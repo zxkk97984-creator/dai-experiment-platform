@@ -1,4 +1,4 @@
-# DAI 实验平台
+# 人工智能基础实验平台开发
 
 在线 AI 教学实验平台，面向机器学习/深度学习教学场景。支持在线编程判题、JupyterLab 交互式实验、课程管理与作业考试。
 
@@ -30,12 +30,12 @@
 ## 快速开始
 
 ```bash
-# 后端
+# 后端（wyh）
 cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 
-# 前端（另一位同学负责）
+# 前端（zxk）
 cd frontend
 npm install
 npm run dev
