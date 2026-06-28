@@ -30,12 +30,12 @@
 ## 快速开始
 
 ```bash
-# 后端（wyh）
+# 后端（zxk）
 cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 
-# 前端（zxk）
+# 前端（wyh）
 cd frontend
 npm install
 npm run dev
