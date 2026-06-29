@@ -29,13 +29,64 @@
 
 ## 快速开始
 
-```bash
-# 后端（zxk）
-cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+### 后端（zxk）
 
-# 前端（wyh）
+Windows 本机的 `python` 命令可能被 Microsoft Store 别名劫持。本项目统一使用 `py -3` 创建虚拟环境，之后固定使用 `backend\.venv\Scripts\python.exe`。
+
+```bat
+cd backend
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install --upgrade pip
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+copy .env.example .env
+```
+
+启动 MySQL、Redis、JupyterLab：
+
+```bat
+cd ..
+docker compose up -d mysql redis jupyter
+```
+
+执行数据库迁移并创建管理员账号：
+
+```bat
+cd backend
+.venv\Scripts\python.exe -m alembic upgrade head
+.venv\Scripts\python.exe -m app.cli create-admin --username admin --password Passw0rd! --real-name Administrator
+```
+
+启动后端 API：
+
+```bat
+cd backend
+.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+```
+
+启动判题 Worker：
+
+```bat
+cd backend
+docker build -t dai-judge-python:latest docker\judge
+.venv\Scripts\python.exe -m app.worker.judge_worker
+```
+
+运行测试：
+
+```bat
+cd backend
+.venv\Scripts\python.exe -m pytest
+```
+
+后端启动后访问：
+
+- Swagger：<http://localhost:8000/docs>
+- 健康检查：<http://localhost:8000/health>
+- JupyterLab：<http://localhost:8888>
+
+### 前端（wyh）
+
+```bash
 cd frontend
 npm install
 npm run dev

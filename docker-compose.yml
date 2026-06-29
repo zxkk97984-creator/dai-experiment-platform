@@ -1,0 +1,51 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: dai-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: dai_platform
+      MYSQL_USER: dai
+      MYSQL_PASSWORD: dai_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - dai_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: dai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - dai_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  jupyter:
+    image: quay.io/jupyter/scipy-notebook:python-3.12
+    container_name: dai-jupyter
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+    command:
+      - start-notebook.py
+      - --ServerApp.token=''
+      - --ServerApp.password=''
+      - --ServerApp.allow_origin='*'
+    ports:
+      - "8888:8888"
+    volumes:
+      - dai_jupyter_data:/home/jovyan/work
+
+volumes:
+  dai_mysql_data:
+  dai_redis_data:
+  dai_jupyter_data:
