@@ -74,7 +74,7 @@ VITE_API_BASE_URL=http://localhost:8000/api/v1
 前端项目启动方式由前端实际工程决定。如果使用 Vite，通常是：
 
 ```bat
-cd /d "C:\Users\zxk\Documents\DAI Experiment Platform\frontend"
+cd frontend
 npm install
 npm run dev
 ```
@@ -95,7 +95,7 @@ http://127.0.0.1:5173
 Windows 本机的 `python` 命令可能被 Microsoft Store 别名劫持。本项目统一使用 `py -3` 创建虚拟环境，之后固定使用 `backend\.venv\Scripts\python.exe`。
 
 ```bat
-cd /d "C:\Users\zxk\Documents\DAI Experiment Platform\backend"
+cd backend
 py -3 -m venv .venv
 .venv\Scripts\python.exe -m pip install --upgrade pip
 .venv\Scripts\python.exe -m pip install -r requirements.txt
@@ -105,14 +105,14 @@ copy .env.example .env
 启动 MySQL、Redis、JupyterLab：
 
 ```bat
-cd /d "C:\Users\zxk\Documents\DAI Experiment Platform"
+
 docker compose up -d mysql redis jupyter
 ```
 
 执行数据库迁移，并创建或刷新管理员账号：
 
 ```bat
-cd /d "C:\Users\zxk\Documents\DAI Experiment Platform\backend"
+cd backend
 .venv\Scripts\python.exe -m alembic upgrade head
 .venv\Scripts\python.exe -m app.cli create-admin --username admin --password Passw0rd! --real-name Administrator
 ```
@@ -120,7 +120,7 @@ cd /d "C:\Users\zxk\Documents\DAI Experiment Platform\backend"
 构建判题镜像：
 
 ```bat
-cd /d "C:\Users\zxk\Documents\DAI Experiment Platform\backend"
+cd backend
 docker build -t dai-judge-python:latest docker\judge
 ```
 
@@ -129,21 +129,21 @@ docker build -t dai-judge-python:latest docker\judge
 启动后端 API：
 
 ```bat
-cd /d "C:\Users\zxk\Documents\DAI Experiment Platform\backend"
+cd backend
 .venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
 需要测试代码提交和判题时，另开一个终端启动 Worker：
 
 ```bat
-cd /d "C:\Users\zxk\Documents\DAI Experiment Platform\backend"
+cd backend
 .venv\Scripts\python.exe -m app.worker.judge_worker
 ```
 
 如果 Docker 服务没开，先执行：
 
 ```bat
-cd /d "C:\Users\zxk\Documents\DAI Experiment Platform"
+
 docker compose up -d mysql redis jupyter
 ```
 
@@ -413,14 +413,14 @@ GET /api/v1/jupyter/entry
 运行单元测试：
 
 ```bat
-cd /d "C:\Users\zxk\Documents\DAI Experiment Platform\backend"
+cd backend
 .venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp=.pytest-tmp-%RANDOM%
 ```
 
 检查 OpenAPI：
 
 ```bat
-cd /d "C:\Users\zxk\Documents\DAI Experiment Platform\backend"
+cd backend
 .venv\Scripts\python.exe -c "from app.main import app; schema=app.openapi(); print(len(schema['paths']))"
 ```
 
@@ -438,10 +438,10 @@ cd /d "C:\Users\zxk\Documents\DAI Experiment Platform\backend"
 
 ### 1. `系统找不到指定的路径`
 
-通常是因为当前命令行不在项目根目录。请使用绝对路径：
+通常是因为当前命令行不在项目根目录。请先切换到 backend 目录：
 
 ```bat
-cd /d "C:\Users\zxk\Documents\DAI Experiment Platform\backend"
+cd backend
 ```
 
 ### 2. `python` 命令不可用或打开 Microsoft Store
@@ -463,7 +463,7 @@ py -3 -m venv .venv
 先确认管理员账号已经创建：
 
 ```bat
-cd /d "C:\Users\zxk\Documents\DAI Experiment Platform\backend"
+cd backend
 .venv\Scripts\python.exe -m app.cli create-admin --username admin --password Passw0rd! --real-name Administrator
 ```
 
@@ -472,7 +472,7 @@ cd /d "C:\Users\zxk\Documents\DAI Experiment Platform\backend"
 说明 API 已经把任务放进 Redis，但 Worker 没启动。另开终端运行：
 
 ```bat
-cd /d "C:\Users\zxk\Documents\DAI Experiment Platform\backend"
+cd backend
 .venv\Scripts\python.exe -m app.worker.judge_worker
 ```
 
@@ -481,7 +481,7 @@ cd /d "C:\Users\zxk\Documents\DAI Experiment Platform\backend"
 确认 Docker 里的 JupyterLab 正常：
 
 ```bat
-cd /d "C:\Users\zxk\Documents\DAI Experiment Platform"
+
 docker compose up -d jupyter
 ```
 
