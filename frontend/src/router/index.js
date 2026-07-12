@@ -1,0 +1,75 @@
+import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '../stores/auth.js'
+
+const routes = [
+  { path: '/login', name: 'Login', component: () => import('../views/LoginView.vue'), meta: { guest: true } },
+
+  // Student
+  { path: '/student', name: 'StudentHome', component: () => import('../views/student/DashboardView.vue'), meta: { role: 'student' } },
+  { path: '/student/courses', name: 'StudentCourses', component: () => import('../views/student/CourseListView.vue'), meta: { role: 'student' } },
+  { path: '/student/courses/:id', name: 'StudentCourseDetail', component: () => import('../views/student/CourseDetailView.vue'), meta: { role: 'student' } },
+  { path: '/student/courses/:id/lessons/:lid', name: 'StudentLesson', component: () => import('../views/student/LessonView.vue'), meta: { role: 'student' } },
+  { path: '/student/assignments', name: 'StudentAssignments', component: () => import('../views/student/AssignmentListView.vue'), meta: { role: 'student' } },
+  { path: '/student/assignments/:id', name: 'StudentAssignmentDetail', component: () => import('../views/student/AssignmentDetailView.vue'), meta: { role: 'student' } },
+  { path: '/student/submissions/:id', name: 'StudentSubmission', component: () => import('../views/student/SubmissionView.vue'), meta: { role: 'student' } },
+  { path: '/student/exams', name: 'StudentExams', component: () => import('../views/student/ExamListView.vue'), meta: { role: 'student' } },
+  { path: '/student/exams/:id', name: 'StudentExam', component: () => import('../views/student/ExamView.vue'), meta: { role: 'student' } },
+  { path: '/student/jupyter', name: 'StudentJupyter', component: () => import('../views/student/JupyterView.vue'), meta: { role: 'student' } },
+  { path: '/student/experiments', name: 'StudentExperiments', component: () => import('../views/student/ExperimentView.vue'), meta: { role: 'student' } },
+
+  // Teacher
+  { path: '/teacher', name: 'TeacherHome', component: () => import('../views/teacher/DashboardView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/courses', name: 'TeacherCourses', component: () => import('../views/teacher/CourseManageView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/courses/:id/manage', name: 'TeacherChapterManage', component: () => import('../views/teacher/ChapterManageView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/assignments', name: 'TeacherAssignments', component: () => import('../views/teacher/AssignmentManageView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/assignments/:id/edit', name: 'TeacherQuestionEdit', component: () => import('../views/teacher/QuestionEditView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/exams', name: 'TeacherExams', component: () => import('../views/teacher/ExamManageView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/exams/:id/grades', name: 'TeacherGrades', component: () => import('../views/teacher/GradesView.vue'), meta: { role: 'teacher' } },
+
+  // Admin
+  { path: '/admin', name: 'AdminHome', component: () => import('../views/admin/DashboardView.vue'), meta: { role: 'admin' } },
+  { path: '/admin/users', name: 'AdminUsers', component: () => import('../views/admin/UserListView.vue'), meta: { role: 'admin' } },
+  { path: '/admin/users/:id/edit', name: 'AdminUserEdit', component: () => import('../views/admin/UserEditView.vue'), meta: { role: 'admin' } },
+  { path: '/admin/courses', name: 'AdminCourses', component: () => import('../views/teacher/CourseManageView.vue'), meta: { role: 'admin' } },
+  { path: '/admin/experiments', name: 'AdminExperiments', component: () => import('../views/admin/ExperimentManageView.vue'), meta: { role: 'admin' } },
+
+  { path: '/', redirect: '/login' },
+  { path: '/:pathMatch(.*)*', redirect: '/login' },
+]
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes,
+})
+
+const roleHome = { student: '/student/courses', teacher: '/teacher/courses', admin: '/admin/users' }
+
+router.beforeEach(async (to, from, next) => {
+  const auth = useAuthStore()
+
+  // Guest-only pages (login)
+  if (to.meta.guest) {
+    if (auth.isLoggedIn) return next(roleHome[auth.role] || '/login')
+    return next()
+  }
+
+  // Protected pages
+  if (!auth.isLoggedIn) {
+    return next('/login')
+  }
+
+  // Restore user if page reload
+  if (!auth.user) {
+    const u = await auth.fetchMe()
+    if (!u) return next('/login')
+  }
+
+  // Role check
+  if (to.meta.role && to.meta.role !== auth.role) {
+    return next(roleHome[auth.role] || '/login')
+  }
+
+  next()
+})
+
+export default router
