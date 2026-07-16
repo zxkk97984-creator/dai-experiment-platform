@@ -81,47 +81,43 @@ async function handleSave() {
 </template>
 
 <style scoped>
-/* ═══════════════════════════════════════════════════════════
-   User Edit — Pythonista Dark Theme
-   ═══════════════════════════════════════════════════════════ */
+/* ── Page title ── */
+.page-title { color: var(--ink); }
 
-/* ── Page title ──────────────────────────────────────────── */
-.page-title { color: #D6DEEB; }
-
-/* ── Form card ───────────────────────────────────────────── */
+/* ── Form card ── */
 .card {
-  background: #1A1E2B;
-  border-color: #2A3040;
+  background: var(--surface);
+  border-color: var(--border);
 }
 
-/* ── Form inputs ─────────────────────────────────────────── */
+/* ── Form inputs ── */
 input,
 select {
-  background: #151821;
-  border-color: #2A3040;
-  color: #D6DEEB;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--ink);
 }
 
-input::placeholder { color: #6A7086; }
+input::placeholder { color: var(--text-secondary); }
 
 input:focus,
 select:focus {
   outline: none;
-  border-color: #E0553D;
-  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.18);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(26, 92, 138, 0.18);
 }
 
-/* ── Labels ──────────────────────────────────────────────── */
+/* ── Labels ── */
 label {
-  color: #6A7086;
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
-/* ── Save button (accent orange) ─────────────────────────── */
+/* ── Save button ── */
 button.btn-primary {
-  background: #E0553D;
-  border-color: #E0553D;
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
 }
 
@@ -132,16 +128,16 @@ button.btn-primary:hover {
 
 button.btn-primary:disabled { opacity: 0.5; }
 
-/* ── Cancel button (ghost dark) ──────────────────────────── */
+/* ── Cancel button ── */
 .card button:not(.btn-primary) {
   background: transparent;
-  border-color: #2A3040;
-  color: #8891A4;
+  border-color: var(--border);
+  color: var(--text-secondary);
 }
 
 .card button:not(.btn-primary):hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: #3A4050;
-  color: #D6DEEB;
+  background: var(--surface-raised);
+  border-color: var(--border);
+  color: var(--ink);
 }
 </style>
