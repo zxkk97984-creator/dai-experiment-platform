@@ -286,26 +286,234 @@ watch(lessonId, async () => {
 </template>
 
 <style scoped>
+/* ── Loading ───────────────────────────────── */
+.lesson-loading { padding: var(--space-4) 0; }
+
+/* ── Breadcrumb ────────────────────────────── */
+.breadcrumb-row {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: var(--space-4); margin-bottom: var(--space-4);
+}
+
+.breadcrumb {
+  display: flex; align-items: center; gap: var(--space-2);
+  flex-wrap: wrap; min-width: 0;
+}
+
+.breadcrumb-link {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: none; border: none; padding: 2px 4px;
+  color: var(--text-secondary); font-size: var(--text-sm); font-weight: 400;
+  cursor: pointer; border-radius: var(--radius-sm);
+  transition: color var(--duration-fast) var(--ease-out);
+  white-space: nowrap;
+}
+.breadcrumb-link:hover { color: var(--primary); }
+
+.breadcrumb-sep { color: #c8ced9; font-size: var(--text-sm); }
+
+.breadcrumb-current {
+  font-size: var(--text-sm); color: var(--text);
+  font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── Dropdown ──────────────────────────────── */
+.dropdown-wrap { position: relative; flex-shrink: 0; }
+
+.dropdown-trigger {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--text-xs); white-space: nowrap;
+}
+
+.dropdown-menu {
+  position: absolute; right: 0; top: 100%; z-index: 50;
+  margin-top: 4px; min-width: 280px; max-height: 420px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  padding: var(--space-2);
+}
+
+.dropdown-group { margin-bottom: var(--space-1); }
+.dropdown-chapter {
+  font-size: var(--text-xs); font-weight: 600; color: var(--text-secondary);
+  padding: 6px 10px 4px; text-transform: uppercase; letter-spacing: 0.04em;
+}
+
+.dropdown-item {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 7px 10px; border-radius: var(--radius-md);
+  font-size: var(--text-sm); color: var(--text); cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.dropdown-item:hover { background: var(--surface-raised); }
+.dropdown-item.active { background: var(--accent-light); color: var(--primary); font-weight: 500; }
+.dropdown-item-icon { font-size: 12px; flex-shrink: 0; }
+
+.dropdown-fade-enter-active,
+.dropdown-fade-leave-active {
+  transition: all var(--duration-fast) var(--ease-out);
+}
+.dropdown-fade-enter-from,
+.dropdown-fade-leave-to { opacity: 0; transform: translateY(-4px); }
+
+/* ── Divider ───────────────────────────────── */
+.lesson-divider {
+  border: none; border-top: 1px solid var(--border);
+  margin: var(--space-5) 0;
+}
+
+/* ── Markdown content (Pythonista) ─────────── */
 .lesson-content { line-height: 1.8; }
-.lesson-content :deep(h1), .lesson-content :deep(h2), .lesson-content :deep(h3) {
-  margin: 20px 0 8px;
+
+.lesson-content :deep(h1) {
   font-family: var(--font-display);
-  font-weight: 400;
-  letter-spacing: -0.01em;
+  font-size: var(--text-2xl); font-weight: 400;
+  color: var(--ink); margin: 28px 0 12px; letter-spacing: -0.01em; line-height: 1.25;
 }
-.lesson-content :deep(h1) { font-size: var(--text-2xl); }
-.lesson-content :deep(h2) { font-size: var(--text-xl); }
-.lesson-content :deep(p) { margin: 8px 0; }
-.lesson-content :deep(pre) {
-  background: #1B1F2B; color: #D6DEEB;
-  padding: var(--space-4); border-radius: var(--radius-md);
-  overflow-x: auto; border: 1px solid #2A3040;
-  line-height: 1.6;
+.lesson-content :deep(h2) {
+  font-family: var(--font-display);
+  font-size: var(--text-xl); font-weight: 400;
+  color: var(--ink); margin: 24px 0 10px; padding-top: var(--space-5);
+  border-top: 1px solid var(--border); letter-spacing: -0.01em; line-height: 1.3;
 }
-.lesson-content :deep(code) { font-family: var(--font-mono); font-size: var(--text-sm); }
+.lesson-content :deep(h3) {
+  font-size: var(--text-md); font-weight: 600;
+  color: var(--ink); margin: 20px 0 8px; line-height: 1.4;
+}
+.lesson-content :deep(p) {
+  margin: 10px 0; color: var(--text); font-size: var(--text-sm);
+}
+.lesson-content :deep(a) {
+  color: var(--primary); text-decoration: none;
+}
+.lesson-content :deep(a:hover) { color: var(--accent-hover); text-decoration: underline; }
+
+/* Inline code */
 .lesson-content :deep(code:not(pre code)) {
+  font-family: var(--font-mono); font-size: 0.85em;
   background: var(--surface-raised); color: var(--danger);
   padding: 1px 6px; border-radius: 3px;
-  font-size: 0.82em;
+}
+
+/* Code block — Pythonista signature */
+.lesson-content :deep(pre) {
+  background: #1A1E2B; color: #D6DEEB;
+  padding: var(--space-4); border-radius: var(--radius-md);
+  overflow-x: auto; border: 1px solid #2A3040;
+  margin: 14px 0; line-height: 1.7;
+}
+.lesson-content :deep(pre code) {
+  font-family: var(--font-mono); font-size: 13px;
+  background: none; color: inherit; padding: 0;
+}
+
+/* Tables */
+.lesson-content :deep(table) {
+  width: 100%; border-collapse: collapse; margin: 12px 0;
+  font-size: var(--text-sm);
+}
+.lesson-content :deep(th) {
+  text-align: left; padding: 8px 12px; border-bottom: 2px solid var(--border);
+  font-size: var(--text-xs); font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--text-secondary); background: var(--surface-raised);
+}
+.lesson-content :deep(td) {
+  padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text);
+}
+
+/* Blockquote — warm yellow callout */
+.lesson-content :deep(blockquote) {
+  background: var(--warning-light); border-left: 3px solid var(--warning);
+  padding: var(--space-3) var(--space-4); margin: 12px 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: var(--text-sm); color: #7C5E0A; line-height: 1.65;
+}
+.lesson-content :deep(blockquote p) { margin: 4px 0; color: inherit; }
+
+/* Images */
+.lesson-content :deep(img) {
+  max-width: 100%; border-radius: var(--radius-md);
+  margin: var(--space-3) 0;
+}
+
+/* Lists */
+.lesson-content :deep(ul), .lesson-content :deep(ol) {
+  margin: 8px 0; padding-left: var(--space-6);
+  font-size: var(--text-sm); color: var(--text);
+}
+.lesson-content :deep(li) { margin: 4px 0; }
+
+/* ── Video mode ────────────────────────────── */
+.lesson-video { margin: var(--space-6) 0; }
+.video-wrapper {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); overflow: hidden;
+}
+.video-placeholder {
+  text-align: center; padding: var(--space-12) var(--space-6);
+  display: flex; flex-direction: column; align-items: center;
+}
+
+/* ── Notebook mode ─────────────────────────── */
+.lesson-notebook { margin: var(--space-6) 0; }
+.notebook-card {
+  text-align: center; padding: var(--space-10) var(--space-6);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); display: flex;
+  flex-direction: column; align-items: center; gap: var(--space-2);
+}
+.notebook-card h3 {
+  font-family: var(--font-display); font-size: var(--text-xl);
+  font-weight: 400; color: var(--ink); margin: 0; letter-spacing: -0.01em;
+}
+
+/* ── Bottom navigation ─────────────────────── */
+.lesson-nav {
+  display: flex; justify-content: space-between; align-items: stretch;
+  gap: var(--space-4); margin-bottom: var(--space-4);
+}
+
+.nav-btn {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-4); border: 1px solid var(--border);
+  border-radius: var(--radius-md); background: var(--surface);
+  cursor: pointer; transition: all var(--duration-fast) var(--ease-out);
+  flex: 1; max-width: 48%; color: var(--text); text-align: left;
+}
+.nav-btn:hover {
+  border-color: var(--primary); background: var(--surface-raised);
+}
+.nav-btn.disabled {
+  opacity: 0.35; cursor: not-allowed; pointer-events: none;
+}
+
+.nav-prev { justify-content: flex-start; }
+.nav-next { justify-content: flex-end; }
+
+.nav-label {
+  font-size: var(--text-xs); color: var(--text-secondary);
+  font-weight: 500; white-space: nowrap;
+}
+
+.nav-title {
+  font-size: var(--text-sm); font-weight: 500;
+  color: var(--text); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── Empty state ───────────────────────────── */
+.empty-state {
+  text-align: center; padding: var(--space-12) var(--space-6);
+  color: var(--text-secondary);
+}
+.empty-state p { font-size: var(--text-sm); margin-bottom: var(--space-3); }
+
+/* ── Responsive ────────────────────────────── */
+@media (max-width: 768px) {
+  .breadcrumb-row { flex-direction: column; }
+  .dropdown-menu { left: 0; right: auto; min-width: auto; width: 100%; }
+  .lesson-nav { flex-direction: column; }
+  .nav-btn { max-width: 100%; }
+  .nav-title { display: none; }
 }
 </style>
