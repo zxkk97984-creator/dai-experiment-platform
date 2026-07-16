@@ -79,7 +79,7 @@ onMounted(fetch)
       <input
         v-model="chForm.title"
         placeholder="章节名称，如：第一章 Python基础"
-        class="dark-input"
+        class="form-input"
         @keyup.enter="createChapter"
       />
       <button class="btn-accent" @click="createChapter">确认添加</button>
@@ -94,7 +94,7 @@ onMounted(fetch)
           <span class="chapter-num">第{{ chi + 1 }}章</span>
           <h3 class="chapter-name">{{ ch.title }}</h3>
         </div>
-        <button class="btn-ghost" @click="showLesForm[ch.id] = !showLesForm[ch.id]">
+        <button class="btn-ghost btn-sm" @click="showLesForm[ch.id] = !showLesForm[ch.id]">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" class="btn-icon">
             <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
@@ -108,9 +108,9 @@ onMounted(fetch)
           <input
             v-model="lesForm.title"
             placeholder="课时名称"
-            class="dark-input"
+            class="form-input"
           />
-          <select v-model="lesForm.content_type" class="dark-select">
+          <select v-model="lesForm.content_type" class="form-select">
             <option value="markdown">Markdown 讲义</option>
             <option value="video">视频</option>
             <option value="notebook">Notebook</option>
@@ -121,7 +121,7 @@ onMounted(fetch)
             v-model="lesForm.content"
             rows="4"
             placeholder="Markdown 内容"
-            class="dark-textarea"
+            class="form-textarea"
           ></textarea>
         </div>
         <button class="btn-accent btn-accent-sm" @click="createLesson(ch.id)">确认添加</button>
@@ -162,11 +162,7 @@ onMounted(fetch)
 </template>
 
 <style scoped>
-/* ═══════════════════════════════════════════════════════════════════════
-   Chapter & Lesson Management — Pythonista Dark Admin
-   ═══════════════════════════════════════════════════════════════════════ */
-
-/* ── Page header ────────────────────────────────────────────────────── */
+/* ── Page header ── */
 .page-header {
   display: flex;
   align-items: center;
@@ -178,18 +174,18 @@ onMounted(fetch)
   font-family: var(--font-display);
   font-size: 24px;
   font-weight: 400;
-  color: #D6DEEB;
+  color: var(--ink);
   margin: 0;
   letter-spacing: -0.3px;
 }
 
-/* ── Buttons ────────────────────────────────────────────────────────── */
+/* ── Accent CTA button ── */
 .btn-accent {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  background: #E0553D;
+  background: var(--accent);
   color: #fff;
   border: none;
   border-radius: 6px;
@@ -202,7 +198,7 @@ onMounted(fetch)
 }
 
 .btn-accent:hover {
-  background: #C94A33;
+  background: var(--cta-hover);
 }
 
 .btn-accent:active {
@@ -214,56 +210,33 @@ onMounted(fetch)
   font-size: 12px;
 }
 
-.btn-ghost {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
-  background: transparent;
-  color: #6A7086;
-  border: 1px solid #2A3040;
-  border-radius: 5px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-  font-family: var(--font-body);
-  line-height: 1.4;
-}
-
-.btn-ghost:hover {
-  color: #D6DEEB;
-  border-color: #3A4050;
-  background: rgba(255,255,255,0.03);
-}
-
 .btn-icon {
   flex-shrink: 0;
 }
 
-/* ── Chapter form (inline create) ──────────────────────────────────── */
+/* ── Chapter form ── */
 .chapter-form {
   display: flex;
   gap: 12px;
   align-items: center;
   padding: 16px;
-  background: #151821;
-  border: 1px solid #2A3040;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
   border-radius: 8px;
   margin-bottom: 20px;
 }
 
-.chapter-form .dark-input {
+.chapter-form .form-input {
   flex: 1;
 }
 
-/* ── Dark inputs ───────────────────────────────────────────────────── */
-.dark-input {
+/* ── Form inputs ── */
+.form-input {
   padding: 8px 12px;
-  background: #11141D;
-  border: 1px solid #2A3040;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  color: #D6DEEB;
+  color: var(--ink);
   font-size: 13px;
   font-family: var(--font-body);
   outline: none;
@@ -271,27 +244,27 @@ onMounted(fetch)
   line-height: 1.5;
 }
 
-.dark-input::placeholder {
-  color: #4A5060;
+.form-input::placeholder {
+  color: #a8b0be;
 }
 
-.dark-input:focus {
-  border-color: #E0553D;
-  box-shadow: 0 0 0 2px rgba(224,85,61,0.15);
+.form-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--accent-light);
 }
 
-.dark-select {
+.form-select {
   padding: 8px 32px 8px 12px;
-  background: #11141D;
-  border: 1px solid #2A3040;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  color: #D6DEEB;
+  color: var(--ink);
   font-size: 13px;
   font-family: var(--font-body);
   outline: none;
   cursor: pointer;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236A7086' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%235F6B7A' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -299,23 +272,23 @@ onMounted(fetch)
   min-width: 150px;
 }
 
-.dark-select:focus {
-  border-color: #E0553D;
-  box-shadow: 0 0 0 2px rgba(224,85,61,0.15);
+.form-select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--accent-light);
 }
 
-.dark-select option {
-  background: #1A1E2B;
-  color: #D6DEEB;
+.form-select option {
+  background: var(--surface);
+  color: var(--ink);
 }
 
-.dark-textarea {
+.form-textarea {
   width: 100%;
   padding: 10px 12px;
-  background: #11141D;
-  border: 1px solid #2A3040;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  color: #D6DEEB;
+  color: var(--ink);
   font-size: 13px;
   font-family: var(--font-mono);
   outline: none;
@@ -324,19 +297,19 @@ onMounted(fetch)
   line-height: 1.6;
 }
 
-.dark-textarea::placeholder {
-  color: #4A5060;
+.form-textarea::placeholder {
+  color: #a8b0be;
 }
 
-.dark-textarea:focus {
-  border-color: #E0553D;
-  box-shadow: 0 0 0 2px rgba(224,85,61,0.15);
+.form-textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--accent-light);
 }
 
-/* ── Chapter card ──────────────────────────────────────────────────── */
+/* ── Chapter card ── */
 .chapter-card {
-  background: #1A1E2B;
-  border: 1px solid #2A3040;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 20px;
   margin-bottom: 16px;
@@ -360,8 +333,8 @@ onMounted(fetch)
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  color: #E0553D;
-  background: rgba(224,85,61,0.1);
+  color: var(--accent);
+  background: rgba(224, 85, 61, 0.1);
   padding: 2px 8px;
   border-radius: 3px;
   flex-shrink: 0;
@@ -370,15 +343,15 @@ onMounted(fetch)
 .chapter-name {
   font-size: 15px;
   font-weight: 600;
-  color: #D6DEEB;
+  color: var(--ink);
   margin: 0;
 }
 
-/* ── Lesson form (inline) ──────────────────────────────────────────── */
+/* ── Lesson form ── */
 .lesson-form {
   padding: 16px;
-  background: #151821;
-  border: 1px solid #2A3040;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
   border-radius: 8px;
   margin-bottom: 16px;
   display: flex;
@@ -391,11 +364,11 @@ onMounted(fetch)
   gap: 10px;
 }
 
-.lesson-form-row .dark-input {
+.lesson-form-row .form-input {
   flex: 1;
 }
 
-/* ── Lesson list ───────────────────────────────────────────────────── */
+/* ── Lesson list ── */
 .lesson-list {
   display: flex;
   flex-direction: column;
@@ -412,7 +385,7 @@ onMounted(fetch)
 }
 
 .lesson-item:hover {
-  background: rgba(224,85,61,0.06);
+  background: var(--surface-raised);
 }
 
 .lesson-type-icon {
@@ -426,24 +399,24 @@ onMounted(fetch)
 }
 
 .icon-markdown {
-  color: #5A9FD4;
-  background: rgba(90,159,212,0.1);
+  color: var(--primary);
+  background: var(--accent-light);
 }
 
 .icon-video {
-  color: #E0553D;
-  background: rgba(224,85,61,0.1);
+  color: var(--accent);
+  background: rgba(224, 85, 61, 0.1);
 }
 
 .icon-notebook {
-  color: #7E8CE0;
-  background: rgba(126,140,224,0.1);
+  color: var(--info);
+  background: var(--info-light);
 }
 
 .lesson-title {
   flex: 1;
   font-size: 13px;
-  color: #D6DEEB;
+  color: var(--ink);
   line-height: 1.4;
 }
 
@@ -452,23 +425,23 @@ onMounted(fetch)
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: #6A7086;
-  background: rgba(106,112,134,0.12);
+  color: var(--text-secondary);
+  background: var(--surface-raised);
   padding: 2px 8px;
   border-radius: 3px;
   flex-shrink: 0;
 }
 
-/* ── Empty state ───────────────────────────────────────────────────── */
+/* ── Empty state ── */
 .empty-text {
   font-size: 13px;
-  color: #6A7086;
+  color: var(--text-secondary);
   padding: 8px 0;
 }
 
 .loading-text {
   font-size: 13px;
-  color: #6A7086;
+  color: var(--text-secondary);
   padding: 24px 0;
 }
 </style>
