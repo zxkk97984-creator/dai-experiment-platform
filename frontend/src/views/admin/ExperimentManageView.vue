@@ -64,74 +64,66 @@ onMounted(fetch)
 </template>
 
 <style scoped>
-/* ═══════════════════════════════════════════════════════════════════════
-   ExperimentManageView — Pythonista Dark Theme
-   ═══════════════════════════════════════════════════════════════════════ */
-
-/* ── Page title ─────────────────────────────────────────────────────── */
+/* ── Page title ── */
 .page-title {
-  color: #D6DEEB;
+  color: var(--ink);
 }
 
-/* ── Cards ──────────────────────────────────────────────────────────── */
+/* ── Cards ── */
 .card {
-  background: #1A1E2B;
-  border-color: #2A3040;
-  color: #D6DEEB;
-}
-.card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-  border-color: #3A4050;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--ink);
 }
 
-/* ── Table ──────────────────────────────────────────────────────────── */
+/* ── Table ── */
 table {
-  color: #D6DEEB;
+  color: var(--ink);
 }
 th {
-  background: #11141D;
-  color: #6A7086;
-  border-bottom-color: #2A3040;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  border-bottom-color: var(--border);
 }
 td {
-  border-bottom-color: #2A3040;
+  border-bottom-color: var(--border);
 }
 tbody tr:hover td {
-  background: rgba(224, 85, 61, 0.08);
+  background: var(--surface-raised);
 }
 
-/* ── Inputs ─────────────────────────────────────────────────────────── */
+/* ── Inputs ── */
 input,
 textarea {
-  background: #151821;
-  border-color: #2A3040;
-  color: #D6DEEB;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--ink);
 }
 input:focus,
 textarea:focus {
-  border-color: #E0553D;
-  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.15);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(26, 92, 138, 0.15);
   outline: none;
 }
 input::placeholder,
 textarea::placeholder {
-  color: #6A7086;
+  color: var(--text-secondary);
 }
 
-/* ── Buttons ────────────────────────────────────────────────────────── */
+/* ── Buttons ── */
 button {
-  background: #1A1E2B;
-  border-color: #2A3040;
-  color: #D6DEEB;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text-secondary);
 }
 button:hover {
-  background: #252B3A;
-  border-color: #3A4050;
+  background: var(--surface-raised);
+  border-color: var(--border);
 }
 
 button.btn-primary {
-  background: #E0553D;
-  border-color: #E0553D;
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
 }
 button.btn-primary:hover {
@@ -142,37 +134,30 @@ button.btn-primary:focus-visible {
   box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.25);
 }
 
-/* Action button — ghost dark */
+/* Action button */
 button.btn-sm {
   background: transparent;
-  border-color: #2A3040;
-  color: #6A7086;
+  border-color: var(--border);
+  color: var(--text-secondary);
 }
 button.btn-sm:hover {
-  background: rgba(224, 85, 61, 0.12);
-  border-color: #E0553D;
-  color: #E0553D;
+  background: var(--surface-raised);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
-/* ── Form labels ────────────────────────────────────────────────────── */
+/* ── Form labels ── */
 .form-group label {
-  color: #6A7086;
+  color: var(--text-secondary);
 }
 
-/* ── Badges — dark-context adjustments ──────────────────────────────── */
-.badge-success { background: rgba(15, 123, 94, 0.18); color: #34D399; }
-.badge-warning { background: rgba(181, 118, 14, 0.18); color: #FBBF24; }
-.badge-danger  { background: rgba(209, 46, 62, 0.18);  color: #F87171; }
-.badge-info    { background: rgba(88, 102, 196, 0.18);  color: #A5B4FC; }
-.badge-neutral { background: #1F2433; color: #6A7086; }
-
-/* ── Type utilities ─────────────────────────────────────────────────── */
+/* ── Type utilities ── */
 .text-secondary {
-  color: #6A7086;
+  color: var(--text-secondary);
 }
 
-/* ── Focus ring ─────────────────────────────────────────────────────── */
+/* ── Focus ring ── */
 :focus-visible {
-  outline-color: #E0553D;
+  outline-color: var(--accent);
 }
 </style>
