@@ -85,19 +85,19 @@ onMounted(fetchCourses)
 
 /* ── Page title override ───────────────────────────────────────────── */
 .course-list-page :deep(.page-title) {
-  color: #D6DEEB;
+  color: var(--ink);
 }
 
 /* ── Loading ───────────────────────────────────────────────────────── */
 .loading-text {
-  color: #6A7086;
+  color: var(--text-secondary);
   font-size: var(--text-sm);
 }
 
 /* ── Cards ─────────────────────────────────────────────────────────── */
 .course-list-page .card {
-  background: #1A1E2B;
-  border: 1px solid #2A3040;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-6);
   transition: border-color var(--duration-fast) var(--ease-out),
@@ -106,8 +106,8 @@ onMounted(fetchCourses)
 }
 
 .course-list-page .card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-  border-color: #2A3040;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  border-color: var(--border);
 }
 
 .course-list-page .card.course-card {
@@ -115,7 +115,9 @@ onMounted(fetchCourses)
 }
 
 .course-list-page .card.course-card:hover {
-  border-color: #E0553D;
+  border-color: var(--accent);
+  box-shadow: 0 0 20px rgba(224, 85, 61, 0.15),
+              0 4px 12px rgba(0, 0, 0, 0.06);
 }
 
 /* Empty state card */
@@ -124,67 +126,32 @@ onMounted(fetchCourses)
   padding: 48px;
 }
 
-/* ── Course title link ─────────────────────────────────────────────── */
+/* ── Course title link (Prussian blue) ──────────────────────────────── */
 .course-title {
   margin: 0;
   font-size: 16px;
   cursor: pointer;
-  color: #E0553D;
+  color: var(--primary);
   font-weight: 500;
   transition: color var(--duration-fast) var(--ease-out);
 }
 
 .course-title:hover {
-  color: #F07060;
+  color: var(--accent-hover);
 }
 
 /* ── Text overrides ────────────────────────────────────────────────── */
 .course-list-page .text-secondary {
-  color: #6A7086;
+  color: var(--text-secondary);
 }
 
-/* ── Badges (dark-background adapted) ──────────────────────────────── */
-.course-list-page .badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  line-height: 1.6;
-}
+/* ── Badges (light theme from global CSS) ──────────────────────────── */
 
-.course-list-page .badge-success {
-  background: rgba(15, 123, 94, 0.18);
-  color: #3DD68C;
-}
-
-.course-list-page .badge-warning {
-  background: rgba(181, 118, 14, 0.18);
-  color: #F5C842;
-}
-
-.course-list-page .badge-neutral {
-  background: rgba(106, 112, 134, 0.18);
-  color: #8B95A8;
-}
-
-.course-list-page .badge-info {
-  background: rgba(88, 102, 196, 0.18);
-  color: #98A0F0;
-}
-
-.course-list-page .badge-danger {
-  background: rgba(209, 46, 62, 0.18);
-  color: #F07080;
-}
-
-/* ── "选课" button ────────────────────────────────────────────────── */
+/* ── "选课" button (accent orange CTA) ──────────────────────────────── */
 .course-list-page .btn-primary {
-  background: #E0553D;
+  background: var(--accent);
   color: #fff;
-  border-color: #E0553D;
+  border-color: var(--accent);
   font-weight: 500;
 }
 
@@ -202,9 +169,9 @@ onMounted(fetchCourses)
 }
 
 .pagination button {
-  background: #1A1E2B;
-  border: 1px solid #2A3040;
-  color: #D6DEEB;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--ink);
   padding: 6px 14px;
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
@@ -215,8 +182,8 @@ onMounted(fetchCourses)
 }
 
 .pagination button:hover:not(:disabled) {
-  background: #252A3A;
-  border-color: #3A4050;
+  background: var(--surface-raised);
+  border-color: var(--border);
 }
 
 .pagination button:disabled {
