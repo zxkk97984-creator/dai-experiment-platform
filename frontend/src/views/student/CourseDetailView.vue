@@ -96,30 +96,119 @@ onMounted(fetchAll)
 
 <template>
   <AppLayout>
-    <div v-if="loading" class="text-secondary">加载中...</div>
-    <template v-else-if="course">
-      <h1 class="page-title">{{ course.title }}</h1>
-      <p class="text-secondary mb-4">{{ course.description || '暂无简介' }}</p>
+    <!-- Loading state -->
+    <div v-if="loading" class="course-loading">
+      <div class="skeleton" style="height:28px;width:240px;margin-bottom:12px"></div>
+      <div class="skeleton" style="height:14px;width:360px;margin-bottom:24px"></div>
+      <div class="skeleton" style="height:120px;width:100%;margin-bottom:16px"></div>
+      <div v-for="i in 3" :key="i" class="skeleton" style="height:48px;width:100%;margin-bottom:8px"></div>
+    </div>
 
-      <div v-if="chapters.length === 0" class="card" style="text-align:center;padding:32px">
-        <p class="text-secondary">暂无章节内容</p>
-      </div>
+    <!-- Error: not enrolled -->
+    <div v-else-if="!course && !enrolled" class="empty-state">
+      <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3">
+        <rect x="4" y="8" width="40" height="32" rx="4"/>
+        <path d="M16 22h16M16 28h12"/>
+      </svg>
+      <p>你还未选这门课</p>
+      <button class="btn-primary" :disabled="enrolling" @click="handleEnroll" style="margin-top:12px">
+        {{ enrolling ? '选课中...' : '立即选课' }}
+      </button>
+    </div>
 
-      <div v-for="ch in chapters" :key="ch.id" class="card mb-4">
-        <h3 style="font-size:15px;margin-bottom:12px;color:var(--ink)">
-          第{{ ch.order_index + 1 }}章 {{ ch.title }}
-        </h3>
-        <div v-if="ch.lessons && ch.lessons.length">
-          <div v-for="l in ch.lessons" :key="l.id"
-            class="lesson-item" @click="goLesson(l)">
-            <span class="badge badge-neutral text-sm">
-              {{ l.content_type === 'markdown' ? '讲义' : l.content_type === 'video' ? '视频' : 'Notebook' }}
-            </span>
-            <span style="flex:1;margin-left:10px;cursor:pointer;color:var(--accent)">{{ l.title }}</span>
-            <span class="text-sm text-secondary">&gt;</span>
+    <!-- Error: course not found -->
+    <div v-else-if="!course" class="empty-state">
+      <p>课程不存在</p>
+      <button class="btn-primary" @click="goBack" style="margin-top:12px">返回课程列表</button>
+    </div>
+
+    <!-- Course portal -->
+    <template v-else>
+      <!-- Back -->
+      <button class="btn-ghost btn-sm back-link" @click="goBack">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"/></svg>
+        返回课程列表
+      </button>
+
+      <!-- Info card -->
+      <div class="course-hero">
+        <h1 class="course-hero-title">{{ course.title }}</h1>
+        <p class="course-hero-desc" v-if="course.description">{{ course.description }}</p>
+        <div class="course-hero-stats">
+          <div class="hero-stat">
+            <span class="hero-stat-value">{{ chapters.length }}</span>
+            <span class="hero-stat-label">章节</span>
+          </div>
+          <div class="hero-stat">
+            <span class="hero-stat-value">{{ totalLessons }}</span>
+            <span class="hero-stat-label">课时</span>
           </div>
         </div>
-        <p v-else class="text-sm text-secondary">暂无课时</p>
+        <!-- Progress bar -->
+        <div class="progress-wrap" v-if="totalLessons > 0">
+          <div class="progress-bar">
+            <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
+          </div>
+          <span class="progress-text">{{ progressPercent }}% 完成</span>
+        </div>
+      </div>
+
+      <!-- Assignments quick entry -->
+      <div class="quick-section" v-if="assignments.length > 0">
+        <h2 class="quick-section-title">作业</h2>
+        <div class="quick-list">
+          <div v-for="a in assignments" :key="a.id" class="quick-item" @click="goAssignment(a.id)">
+            <span class="quick-item-icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h7l4 4v7H2V3z"/><path d="M9 3v4h4"/></svg>
+            </span>
+            <span class="quick-item-title">{{ a.title }}</span>
+            <span class="badge badge-neutral text-xs">{{ a.status }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Exams quick entry -->
+      <div class="quick-section" v-if="exams.length > 0">
+        <h2 class="quick-section-title">考试</h2>
+        <div class="quick-list">
+          <div v-for="e in exams" :key="e.id" class="quick-item" @click="goExam(e.id)">
+            <span class="quick-item-icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 7l2 2 4-4"/></svg>
+            </span>
+            <span class="quick-item-title">{{ e.title }}</span>
+            <span class="quick-item-meta" v-if="e.duration_minutes">{{ e.duration_minutes }} 分钟</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chapter outline -->
+      <div class="chapter-outline" v-if="chapters.length > 0">
+        <div v-for="ch in chapters" :key="ch.id" class="chapter-card">
+          <h3 class="chapter-title">第{{ ch.order_index + 1 }}章  {{ ch.title }}</h3>
+          <div v-if="ch.lessons && ch.lessons.length" class="lesson-list">
+            <div v-for="l in ch.lessons" :key="l.id" class="lesson-item" @click="goLesson(l)">
+              <span class="lesson-type-icon">
+                <template v-if="l.content_type === 'markdown'">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h10v8H2z"/><path d="M4 6h6M4 9h4"/></svg>
+                </template>
+                <template v-else-if="l.content_type === 'video'">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="5"/><path d="M6 5v4l3-2z"/></svg>
+                </template>
+                <template v-else>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="10" height="10" rx="1"/><path d="M5 6h4M5 9h2"/></svg>
+                </template>
+              </span>
+              <span class="lesson-title">{{ l.title }}</span>
+              <span v-if="completedLessonIds.includes(l.id)" class="lesson-check">✓</span>
+            </div>
+          </div>
+          <p v-else class="lesson-empty">暂无课时</p>
+        </div>
+      </div>
+
+      <!-- Empty chapters -->
+      <div v-else class="empty-state">
+        <p>教师正在准备课程内容...</p>
       </div>
     </template>
   </AppLayout>
