@@ -43,3 +43,43 @@ onMounted(async () => {
     </div>
   </AppLayout>
 </template>
+
+<style scoped>
+/* ── Pythonista dark theme ───────────────────────────────────────────── */
+
+.page-title {
+  color: #D6DEEB;
+}
+
+/* Card overrides */
+.card {
+  background: #1A1E2B;
+  border-color: #2A3040;
+  color: #D6DEEB;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+.card:hover {
+  border-color: #E0553D;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* Muted text */
+.text-secondary {
+  color: #6A7086;
+}
+
+/* Title links in accent orange */
+h3 {
+  color: #E0553D;
+}
+
+/* Dark bg badges — luminous on dark surfaces */
+.badge {
+  font-weight: 500;
+}
+.badge-success  { background: rgba(15, 123, 94, 0.18);  color: #2EE6A8; }
+.badge-warning  { background: rgba(181, 118, 14, 0.18); color: #F5C842; }
+.badge-danger   { background: rgba(209, 46, 62, 0.18);  color: #FF6B7A; }
+.badge-info     { background: rgba(88, 102, 196, 0.18);  color: #9DA8F0; }
+.badge-neutral  { background: rgba(106, 112, 134, 0.15); color: #8B93A8; }
+</style>
