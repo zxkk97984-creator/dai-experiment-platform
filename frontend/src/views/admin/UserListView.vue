@@ -78,77 +78,65 @@ onMounted(fetch)
 </template>
 
 <style scoped>
-/* ═══════════════════════════════════════════════════════════
-   User List — Pythonista Dark Theme
-   ═══════════════════════════════════════════════════════════ */
+/* ── Page title ── */
+.page-title { color: var(--ink); }
 
-/* ── Page title ──────────────────────────────────────────── */
-.page-title { color: #D6DEEB; }
-
-/* ── Table card ──────────────────────────────────────────── */
+/* ── Table card ── */
 table.card {
-  background: #1A1E2B;
-  border-color: #2A3040;
+  background: var(--surface);
+  border-color: var(--border);
 }
 
-/* ── Table header ────────────────────────────────────────── */
+/* ── Table header ── */
 thead th {
-  background: #11141D;
-  color: #6A7086;
-  border-bottom-color: #2A3040;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  border-bottom-color: var(--border);
 }
 
-/* ── Table body ──────────────────────────────────────────── */
+/* ── Table body ── */
 tbody td {
-  color: #D6DEEB;
-  border-bottom-color: #2A3040;
+  color: var(--ink);
+  border-bottom-color: var(--border);
 }
 
-tbody tr:hover td { background: rgba(224, 85, 61, 0.04); }
+tbody tr:hover td { background: var(--surface-raised); }
 
-/* Secondary text (ID column / pagination / loading) */
-td .text-secondary,
-.text-secondary { color: #6A7086; }
+/* Secondary text */
+.text-secondary { color: var(--text-secondary); }
 
-/* ── Username link ───────────────────────────────────────── */
+/* ── Username link ── */
 td a {
-  color: #D6DEEB;
+  color: var(--primary);
   cursor: pointer;
 }
 
-td a:hover { color: #E0553D; }
+td a:hover { color: var(--accent); }
 
-/* ── Dark-adapted badges ─────────────────────────────────── */
-.badge-success { background: rgba(15, 123, 94, 0.18); color: #34D3A5; }
-.badge-warning { background: rgba(181, 118, 14, 0.18); color: #F5BC4E; }
-.badge-danger  { background: rgba(209, 46, 62, 0.18); color: #F06A78; }
-.badge-info    { background: rgba(88, 102, 196, 0.18); color: #A0A6F6; }
-.badge-neutral { background: rgba(106, 112, 134, 0.15); color: #8891A4; }
-
-/* ── Select dropdowns ────────────────────────────────────── */
+/* ── Select dropdowns ── */
 select {
-  background: #151821;
-  border-color: #2A3040;
-  color: #D6DEEB;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--ink);
 }
 
 select:focus {
   outline: none;
-  border-color: #E0553D;
-  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.18);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(26, 92, 138, 0.18);
 }
 
-/* ── Buttons (dark base) ─────────────────────────────────── */
+/* ── Buttons ── */
 button {
-  background: #1A1E2B;
-  border-color: #2A3040;
-  color: #8891A4;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text-secondary);
 }
 
 button:hover:not(:disabled) {
-  background: rgba(224, 85, 61, 0.08);
-  border-color: #3A4050;
-  color: #D6DEEB;
+  background: var(--surface-raised);
+  border-color: var(--border);
+  color: var(--ink);
 }
 
 button:disabled {
@@ -156,10 +144,10 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* ── Accent orange primary button ────────────────────────── */
+/* ── Primary button ── */
 button.btn-primary {
-  background: #E0553D;
-  border-color: #E0553D;
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
 }
 
@@ -168,7 +156,7 @@ button.btn-primary:hover {
   border-color: #C94A33;
 }
 
-/* ── Danger button ───────────────────────────────────────── */
+/* ── Danger button ── */
 button.btn-danger {
   background: #D12E3E;
   border-color: #D12E3E;
