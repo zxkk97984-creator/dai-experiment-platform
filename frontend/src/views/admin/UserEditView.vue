@@ -79,3 +79,69 @@ async function handleSave() {
     </div>
   </AppLayout>
 </template>
+
+<style scoped>
+/* ═══════════════════════════════════════════════════════════
+   User Edit — Pythonista Dark Theme
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Page title ──────────────────────────────────────────── */
+.page-title { color: #D6DEEB; }
+
+/* ── Form card ───────────────────────────────────────────── */
+.card {
+  background: #1A1E2B;
+  border-color: #2A3040;
+}
+
+/* ── Form inputs ─────────────────────────────────────────── */
+input,
+select {
+  background: #151821;
+  border-color: #2A3040;
+  color: #D6DEEB;
+}
+
+input::placeholder { color: #6A7086; }
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: #E0553D;
+  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.18);
+}
+
+/* ── Labels ──────────────────────────────────────────────── */
+label {
+  color: #6A7086;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ── Save button (accent orange) ─────────────────────────── */
+button.btn-primary {
+  background: #E0553D;
+  border-color: #E0553D;
+  color: #fff;
+}
+
+button.btn-primary:hover {
+  background: #C94A33;
+  border-color: #C94A33;
+}
+
+button.btn-primary:disabled { opacity: 0.5; }
+
+/* ── Cancel button (ghost dark) ──────────────────────────── */
+.card button:not(.btn-primary) {
+  background: transparent;
+  border-color: #2A3040;
+  color: #8891A4;
+}
+
+.card button:not(.btn-primary):hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: #3A4050;
+  color: #D6DEEB;
+}
+</style>
