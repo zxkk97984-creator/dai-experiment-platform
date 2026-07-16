@@ -94,9 +94,9 @@ async function submitExam() {
 <style scoped>
 /* ── Timer badge ─────────────────────────────────────────────────────── */
 .exam-timer {
-  background: #1A1E2B;
-  border: 2px solid #E0553D;
-  color: #E0553D;
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  color: var(--accent);
   font-family: var(--font-mono);
   font-size: 18px;
   font-weight: 600;
@@ -104,10 +104,10 @@ async function submitExam() {
   border-radius: var(--radius-md);
 }
 
-/* ── Dark cards ───────────────────────────────────────────────────────── */
+/* ── Cards ───────────────────────────────────────────────────────── */
 .exam-card {
-  background: #1A1E2B;
-  border: 1px solid #2A3040;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-6);
 }
@@ -118,7 +118,7 @@ async function submitExam() {
 }
 
 .exam-duration {
-  color: #6A7086;
+  color: var(--text-secondary);
   font-size: var(--text-sm);
   margin-bottom: var(--space-4);
 }
@@ -140,13 +140,13 @@ async function submitExam() {
   margin-bottom: var(--space-4);
 }
 .exam-submitted p {
-  color: #6A7086;
+  color: var(--text-secondary);
 }
 
-/* ── Answer textarea ─────────────────────────────────────────────────── */
+/* ── Answer textarea (code block — keep dark) ─────────────────────────── */
 .code-editor {
   width: 100%;
-  background: #1A1E2B;
+  background: #1B1F2B;
   color: #D6DEEB;
   border: 1px solid #2A3040;
   border-radius: var(--radius-md);
@@ -158,7 +158,7 @@ async function submitExam() {
 }
 .code-editor:focus {
   outline: none;
-  border-color: #E0553D;
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.18);
 }
 </style>
