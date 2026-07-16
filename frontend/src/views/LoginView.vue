@@ -35,67 +35,330 @@ async function handleLogin() {
 <template>
   <div class="login-page">
     <div class="login-card">
+      <!-- Brandmark -->
+      <div class="login-brand">
+        <div class="brand-block">
+          <span class="brand-letter">D</span>
+          <span class="brand-cursor" aria-hidden="true"></span>
+        </div>
+      </div>
+
       <div class="login-header">
-        <div class="login-brand">DAI</div>
-        <h1>实验平台</h1>
+        <h1>DAI 实验平台</h1>
         <p>面向人工智能课程的在线实验教学平台</p>
       </div>
 
       <form @submit.prevent="handleLogin" class="login-form">
-        <div class="form-group">
-          <label>用户名</label>
-          <input v-model="username" type="text" placeholder="输入用户名" autocomplete="username" />
-        </div>
-        <div class="form-group">
-          <label>密码</label>
-          <input v-model="password" type="password" placeholder="输入密码" autocomplete="current-password" />
+        <!-- Error banner -->
+        <transition name="error-slide">
+          <div v-if="error" class="login-error" role="alert">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.2"/>
+              <path d="M7 4v3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+              <circle cx="7" cy="10" r="0.6" fill="currentColor"/>
+            </svg>
+            {{ error }}
+          </div>
+        </transition>
+
+        <div class="input-wrap">
+          <svg class="input-icon" width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+            <circle cx="7.5" cy="5" r="3" stroke="currentColor" stroke-width="1.1"/>
+            <path d="M1.5 14c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
+          </svg>
+          <input
+            id="login-username"
+            v-model="username"
+            type="text"
+            placeholder="用户名"
+            autocomplete="username"
+          />
         </div>
 
-        <div v-if="error" class="login-error">{{ error }}</div>
+        <div class="input-wrap">
+          <svg class="input-icon" width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+            <rect x="2.5" y="7.5" width="10" height="5.5" rx="1" stroke="currentColor" stroke-width="1.1"/>
+            <path d="M5 7.5V5a2.5 2.5 0 015 0v2.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
+          </svg>
+          <input
+            id="login-password"
+            v-model="password"
+            type="password"
+            placeholder="密码"
+            autocomplete="current-password"
+          />
+        </div>
 
-        <button type="submit" class="btn-primary login-btn" :disabled="loading">
-          {{ loading ? '登录中...' : '登 录' }}
+        <button type="submit" class="login-btn" :disabled="loading">
+          <template v-if="loading">
+            <span class="dot-pulse" aria-hidden="true"><span>·</span><span>·</span><span>·</span></span>
+            登录中
+          </template>
+          <template v-else>登录</template>
         </button>
       </form>
 
-      <div class="login-hint">
-        默认管理员: admin / Passw0rd!
-      </div>
+      <p class="login-hint">
+        <span class="hint-label">默认管理员</span>
+        <code>admin</code><!--
+        --><span class="hint-sep">/</span><!--
+        --><code>Passw0rd!</code>
+      </p>
     </div>
   </div>
 </template>
 
 <style scoped>
+/* ═══════════════════════════════════════════════════════════════════════
+   Login — "D-Terminal"
+   Pythonista dark terminal aesthetic, code-editor input fields,
+   cadmium orange brandmark with blinking cursor.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Page ──────────────────────────────────── */
 .login-page {
-  height: 100vh; display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #1e2532 0%, #2d3748 100%);
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0F1118;
+  padding: var(--space-4);
 }
+
+/* ── Card ──────────────────────────────────── */
 .login-card {
-  background: #fff; padding: 48px 40px; border-radius: 12px;
-  width: 400px; max-width: 95vw;
+  width: 400px;
+  max-width: 100%;
+  padding: var(--space-10) var(--space-10) var(--space-8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
-.login-header { text-align: center; margin-bottom: 32px; }
-.login-brand {
-  font-size: 28px; font-weight: 800; color: var(--accent); margin-bottom: 8px;
+
+/* ── Brandmark ─────────────────────────────── */
+.login-brand { margin-bottom: var(--space-6); }
+
+.brand-block {
+  width: 64px;
+  height: 64px;
+  background: var(--accent);
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-shadow: 0 0 32px rgba(224,85,61,0.25);
 }
-.login-header h1 { font-size: 22px; font-weight: 600; color: #111827; margin-bottom: 6px; }
-.login-header p { font-size: 14px; color: var(--text-secondary); }
 
-.login-form { display: flex; flex-direction: column; gap: 16px; }
+.brand-letter {
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 400;
+  color: #fff;
+  line-height: 1;
+  margin-top: -2px;
+}
 
+.brand-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 22px;
+  background: rgba(255,255,255,0.9);
+  margin-left: 1px;
+  animation: cursor-blink 1.2s step-end infinite;
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
+/* ── Header ─────────────────────────────────── */
+.login-header {
+  text-align: center;
+  margin-bottom: var(--space-8);
+}
+
+.login-header h1 {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 400;
+  color: #E8ECF2;
+  margin: 0 0 6px;
+  letter-spacing: -0.01em;
+}
+
+.login-header p {
+  font-size: 13px;
+  color: #6A7086;
+  margin: 0;
+}
+
+/* ── Form ───────────────────────────────────── */
+.login-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ── Input wrap ─────────────────────────────── */
+.input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-icon {
+  position: absolute;
+  left: 14px;
+  color: #4E5670;
+  pointer-events: none;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.input-wrap input {
+  width: 100%;
+  padding: 12px 14px 12px 40px;
+  background: #1A1E2B;
+  border: 1px solid #2A3040;
+  border-radius: var(--radius-md);
+  color: #D6DEEB;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  transition: border-color var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+  box-shadow: none;
+  outline: none;
+}
+
+.input-wrap input::placeholder {
+  color: #4E5670;
+}
+
+.input-wrap input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(224,85,61,0.12);
+}
+
+.input-wrap input:focus ~ .input-icon,
+.input-wrap input:focus + .input-icon {
+  color: var(--accent);
+}
+
+/* Icon color on focus — sibling selectors */
+.input-wrap:focus-within .input-icon {
+  color: var(--accent);
+}
+
+/* ── Error ──────────────────────────────────── */
 .login-error {
-  background: var(--danger-light); color: var(--danger);
-  padding: 10px 14px; border-radius: 6px; font-size: 13px;
-  border: 1px solid #fca5a5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(209,46,62,0.12);
+  color: #EE7A82;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  border: 1px solid rgba(209,46,62,0.25);
 }
 
+/* Error slide-in */
+.error-slide-enter-active {
+  transition: all var(--duration-normal) var(--ease-out);
+}
+.error-slide-leave-active {
+  transition: all var(--duration-fast) var(--ease-out);
+}
+.error-slide-enter-from {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+.error-slide-leave-to {
+  opacity: 0;
+}
+
+/* ── Button ─────────────────────────────────── */
 .login-btn {
-  width: 100%; padding: 12px; font-size: 16px; margin-top: 8px;
+  width: 100%;
+  padding: 12px;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-md);
+  color: #fff;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  margin-top: var(--space-3);
+  transition: background var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
 }
 
+.login-btn:hover {
+  background: var(--cta-hover);
+  box-shadow: 0 4px 16px rgba(224,85,61,0.25);
+}
+
+.login-btn:active {
+  transform: scale(0.985);
+}
+
+.login-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* ── Dot pulse (loading) ────────────────────── */
+.dot-pulse {
+  display: inline-flex;
+  gap: 1px;
+  margin-right: 4px;
+}
+
+.dot-pulse span {
+  animation: dot-bounce 1.2s infinite;
+}
+.dot-pulse span:nth-child(1) { animation-delay: 0s; }
+.dot-pulse span:nth-child(2) { animation-delay: 0.15s; }
+.dot-pulse span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes dot-bounce {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30%           { opacity: 1;   transform: translateY(-2px); }
+}
+
+/* ── Footer hint ────────────────────────────── */
 .login-hint {
-  text-align: center; margin-top: 24px;
-  font-size: 12px; color: #9ca3af;
+  margin-top: var(--space-6);
+  font-size: var(--text-xs);
+  color: #4E5670;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hint-label {
+  color: #4E5670;
+  margin-right: 6px;
+}
+
+.login-hint code {
   font-family: var(--font-mono);
+  font-size: 11px;
+  color: #8891A4;
+  background: rgba(255,255,255,0.04);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.hint-sep {
+  color: #3A4050;
+  margin: 0 2px;
 }
 </style>
