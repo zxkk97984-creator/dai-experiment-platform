@@ -63,3 +63,113 @@ onMounted(fetch)
     <div v-else class="card" style="text-align:center;padding:48px"><p class="text-secondary">暂无考试</p></div>
   </AppLayout>
 </template>
+
+<style scoped>
+/* ═══════════════════════════════════════════════════════════════════════
+   ExamManageView — Dark Admin Theme
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Page title ─────────────────────────────────────────────────────── */
+.page-title {
+  color: #D6DEEB;
+}
+
+/* ── Cards ──────────────────────────────────────────────────────────── */
+.card {
+  background: #1A1E2B;
+  border-color: #2A3040;
+  color: #D6DEEB;
+}
+.card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  border-color: #3A4050;
+}
+
+/* ── Table ──────────────────────────────────────────────────────────── */
+table {
+  color: #D6DEEB;
+}
+th {
+  background: #151821;
+  color: #8891A4;
+  border-bottom-color: #2A3040;
+}
+td {
+  border-bottom-color: #2A3040;
+}
+tbody tr:hover td {
+  background: #1F2433;
+}
+
+/* ── Inputs ─────────────────────────────────────────────────────────── */
+input {
+  background: #151821;
+  border-color: #2A3040;
+  color: #D6DEEB;
+}
+input:focus {
+  border-color: #E0553D;
+  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.15);
+  outline: none;
+}
+input::placeholder {
+  color: #5F6B7A;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+button {
+  background: #1A1E2B;
+  border-color: #2A3040;
+  color: #D6DEEB;
+}
+button:hover {
+  background: #252B3A;
+  border-color: #3A4050;
+}
+
+button.btn-primary {
+  background: #E0553D;
+  border-color: #E0553D;
+  color: #fff;
+}
+button.btn-primary:hover {
+  background: #C94A33;
+  border-color: #C94A33;
+}
+button.btn-primary:focus-visible {
+  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.25);
+}
+
+button.btn-sm {
+  background: #252B3A;
+  border-color: #2A3040;
+  color: #D6DEEB;
+}
+button.btn-sm:hover {
+  background: #E0553D;
+  border-color: #E0553D;
+  color: #fff;
+}
+
+/* ── Form labels ────────────────────────────────────────────────────── */
+.form-group label {
+  color: #8891A4;
+}
+
+/* ── Badges — dark-context adjustments ──────────────────────────────── */
+.badge-success { background: rgba(15, 123, 94, 0.18); color: #34D399; }
+.badge-warning { background: rgba(181, 118, 14, 0.18); color: #FBBF24; }
+.badge-danger  { background: rgba(209, 46, 62, 0.18);  color: #F87171; }
+.badge-info    { background: rgba(88, 102, 196, 0.18);  color: #A5B4FC; }
+.badge-neutral { background: #1F2433; color: #8891A4; }
+
+/* ── Type utilities ─────────────────────────────────────────────────── */
+.text-secondary {
+  color: #8891A4;
+}
+
+/* ── Focus ring ─────────────────────────────────────────────────────── */
+:focus-visible {
+  outline-color: #E0553D;
+}
+</style>
