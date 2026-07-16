@@ -18,6 +18,7 @@ const exams = ref([])
 const loading = ref(true)
 const enrolling = ref(false)
 const enrolled = ref(false)
+const fetchError = ref(false)
 
 const courseId = computed(() => route.params.id)
 
@@ -58,7 +59,7 @@ async function fetchAll() {
     enrolled.value = true
   } catch (e) {
     if (e.response?.status === 403) enrolled.value = false
-    else app.showToast('加载课程失败', 'error')
+    else { fetchError.value = true; app.showToast('加载课程失败', 'error') }
   } finally { loading.value = false }
 }
 
@@ -102,6 +103,12 @@ onMounted(fetchAll)
       <div class="skeleton" style="height:14px;width:360px;margin-bottom:24px"></div>
       <div class="skeleton" style="height:120px;width:100%;margin-bottom:16px"></div>
       <div v-for="i in 3" :key="i" class="skeleton" style="height:48px;width:100%;margin-bottom:8px"></div>
+    </div>
+
+    <!-- Error: fetch failed -->
+    <div v-else-if="fetchError" class="empty-state">
+      <p>加载课程失败</p>
+      <button class="btn-primary" @click="fetchAll" style="margin-top:12px">重新加载</button>
     </div>
 
     <!-- Error: not enrolled -->

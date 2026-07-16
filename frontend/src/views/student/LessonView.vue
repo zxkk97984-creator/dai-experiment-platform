@@ -14,7 +14,6 @@ const course = ref(null)
 const lesson = ref(null)
 const loading = ref(true)
 const dropdownOpen = ref(false)
-const currentChapterIndex = ref(0)
 
 const courseId = computed(() => route.params.id)
 const lessonId = computed(() => route.params.lid)
@@ -55,7 +54,6 @@ const currentChapterTitle = computed(() => {
 function findLesson() {
   for (let i = 0; i < chapters.value.length; i++) {
     const ch = chapters.value[i]
-    currentChapterIndex.value = i
     if (ch.lessons) {
       const found = ch.lessons.find(l => l.id == lessonId.value)
       if (found) { lesson.value = found; return }
@@ -116,10 +114,6 @@ function goJupyter() {
 
 function toggleDropdown() {
   dropdownOpen.value = !dropdownOpen.value
-}
-
-function closeDropdown() {
-  dropdownOpen.value = false
 }
 
 // 点击外部关闭下拉
