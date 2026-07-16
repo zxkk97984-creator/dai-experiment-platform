@@ -62,3 +62,117 @@ onMounted(fetch)
     <div v-else class="card" style="text-align:center;padding:48px"><p class="text-secondary">暂无实验模块</p></div>
   </AppLayout>
 </template>
+
+<style scoped>
+/* ═══════════════════════════════════════════════════════════════════════
+   ExperimentManageView — Pythonista Dark Theme
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Page title ─────────────────────────────────────────────────────── */
+.page-title {
+  color: #D6DEEB;
+}
+
+/* ── Cards ──────────────────────────────────────────────────────────── */
+.card {
+  background: #1A1E2B;
+  border-color: #2A3040;
+  color: #D6DEEB;
+}
+.card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  border-color: #3A4050;
+}
+
+/* ── Table ──────────────────────────────────────────────────────────── */
+table {
+  color: #D6DEEB;
+}
+th {
+  background: #11141D;
+  color: #6A7086;
+  border-bottom-color: #2A3040;
+}
+td {
+  border-bottom-color: #2A3040;
+}
+tbody tr:hover td {
+  background: rgba(224, 85, 61, 0.08);
+}
+
+/* ── Inputs ─────────────────────────────────────────────────────────── */
+input,
+textarea {
+  background: #151821;
+  border-color: #2A3040;
+  color: #D6DEEB;
+}
+input:focus,
+textarea:focus {
+  border-color: #E0553D;
+  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.15);
+  outline: none;
+}
+input::placeholder,
+textarea::placeholder {
+  color: #6A7086;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+button {
+  background: #1A1E2B;
+  border-color: #2A3040;
+  color: #D6DEEB;
+}
+button:hover {
+  background: #252B3A;
+  border-color: #3A4050;
+}
+
+button.btn-primary {
+  background: #E0553D;
+  border-color: #E0553D;
+  color: #fff;
+}
+button.btn-primary:hover {
+  background: #C94A33;
+  border-color: #C94A33;
+}
+button.btn-primary:focus-visible {
+  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.25);
+}
+
+/* Action button — ghost dark */
+button.btn-sm {
+  background: transparent;
+  border-color: #2A3040;
+  color: #6A7086;
+}
+button.btn-sm:hover {
+  background: rgba(224, 85, 61, 0.12);
+  border-color: #E0553D;
+  color: #E0553D;
+}
+
+/* ── Form labels ────────────────────────────────────────────────────── */
+.form-group label {
+  color: #6A7086;
+}
+
+/* ── Badges — dark-context adjustments ──────────────────────────────── */
+.badge-success { background: rgba(15, 123, 94, 0.18); color: #34D399; }
+.badge-warning { background: rgba(181, 118, 14, 0.18); color: #FBBF24; }
+.badge-danger  { background: rgba(209, 46, 62, 0.18);  color: #F87171; }
+.badge-info    { background: rgba(88, 102, 196, 0.18);  color: #A5B4FC; }
+.badge-neutral { background: #1F2433; color: #6A7086; }
+
+/* ── Type utilities ─────────────────────────────────────────────────── */
+.text-secondary {
+  color: #6A7086;
+}
+
+/* ── Focus ring ─────────────────────────────────────────────────────── */
+:focus-visible {
+  outline-color: #E0553D;
+}
+</style>
