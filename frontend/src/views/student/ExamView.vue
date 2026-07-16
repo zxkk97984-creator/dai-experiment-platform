@@ -62,25 +62,24 @@ async function submitExam() {
     <template v-else>
       <div class="flex-between mb-4">
         <h1 class="page-title" style="margin-bottom:0">{{ exam.title }}</h1>
-        <div v-if="started && !submitted" class="badge badge-warning"
-          style="font-size:18px;padding:6px 16px;font-family:var(--font-mono)">
+        <div v-if="started && !submitted" class="exam-timer">
           {{ timeDisplay }}
         </div>
       </div>
 
-      <div v-if="submitted" class="card" style="text-align:center;padding:48px">
-        <h3 style="color:var(--success)">考试已提交</h3>
-        <p class="text-secondary mt-4">请等待教师批阅</p>
+      <div v-if="submitted" class="exam-card exam-submitted">
+        <h3>考试已提交</h3>
+        <p>请等待教师批阅</p>
       </div>
 
-      <div v-else-if="!started" class="card" style="text-align:center;padding:48px">
-        <p class="text-secondary mb-4">时长: {{ exam.duration_minutes }} 分钟</p>
-        <button class="btn-primary" @click="startExam" style="padding:12px 40px;font-size:16px">
+      <div v-else-if="!started" class="exam-card exam-start-card">
+        <p class="exam-duration">时长: {{ exam.duration_minutes }} 分钟</p>
+        <button class="btn-primary exam-start-btn" @click="startExam">
           开始考试
         </button>
       </div>
 
-      <div v-else class="card">
+      <div v-else class="exam-card">
         <p class="text-secondary mb-4">考试进行中，请在下方作答</p>
         <textarea v-model="answers.content" rows="12" class="code-editor"
           placeholder="在此作答..."></textarea>
@@ -93,10 +92,73 @@ async function submitExam() {
 </template>
 
 <style scoped>
-.code-editor {
-  width:100%; background:#1e2532; color:#e5e7eb; border:none; border-radius:6px;
-  padding:16px; font-family:var(--font-mono); font-size:13px; line-height:1.6;
-  resize:vertical;
+/* ── Timer badge ─────────────────────────────────────────────────────── */
+.exam-timer {
+  background: #1A1E2B;
+  border: 2px solid #E0553D;
+  color: #E0553D;
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: var(--radius-md);
 }
-.code-editor:focus { outline:2px solid var(--accent); }
+
+/* ── Dark cards ───────────────────────────────────────────────────────── */
+.exam-card {
+  background: #1A1E2B;
+  border: 1px solid #2A3040;
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+}
+
+.exam-start-card {
+  text-align: center;
+  padding: 48px;
+}
+
+.exam-duration {
+  color: #6A7086;
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-4);
+}
+
+.exam-start-btn {
+  padding: 12px 40px !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+}
+
+/* ── Submitted state ─────────────────────────────────────────────────── */
+.exam-submitted {
+  text-align: center;
+  padding: 48px;
+}
+.exam-submitted h3 {
+  color: var(--success);
+  font-size: var(--text-lg);
+  margin-bottom: var(--space-4);
+}
+.exam-submitted p {
+  color: #6A7086;
+}
+
+/* ── Answer textarea ─────────────────────────────────────────────────── */
+.code-editor {
+  width: 100%;
+  background: #1A1E2B;
+  color: #D6DEEB;
+  border: 1px solid #2A3040;
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.65;
+  resize: vertical;
+}
+.code-editor:focus {
+  outline: none;
+  border-color: #E0553D;
+  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.18);
+}
 </style>
