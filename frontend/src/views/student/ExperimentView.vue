@@ -60,13 +60,13 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-/* ── Pythonista dark experiment module ──────────────────────────────── */
+/* ── Reading Room experiment module ──────────────────────────────── */
 
 .page-title {
   font-family: var(--font-display);
   font-size: var(--text-2xl);
   font-weight: 400;
-  color: #D6DEEB;
+  color: var(--ink);
   margin-bottom: var(--space-8);
   letter-spacing: -0.01em;
   line-height: 1.2;
@@ -74,73 +74,39 @@ onMounted(async () => {
 
 /* ── Cards ──────────────────────────────────────────────────────────── */
 .card {
-  background: #1A1E2B;
-  border: 1px solid #2A3040;
-  color: #D6DEEB;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--ink);
 }
 
 .card:hover {
-  border-color: #3A4058;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  border-color: var(--accent);
+  box-shadow: 0 0 20px rgba(224, 85, 61, 0.15),
+              0 4px 16px rgba(0, 0, 0, 0.06);
 }
 
 /* ── Card title ─────────────────────────────────────────────────────── */
 h3 {
-  color: #D6DEEB;
+  color: var(--ink);
 }
 
 /* ── Text utilities ─────────────────────────────────────────────────── */
 .text-secondary {
-  color: #6A7086;
+  color: var(--text-secondary);
 }
 
 /* ── Section header ─────────────────────────────────────────────────── */
 h2 {
-  color: #D6DEEB;
+  color: var(--ink);
 }
 
-/* ── Badges (dark-adapted) ──────────────────────────────────────────── */
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  line-height: 1.6;
-}
+/* ── Badges (light theme from global CSS) ──────────────────────────── */
 
-.badge-success {
-  background: rgba(15, 123, 94, 0.15);
-  color: #4EC9A0;
-}
-
-.badge-warning {
-  background: rgba(181, 118, 14, 0.15);
-  color: #E5A620;
-}
-
-.badge-danger {
-  background: rgba(209, 46, 62, 0.15);
-  color: #F06A6A;
-}
-
-.badge-info {
-  background: rgba(88, 102, 196, 0.15);
-  color: #8B90E0;
-}
-
-.badge-neutral {
-  background: rgba(106, 112, 134, 0.12);
-  color: #8B91A0;
-}
-
-/* ── "进入实验" button (accent orange) ───────────────────────────────── */
+/* ── "进入实验" button (accent orange CTA) ──────────────────────────── */
 .btn-primary {
-  background: #E0553D;
+  background: var(--accent);
   color: #fff;
-  border-color: #E0553D;
+  border-color: var(--accent);
 }
 
 .btn-primary:hover {
@@ -149,19 +115,19 @@ h2 {
   box-shadow: 0 0 14px rgba(224, 85, 61, 0.2);
 }
 
-/* ── Table (dark) ────────────────────────────────────────────────────── */
+/* ── Table ────────────────────────────────────────────────────── */
 th {
-  background: #11141D;
-  color: #6A7086;
-  border-bottom-color: #2A3040;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  border-bottom-color: var(--border);
 }
 
 td {
-  color: #D6DEEB;
-  border-bottom-color: #2A3040;
+  color: var(--ink);
+  border-bottom-color: var(--border);
 }
 
 tbody tr:hover td {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-raised);
 }
 </style>
