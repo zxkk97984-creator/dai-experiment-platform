@@ -58,3 +58,110 @@ onMounted(async () => {
     </table>
   </AppLayout>
 </template>
+
+<style scoped>
+/* ── Pythonista dark experiment module ──────────────────────────────── */
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 400;
+  color: #D6DEEB;
+  margin-bottom: var(--space-8);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+/* ── Cards ──────────────────────────────────────────────────────────── */
+.card {
+  background: #1A1E2B;
+  border: 1px solid #2A3040;
+  color: #D6DEEB;
+}
+
+.card:hover {
+  border-color: #3A4058;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+/* ── Card title ─────────────────────────────────────────────────────── */
+h3 {
+  color: #D6DEEB;
+}
+
+/* ── Text utilities ─────────────────────────────────────────────────── */
+.text-secondary {
+  color: #6A7086;
+}
+
+/* ── Section header ─────────────────────────────────────────────────── */
+h2 {
+  color: #D6DEEB;
+}
+
+/* ── Badges (dark-adapted) ──────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.6;
+}
+
+.badge-success {
+  background: rgba(15, 123, 94, 0.15);
+  color: #4EC9A0;
+}
+
+.badge-warning {
+  background: rgba(181, 118, 14, 0.15);
+  color: #E5A620;
+}
+
+.badge-danger {
+  background: rgba(209, 46, 62, 0.15);
+  color: #F06A6A;
+}
+
+.badge-info {
+  background: rgba(88, 102, 196, 0.15);
+  color: #8B90E0;
+}
+
+.badge-neutral {
+  background: rgba(106, 112, 134, 0.12);
+  color: #8B91A0;
+}
+
+/* ── "进入实验" button (accent orange) ───────────────────────────────── */
+.btn-primary {
+  background: #E0553D;
+  color: #fff;
+  border-color: #E0553D;
+}
+
+.btn-primary:hover {
+  background: #C94A33;
+  border-color: #C94A33;
+  box-shadow: 0 0 14px rgba(224, 85, 61, 0.2);
+}
+
+/* ── Table (dark) ────────────────────────────────────────────────────── */
+th {
+  background: #11141D;
+  color: #6A7086;
+  border-bottom-color: #2A3040;
+}
+
+td {
+  color: #D6DEEB;
+  border-bottom-color: #2A3040;
+}
+
+tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+</style>
