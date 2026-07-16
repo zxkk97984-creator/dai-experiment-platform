@@ -41,13 +41,13 @@ onMounted(loadJupyter)
 </template>
 
 <style scoped>
-/* ── Pythonista dark JupyterLab ─────────────────────────────────────── */
+/* ── Reading Room JupyterLab ─────────────────────────────────────── */
 
 .page-title {
   font-family: var(--font-display);
   font-size: var(--text-2xl);
   font-weight: 400;
-  color: #D6DEEB;
+  color: var(--ink);
   margin-bottom: var(--space-8);
   letter-spacing: -0.01em;
   line-height: 1.2;
@@ -55,25 +55,25 @@ onMounted(loadJupyter)
 
 /* ── Loading / error cards ──────────────────────────────────────────── */
 .card {
-  background: #1A1E2B;
-  border: 1px solid #2A3040;
-  color: #D6DEEB;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--ink);
 }
 
 .text-secondary {
-  color: #6A7086;
+  color: var(--text-secondary);
 }
 
 /* ── Iframe border ──────────────────────────────────────────────────── */
 iframe {
-  border: 1px solid #2A3040 !important;
+  border: 1px solid var(--border) !important;
 }
 
-/* ── Retry button (accent orange) ───────────────────────────────────── */
+/* ── Retry button (accent orange CTA) ───────────────────────────────── */
 .btn-primary {
-  background: #E0553D;
+  background: var(--accent);
   color: #fff;
-  border-color: #E0553D;
+  border-color: var(--accent);
 }
 
 .btn-primary:hover {
