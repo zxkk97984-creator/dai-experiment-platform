@@ -68,13 +68,13 @@ onMounted(fetch)
             <td><span class="badge" :class="'badge-' + statusBadge(PUBLISH_STATUS_MAP, a.status).color">{{ statusBadge(PUBLISH_STATUS_MAP, a.status).label }}</span></td>
             <td class="text-sm date-cell">{{ formatDateTime(a.due_at) }}</td>
             <td class="actions-cell">
-              <button class="btn-sm btn-action" @click="router.push(`/teacher/assignments/${a.id}/edit`)">编辑题目</button>
-              <button v-if="a.status==='draft'" class="btn-sm btn-publish" style="margin-left:6px" @click="handlePublish(a)">发布</button>
+              <button class="btn-ghost btn-sm" @click="router.push(`/teacher/assignments/${a.id}/edit`)">编辑题目</button>
+              <button v-if="a.status==='draft'" class="btn-ghost btn-sm btn-publish" style="margin-left:6px" @click="handlePublish(a)">发布</button>
             </td>
           </tr>
         </tbody>
       </table>
-      <div v-else class="empty-card">
+      <div v-else class="card empty-card">
         <p class="empty-text">暂无作业</p>
         <p class="empty-hint">点击「布置作业」创建第一个作业</p>
       </div>
@@ -83,154 +83,43 @@ onMounted(fetch)
 </template>
 
 <style scoped>
-/* ═══════════════════════════════════════════════════════════
-   Pythonista Dark Admin — Assignment Management
-   ═══════════════════════════════════════════════════════════ */
-
-.assignment-manage {
-  color: #D6DEEB;
-}
-
-/* ── Page title ─────────────────────────────────────────── */
-.page-title {
-  color: #D6DEEB;
-}
-
-/* ── Loading ────────────────────────────────────────────── */
+/* ── Loading ── */
 .loading-text {
-  color: #6A7086;
+  color: var(--text-secondary);
   font-size: var(--text-sm);
 }
 
-/* ── Cards ──────────────────────────────────────────────── */
-.card,
-.empty-card {
-  background: #1A1E2B;
-  border: 1px solid #2A3040;
-  border-radius: var(--radius-lg);
-  padding: var(--space-6);
-}
-.card:hover,
-.empty-card:hover {
-  box-shadow: none;
-  border-color: #2A3040;
-}
-
+/* ── Empty state ── */
 .empty-card {
   text-align: center;
   padding: 48px;
 }
 .empty-text {
-  color: #6A7086;
+  color: var(--text-secondary);
   font-size: var(--text-sm);
 }
 .empty-hint {
-  color: #4A5066;
+  color: var(--text-secondary);
   font-size: var(--text-xs);
   margin-top: 6px;
+  opacity: 0.7;
 }
 
-/* ── Create form card ───────────────────────────────────── */
-.create-form {
-  /* inherits .card */
-}
-
-/* ── Form labels ────────────────────────────────────────── */
-.form-group label {
-  color: #6A7086;
-}
-
-/* ── Inputs ─────────────────────────────────────────────── */
-input,
-textarea,
-select {
-  background: #151821;
-  border-color: #2A3040;
-  color: #D6DEEB;
-}
-input::placeholder,
-textarea::placeholder {
-  color: #4A5066;
-}
-input:focus,
-textarea:focus,
-select:focus {
-  outline: none;
-  border-color: #E0553D;
-  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.18);
-}
-
-/* ── Secondary text ─────────────────────────────────────── */
-.text-secondary {
-  color: #6A7086;
-}
-
-/* ── Buttons: base override for dark bg ─────────────────── */
-button {
-  background: #1A1E2B;
-  border-color: #2A3040;
-  color: #8A90A8;
-}
-button:hover {
-  background: #222738;
-  border-color: #3A4050;
-}
-
-/* Primary buttons keep their accent styling */
-button.btn-primary {
-  background: #E0553D;
-  color: #fff;
-  border-color: #E0553D;
-}
-button.btn-primary:hover {
-  background: #C94A33;
-  border-color: #C94A33;
-}
-
-/* ── Small action buttons ───────────────────────────────── */
-button.btn-sm {
-  padding: 4px 10px;
-  font-size: var(--text-xs);
-  border-radius: var(--radius-sm);
-}
-
-.btn-action {
-  background: transparent;
-  border-color: #2A3040;
-  color: #8A90A8;
-}
-.btn-action:hover {
-  background: rgba(224, 85, 61, 0.08);
-  border-color: #E0553D;
-  color: #E0553D;
-}
-
-.btn-publish {
-  background: rgba(224, 85, 61, 0.12);
-  border-color: #E0553D;
-  color: #E0553D;
-}
-.btn-publish:hover {
-  background: #E0553D;
-  color: #fff;
-}
-
-/* ── Data table ─────────────────────────────────────────── */
+/* ── Data table ── */
 .data-table {
   width: 100%;
   border-collapse: collapse;
   font-size: var(--text-sm);
-  background: #1A1E2B;
-  border: 1px solid #2A3040;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
-th,
-td {
+th, td {
   text-align: left;
   padding: 10px 14px;
-  border-bottom: 1px solid #2A3040;
+  border-bottom: 1px solid var(--border);
 }
 
 th {
@@ -238,8 +127,8 @@ th {
   font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #6A7086;
-  background: #11141D;
+  color: var(--text-secondary);
+  background: var(--surface-raised);
 }
 
 tr:last-child td {
@@ -247,78 +136,31 @@ tr:last-child td {
 }
 
 tr:hover td {
-  background: rgba(224, 85, 61, 0.04);
+  background: var(--surface-raised);
 }
 
 .title-cell {
   font-weight: 500;
-  color: #D6DEEB;
+  color: var(--ink);
 }
 
 .date-cell {
-  color: #8A90A8;
+  color: var(--text-secondary);
 }
 
-/* ── Badges on dark background ──────────────────────────── */
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  line-height: 1.6;
-}
-
-.badge-success {
-  background: rgba(15, 123, 94, 0.15);
-  color: #3EC99E;
-}
-
-.badge-warning {
-  background: rgba(181, 118, 14, 0.15);
-  color: #E5A820;
-}
-
-.badge-danger {
-  background: rgba(209, 46, 62, 0.15);
-  color: #F05060;
-}
-
-.badge-info {
-  background: rgba(88, 102, 196, 0.15);
-  color: #8898E8;
-}
-
-.badge-neutral {
-  background: rgba(106, 112, 134, 0.15);
-  color: #8A90A8;
-}
-
-/* ── Grid ───────────────────────────────────────────────── */
-.grid-2 {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--space-4);
-}
-
-/* ── Flex utilities ─────────────────────────────────────── */
-.flex-between {
+/* ── Action buttons ── */
+.actions-cell {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  gap: 8px;
 }
 
-/* ── Spacing ────────────────────────────────────────────── */
-.mb-4 {
-  margin-bottom: var(--space-4);
+.btn-publish {
+  color: var(--accent);
+  border-color: rgba(224, 85, 61, 0.3);
 }
-.mb-3 {
-  margin-bottom: var(--space-3);
-}
-
-.text-sm {
-  font-size: var(--text-sm);
+.btn-publish:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 </style>
