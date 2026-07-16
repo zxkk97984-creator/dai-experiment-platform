@@ -40,8 +40,8 @@ onMounted(fetch)
 
     <div v-if="showCreate" class="card mb-4">
       <div class="grid-2">
-        <div class="form-group"><label>考试名称</label><input v-model="form.title" /></div>
-        <div class="form-group"><label>课程 ID</label><input v-model="form.course_id" type="number" /></div>
+        <div class="form-group"><label>考试名称</label><input v-model="form.title" placeholder="输入考试名称" /></div>
+        <div class="form-group"><label>课程 ID</label><input v-model="form.course_id" type="number" placeholder="课程 ID" /></div>
         <div class="form-group"><label>时长 (分钟)</label><input v-model.number="form.duration_minutes" type="number" /></div>
         <div class="form-group"><label>开始时间</label><input v-model="form.start_at" type="datetime-local" /></div>
       </div>
@@ -49,14 +49,14 @@ onMounted(fetch)
     </div>
 
     <div v-if="loading" class="text-secondary">加载中...</div>
-    <table v-else-if="exams.length" class="card" style="padding:0">
+    <table v-else-if="exams.length" class="data-table">
       <thead><tr><th>名称</th><th>状态</th><th>时长</th><th>操作</th></tr></thead>
       <tbody>
         <tr v-for="e in exams" :key="e.id">
           <td>{{ e.title }}</td>
           <td><span class="badge" :class="'badge-' + statusBadge(EXAM_STATUS_MAP, e.status).color">{{ statusBadge(EXAM_STATUS_MAP, e.status).label }}</span></td>
           <td>{{ e.duration_minutes }} 分钟</td>
-          <td><button class="btn-sm" @click="router.push(`/teacher/exams/${e.id}/grades`)">查看成绩</button></td>
+          <td><button class="btn-ghost btn-sm" @click="router.push(`/teacher/exams/${e.id}/grades`)">查看成绩</button></td>
         </tr>
       </tbody>
     </table>
@@ -65,111 +65,31 @@ onMounted(fetch)
 </template>
 
 <style scoped>
-/* ═══════════════════════════════════════════════════════════════════════
-   ExamManageView — Dark Admin Theme
-   ═══════════════════════════════════════════════════════════════════════ */
-
-/* ── Page title ─────────────────────────────────────────────────────── */
-.page-title {
-  color: #D6DEEB;
+/* ── Data table ── */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
-/* ── Cards ──────────────────────────────────────────────────────────── */
-.card {
-  background: #1A1E2B;
-  border-color: #2A3040;
-  color: #D6DEEB;
-}
-.card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-  border-color: #3A4050;
+.data-table th {
+  background: var(--surface-raised);
+  color: var(--text-secondary);
 }
 
-/* ── Table ──────────────────────────────────────────────────────────── */
-table {
-  color: #D6DEEB;
-}
-th {
-  background: #151821;
-  color: #8891A4;
-  border-bottom-color: #2A3040;
-}
-td {
-  border-bottom-color: #2A3040;
-}
-tbody tr:hover td {
-  background: #1F2433;
+.data-table td {
+  border-bottom: 1px solid var(--border);
 }
 
-/* ── Inputs ─────────────────────────────────────────────────────────── */
-input {
-  background: #151821;
-  border-color: #2A3040;
-  color: #D6DEEB;
-}
-input:focus {
-  border-color: #E0553D;
-  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.15);
-  outline: none;
-}
-input::placeholder {
-  color: #5F6B7A;
+.data-table tbody tr:hover td {
+  background: var(--surface-raised);
 }
 
-/* ── Buttons ────────────────────────────────────────────────────────── */
-button {
-  background: #1A1E2B;
-  border-color: #2A3040;
-  color: #D6DEEB;
-}
-button:hover {
-  background: #252B3A;
-  border-color: #3A4050;
-}
-
-button.btn-primary {
-  background: #E0553D;
-  border-color: #E0553D;
-  color: #fff;
-}
-button.btn-primary:hover {
-  background: #C94A33;
-  border-color: #C94A33;
-}
-button.btn-primary:focus-visible {
-  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.25);
-}
-
-button.btn-sm {
-  background: #252B3A;
-  border-color: #2A3040;
-  color: #D6DEEB;
-}
-button.btn-sm:hover {
-  background: #E0553D;
-  border-color: #E0553D;
-  color: #fff;
-}
-
-/* ── Form labels ────────────────────────────────────────────────────── */
-.form-group label {
-  color: #8891A4;
-}
-
-/* ── Badges — dark-context adjustments ──────────────────────────────── */
-.badge-success { background: rgba(15, 123, 94, 0.18); color: #34D399; }
-.badge-warning { background: rgba(181, 118, 14, 0.18); color: #FBBF24; }
-.badge-danger  { background: rgba(209, 46, 62, 0.18);  color: #F87171; }
-.badge-info    { background: rgba(88, 102, 196, 0.18);  color: #A5B4FC; }
-.badge-neutral { background: #1F2433; color: #8891A4; }
-
-/* ── Type utilities ─────────────────────────────────────────────────── */
-.text-secondary {
-  color: #8891A4;
-}
-
-/* ── Focus ring ─────────────────────────────────────────────────────── */
-:focus-visible {
-  outline-color: #E0553D;
+.data-table tbody tr:last-child td {
+  border-bottom: none;
 }
 </style>
