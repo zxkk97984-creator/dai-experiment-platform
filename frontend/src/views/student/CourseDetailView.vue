@@ -215,10 +215,132 @@ onMounted(fetchAll)
 </template>
 
 <style scoped>
+/* ── Back link ─────────────────────────────── */
+.back-link {
+  display: inline-flex; align-items: center; gap: 4px;
+  color: var(--text-secondary); font-size: var(--text-sm); margin-bottom: var(--space-5);
+}
+.back-link:hover { color: var(--text); }
+
+/* ── Hero card ─────────────────────────────── */
+.course-hero {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  margin-bottom: var(--space-5);
+  transition: border-color var(--duration-normal) var(--ease-out);
+}
+.course-hero:hover { border-color: #cfd5e0; }
+
+.course-hero-title {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 400;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--space-2);
+  line-height: 1.2;
+}
+
+.course-hero-desc {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-5);
+  line-height: 1.6;
+}
+
+.course-hero-stats { display: flex; gap: var(--space-6); margin-bottom: var(--space-4); }
+.hero-stat { display: flex; flex-direction: column; }
+.hero-stat-value { font-family: var(--font-display); font-size: 22px; color: var(--ink); }
+.hero-stat-label { font-size: var(--text-xs); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
+
+/* Progress bar */
+.progress-wrap { display: flex; align-items: center; gap: var(--space-3); }
+.progress-bar {
+  flex: 1; height: 6px; background: #E4E8F0;
+  border-radius: 3px; overflow: hidden;
+}
+.progress-fill {
+  height: 100%; background: var(--accent);
+  border-radius: 3px; transition: width var(--duration-slow) var(--ease-out);
+}
+.progress-text {
+  font-size: var(--text-xs); color: var(--text-secondary);
+  white-space: nowrap; font-weight: 500;
+}
+
+/* ── Quick sections (assignments & exams) ─── */
+.quick-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5) var(--space-6);
+  margin-bottom: var(--space-4);
+  transition: border-color var(--duration-normal) var(--ease-out);
+}
+.quick-section:hover { border-color: #cfd5e0; }
+
+.quick-section-title {
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: 400;
+  color: var(--ink);
+  margin: 0 0 var(--space-3);
+  letter-spacing: -0.01em;
+}
+
+.quick-list { display: flex; flex-direction: column; gap: 2px; }
+.quick-item {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: 8px 10px; border-radius: var(--radius-md);
+  cursor: pointer; transition: background var(--duration-fast) var(--ease-out);
+}
+.quick-item:hover { background: var(--surface-raised); }
+
+.quick-item-icon { color: var(--text-secondary); flex-shrink: 0; display: flex; }
+.quick-item-title { flex: 1; font-size: var(--text-sm); font-weight: 500; color: var(--text); }
+.quick-item-meta { font-size: var(--text-xs); color: var(--text-secondary); }
+
+/* ── Chapter outline ───────────────────────── */
+.chapter-outline { display: flex; flex-direction: column; gap: var(--space-4); }
+.chapter-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5) var(--space-6);
+  transition: border-color var(--duration-normal) var(--ease-out);
+}
+.chapter-card:hover { border-color: #cfd5e0; }
+
+.chapter-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0 0 var(--space-3);
+  letter-spacing: 0.01em;
+}
+
+.lesson-list { display: flex; flex-direction: column; gap: 2px; }
 .lesson-item {
-  display: flex; align-items: center; padding: 8px 12px;
-  border-radius: var(--radius-md); cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out);
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 7px 10px; border-radius: var(--radius-md);
+  cursor: pointer; transition: background var(--duration-fast) var(--ease-out);
 }
 .lesson-item:hover { background: var(--surface-raised); }
+
+.lesson-type-icon { color: var(--text-secondary); flex-shrink: 0; display: flex; }
+.lesson-title { flex: 1; font-size: var(--text-sm); color: var(--text); }
+.lesson-check { color: var(--success); font-size: var(--text-xs); font-weight: 600; }
+.lesson-empty { font-size: var(--text-xs); color: var(--text-secondary); padding: var(--space-2) 0; margin: 0; }
+
+/* ── Loading ───────────────────────────────── */
+.course-loading { padding: var(--space-2) 0; }
+
+/* ── Empty state ───────────────────────────── */
+.empty-state {
+  text-align: center; padding: var(--space-12) var(--space-6);
+  color: var(--text-secondary);
+}
+.empty-state p { font-size: var(--text-sm); margin-bottom: var(--space-3); }
 </style>
