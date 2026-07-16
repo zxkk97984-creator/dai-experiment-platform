@@ -45,41 +45,37 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-/* ── Pythonista dark theme ───────────────────────────────────────────── */
+/* ── Reading Room exam list ───────────────────────────────────────────── */
 
 .page-title {
-  color: #D6DEEB;
+  color: var(--ink);
 }
 
 /* Card overrides */
 .card {
-  background: #1A1E2B;
-  border-color: #2A3040;
-  color: #D6DEEB;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--ink);
   transition: border-color 200ms ease, box-shadow 200ms ease;
 }
 .card:hover {
-  border-color: #E0553D;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  border-color: var(--accent);
+  box-shadow: 0 0 20px rgba(224, 85, 61, 0.15),
+              0 4px 16px rgba(0, 0, 0, 0.06);
 }
 
 /* Muted text */
 .text-secondary {
-  color: #6A7086;
+  color: var(--text-secondary);
 }
 
-/* Title links in accent orange */
+/* Title links in Prussian blue */
 h3 {
-  color: #E0553D;
+  color: var(--primary);
 }
 
-/* Dark bg badges — luminous on dark surfaces */
+/* Badges (light theme from global CSS) */
 .badge {
   font-weight: 500;
 }
-.badge-success  { background: rgba(15, 123, 94, 0.18);  color: #2EE6A8; }
-.badge-warning  { background: rgba(181, 118, 14, 0.18); color: #F5C842; }
-.badge-danger   { background: rgba(209, 46, 62, 0.18);  color: #FF6B7A; }
-.badge-info     { background: rgba(88, 102, 196, 0.18);  color: #9DA8F0; }
-.badge-neutral  { background: rgba(106, 112, 134, 0.15); color: #8B93A8; }
 </style>
