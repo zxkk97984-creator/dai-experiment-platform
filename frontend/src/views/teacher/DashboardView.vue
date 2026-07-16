@@ -37,7 +37,7 @@ onMounted(loadCounts)
 
 <template>
   <AppLayout>
-    <h1 class="page-title-dark">教师工作台</h1>
+    <h1 class="page-title">教师工作台</h1>
 
     <!-- Stats row -->
     <div class="stats-row">
@@ -112,22 +112,6 @@ onMounted(loadCounts)
 </template>
 
 <style scoped>
-/* ── Page background override ── */
-:deep(.content) {
-  background: #0F1118;
-}
-
-/* ── Page title ── */
-.page-title-dark {
-  font-family: var(--font-display);
-  font-size: var(--text-2xl);
-  font-weight: 400;
-  color: #D6DEEB;
-  margin-bottom: var(--space-6);
-  letter-spacing: -0.01em;
-  line-height: 1.2;
-}
-
 /* ── Stats row ── */
 .stats-row {
   display: grid;
@@ -137,8 +121,8 @@ onMounted(loadCounts)
 }
 
 .stat-card {
-  background: #1A1E2B;
-  border: 1px solid #2A3040;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-5) var(--space-6);
   display: flex;
@@ -149,7 +133,7 @@ onMounted(loadCounts)
 }
 
 .stat-card:hover {
-  border-color: #E0553D;
+  border-color: var(--accent);
   box-shadow: 0 0 12px rgba(224, 85, 61, 0.12);
 }
 
@@ -164,18 +148,18 @@ onMounted(loadCounts)
 }
 
 .stat-icon-courses {
-  background: rgba(26, 92, 138, 0.15);
-  color: #4A9FD0;
+  background: var(--accent-light);
+  color: var(--primary);
 }
 
 .stat-icon-assignments {
-  background: rgba(224, 85, 61, 0.12);
-  color: #E0553D;
+  background: rgba(224, 85, 61, 0.1);
+  color: var(--accent);
 }
 
 .stat-icon-exams {
-  background: rgba(181, 118, 14, 0.15);
-  color: #E2A83C;
+  background: var(--warning-light);
+  color: var(--warning);
 }
 
 .stat-body {
@@ -188,13 +172,13 @@ onMounted(loadCounts)
   font-family: var(--font-mono);
   font-size: var(--text-2xl);
   font-weight: 600;
-  color: #D6DEEB;
+  color: var(--ink);
   line-height: 1.1;
 }
 
 .stat-label {
   font-size: var(--text-xs);
-  color: #6A7086;
+  color: var(--text-secondary);
   letter-spacing: 0.04em;
 }
 
@@ -206,8 +190,8 @@ onMounted(loadCounts)
 }
 
 .action-card {
-  background: #1A1E2B;
-  border: 1px solid #2A3040;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-6) var(--space-6) var(--space-5);
   cursor: pointer;
@@ -217,7 +201,7 @@ onMounted(loadCounts)
 }
 
 .action-card:hover {
-  border-color: #E0553D;
+  border-color: var(--accent);
   box-shadow: 0 0 16px rgba(224, 85, 61, 0.1);
   transform: translateY(-1px);
 }
@@ -230,14 +214,14 @@ onMounted(loadCounts)
   font-family: var(--font-display);
   font-size: var(--text-lg);
   font-weight: 400;
-  color: #D6DEEB;
+  color: var(--ink);
   margin: var(--space-4) 0 var(--space-2);
   letter-spacing: -0.01em;
 }
 
 .action-card p {
   font-size: var(--text-sm);
-  color: #6A7086;
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 
@@ -251,18 +235,18 @@ onMounted(loadCounts)
 }
 
 .action-icon-courses {
-  background: rgba(26, 92, 138, 0.15);
-  color: #4A9FD0;
+  background: var(--accent-light);
+  color: var(--primary);
 }
 
 .action-icon-assignments {
-  background: rgba(224, 85, 61, 0.12);
-  color: #E0553D;
+  background: rgba(224, 85, 61, 0.1);
+  color: var(--accent);
 }
 
 .action-icon-exams {
-  background: rgba(181, 118, 14, 0.15);
-  color: #E2A83C;
+  background: var(--warning-light);
+  color: var(--warning);
 }
 
 /* ── Responsive ── */
