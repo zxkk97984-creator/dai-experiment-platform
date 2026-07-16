@@ -49,13 +49,13 @@ const router = useRouter()
 </template>
 
 <style scoped>
-/* ── Pythonista dark dashboard ─────────────────────────────────────── */
+/* ── Reading Room dashboard ─────────────────────────────────────── */
 
 .page-title {
   font-family: var(--font-display);
   font-size: var(--text-2xl);
   font-weight: 400;
-  color: #D6DEEB;
+  color: var(--ink);
   margin-bottom: var(--space-8);
   letter-spacing: -0.01em;
   line-height: 1.2;
@@ -63,8 +63,8 @@ const router = useRouter()
 
 /* ── Action cards ──────────────────────────────────────────────────── */
 .dash-card {
-  background: #1A1E2B;
-  border: 1px solid #2A3040;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-6) var(--space-6) var(--space-5);
   cursor: pointer;
@@ -74,9 +74,9 @@ const router = useRouter()
 }
 
 .dash-card:hover {
-  border-color: #E0553D;
+  border-color: var(--accent);
   box-shadow: 0 0 24px rgba(224, 85, 61, 0.18),
-              0 4px 12px rgba(0, 0, 0, 0.3);
+              0 4px 12px rgba(0, 0, 0, 0.08);
   transform: translateY(-2px);
 }
 
@@ -84,14 +84,14 @@ const router = useRouter()
   font-family: var(--font-display);
   font-size: var(--text-lg);
   font-weight: 400;
-  color: #D6DEEB;
+  color: var(--ink);
   margin: var(--space-4) 0 var(--space-2);
   letter-spacing: -0.01em;
 }
 
 .dash-card p {
   font-size: var(--text-sm);
-  color: #6A7086;
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 
@@ -106,17 +106,17 @@ const router = useRouter()
 }
 
 .dash-icon-courses {
-  background: rgba(59, 130, 246, 0.12);
+  background: rgba(59, 130, 246, 0.10);
   color: #3B82F6;
 }
 
 .dash-icon-code {
-  background: rgba(224, 85, 61, 0.12);
+  background: rgba(224, 85, 61, 0.10);
   color: #E0553D;
 }
 
 .dash-icon-lab {
-  background: rgba(16, 185, 129, 0.12);
+  background: rgba(16, 185, 129, 0.10);
   color: #10B981;
 }
 </style>
