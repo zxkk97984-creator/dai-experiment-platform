@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import { coursesAPI } from '../../api/courses.js'
@@ -131,6 +131,10 @@ function onDocClick(e) {
 onMounted(async () => {
   await fetchData()
   document.addEventListener('click', onDocClick)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocClick)
 })
 
 // 路由参数变化时重新查找
