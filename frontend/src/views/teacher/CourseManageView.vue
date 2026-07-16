@@ -79,7 +79,7 @@ onMounted(fetch)
         <p class="empty-text">暂无课程，点击上方按钮创建第一个课程</p>
       </div>
 
-      <table v-else class="card course-table">
+      <table v-else class="data-table">
         <thead>
           <tr>
             <th>名称</th>
@@ -98,8 +98,8 @@ onMounted(fetch)
               </span>
             </td>
             <td class="actions-cell">
-              <button class="btn-ghost-dark" @click="router.push(`/teacher/courses/${c.id}/manage`)">章节课时</button>
-              <button v-if="c.status === 'draft'" class="btn-ghost-dark btn-publish" @click="handlePublish(c)">发布</button>
+              <button class="btn-ghost btn-sm" @click="router.push(`/teacher/courses/${c.id}/manage`)">章节课时</button>
+              <button v-if="c.status === 'draft'" class="btn-ghost btn-sm btn-publish" @click="handlePublish(c)">发布</button>
             </td>
           </tr>
         </tbody>
@@ -109,53 +109,29 @@ onMounted(fetch)
 </template>
 
 <style scoped>
-/* ═══════════════════════════════════════════════════════════════════════
-   Pythonista Dark Admin — Course Management
-   ═══════════════════════════════════════════════════════════════════════ */
-
-/* ── Page wrapper ──────────────────────────────────────────────────── */
-.course-manage-page {
-  color: #D6DEEB;
-}
-
-.course-manage-page .page-title {
-  color: #D6DEEB;
-}
-
-/* ── Cards ─────────────────────────────────────────────────────────── */
-.course-manage-page .card {
-  background: #1A1E2B;
-  border-color: #2A3040;
-  color: #D6DEEB;
-}
-.course-manage-page .card:hover {
-  border-color: #3A4050;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-}
-
-/* ── Create form ───────────────────────────────────────────────────── */
+/* ── Create form ── */
 .create-form .form-group label {
-  color: #6A7086;
+  color: var(--text-secondary);
 }
 
 .create-form input,
 .create-form textarea {
-  background: #151821;
-  border-color: #2A3040;
-  color: #D6DEEB;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--ink);
 }
 .create-form input::placeholder,
 .create-form textarea::placeholder {
-  color: #4A5066;
+  color: #a8b0be;
 }
 .create-form input:focus,
 .create-form textarea:focus {
-  border-color: #E0553D;
-  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.15);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--accent-light);
   outline: none;
 }
 
-/* ── Loading skeleton ──────────────────────────────────────────────── */
+/* ── Loading skeleton ── */
 .loading-card {
   padding: 0;
   overflow: hidden;
@@ -164,7 +140,7 @@ onMounted(fetch)
   display: flex;
   gap: 16px;
   padding: 14px 16px;
-  border-bottom: 1px solid #2A3040;
+  border-bottom: 1px solid var(--border);
 }
 .skeleton-row:last-child {
   border-bottom: none;
@@ -173,102 +149,76 @@ onMounted(fetch)
   height: 16px;
   border-radius: 4px;
 }
-.course-manage-page .skeleton {
-  background: linear-gradient(90deg, #1E2332 25%, #252B3A 50%, #1E2332 75%);
-  background-size: 200% 100%;
-  animation: shimmer-dark 1.5s infinite;
-}
-@keyframes shimmer-dark {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
 
-/* ── Empty state ───────────────────────────────────────────────────── */
+/* ── Empty state ── */
 .empty-card {
   text-align: center;
   padding: 48px;
 }
 .empty-text {
-  color: #6A7086;
+  color: var(--text-secondary);
   font-size: 0.875rem;
 }
 
-/* ── Table ─────────────────────────────────────────────────────────── */
-.course-table {
-  padding: 0;
+/* ── Data table ── */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
-.course-table thead {
-  background: #11141D;
-}
-.course-table th {
-  background: #11141D;
-  color: #6A7086;
+.data-table th {
+  background: var(--surface-raised);
+  color: var(--text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 12px 16px;
-  border-bottom: 1px solid #2A3040;
+  border-bottom: 1px solid var(--border);
 }
 
-.course-table td {
+.data-table td {
   padding: 12px 16px;
-  border-bottom: 1px solid #2A3040;
-  color: #D6DEEB;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink);
 }
 
-.course-row:hover {
-  background: rgba(224, 85, 61, 0.06);
+.course-row:hover td {
+  background: var(--surface-raised);
 }
 .course-row:last-child td {
   border-bottom: none;
 }
 
-/* ── Course link ───────────────────────────────────────────────────── */
+/* ── Course link ── */
 .course-link {
-  color: #D6DEEB;
+  color: var(--primary);
   cursor: pointer;
   font-weight: 500;
   transition: color 120ms ease;
 }
 .course-link:hover {
-  color: #E0553D;
+  color: var(--accent-hover);
 }
 
-/* ── Action buttons (ghost on dark) ────────────────────────────────── */
+/* ── Action buttons ── */
 .actions-cell {
   display: flex;
   gap: 8px;
 }
 
-.btn-ghost-dark {
-  background: transparent;
-  border: 1px solid #2A3040;
-  color: #6A7086;
-  padding: 5px 12px;
-  border-radius: 6px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 120ms ease,
-              border-color 120ms ease,
-              color 120ms ease;
-}
-.btn-ghost-dark:hover {
-  background: rgba(224, 85, 61, 0.08);
-  border-color: #E0553D;
-  color: #E0553D;
-}
-
-.btn-ghost-dark.btn-publish {
-  color: #E0553D;
+.btn-publish {
+  color: var(--accent);
   border-color: rgba(224, 85, 61, 0.3);
 }
-.btn-ghost-dark.btn-publish:hover {
-  background: #E0553D;
+.btn-publish:hover {
+  background: var(--accent);
   color: #fff;
-  border-color: #E0553D;
+  border-color: var(--accent);
 }
 </style>
