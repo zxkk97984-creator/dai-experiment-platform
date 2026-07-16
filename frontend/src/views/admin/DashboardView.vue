@@ -43,17 +43,12 @@ const router = useRouter()
 </template>
 
 <style scoped>
-/* ── Page background override ── */
-:deep(.content) {
-  background: #0F1118;
-}
-
 /* ── Page title ── */
 .page-title {
   font-family: var(--font-display);
   font-size: var(--text-2xl);
   font-weight: 400;
-  color: #D6DEEB;
+  color: var(--ink);
   margin-bottom: var(--space-6);
   letter-spacing: -0.01em;
   line-height: 1.2;
@@ -67,8 +62,8 @@ const router = useRouter()
 }
 
 .dash-card {
-  background: #1A1E2B;
-  border: 1px solid #2A3040;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-6) var(--space-6) var(--space-5);
   cursor: pointer;
@@ -91,14 +86,14 @@ const router = useRouter()
   font-family: var(--font-display);
   font-size: var(--text-lg);
   font-weight: 400;
-  color: #D6DEEB;
+  color: var(--ink);
   margin: var(--space-4) 0 var(--space-2);
   letter-spacing: -0.01em;
 }
 
 .dash-card p {
   font-size: var(--text-sm);
-  color: #6A7086;
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 
@@ -113,17 +108,17 @@ const router = useRouter()
 }
 
 .dash-icon-users {
-  background: rgba(124, 92, 252, 0.15);
+  background: rgba(124, 92, 252, 0.12);
   color: #7C5CFC;
 }
 
 .dash-icon-courses {
-  background: rgba(59, 130, 246, 0.15);
+  background: rgba(59, 130, 246, 0.12);
   color: #3B82F6;
 }
 
 .dash-icon-lab {
-  background: rgba(16, 185, 129, 0.15);
+  background: rgba(16, 185, 129, 0.12);
   color: #10B981;
 }
 
