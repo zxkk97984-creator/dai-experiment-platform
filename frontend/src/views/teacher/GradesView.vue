@@ -21,7 +21,7 @@ onMounted(async () => {
   <AppLayout>
     <h1 class="page-title">考试成绩</h1>
     <div v-if="loading" class="text-secondary">加载中...</div>
-    <table v-else-if="grades.length" class="card" style="padding:0">
+    <table v-else-if="grades.length" class="data-table">
       <thead><tr><th>学生 ID</th><th>成绩</th><th>时间</th></tr></thead>
       <tbody>
         <tr v-for="g in grades" :key="g.id">
@@ -36,54 +36,38 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-/* ═══════════════════════════════════════════════════════════════════════
-   GradesView — Dark Admin Theme
-   ═══════════════════════════════════════════════════════════════════════ */
-
-/* ── Page title ─────────────────────────────────────────────────────── */
-.page-title {
-  color: #D6DEEB;
+/* ── Data table ── */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
-/* ── Cards ──────────────────────────────────────────────────────────── */
-.card {
-  background: #1A1E2B;
-  border-color: #2A3040;
-  color: #D6DEEB;
-}
-.card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-  border-color: #3A4050;
+.data-table th {
+  background: var(--surface-raised);
+  color: var(--text-secondary);
 }
 
-/* ── Table ──────────────────────────────────────────────────────────── */
-table {
-  color: #D6DEEB;
-}
-th {
-  background: #151821;
-  color: #8891A4;
-  border-bottom-color: #2A3040;
-}
-td {
-  border-bottom-color: #2A3040;
-}
-tbody tr:hover td {
-  background: #1F2433;
+.data-table td {
+  border-bottom: 1px solid var(--border);
 }
 
-/* ── Score value ────────────────────────────────────────────────────── */
+.data-table tbody tr:hover td {
+  background: var(--surface-raised);
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* ── Score value ── */
 .score-value {
   font-size: 1.125rem;
   font-weight: 700;
-  color: #E0553D;
-}
-
-/* ── Type utilities ─────────────────────────────────────────────────── */
-.text-secondary {
-  color: #8891A4;
-}
-.text-sm {
-  color: #8891A4;
+  color: var(--accent);
 }
 </style>
