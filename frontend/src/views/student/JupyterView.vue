@@ -39,3 +39,45 @@ onMounted(loadJupyter)
     </div>
   </AppLayout>
 </template>
+
+<style scoped>
+/* ── Pythonista dark JupyterLab ─────────────────────────────────────── */
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 400;
+  color: #D6DEEB;
+  margin-bottom: var(--space-8);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+/* ── Loading / error cards ──────────────────────────────────────────── */
+.card {
+  background: #1A1E2B;
+  border: 1px solid #2A3040;
+  color: #D6DEEB;
+}
+
+.text-secondary {
+  color: #6A7086;
+}
+
+/* ── Iframe border ──────────────────────────────────────────────────── */
+iframe {
+  border: 1px solid #2A3040 !important;
+}
+
+/* ── Retry button (accent orange) ───────────────────────────────────── */
+.btn-primary {
+  background: #E0553D;
+  color: #fff;
+  border-color: #E0553D;
+}
+
+.btn-primary:hover {
+  background: #C94A33;
+  border-color: #C94A33;
+}
+</style>
