@@ -145,99 +145,21 @@ onMounted(fetch)
 </template>
 
 <style scoped>
-/* ═══════════════════════════════════════════════════════════════════════
-   Question Editor — Pythonista Dark Admin
-   ═══════════════════════════════════════════════════════════════════════ */
-
-/* ── Scope container ────────────────────────────────────────────────── */
-.question-editor {
-  color: #D6DEEB;
-}
-
-/* ── Page title ─────────────────────────────────────────────────────── */
-.question-editor .page-title {
-  color: #D6DEEB;
-}
-
-/* ── Cards ──────────────────────────────────────────────────────────── */
-.card {
-  background: #1A1E2B;
-  border: 1px solid #2A3040;
-  border-radius: var(--radius-lg);
-  padding: var(--space-6);
-  color: #D6DEEB;
-  transition: box-shadow var(--duration-normal) var(--ease-out),
-              border-color var(--duration-normal) var(--ease-out);
-}
-.card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-  border-color: #3A4050;
-}
-
-/* ── Empty state ────────────────────────────────────────────────────── */
+/* ── Cards ── */
 .empty-card {
   text-align: center;
   padding: var(--space-12) !important;
 }
 .empty-text {
-  color: #6A7086;
+  color: var(--text-secondary);
   font-size: var(--text-base);
   margin-bottom: 0;
 }
 
-/* ── Form labels ────────────────────────────────────────────────────── */
-.form-group label {
-  display: block;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: #6A7086;
-  margin-bottom: 5px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-/* ── Inputs / Textareas ─────────────────────────────────────────────── */
-input,
-textarea,
-select {
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
-  border: 1px solid #2A3040;
-  border-radius: var(--radius-md);
-  padding: 8px 12px;
-  color: #D6DEEB;
-  background: #151821;
-  width: 100%;
-  transition: border-color var(--duration-fast) var(--ease-out),
-              box-shadow var(--duration-fast) var(--ease-out);
-  line-height: 1.5;
-}
-input:focus,
-textarea:focus,
-select:focus {
-  outline: none;
-  border-color: #E0553D;
-  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.18);
-}
-input::placeholder,
-textarea::placeholder {
-  color: #5A6070;
-}
-
-/* Number inputs — prevent browser spinners from clashing */
-input[type="number"] {
-  -moz-appearance: textfield;
-}
-input[type="number"]::-webkit-inner-spin-button,
-input[type="number"]::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-/* ── Code editor ────────────────────────────────────────────────────── */
+/* ── Code editor (keep dark surface) ── */
 .code-editor {
   width: 100%;
-  background: #11141D;
+  background: #1B1F2B;
   color: #D6DEEB;
   border: 1px solid #2A3040;
   border-radius: var(--radius-md);
@@ -250,68 +172,39 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 .code-editor:focus {
   outline: none;
-  border-color: #E0553D;
-  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.18);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(26, 92, 138, 0.15);
 }
 
-/* ── Buttons (dark surface overrides) ───────────────────────────────── */
-button {
-  background: #1A1E2B;
-  border: 1px solid #2A3040;
-  color: #D6DEEB;
+/* ── Number inputs ── */
+input[type="number"] {
+  -moz-appearance: textfield;
 }
-button:hover {
-  background: #252A38;
-  border-color: #3A4050;
-}
-
-button.btn-primary {
-  background: #E0553D;
-  color: #fff;
-  border-color: #E0553D;
-  font-weight: 500;
-}
-button.btn-primary:hover {
-  background: #C94A33;
-  border-color: #C94A33;
-}
-button.btn-primary:focus-visible {
-  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.25);
-}
-button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-  transform: none;
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
+/* ── Submit button ── */
 .btn-submit {
   margin-top: var(--space-2);
   padding: 9px 24px;
   font-size: var(--text-sm);
 }
 
-/* ── Text utilities ─────────────────────────────────────────────────── */
-.text-secondary {
-  color: #6A7086;
-}
-
-/* ── Question list cards ────────────────────────────────────────────── */
+/* ── Question list cards ── */
 .question-card:hover {
-  border-color: #3A4050;
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(224, 85, 61, 0.08);
 }
 .question-title {
   font-size: var(--text-base);
   font-weight: 600;
-  color: #D6DEEB;
+  color: var(--ink);
   margin-bottom: 4px;
 }
 .question-meta {
   margin-top: 2px;
-}
-
-/* ── Badge override ─────────────────────────────────────────────────── */
-.badge-neutral {
-  background: #252A38;
-  color: #6A7086;
 }
 </style>
