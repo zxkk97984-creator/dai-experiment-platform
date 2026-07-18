@@ -5,6 +5,7 @@
 
 /* ── Reset ──────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+* { caret-color: transparent; }
 
 /* ── Design Tokens ──────────────────────────────────────────────────── */
 :root {
@@ -97,6 +98,7 @@
 body {
   min-height: 100vh;
   line-height: 1.55;
+  cursor: default;
 }
 
 #app {
@@ -171,7 +173,9 @@ button.btn-ghost:hover {
 }
 
 /* ── Inputs ─────────────────────────────────────────────────────────── */
+input, textarea, [contenteditable] { caret-color: auto; }
 input, textarea, select {
+  cursor: text;
   font-family: var(--font-body);
   font-size: var(--text-sm);
   border: 1px solid var(--border);
@@ -234,6 +238,7 @@ th {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-6);
+  cursor: default;
   transition: box-shadow var(--duration-normal) var(--ease-out),
               border-color var(--duration-normal) var(--ease-out);
 }

@@ -53,7 +53,7 @@ async function fetchAll() {
       examsAPI.list({ course_id: courseId.value }),
     ])
     course.value = cRes.data
-    chapters.value = chRes.data
+    chapters.value = chRes.data.items || chRes.data || []
     assignments.value = (aRes.data.items || aRes.data || [])
     exams.value = (eRes.data.items || eRes.data || [])
     enrolled.value = true
@@ -169,7 +169,6 @@ onMounted(fetchAll)
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h7l4 4v7H2V3z"/><path d="M9 3v4h4"/></svg>
             </span>
             <span class="quick-item-title">{{ a.title }}</span>
-            <span class="badge badge-neutral text-xs">{{ a.status }}</span>
           </div>
         </div>
       </div>
@@ -213,10 +212,6 @@ onMounted(fetchAll)
         </div>
       </div>
 
-      <!-- Empty chapters -->
-      <div v-else class="empty-state">
-        <p>教师正在准备课程内容...</p>
-      </div>
     </template>
   </AppLayout>
 </template>

@@ -153,7 +153,6 @@ function navigate(path) {
 }
 .nav-item.active .nav-indicator {
   background: var(--accent);
-  box-shadow: 0 0 6px rgba(224,85,61,0.5);
 }
 
 .nav-indicator {
