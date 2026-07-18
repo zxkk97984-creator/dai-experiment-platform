@@ -27,6 +27,8 @@ const lineCount = computed(() => {
 })
 
 const TERMINAL_STATUSES = ['accepted', 'wrong_answer', 'runtime_error', 'time_limit_exceeded', 'system_error']
+const submitResult = ref(null)
+const submitPolling = ref(false)
 
 let pollTimer = null
 
@@ -44,7 +46,7 @@ onMounted(async () => {
   } catch { app.showToast('加载作业失败', 'error') }
 })
 
-onUnmounted(() => { stopPolling() })
+onUnmounted(() => { stopPolling(); stopSubmitPolling() })
 
 function selectQuestion(idx) {
   activeQ.value = idx
@@ -109,14 +111,38 @@ async function handleSubmit() {
   const q = questions.value[activeQ.value]
   if (!q) return
   submitting.value = true
+  submitResult.value = null
+  bottomTab.value = 'submit'
   try {
     const res = await judgeAPI.submit({ question_id: q.id, code: code.value })
-    app.showToast('提交成功', 'success')
-    router.push(`/student/submissions/${res.data.id}`)
+    pollSubmitResult(res.data.id)
   } catch (e) {
     const msg = e.response?.data?.detail?.message || '提交失败'
     app.showToast(msg, 'error')
-  } finally { submitting.value = false }
+    submitting.value = false
+  }
+}
+
+let submitPollTimer = null
+
+function pollSubmitResult(submissionId) {
+  stopSubmitPolling()
+  submitPolling.value = true
+  submitPollTimer = setInterval(async () => {
+    try {
+      const res = await judgeAPI.getResult(submissionId)
+      submitResult.value = res.data
+      if (TERMINAL_STATUSES.includes(res.data.status)) {
+        stopSubmitPolling()
+        submitting.value = false
+        submitPolling.value = false
+      }
+    } catch { /* ignore */ }
+  }, 1000)
+}
+
+function stopSubmitPolling() {
+  if (submitPollTimer) { clearInterval(submitPollTimer); submitPollTimer = null }
 }
 
 // ── Computed helpers for test result display ──────────────────────────
@@ -309,11 +335,6 @@ const isTerminal = computed(() => {
                     <div v-else-if="testResult?.status === 'system_error'" class="terminal-line error">
                       <span class="cross">✗</span> 系统错误
                     </div>
-                    <div v-if="testResult?.stdout" class="terminal-line stdout">{{ testResult.stdout }}</div>
-                    <div v-if="testResult?.stderr" class="terminal-line stderr">{{ testResult.stderr }}</div>
-                    <div v-if="testResult?.score != null" class="terminal-line muted">
-                      <span class="prompt">score</span> {{ testResult.score }} / 100
-                    </div>
                   </template>
                 </div>
               </div>
@@ -321,11 +342,33 @@ const isTerminal = computed(() => {
 
             <!-- Submit content -->
             <div v-else class="tab-content submit-tab" key="submit">
-              <div class="submit-hint">
+              <div v-if="!submitResult && !submitPolling" class="submit-hint">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
                   <circle cx="8" cy="8" r="7"/><path d="M8 5v3M8 11.5v.01"/>
                 </svg>
                 <span>提交后不可修改，建议先通过自测验证代码正确性</span>
+              </div>
+              <!-- Submit result -->
+              <div v-if="submitPolling || submitResult" class="submit-result-card" :class="{
+                'result-pass': submitResult?.status === 'accepted',
+                'result-fail': submitResult && submitResult.status !== 'accepted'
+              }">
+                <div v-if="submitPolling" class="result-status">
+                  <span class="spinner-sm"></span> 判题中...
+                </div>
+                <template v-else>
+                  <div class="result-status">
+                    <span v-if="submitResult?.status === 'accepted'">✓ 通过</span>
+                    <span v-else-if="submitResult?.status === 'wrong_answer'">✗ 答案错误</span>
+                    <span v-else-if="submitResult?.status === 'runtime_error'">✗ 运行错误</span>
+                    <span v-else-if="submitResult?.status === 'time_limit_exceeded'">⏱ 超时</span>
+                    <span v-else>✗ {{ submitResult?.status }}</span>
+                  </div>
+                  <div class="result-meta">
+                    <span v-if="submitResult?.score != null">得分: <strong>{{ submitResult.score }}</strong></span>
+                    <span v-if="submitResult?.execution_time_ms != null">{{ submitResult.execution_time_ms }}ms</span>
+                  </div>
+                </template>
               </div>
             </div>
           </transition>
@@ -807,6 +850,26 @@ const isTerminal = computed(() => {
   line-height: 1.6;
 }
 .submit-hint svg { flex-shrink: 0; margin-top: 1px; color: var(--warning); }
+
+/* ── Submit result card ───────────────────── */
+.submit-result-card {
+  padding: var(--space-4); border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+.submit-result-card.result-pass { background: var(--success-light); border-color: var(--success); }
+.submit-result-card.result-fail { background: var(--danger-light);  border-color: var(--danger); }
+
+.result-status {
+  font-size: var(--text-md); font-weight: 600; margin-bottom: var(--space-2);
+  display: flex; align-items: center; gap: var(--space-2);
+}
+.result-pass .result-status { color: var(--success); }
+.result-fail .result-status { color: var(--danger); }
+
+.result-meta {
+  font-size: var(--text-sm); color: var(--text-secondary);
+  display: flex; gap: var(--space-4);
+}
 
 /* ── Action Bar ──────────────────────────────────────────────────────── */
 .action-bar {

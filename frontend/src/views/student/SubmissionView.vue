@@ -60,20 +60,6 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
         </div>
       </div>
 
-      <div class="card submission-card mb-4" v-if="submission.stdout">
-        <h3 class="submission-title" style="margin-bottom:8px">标准输出</h3>
-        <pre class="output-block">{{ submission.stdout }}</pre>
-      </div>
-
-      <div class="card submission-card mb-4" v-if="submission.stderr">
-        <h3 class="submission-title" style="margin-bottom:8px">错误输出</h3>
-        <pre class="output-block output-error">{{ submission.stderr }}</pre>
-      </div>
-
-      <div class="card submission-card" v-if="submission.result_details">
-        <h3 class="submission-title" style="margin-bottom:12px">测试详情</h3>
-        <pre class="output-block">{{ JSON.stringify(submission.result_details, null, 2) }}</pre>
-      </div>
 
       <div v-if="polling" class="polling-text text-sm mt-4 flex-center gap-2">
         <span>判题进行中，自动刷新中...</span>
