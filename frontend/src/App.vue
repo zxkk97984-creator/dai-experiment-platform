@@ -13,12 +13,17 @@ const app = useAppStore()
 
 <style scoped>
 .toast {
-  position: fixed; top: 16px; right: 16px; z-index: 9999;
-  padding: 10px 20px; border-radius: 6px; font-size: 14px;
-  border: 1px solid; animation: slideIn 0.2s ease;
+  position: fixed; top: var(--space-4); right: var(--space-4); z-index: 9999;
+  padding: 10px 20px; border-radius: var(--radius-md); font-size: var(--text-sm);
+  border: 1px solid; font-weight: 500;
+  animation: toastIn var(--duration-normal) var(--ease-out);
+  box-shadow: var(--shadow-lg);
 }
-.toast-success { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
-.toast-error { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
-.toast-info { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
-@keyframes slideIn { from { transform: translateY(-10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.toast-success { background: var(--success-light); color: #064E3A; border-color: #8DDBC6; }
+.toast-error   { background: var(--danger-light);  color: #8B1A25; border-color: #F5A3AB; }
+.toast-info    { background: var(--accent-light);   color: #0F3E5C; border-color: #A3C8E0; }
+@keyframes toastIn {
+  from { transform: translateY(-8px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
 </style>

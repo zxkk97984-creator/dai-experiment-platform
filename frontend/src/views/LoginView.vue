@@ -39,7 +39,6 @@ async function handleLogin() {
       <div class="login-brand">
         <div class="brand-block">
           <span class="brand-letter">D</span>
-          <span class="brand-cursor" aria-hidden="true"></span>
         </div>
       </div>
 
@@ -90,10 +89,7 @@ async function handleLogin() {
         </div>
 
         <button type="submit" class="login-btn" :disabled="loading">
-          <template v-if="loading">
-            <span class="dot-pulse" aria-hidden="true"><span>·</span><span>·</span><span>·</span></span>
-            登录中
-          </template>
+          <template v-if="loading">登录中…</template>
           <template v-else>登录</template>
         </button>
       </form>
@@ -110,9 +106,8 @@ async function handleLogin() {
 
 <style scoped>
 /* ═══════════════════════════════════════════════════════════════════════
-   Login — "D-Terminal"
-   Pythonista dark terminal aesthetic, code-editor input fields,
-   cadmium orange brandmark with blinking cursor.
+   Login — "Reading Room"
+   Warm paper, white card, Prussian blue + cadmium orange accents.
    ═══════════════════════════════════════════════════════════════════════ */
 
 /* ── Page ──────────────────────────────────── */
@@ -121,7 +116,7 @@ async function handleLogin() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #0F1118;
+  background: var(--paper);
   padding: var(--space-4);
 }
 
@@ -133,6 +128,10 @@ async function handleLogin() {
   display: flex;
   flex-direction: column;
   align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 2px 16px rgba(0,0,0,0.04);
 }
 
 /* ── Brandmark ─────────────────────────────── */
@@ -147,7 +146,6 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   position: relative;
-  box-shadow: 0 0 32px rgba(224,85,61,0.25);
 }
 
 .brand-letter {
@@ -157,20 +155,6 @@ async function handleLogin() {
   color: #fff;
   line-height: 1;
   margin-top: -2px;
-}
-
-.brand-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 22px;
-  background: rgba(255,255,255,0.9);
-  margin-left: 1px;
-  animation: cursor-blink 1.2s step-end infinite;
-}
-
-@keyframes cursor-blink {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0; }
 }
 
 /* ── Header ─────────────────────────────────── */
@@ -183,14 +167,14 @@ async function handleLogin() {
   font-family: var(--font-display);
   font-size: var(--text-2xl);
   font-weight: 400;
-  color: #E8ECF2;
+  color: var(--ink);
   margin: 0 0 6px;
   letter-spacing: -0.01em;
 }
 
 .login-header p {
   font-size: 13px;
-  color: #6A7086;
+  color: var(--text-secondary);
   margin: 0;
 }
 
@@ -212,18 +196,20 @@ async function handleLogin() {
 .input-icon {
   position: absolute;
   left: 14px;
-  color: #4E5670;
+  color: var(--text-secondary);
+  opacity: 0.55;
   pointer-events: none;
-  transition: color var(--duration-fast) var(--ease-out);
+  transition: color var(--duration-fast) var(--ease-out),
+              opacity var(--duration-fast) var(--ease-out);
 }
 
 .input-wrap input {
   width: 100%;
   padding: 12px 14px 12px 40px;
-  background: #1A1E2B;
-  border: 1px solid #2A3040;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  color: #D6DEEB;
+  color: var(--ink);
   font-family: var(--font-body);
   font-size: var(--text-sm);
   transition: border-color var(--duration-fast) var(--ease-out),
@@ -233,22 +219,19 @@ async function handleLogin() {
 }
 
 .input-wrap input::placeholder {
-  color: #4E5670;
+  color: var(--text-secondary);
+  opacity: 0.5;
 }
 
 .input-wrap input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(224,85,61,0.12);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(26,92,138,0.12);
 }
 
-.input-wrap input:focus ~ .input-icon,
-.input-wrap input:focus + .input-icon {
-  color: var(--accent);
-}
-
-/* Icon color on focus — sibling selectors */
+/* Icon color on focus */
 .input-wrap:focus-within .input-icon {
-  color: var(--accent);
+  color: var(--primary);
+  opacity: 1;
 }
 
 /* ── Error ──────────────────────────────────── */
@@ -256,13 +239,13 @@ async function handleLogin() {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: rgba(209,46,62,0.12);
-  color: #EE7A82;
+  background: #FEF2F2;
+  color: #B91C1C;
   padding: 10px 14px;
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
   font-weight: 500;
-  border: 1px solid rgba(209,46,62,0.25);
+  border: 1px solid #FECACA;
 }
 
 /* Error slide-in */
@@ -314,51 +297,33 @@ async function handleLogin() {
   box-shadow: none;
 }
 
-/* ── Dot pulse (loading) ────────────────────── */
-.dot-pulse {
-  display: inline-flex;
-  gap: 1px;
-  margin-right: 4px;
-}
-
-.dot-pulse span {
-  animation: dot-bounce 1.2s infinite;
-}
-.dot-pulse span:nth-child(1) { animation-delay: 0s; }
-.dot-pulse span:nth-child(2) { animation-delay: 0.15s; }
-.dot-pulse span:nth-child(3) { animation-delay: 0.3s; }
-
-@keyframes dot-bounce {
-  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
-  30%           { opacity: 1;   transform: translateY(-2px); }
-}
-
 /* ── Footer hint ────────────────────────────── */
 .login-hint {
   margin-top: var(--space-6);
   font-size: var(--text-xs);
-  color: #4E5670;
+  color: var(--text-secondary);
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
 .hint-label {
-  color: #4E5670;
+  color: var(--text-secondary);
   margin-right: 6px;
 }
 
 .login-hint code {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: #8891A4;
-  background: rgba(255,255,255,0.04);
+  color: var(--ink);
+  opacity: 0.7;
+  background: rgba(0,0,0,0.04);
   padding: 1px 6px;
   border-radius: 3px;
 }
 
 .hint-sep {
-  color: #3A4050;
+  color: var(--border);
   margin: 0 2px;
 }
 </style>

@@ -20,7 +20,11 @@ const app = useAppStore()
 
 <style scoped>
 .layout { display: flex; height: 100vh; overflow: hidden; }
-.main-area { flex: 1; display: flex; flex-direction: column; margin-left: 240px; transition: margin-left 0.2s; min-width: 0; }
-.main-area.collapsed { margin-left: 64px; }
-.content { flex: 1; overflow-y: auto; padding: 24px; }
+.main-area {
+  flex: 1; display: flex; flex-direction: column;
+  margin-left: 232px; transition: margin-left var(--duration-slow) var(--ease-out);
+  min-width: 0;
+}
+.main-area.collapsed { margin-left: 60px; }
+.content { flex: 1; overflow-y: auto; padding: var(--space-8) var(--space-8) var(--space-10); }
 </style>

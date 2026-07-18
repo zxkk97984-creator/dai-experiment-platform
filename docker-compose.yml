@@ -40,10 +40,12 @@ services:
       - --ServerApp.token=''
       - --ServerApp.password=''
       - --ServerApp.allow_origin='*'
+      - --ServerApp.ip='0.0.0.0'
     ports:
       - "8888:8888"
     volumes:
       - dai_jupyter_data:/home/jovyan/work
+      - ./docker/jupyter/jupyter_server_config.py:/etc/jupyter/jupyter_server_config.py:ro
 
 volumes:
   dai_mysql_data:

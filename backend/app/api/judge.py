@@ -104,6 +104,8 @@ def sample_run(
     question_id: int,
     payload: SubmissionCreate,
     db: Session = Depends(get_db),
+    redis_client=Depends(get_redis_client),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(get_current_user),
 ):
     if question_id != payload.question_id:
@@ -120,4 +122,5 @@ def sample_run(
     db.add(submission)
     db.commit()
     db.refresh(submission)
+    redis_client.lpush(settings.judge_queue_name, str(submission.id))
     return submission
