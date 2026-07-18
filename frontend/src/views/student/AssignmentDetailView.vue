@@ -29,22 +29,31 @@ const lineCount = computed(() => {
 const TERMINAL_STATUSES = ['accepted', 'wrong_answer', 'runtime_error', 'time_limit_exceeded', 'system_error']
 const submitResult = ref(null)
 const submitPolling = ref(false)
+const completedQuestions = ref(new Set())
 
 let pollTimer = null
 
 onMounted(async () => {
   try {
-    const [aRes, qRes] = await Promise.all([
+    const [aRes, qRes, sRes] = await Promise.all([
       assignmentsAPI.get(route.params.id),
       assignmentsAPI.getQuestions(route.params.id),
+      judgeAPI.list(),
     ])
     assignment.value = aRes.data
     questions.value = qRes.data.items || qRes.data || []
+    // check which questions have been accepted
+    const subs = sRes.data.items || sRes.data || []
+    for (const s of subs) {
+      if (s.status === 'accepted') completedQuestions.value.add(s.question_id)
+    }
     if (questions.value.length > 0) {
       code.value = questions.value[0].starter_code || ''
     }
   } catch { app.showToast('加载作业失败', 'error') }
 })
+
+const currentCompleted = computed(() => completedQuestions.value.has(questions.value[activeQ.value]?.id))
 
 onUnmounted(() => { stopPolling(); stopSubmitPolling() })
 
@@ -136,6 +145,9 @@ function pollSubmitResult(submissionId) {
         stopSubmitPolling()
         submitting.value = false
         submitPolling.value = false
+        if (res.data.status === 'accepted') {
+          completedQuestions.value.add(questions.value[activeQ.value]?.id)
+        }
       }
     } catch { /* ignore */ }
   }, 1000)
@@ -180,7 +192,7 @@ const isTerminal = computed(() => {
               v-for="(q, i) in questions"
               :key="q.id"
               class="q-dot"
-              :class="{ active: i === activeQ }"
+              :class="{ active: i === activeQ, done: completedQuestions.has(q.id) }"
               @click="selectQuestion(i)"
               :title="q.title"
             >{{ i + 1 }}</button>
@@ -255,11 +267,13 @@ const isTerminal = computed(() => {
           <textarea
             id="code-editor"
             class="editor-textarea"
+            :class="{ completed: currentCompleted }"
             v-model="code"
             @scroll="syncScroll"
             @keydown.tab.prevent="code += '    '"
             spellcheck="false"
-            placeholder="# 在这里编写 Python 代码..."
+            :placeholder="currentCompleted ? '该题目已完成' : '# 在这里编写 Python 代码...'"
+            :disabled="currentCompleted"
             :rows="Math.max(lineCount, 12)"
           ></textarea>
         </div>
@@ -365,7 +379,6 @@ const isTerminal = computed(() => {
                     <span v-else>✗ {{ submitResult?.status }}</span>
                   </div>
                   <div class="result-meta">
-                    <span v-if="submitResult?.score != null">得分: <strong>{{ submitResult.score }}</strong></span>
                     <span v-if="submitResult?.execution_time_ms != null">{{ submitResult.execution_time_ms }}ms</span>
                   </div>
                 </template>
@@ -377,6 +390,8 @@ const isTerminal = computed(() => {
 
       <!-- ── Action Buttons ───────────────────────────────────────────── -->
       <div class="action-bar" v-if="questions.length > 0">
+        <div v-if="currentCompleted" class="completed-badge">✓ 已完成</div>
+        <template v-else>
         <button
           class="btn-self-test"
           :disabled="testing || submitting"
@@ -399,6 +414,7 @@ const isTerminal = computed(() => {
           <span v-if="submitting" class="spinner-sm"></span>
           {{ submitting ? '提交中...' : '提交代码' }}
         </button>
+        </template>
       </div>
     </template>
   </AppLayout>
@@ -470,6 +486,11 @@ const isTerminal = computed(() => {
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;
+}
+.q-dot.done {
+  background: var(--success-light);
+  border-color: var(--success);
+  color: var(--success);
 }
 
 /* ── Problem Card ────────────────────────────────────────────────────── */
@@ -689,6 +710,15 @@ const isTerminal = computed(() => {
   background: #181C28;
 }
 .editor-textarea::placeholder { color: #4E5670; }
+.editor-textarea.completed { opacity: 0.6; cursor: not-allowed; }
+.editor-textarea.completed::placeholder { color: var(--success); }
+
+.completed-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 9px 24px; font-size: var(--text-sm); font-weight: 600;
+  color: var(--success); background: var(--success-light);
+  border: 1px solid var(--success); border-radius: var(--radius-md);
+}
 
 /* ── Bottom Section ──────────────────────────────────────────────────── */
 .bottom-section {

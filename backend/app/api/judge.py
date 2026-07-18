@@ -45,6 +45,16 @@ def create_submission(
     course = db.get(Course, assignment.course_id)
     if not course or not can_view_course(course, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限提交该题目")
+    # check max attempts
+    if question.max_attempts is not None:
+        count = db.scalar(
+            select(func.count()).select_from(Submission).where(
+                Submission.question_id == payload.question_id,
+                Submission.student_id == current_user.id,
+            )
+        ) or 0
+        if count >= question.max_attempts:
+            raise api_error(400, "MAX_ATTEMPTS_REACHED", f"已达到最大提交次数（{question.max_attempts}次）")
     submission = Submission(
         question_id=payload.question_id,
         student_id=current_user.id,

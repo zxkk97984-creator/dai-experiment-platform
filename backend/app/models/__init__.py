@@ -120,6 +120,7 @@ class JudgeQuestion(TimestampMixin, Base):
     hidden_tests: Mapped[str] = mapped_column(Text)
     time_limit_ms: Mapped[int] = mapped_column(Integer, default=10000)
     memory_limit_mb: Mapped[int] = mapped_column(Integer, default=256)
+    max_attempts: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
 
     assignment: Mapped[Assignment] = relationship(back_populates="questions")
 
