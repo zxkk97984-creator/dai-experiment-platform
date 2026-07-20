@@ -47,7 +47,7 @@ onMounted(fetch)
   <AppLayout>
     <div class="course-manage-page">
       <div class="flex-between mb-4">
-        <h1 class="page-title" style="margin-bottom:0">课程管理</h1>
+        <h1 class="page-title" style="margin-bottom:0">课程管理 📚</h1>
         <button class="btn-primary" @click="showCreate = !showCreate">
           {{ showCreate ? '取消' : '创建课程' }}
         </button>
@@ -122,12 +122,12 @@ onMounted(fetch)
 }
 .create-form input::placeholder,
 .create-form textarea::placeholder {
-  color: #a8b0be;
+  color: var(--text-tertiary);
 }
 .create-form input:focus,
 .create-form textarea:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--accent-light);
+  box-shadow: var(--shadow-glow-primary);
   outline: none;
 }
 
@@ -172,7 +172,7 @@ onMounted(fetch)
 }
 
 .data-table th {
-  background: var(--surface-raised);
+  background: var(--surface-sunken);
   color: var(--text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
@@ -214,7 +214,7 @@ onMounted(fetch)
 
 .btn-publish {
   color: var(--accent);
-  border-color: rgba(224, 85, 61, 0.3);
+  border-color: rgba(249, 115, 22, 0.3);
 }
 .btn-publish:hover {
   background: var(--accent);

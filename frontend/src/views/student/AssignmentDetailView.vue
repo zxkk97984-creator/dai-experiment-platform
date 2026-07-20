@@ -1,11 +1,11 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import { assignmentsAPI } from '../../api/assignments.js'
 import { judgeAPI } from '../../api/judge.js'
 import { useAppStore } from '../../stores/app.js'
-import { statusBadge, JUDGE_STATUS_MAP } from '../../utils/status.js'
+import { sanitizeHtml } from '../../utils/sanitize.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -17,61 +17,100 @@ const activeQ = ref(0)
 const code = ref('')
 const submitting = ref(false)
 const testing = ref(false)
-const bottomTab = ref('self-test') // 'self-test' | 'submit'
+const bottomTab = ref('self-test')
 const showProblem = ref(true)
 const customInput = ref('')
 const testResult = ref(null)
+
+const MAX_POLL_COUNT = 120
+
 const lineCount = computed(() => {
-  const lines = (code.value || '').split('\n')
-  return Math.max(lines.length, 1)
+  let count = 1
+  const s = code.value || ''
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '\n') count++
+  }
+  return count
+})
+
+const lineNumbers = computed(() => {
+  const nums = []
+  for (let i = 1; i <= lineCount.value; i++) nums.push(i)
+  return nums.join('\n')
+})
+
+const descriptionHtml = computed(() => {
+  const desc = questions.value[activeQ.value]?.description
+  if (!desc) return ''
+  return sanitizeHtml(desc.replace(/\n/g, '<br>'))
+})
+
+const publicCasesPretty = computed(() => {
+  const cases = questions.value[activeQ.value]?.public_cases
+  if (!cases?.length) return ''
+  return JSON.stringify(cases, null, 2)
 })
 
 const TERMINAL_STATUSES = ['accepted', 'wrong_answer', 'runtime_error', 'time_limit_exceeded', 'system_error']
+
+const TEST_STATUS_ICON = { accepted: '✓', wrong_answer: '✗', runtime_error: '✗', time_limit_exceeded: '⏱', system_error: '✗' }
+const TEST_STATUS_LABEL = { accepted: '全部测试通过', wrong_answer: '测试未通过 — 答案错误', runtime_error: '运行错误', time_limit_exceeded: '执行超时', system_error: '系统错误' }
+const TEST_STATUS_CLASS = { accepted: 'success', wrong_answer: 'error', runtime_error: 'error', time_limit_exceeded: 'warning', system_error: 'error' }
+
+const SUBMIT_STATUS_LABEL = { accepted: '✓ 通过', wrong_answer: '✗ 答案错误', runtime_error: '✗ 运行错误', time_limit_exceeded: '⏱ 超时' }
+
 const submitResult = ref(null)
 const submitPolling = ref(false)
 const completedQuestions = ref(new Set())
 
 let pollTimer = null
+let pollCount = 0
 
 onMounted(async () => {
-  try {
-    const [aRes, qRes, sRes] = await Promise.all([
-      assignmentsAPI.get(route.params.id),
-      assignmentsAPI.getQuestions(route.params.id),
-      judgeAPI.list(),
-    ])
-    assignment.value = aRes.data
-    questions.value = qRes.data.items || qRes.data || []
-    // check which questions have been accepted
-    const subs = sRes.data.items || sRes.data || []
+  const results = await Promise.allSettled([
+    assignmentsAPI.get(route.params.id),
+    assignmentsAPI.getQuestions(route.params.id),
+    judgeAPI.list(),
+  ])
+  if (results[0].status === 'fulfilled') {
+    assignment.value = results[0].value.data
+  } else {
+    app.showToast('加载作业失败', 'error')
+  }
+  if (results[1].status === 'fulfilled') {
+    const qData = results[1].value.data
+    questions.value = qData.items || qData || []
+  }
+  if (results[2].status === 'fulfilled') {
+    const subs = results[2].value.data.items || results[2].value.data || []
     for (const s of subs) {
       if (s.status === 'accepted') completedQuestions.value.add(s.question_id)
     }
-    if (questions.value.length > 0) {
-      code.value = questions.value[0].starter_code || ''
-    }
-  } catch { app.showToast('加载作业失败', 'error') }
+  }
+  if (!assignment.value && questions.value.length === 0) {
+    app.showToast('加载作业失败', 'error')
+  }
+  if (questions.value.length > 0) {
+    code.value = questions.value[0].starter_code || ''
+  }
 })
 
-const currentCompleted = computed(() => completedQuestions.value.has(questions.value[activeQ.value]?.id))
+const currentCompleted = computed(() => {
+  const qid = questions.value[activeQ.value]?.id
+  return qid != null && completedQuestions.value.has(qid)
+})
 
 onUnmounted(() => { stopPolling(); stopSubmitPolling() })
 
 function selectQuestion(idx) {
+  stopPolling()
+  stopSubmitPolling()
   activeQ.value = idx
   code.value = questions.value[idx]?.starter_code || ''
   testResult.value = null
+  submitResult.value = null
+  submitPolling.value = false
   bottomTab.value = 'self-test'
-}
-
-function handleCodeInput(e) {
-  code.value = e.target.value
-}
-
-// ── Line numbers ──────────────────────────────────────────────────────
-function lineNumbers() {
-  const len = lineCount.value
-  return Array.from({ length: len }, (_, i) => i + 1).join('\n')
 }
 
 function syncScroll() {
@@ -87,9 +126,18 @@ async function handleSelfTest() {
   testing.value = true
   testResult.value = null
   try {
-    const res = await judgeAPI.sampleRun(q.id, { question_id: q.id, code: code.value })
+    const res = await judgeAPI.sampleRun(q.id, {
+      question_id: q.id,
+      code: code.value,
+      input: customInput.value,
+    })
     const submissionId = res.data.id
-    pollResult(submissionId)
+    if (submissionId != null) {
+      pollResult(submissionId)
+    } else {
+      app.showToast('自测请求未返回有效ID', 'error')
+      testing.value = false
+    }
   } catch (e) {
     const msg = e.response?.data?.detail?.message || '自测请求失败'
     app.showToast(msg, 'error')
@@ -99,15 +147,31 @@ async function handleSelfTest() {
 
 function pollResult(submissionId) {
   stopPolling()
+  pollCount = 0
+  let failCount = 0
   pollTimer = setInterval(async () => {
+    pollCount++
     try {
       const res = await judgeAPI.getResult(submissionId)
       testResult.value = res.data
+      failCount = 0
       if (TERMINAL_STATUSES.includes(res.data.status)) {
         stopPolling()
         testing.value = false
       }
-    } catch { /* ignore poll errors */ }
+    } catch {
+      failCount++
+      if (failCount >= 5) {
+        stopPolling()
+        testing.value = false
+        app.showToast('判题服务无响应，请重试', 'error')
+      }
+    }
+    if (pollCount >= MAX_POLL_COUNT) {
+      stopPolling()
+      testing.value = false
+      app.showToast('判题超时，请重试', 'error')
+    }
   }, 1000)
 }
 
@@ -122,9 +186,15 @@ async function handleSubmit() {
   submitting.value = true
   submitResult.value = null
   bottomTab.value = 'submit'
+  const submittingQId = q.id
   try {
     const res = await judgeAPI.submit({ question_id: q.id, code: code.value })
-    pollSubmitResult(res.data.id)
+    if (res.data.id != null) {
+      pollSubmitResult(res.data.id, submittingQId)
+    } else {
+      app.showToast('提交未返回有效ID', 'error')
+      submitting.value = false
+    }
   } catch (e) {
     const msg = e.response?.data?.detail?.message || '提交失败'
     app.showToast(msg, 'error')
@@ -133,11 +203,48 @@ async function handleSubmit() {
 }
 
 let submitPollTimer = null
+let submitPollCount = 0
 
-function pollSubmitResult(submissionId) {
+// Resizable editor
+const editorHeight = ref(300)
+let editorDragStartY = 0
+let editorDragStartH = 0
+let editorDragging = false
+
+function onEditorDragStart(e) {
+  e.preventDefault()
+  editorDragging = true
+  editorDragStartY = e.clientY
+  const el = document.getElementById('code-editor')
+  editorDragStartH = el?.offsetHeight || editorHeight.value
+  document.body.style.userSelect = 'none'
+  document.body.style.cursor = 'ns-resize'
+  document.addEventListener('mousemove', onEditorDragMove)
+  document.addEventListener('mouseup', onEditorDragEnd)
+}
+
+function onEditorDragMove(e) {
+  if (!editorDragging) return
+  const delta = e.clientY - editorDragStartY
+  if (Math.abs(delta) < 5) return
+  e.preventDefault()
+  editorHeight.value = Math.max(120, editorDragStartH + delta)
+}
+
+function onEditorDragEnd() {
+  editorDragging = false
+  document.body.style.userSelect = ''
+  document.body.style.cursor = ''
+  document.removeEventListener('mousemove', onEditorDragMove)
+  document.removeEventListener('mouseup', onEditorDragEnd)
+}
+
+function pollSubmitResult(submissionId, questionId) {
   stopSubmitPolling()
   submitPolling.value = true
+  submitPollCount = 0
   submitPollTimer = setInterval(async () => {
+    submitPollCount++
     try {
       const res = await judgeAPI.getResult(submissionId)
       submitResult.value = res.data
@@ -145,28 +252,23 @@ function pollSubmitResult(submissionId) {
         stopSubmitPolling()
         submitting.value = false
         submitPolling.value = false
-        if (res.data.status === 'accepted') {
-          completedQuestions.value.add(questions.value[activeQ.value]?.id)
+        if (res.data.status === 'accepted' && questionId != null) {
+          completedQuestions.value.add(questionId)
         }
       }
     } catch { /* ignore */ }
+    if (submitPollCount >= MAX_POLL_COUNT) {
+      stopSubmitPolling()
+      submitting.value = false
+      submitPolling.value = false
+      app.showToast('判题超时，请重试', 'error')
+    }
   }, 1000)
 }
 
 function stopSubmitPolling() {
   if (submitPollTimer) { clearInterval(submitPollTimer); submitPollTimer = null }
 }
-
-// ── Computed helpers for test result display ──────────────────────────
-const resultStatus = computed(() => {
-  if (!testResult.value) return null
-  return statusBadge(JUDGE_STATUS_MAP, testResult.value.status)
-})
-
-const isTerminal = computed(() => {
-  if (!testResult.value) return false
-  return TERMINAL_STATUSES.includes(testResult.value.status)
-})
 </script>
 
 <template>
@@ -217,8 +319,8 @@ const isTerminal = computed(() => {
         </div>
         <transition name="problem-collapse">
           <div v-if="showProblem" class="problem-body">
-            <div class="problem-desc" v-if="questions[activeQ]?.description"
-              v-html="questions[activeQ]?.description.replace(/\n/g, '<br>')"></div>
+            <div class="problem-desc" v-if="descriptionHtml"
+              v-html="descriptionHtml"></div>
             <div class="problem-meta" v-if="questions[activeQ]">
               <div class="meta-item" v-if="questions[activeQ]?.signature || questions[activeQ]?.function_name">
                 <span class="meta-label">函数签名</span>
@@ -226,7 +328,7 @@ const isTerminal = computed(() => {
               </div>
               <div class="meta-item" v-if="questions[activeQ]?.public_cases?.length">
                 <span class="meta-label">公开样例</span>
-                <code class="meta-code pre">{{ JSON.stringify(questions[activeQ].public_cases, null, 2) }}</code>
+                <code class="meta-code pre">{{ publicCasesPretty }}</code>
               </div>
             </div>
           </div>
@@ -260,9 +362,9 @@ const isTerminal = computed(() => {
         </div>
 
         <!-- Editor body -->
-        <div class="editor-body">
+        <div class="editor-body" :style="{ height: editorHeight + 'px' }">
           <div class="editor-gutter" id="code-gutter">
-            <pre>{{ lineNumbers() }}</pre>
+            <pre>{{ lineNumbers }}</pre>
           </div>
           <textarea
             id="code-editor"
@@ -274,8 +376,12 @@ const isTerminal = computed(() => {
             spellcheck="false"
             :placeholder="currentCompleted ? '该题目已完成' : '# 在这里编写 Python 代码...'"
             :disabled="currentCompleted"
-            :rows="Math.max(lineCount, 12)"
           ></textarea>
+        </div>
+
+        <!-- Editor resize handle -->
+        <div class="editor-resize-handle" @mousedown="onEditorDragStart">
+          <div class="editor-resize-grip"></div>
         </div>
 
         <!-- Bottom action tabs -->
@@ -333,21 +439,14 @@ const isTerminal = computed(() => {
                     <div class="terminal-line muted">
                       <span class="prompt">$</span> pytest test_{{ questions[activeQ]?.function_name || 'solution' }}.py
                     </div>
-                    <div v-if="testResult?.status === 'accepted'" class="terminal-line success">
-                      <span class="check">✓</span> 全部测试通过
+                    <div
+                      v-if="testResult?.status && TEST_STATUS_LABEL[testResult.status]"
+                      class="terminal-line"
+                      :class="TEST_STATUS_CLASS[testResult.status] || 'error'"
+                    >
+                      <span class="check">{{ TEST_STATUS_ICON[testResult.status] || '✗' }}</span>
+                      {{ TEST_STATUS_LABEL[testResult.status] }}
                       <span v-if="testResult.execution_time_ms != null" class="time">({{ testResult.execution_time_ms }}ms)</span>
-                    </div>
-                    <div v-else-if="testResult?.status === 'wrong_answer'" class="terminal-line error">
-                      <span class="cross">✗</span> 测试未通过 — 答案错误
-                    </div>
-                    <div v-else-if="testResult?.status === 'runtime_error'" class="terminal-line error">
-                      <span class="cross">✗</span> 运行错误
-                    </div>
-                    <div v-else-if="testResult?.status === 'time_limit_exceeded'" class="terminal-line warning">
-                      <span class="cross">⏱</span> 执行超时
-                    </div>
-                    <div v-else-if="testResult?.status === 'system_error'" class="terminal-line error">
-                      <span class="cross">✗</span> 系统错误
                     </div>
                   </template>
                 </div>
@@ -372,11 +471,7 @@ const isTerminal = computed(() => {
                 </div>
                 <template v-else>
                   <div class="result-status">
-                    <span v-if="submitResult?.status === 'accepted'">✓ 通过</span>
-                    <span v-else-if="submitResult?.status === 'wrong_answer'">✗ 答案错误</span>
-                    <span v-else-if="submitResult?.status === 'runtime_error'">✗ 运行错误</span>
-                    <span v-else-if="submitResult?.status === 'time_limit_exceeded'">⏱ 超时</span>
-                    <span v-else>✗ {{ submitResult?.status }}</span>
+                    <span>{{ SUBMIT_STATUS_LABEL[submitResult?.status] || '✗ ' + submitResult?.status }}</span>
                   </div>
                   <div class="result-meta">
                     <span v-if="submitResult?.execution_time_ms != null">{{ submitResult.execution_time_ms }}ms</span>
@@ -454,7 +549,7 @@ const isTerminal = computed(() => {
 .assignment-title {
   font-family: var(--font-display);
   font-size: var(--text-xl);
-  font-weight: 400;
+  font-weight: 600;
   color: var(--ink);
   letter-spacing: -0.01em;
   margin: 0;
@@ -606,7 +701,7 @@ const isTerminal = computed(() => {
 }
 .editor-panel:focus-within {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(26,92,138,0.1);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 /* File tabs */
@@ -664,14 +759,48 @@ const isTerminal = computed(() => {
 .editor-body {
   display: flex;
   position: relative;
-  min-height: 280px;
+  min-height: 120px;
+  height: 300px;
+}
+
+/* Editor resize handle */
+.editor-resize-handle {
+  height: 4px;
+  background: var(--border);
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  position: relative;
+}
+.editor-resize-handle::before {
+  content: '';
+  position: absolute;
+  inset: -4px 0;
+}
+.editor-resize-handle:hover,
+.editor-resize-handle:active {
+  background: var(--border-strong);
+}
+.editor-resize-grip {
+  width: 48px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--surface);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.editor-resize-handle:hover .editor-resize-grip,
+.editor-resize-handle:active .editor-resize-grip {
+  opacity: 0.8;
 }
 
 .editor-gutter {
   flex-shrink: 0;
   width: 48px;
-  background: #1E2230;
-  border-right: 1px solid #2A3040;
+  background: #0F172A;
+  border-right: 1px solid #1E293B;
   padding: var(--space-3) 0;
   overflow: hidden;
   user-select: none;
@@ -688,8 +817,8 @@ const isTerminal = computed(() => {
 
 .editor-textarea {
   flex: 1;
-  background: #1A1E2B;
-  color: #D6DEEB;
+  background: #0F172A;
+  color: #E2E8F0;
   border: none;
   border-radius: 0;
   padding: var(--space-3) var(--space-4);
@@ -697,7 +826,6 @@ const isTerminal = computed(() => {
   font-size: 13px;
   line-height: 1.7;
   resize: none;
-  min-height: 280px;
   tab-size: 4;
   overflow: auto;
   transition: none;
@@ -707,7 +835,7 @@ const isTerminal = computed(() => {
   outline: none;
   border: none;
   box-shadow: none;
-  background: #181C28;
+  background: #0F172A;
 }
 .editor-textarea::placeholder { color: #4E5670; }
 .editor-textarea.completed { opacity: 0.6; cursor: not-allowed; }
@@ -802,8 +930,8 @@ const isTerminal = computed(() => {
 
 /* ── Terminal Panel ──────────────────────────────────────────────────── */
 .terminal-panel {
-  background: #0F1118;
-  border: 1px solid #1F2330;
+  background: #0F172A;
+  border: 1px solid #1E293B;
   border-radius: var(--radius-md);
   overflow: hidden;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
@@ -814,8 +942,8 @@ const isTerminal = computed(() => {
   align-items: center;
   gap: 6px;
   padding: 8px 12px;
-  background: #161922;
-  border-bottom: 1px solid #1F2330;
+  background: #1E293B;
+  border-bottom: 1px solid #1E293B;
   user-select: none;
 }
 
@@ -949,8 +1077,8 @@ const isTerminal = computed(() => {
   letter-spacing: 0.02em;
 }
 .btn-submit-code:hover {
-  background: var(--cta-hover);
-  border-color: var(--cta-hover);
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
 }
 .btn-submit-code:disabled { opacity: 0.45; cursor: not-allowed; }
 
@@ -966,14 +1094,14 @@ const isTerminal = computed(() => {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .btn-self-test .spinner-sm {
-  border-color: rgba(26,92,138,0.2);
+  border-color: rgba(37, 99, 235, 0.2);
   border-top-color: var(--primary);
 }
 
 /* ── Responsive ──────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
-  .editor-body { min-height: 200px; }
-  .editor-textarea { min-height: 200px; font-size: 12px; }
+  .editor-body { min-height: 120px; }
+  .editor-textarea { font-size: 12px; }
   .editor-gutter pre { font-size: 12px; }
   .editor-gutter { width: 36px; }
   .action-bar { flex-direction: column; gap: var(--space-2); }

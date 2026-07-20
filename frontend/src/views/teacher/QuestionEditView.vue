@@ -60,7 +60,7 @@ onMounted(fetch)
   <AppLayout>
     <div class="question-editor">
       <div class="flex-between mb-4">
-        <h1 class="page-title" style="margin-bottom:0">{{ assignment?.title || '作业' }} - 题目管理</h1>
+        <h1 class="page-title" style="margin-bottom:0">{{ assignment?.title || '作业' }} - 题目管理 🧩</h1>
         <button class="btn-primary" @click="showForm = !showForm">
           {{ showForm ? '取消' : '添加题目' }}
         </button>
@@ -159,9 +159,9 @@ onMounted(fetch)
 /* ── Code editor (keep dark surface) ── */
 .code-editor {
   width: 100%;
-  background: #1B1F2B;
-  color: #D6DEEB;
-  border: 1px solid #2A3040;
+  background: #0F172A;
+  color: #E2E8F0;
+  border: 1px solid #1E293B;
   border-radius: var(--radius-md);
   padding: var(--space-4);
   font-family: var(--font-mono);
@@ -173,7 +173,7 @@ onMounted(fetch)
 .code-editor:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(26, 92, 138, 0.15);
+  box-shadow: var(--shadow-glow-primary);
 }
 
 /* ── Number inputs ── */
@@ -195,8 +195,8 @@ input[type="number"]::-webkit-outer-spin-button {
 
 /* ── Question list cards ── */
 .question-card:hover {
-  border-color: var(--accent);
-  box-shadow: 0 0 12px rgba(224, 85, 61, 0.08);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
 }
 .question-title {
   font-size: var(--text-base);

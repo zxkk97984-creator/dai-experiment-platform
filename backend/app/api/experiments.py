@@ -30,7 +30,7 @@ def list_modules(db: Session = Depends(get_db), _: User = Depends(get_current_us
 def create_module(
     payload: ExperimentModuleCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles("admin", "developer")),
+    _: User = Depends(require_roles("admin", "developer", "teacher")),
 ):
     module = ExperimentModule(**payload.model_dump())
     db.add(module)

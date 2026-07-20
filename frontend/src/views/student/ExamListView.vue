@@ -23,7 +23,7 @@ onMounted(async () => {
 
 <template>
   <AppLayout>
-    <h1 class="page-title">考试中心</h1>
+    <h1 class="page-title">考试中心 📋</h1>
     <div v-if="loading" class="text-secondary">加载中...</div>
     <div v-else-if="exams.length === 0" class="card" style="text-align:center;padding:48px">
       <p class="text-secondary">暂无考试</p>
@@ -59,9 +59,8 @@ onMounted(async () => {
   transition: border-color 200ms ease, box-shadow 200ms ease;
 }
 .card:hover {
-  border-color: var(--accent);
-  box-shadow: 0 0 20px rgba(224, 85, 61, 0.15),
-              0 4px 16px rgba(0, 0, 0, 0.06);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
 }
 
 /* Muted text */

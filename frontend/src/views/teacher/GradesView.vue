@@ -19,7 +19,7 @@ onMounted(async () => {
 
 <template>
   <AppLayout>
-    <h1 class="page-title">考试成绩</h1>
+    <h1 class="page-title">考试成绩 📊</h1>
     <div v-if="loading" class="text-secondary">加载中...</div>
     <table v-else-if="grades.length" class="data-table">
       <thead><tr><th>学生 ID</th><th>成绩</th><th>时间</th></tr></thead>
@@ -48,7 +48,7 @@ onMounted(async () => {
 }
 
 .data-table th {
-  background: var(--surface-raised);
+  background: var(--surface-sunken);
   color: var(--text-secondary);
 }
 
@@ -68,6 +68,7 @@ onMounted(async () => {
 .score-value {
   font-size: 1.125rem;
   font-weight: 700;
+  font-family: var(--font-mono);
   color: var(--accent);
 }
 </style>

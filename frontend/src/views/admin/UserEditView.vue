@@ -55,7 +55,7 @@ async function handleSave() {
 
 <template>
   <AppLayout>
-    <h1 class="page-title">{{ isNew ? '创建用户' : '编辑用户' }}</h1>
+    <h1 class="page-title">{{ isNew ? '创建用户 👤' : '编辑用户 ✏️' }}</h1>
     <div class="card" style="max-width:500px">
       <div class="form-group"><label>用户名</label><input v-model="form.username" /></div>
       <div class="form-group"><label>真实姓名</label><input v-model="form.real_name" /></div>
@@ -84,60 +84,7 @@ async function handleSave() {
 /* ── Page title ── */
 .page-title { color: var(--ink); }
 
-/* ── Form card ── */
-.card {
-  background: var(--surface);
-  border-color: var(--border);
-}
-
-/* ── Form inputs ── */
-input,
-select {
-  background: var(--surface);
-  border-color: var(--border);
-  color: var(--ink);
-}
-
-input::placeholder { color: var(--text-secondary); }
-
-input:focus,
-select:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(26, 92, 138, 0.18);
-}
-
-/* ── Labels ── */
-label {
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-/* ── Save button ── */
-button.btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-button.btn-primary:hover {
-  background: #C94A33;
-  border-color: #C94A33;
-}
-
-button.btn-primary:disabled { opacity: 0.5; }
-
-/* ── Cancel button ── */
-.card button:not(.btn-primary) {
-  background: transparent;
-  border-color: var(--border);
-  color: var(--text-secondary);
-}
-
-.card button:not(.btn-primary):hover {
-  background: var(--surface-raised);
-  border-color: var(--border);
-  color: var(--ink);
-}
+/* Form card, inputs, labels and buttons inherit Code Studio global
+   styles from src/style.css (.card, .form-group label, input/select:focus,
+   .btn-primary, default button). Inputs use var(--shadow-glow-primary) on focus. */
 </style>

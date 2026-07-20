@@ -14,8 +14,8 @@ const routes = [
   { path: '/student/submissions/:id', name: 'StudentSubmission', component: () => import('../views/student/SubmissionView.vue'), meta: { role: 'student' } },
   { path: '/student/exams', name: 'StudentExams', component: () => import('../views/student/ExamListView.vue'), meta: { role: 'student' } },
   { path: '/student/exams/:id', name: 'StudentExam', component: () => import('../views/student/ExamView.vue'), meta: { role: 'student' } },
-  { path: '/student/jupyter', name: 'StudentJupyter', component: () => import('../views/student/JupyterView.vue'), meta: { role: 'student' } },
   { path: '/student/experiments', name: 'StudentExperiments', component: () => import('../views/student/ExperimentView.vue'), meta: { role: 'student' } },
+  { path: '/student/experiments/:id', name: 'StudentExperimentDetail', component: () => import('../views/student/ExperimentDetailView.vue'), meta: { role: 'student' } },
 
   // Teacher
   { path: '/teacher', name: 'TeacherHome', component: () => import('../views/teacher/DashboardView.vue'), meta: { role: 'teacher' } },
@@ -25,6 +25,7 @@ const routes = [
   { path: '/teacher/assignments/:id/edit', name: 'TeacherQuestionEdit', component: () => import('../views/teacher/QuestionEditView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/exams', name: 'TeacherExams', component: () => import('../views/teacher/ExamManageView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/exams/:id/grades', name: 'TeacherGrades', component: () => import('../views/teacher/GradesView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/experiments', name: 'TeacherExperiments', component: () => import('../views/teacher/ExperimentManageView.vue'), meta: { role: 'teacher' } },
 
   // Admin
   { path: '/admin', name: 'AdminHome', component: () => import('../views/admin/DashboardView.vue'), meta: { role: 'admin' } },
@@ -42,7 +43,9 @@ const router = createRouter({
   routes,
 })
 
-const roleHome = { student: '/student/courses', teacher: '/teacher/courses', admin: '/admin/users' }
+const roleHome = { student: '/student/courses', teacher: '/teacher/courses', admin: '/admin/users', developer: '/admin/users' }
+
+let fetchMePromise = null
 
 router.beforeEach(async (to, from, next) => {
   const auth = useAuthStore()
@@ -58,9 +61,14 @@ router.beforeEach(async (to, from, next) => {
     return next('/login')
   }
 
-  // Restore user if page reload
+  // Restore user if page reload (deduplicate concurrent calls)
   if (!auth.user) {
-    const u = await auth.fetchMe()
+    if (!fetchMePromise) {
+      fetchMePromise = auth.fetchMe().finally(() => {
+        fetchMePromise = null
+      })
+    }
+    const u = await fetchMePromise
     if (!u) return next('/login')
   }
 

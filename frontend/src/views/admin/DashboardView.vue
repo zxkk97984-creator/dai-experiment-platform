@@ -1,137 +1,511 @@
 <script setup>
-import AppLayout from '../../components/layout/AppLayout.vue'
 import { useRouter } from 'vue-router'
+import AppLayout from '../../components/layout/AppLayout.vue'
+import { useAuthStore } from '../../stores/auth.js'
+
 const router = useRouter()
+const auth = useAuthStore()
+
+const adminName = (auth.user?.real_name || auth.user?.username || '管理员').slice(0, 8)
+
+const stats = [
+  { label: '系统用户',   value: 248, unit: '人', color: 'blue',   icon: '👥', trend: '2 学生 · 1 教师 · 本周新增' },
+  { label: '课程总数',   value: 36,  unit: '门', color: 'green',  icon: '📚', trend: '已发布 28 门' },
+  { label: '实验模块',   value: 14,  unit: '个', color: 'orange', icon: '🧪', trend: '含 Jupyter / 沙箱环境' },
+  { label: '系统健康',   value: 100, unit: '%',  color: 'purple', icon: '💚', trend: '所有服务正常 · 0 告警' },
+]
+
+const ledger = [
+  { date: '今日', time: '15:42', title: '新建用户账号 3 个',           meta: '2 学生 · 1 教师',           status: 'info',    icon: '👤' },
+  { date: '今日', time: '09:30', title: '《机器学习导论》课程已归档',   meta: 'CRS-014 · 已转归档状态',   status: 'neutral', icon: '🗄️' },
+  { date: '昨日', time: '17:50', title: 'Jupyter 镜像更新至 v1.4',     meta: 'EXP-IMG · 含 PyTorch 2.3',  status: 'success', icon: '🐳' },
+  { date: '11.12', time: '11:08', title: '系统例行巡检完成',           meta: '所有服务正常 · 0 告警',     status: 'success', icon: '🛡️' },
+]
+
+const sections = [
+  { num: '01', label: '用户管理',   sub: 'Users',        desc: '创建、编辑、管理用户账号与角色权限',  path: '/admin/users',        icon: '👥', color: 'blue' },
+  { num: '02', label: '课程维护',   sub: 'Courses',      desc: '审视与维护全部课程资源',              path: '/admin/courses',      icon: '📚', color: 'green' },
+  { num: '03', label: '实验配置',   sub: 'Experiments',  desc: '配置与维护实验模块、镜像与数据集',    path: '/admin/experiments',  icon: '🧪', color: 'orange' },
+]
+
+function go(p) { router.push(p) }
+function statusText(s) {
+  return s === 'success' ? '完成' : s === 'warning' ? '待处理' : s === 'neutral' ? '归档' : '通知'
+}
 </script>
+
 <template>
   <AppLayout>
-    <h1 class="page-title">管理后台</h1>
-    <div class="grid-3">
-      <div class="card dash-card" @click="router.push('/admin/users')">
-        <div class="dash-card-icon dash-icon-users">
-          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-            <circle cx="8" cy="7" r="3" stroke="currentColor" stroke-width="1.4"/>
-            <circle cx="15" cy="7" r="2.5" stroke="currentColor" stroke-width="1.4"/>
-            <path d="M2 18c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-            <path d="M13 14c2.2.3 4 2 4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-          </svg>
+    <div class="dash">
+      <!-- ── Hero ───────────────────────────────────────────────────── -->
+      <section class="hero">
+        <div class="hero-content">
+          <div class="hero-eyebrow">
+            <span class="eyebrow-dot"></span>
+            <span>系统管理 · 运行中</span>
+          </div>
+          <h1 class="hero-title">
+            管理控制台，{{ adminName }} 🛠️
+          </h1>
+          <p class="hero-sub">
+            全部服务运行正常，最近 24 小时 <strong>0 告警</strong>，已处理 <strong>4 项</strong>变更。
+          </p>
+          <div class="hero-actions">
+            <button class="btn-primary" @click="go('/admin/users')">
+              管理用户
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path d="M3 8h10 M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button class="btn-ghost" @click="go('/admin/experiments')">
+              实验配置
+            </button>
+          </div>
         </div>
-        <h3>用户管理</h3>
-        <p>创建、编辑、管理用户账号和权限</p>
-      </div>
-      <div class="card dash-card" @click="router.push('/admin/courses')">
-        <div class="dash-card-icon dash-icon-courses">
-          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-            <path d="M3 5h6l2 3h8v9H3V5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-          </svg>
+        <div class="hero-visual" aria-hidden="true">
+          <div class="health-card">
+            <div class="health-emoji">💚</div>
+            <div class="health-body">
+              <div class="health-num">100<span class="health-unit">%</span></div>
+              <div class="health-label">系统健康度</div>
+            </div>
+          </div>
         </div>
-        <h3>课程管理</h3>
-        <p>管理全部课程资源</p>
-      </div>
-      <div class="card dash-card" @click="router.push('/admin/experiments')">
-        <div class="dash-card-icon dash-icon-lab">
-          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-            <rect x="3" y="8" width="16" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
-            <path d="M7 8V5.5C7 4.67 7.67 4 8.5 4h5c.83 0 1.5.67 1.5 1.5V8" stroke="currentColor" stroke-width="1.4"/>
-          </svg>
+      </section>
+
+      <!-- ── Stats ──────────────────────────────────────────────────── -->
+      <section class="stats">
+        <div v-for="s in stats" :key="s.label" class="stat-card" :class="'stat-' + s.color">
+          <div class="stat-icon">{{ s.icon }}</div>
+          <div class="stat-body">
+            <div class="stat-value">
+              <span class="stat-num">{{ s.value }}</span>
+              <span class="stat-unit">{{ s.unit }}</span>
+            </div>
+            <div class="stat-label">{{ s.label }}</div>
+            <div class="stat-trend">{{ s.trend }}</div>
+          </div>
         </div>
-        <h3>实验模块</h3>
-        <p>配置和管理实验模块</p>
+      </section>
+
+      <!-- ── Main grid ──────────────────────────────────────────────── -->
+      <div class="dash-grid">
+        <!-- Activity ledger -->
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">变更纪要</h2>
+              <p class="panel-sub">近期用户、课程与实验的变动记录</p>
+            </div>
+            <span class="badge badge-info">Ledger</span>
+          </div>
+          <ul class="timeline">
+            <li v-for="(a, i) in ledger" :key="i" class="tl-item">
+              <div class="tl-icon" :class="'tl-' + a.status">{{ a.icon }}</div>
+              <div class="tl-body">
+                <div class="tl-title">{{ a.title }}</div>
+                <div class="tl-meta">
+                  <span class="tl-meta-code">{{ a.meta }}</span>
+                  <span class="tl-sep">·</span>
+                  <span class="tl-time">{{ a.date }} {{ a.time }}</span>
+                </div>
+              </div>
+              <span class="badge" :class="'badge-' + a.status">{{ statusText(a.status) }}</span>
+            </li>
+          </ul>
+        </section>
+
+        <!-- Section directory -->
+        <aside class="panel">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">管理入口</h2>
+              <p class="panel-sub">快速进入各管理模块</p>
+            </div>
+          </div>
+          <div class="section-list">
+            <button
+              v-for="s in sections" :key="s.num"
+              class="section-row"
+              :class="'sec-' + s.color"
+              @click="go(s.path)"
+            >
+              <div class="sec-icon">{{ s.icon }}</div>
+              <div class="sec-body">
+                <div class="sec-label">
+                  <span class="sec-zh">{{ s.label }}</span>
+                  <span class="sec-num">{{ s.num }}</span>
+                </div>
+                <p class="sec-desc">{{ s.desc }}</p>
+              </div>
+              <svg class="sec-arrow" width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path d="M5 3l5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+        </aside>
       </div>
     </div>
   </AppLayout>
 </template>
 
 <style scoped>
-/* ── Page title ── */
-.page-title {
-  font-family: var(--font-display);
-  font-size: var(--text-2xl);
-  font-weight: 400;
-  color: var(--ink);
-  margin-bottom: var(--space-6);
-  letter-spacing: -0.01em;
-  line-height: 1.2;
-}
+/* ═══════════════════════════════════════════════════════════════════════
+   Admin Dashboard — Code Studio
+   Hero + KPI stats + activity ledger + section directory.
+   ═══════════════════════════════════════════════════════════════════════ */
+.dash { display: flex; flex-direction: column; gap: 32px; }
 
-/* ── Action grid ── */
-.grid-3 {
+/* ── Hero ─────────────────────────────────────────────────────────── */
+.hero {
+  background: linear-gradient(135deg, #0F172A 0%, #1E3A8A 70%, #2563EB 100%);
+  border-radius: var(--radius-2xl);
+  padding: 36px 36px;
+  color: #FFFFFF;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-4);
+  grid-template-columns: 1fr auto;
+  gap: 24px;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
+}
+.hero::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    radial-gradient(circle at 85% 20%, rgba(249, 115, 22, 0.3) 0%, transparent 45%),
+    radial-gradient(circle at 20% 80%, rgba(139, 92, 246, 0.18) 0%, transparent 50%);
+  pointer-events: none;
+}
+.hero::after {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
 }
 
-.dash-card {
+.hero-content { position: relative; z-index: 1; }
+.hero-eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 5px 11px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 500;
+  margin-bottom: 14px;
+}
+.eyebrow-dot {
+  width: 6px; height: 6px;
+  background: #10B981;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3); }
+  50%      { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+}
+.hero-title {
+  font-size: 30px;
+  font-weight: 700;
+  color: #FFFFFF;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin: 0 0 10px;
+}
+.hero-sub {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.8);
+  line-height: 1.55;
+  margin: 0 0 18px;
+}
+.hero-sub strong { color: #FCD34D; font-weight: 600; }
+.hero-actions {
+  display: flex; gap: 10px; flex-wrap: wrap;
+}
+.hero-actions .btn-primary {
+  background: #FFFFFF;
+  color: #1E3A8A;
+  border-color: #FFFFFF;
+  font-weight: 600;
+}
+.hero-actions .btn-primary:hover {
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--primary-dark);
+  box-shadow: 0 8px 20px rgba(255, 255, 255, 0.2);
+}
+.hero-actions .btn-ghost {
+  background: rgba(255, 255, 255, 0.08);
+  color: #FFFFFF;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+.hero-actions .btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.hero-visual { position: relative; z-index: 1; }
+.health-card {
+  display: flex; align-items: center; gap: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-xl);
+  padding: 18px 22px;
+  backdrop-filter: blur(10px);
+}
+.health-emoji { font-size: 32px; line-height: 1; }
+.health-num {
+  font-size: 28px;
+  font-weight: 700;
+  color: #FCD34D;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.health-unit {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 500;
+  margin-left: 4px;
+}
+.health-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  margin-top: 4px;
+}
+
+/* ── Stats ─────────────────────────────────────────────────────────── */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+.stat-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: var(--space-6) var(--space-6) var(--space-5);
-  cursor: pointer;
+  padding: 18px;
+  display: flex; align-items: flex-start; gap: 14px;
   transition: border-color var(--duration-normal) var(--ease-out),
               box-shadow var(--duration-normal) var(--ease-out),
               transform var(--duration-fast) var(--ease-out);
 }
+.stat-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+.stat-icon {
+  width: 40px; height: 40px;
+  border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+  background: var(--primary-light);
+}
+.stat-blue .stat-icon   { background: var(--primary-light); }
+.stat-orange .stat-icon { background: var(--accent-light); }
+.stat-purple .stat-icon { background: var(--purple-light); }
+.stat-green .stat-icon  { background: var(--success-light); }
 
-.dash-card:hover {
-  border-color: #E0553D;
-  box-shadow: 0 0 16px rgba(224, 85, 61, 0.1);
+.stat-body { flex: 1; min-width: 0; }
+.stat-value {
+  display: flex; align-items: baseline; gap: 3px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+.stat-num {
+  font-size: 24px;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.stat-unit {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.stat-label {
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.stat-trend {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+/* ── Dash grid ─────────────────────────────────────────────────────── */
+.dash-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+/* Panel */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+}
+.panel-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 18px;
+}
+.panel-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.panel-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 3px 0 0;
+}
+
+/* Timeline */
+.timeline { list-style: none; padding: 0; margin: 0; }
+.tl-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.tl-item:first-child { padding-top: 0; }
+.tl-item:last-child { border-bottom: none; padding-bottom: 0; }
+.tl-icon {
+  width: 36px; height: 36px;
+  border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+  background: var(--primary-light);
+}
+.tl-warning .tl-icon { background: var(--accent-light); }
+.tl-info .tl-icon    { background: var(--primary-light); }
+.tl-success .tl-icon { background: var(--success-light); }
+.tl-neutral .tl-icon { background: var(--surface-sunken); }
+
+.tl-body { flex: 1; min-width: 0; }
+.tl-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+.tl-meta {
+  display: flex; gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+.tl-meta-code {
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+.tl-sep { color: var(--text-tertiary); }
+.tl-time { color: var(--text-tertiary); }
+
+/* Section directory */
+.section-list {
+  display: flex; flex-direction: column; gap: 10px;
+}
+.section-row {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: border-color var(--duration-fast) var(--ease-out),
+              background var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+.section-row:hover {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
   transform: translateY(-1px);
 }
-
-.dash-card:active {
-  transform: scale(0.99);
-}
-
-.dash-card h3 {
-  font-family: var(--font-display);
-  font-size: var(--text-lg);
-  font-weight: 400;
-  color: var(--ink);
-  margin: var(--space-4) 0 var(--space-2);
-  letter-spacing: -0.01em;
-}
-
-.dash-card p {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
-
-/* ── Icon blocks ── */
-.dash-card-icon {
-  width: 44px;
-  height: 44px;
+.sec-icon {
+  width: 38px; height: 38px;
   border-radius: var(--radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px;
+  flex-shrink: 0;
+  background: var(--primary-light);
+}
+.sec-blue .sec-icon   { background: var(--primary-light); }
+.sec-orange .sec-icon { background: var(--accent-light); }
+.sec-purple .sec-icon { background: var(--purple-light); }
+.sec-green .sec-icon  { background: var(--success-light); }
+
+.sec-body { flex: 1; min-width: 0; }
+.sec-label {
+  display: flex; align-items: baseline; gap: 8px;
+  margin-bottom: 2px;
+}
+.sec-zh {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+  line-height: 1.2;
+}
+.sec-num {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.sec-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin: 0;
+}
+.sec-arrow {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: transform var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+}
+.section-row:hover .sec-arrow {
+  color: var(--primary);
+  transform: translateX(2px);
 }
 
-.dash-icon-users {
-  background: rgba(124, 92, 252, 0.12);
-  color: #7C5CFC;
-}
-
-.dash-icon-courses {
-  background: rgba(59, 130, 246, 0.12);
-  color: #3B82F6;
-}
-
-.dash-icon-lab {
-  background: rgba(16, 185, 129, 0.12);
-  color: #10B981;
-}
-
-/* ── Responsive ── */
-@media (max-width: 768px) {
-  .grid-3 {
-    grid-template-columns: 1fr;
-  }
-}
-
+/* ── Responsive ─────────────────────────────────────────────────────── */
 @media (max-width: 1024px) {
-  .grid-3 {
-    grid-template-columns: repeat(2, 1fr);
-  }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .dash-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {
+  .hero { grid-template-columns: 1fr; padding: 24px; }
+  .hero-visual { display: none; }
+  .hero-title { font-size: 24px; }
+  .stats { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .stat-card { padding: 14px; }
+  .stat-num { font-size: 20px; }
+  .panel { padding: 18px; }
 }
 </style>

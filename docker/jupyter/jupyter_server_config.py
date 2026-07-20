@@ -1,9 +1,9 @@
 c = get_config()
 
-# Allow iframe embedding from frontend dev server
+# Allow iframe embedding from frontend dev server (all localhost ports)
 c.ServerApp.tornado_settings = {
     'headers': {
-        'Content-Security-Policy': "frame-ancestors http://localhost:5173 http://127.0.0.1:5173; report-uri /api/security/csp-report"
+        'Content-Security-Policy': "frame-ancestors http://localhost:* http://127.0.0.1:*; report-uri /api/security/csp-report"
     }
 }
 
@@ -13,3 +13,4 @@ c.ServerApp.tornado_settings = {
 
 # Allow all origins for CORS
 c.ServerApp.allow_origin = '*'
+c.ServerApp.allow_remote_access = True

@@ -36,7 +36,7 @@ onMounted(fetch)
 <template>
   <AppLayout>
     <div class="flex-between mb-4">
-      <h1 class="page-title" style="margin-bottom:0">实验模块管理</h1>
+      <h1 class="page-title" style="margin-bottom:0">实验模块管理 🧪</h1>
       <button class="btn-primary" @click="showCreate = !showCreate">{{ showCreate ? '取消' : '创建模块' }}</button>
     </div>
 
@@ -69,95 +69,7 @@ onMounted(fetch)
   color: var(--ink);
 }
 
-/* ── Cards ── */
-.card {
-  background: var(--surface);
-  border-color: var(--border);
-  color: var(--ink);
-}
-
-/* ── Table ── */
-table {
-  color: var(--ink);
-}
-th {
-  background: var(--surface-raised);
-  color: var(--text-secondary);
-  border-bottom-color: var(--border);
-}
-td {
-  border-bottom-color: var(--border);
-}
-tbody tr:hover td {
-  background: var(--surface-raised);
-}
-
-/* ── Inputs ── */
-input,
-textarea {
-  background: var(--surface);
-  border-color: var(--border);
-  color: var(--ink);
-}
-input:focus,
-textarea:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(26, 92, 138, 0.15);
-  outline: none;
-}
-input::placeholder,
-textarea::placeholder {
-  color: var(--text-secondary);
-}
-
-/* ── Buttons ── */
-button {
-  background: var(--surface);
-  border-color: var(--border);
-  color: var(--text-secondary);
-}
-button:hover {
-  background: var(--surface-raised);
-  border-color: var(--border);
-}
-
-button.btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-button.btn-primary:hover {
-  background: #C94A33;
-  border-color: #C94A33;
-}
-button.btn-primary:focus-visible {
-  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.25);
-}
-
-/* Action button */
-button.btn-sm {
-  background: transparent;
-  border-color: var(--border);
-  color: var(--text-secondary);
-}
-button.btn-sm:hover {
-  background: var(--surface-raised);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-/* ── Form labels ── */
-.form-group label {
-  color: var(--text-secondary);
-}
-
-/* ── Type utilities ── */
-.text-secondary {
-  color: var(--text-secondary);
-}
-
-/* ── Focus ring ── */
-:focus-visible {
-  outline-color: var(--accent);
-}
+/* Table, inputs, buttons and labels inherit Code Studio global styles
+   from src/style.css (th/td with surface-sunken header, input/textarea:focus
+   with var(--shadow-glow-primary), .btn-primary, .btn-sm, .form-group label). */
 </style>

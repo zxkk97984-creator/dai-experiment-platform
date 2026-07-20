@@ -43,7 +43,7 @@ onMounted(fetch)
   <AppLayout>
     <div class="assignment-manage">
       <div class="flex-between mb-4">
-        <h1 class="page-title" style="margin-bottom:0">作业管理</h1>
+        <h1 class="page-title" style="margin-bottom:0">作业管理 ✍️</h1>
         <button class="btn-primary" @click="showCreate = !showCreate">
           {{ showCreate ? '取消' : '布置作业' }}
         </button>
@@ -128,7 +128,7 @@ th {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-secondary);
-  background: var(--surface-raised);
+  background: var(--surface-sunken);
 }
 
 tr:last-child td {
@@ -156,7 +156,7 @@ tr:hover td {
 
 .btn-publish {
   color: var(--accent);
-  border-color: rgba(224, 85, 61, 0.3);
+  border-color: rgba(249, 115, 22, 0.3);
 }
 .btn-publish:hover {
   background: var(--accent);

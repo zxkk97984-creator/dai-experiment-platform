@@ -173,7 +173,7 @@ onMounted(fetch)
 .page-title {
   font-family: var(--font-display);
   font-size: 24px;
-  font-weight: 400;
+  font-weight: 600;
   color: var(--ink);
   margin: 0;
   letter-spacing: -0.3px;
@@ -187,7 +187,7 @@ onMounted(fetch)
   padding: 8px 16px;
   background: var(--accent);
   color: #fff;
-  border: none;
+  border: 1px solid var(--accent);
   border-radius: 6px;
   font-size: 13px;
   font-weight: 500;
@@ -198,11 +198,13 @@ onMounted(fetch)
 }
 
 .btn-accent:hover {
-  background: var(--cta-hover);
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.32);
 }
 
 .btn-accent:active {
-  background: #B33E2A;
+  background: var(--accent-dark);
 }
 
 .btn-accent-sm {
@@ -245,12 +247,12 @@ onMounted(fetch)
 }
 
 .form-input::placeholder {
-  color: #a8b0be;
+  color: var(--text-tertiary);
 }
 
 .form-input:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--accent-light);
+  box-shadow: var(--shadow-glow-primary);
 }
 
 .form-select {
@@ -264,7 +266,7 @@ onMounted(fetch)
   outline: none;
   cursor: pointer;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%235F6B7A' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2364748B' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -274,7 +276,7 @@ onMounted(fetch)
 
 .form-select:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--accent-light);
+  box-shadow: var(--shadow-glow-primary);
 }
 
 .form-select option {
@@ -298,12 +300,12 @@ onMounted(fetch)
 }
 
 .form-textarea::placeholder {
-  color: #a8b0be;
+  color: var(--text-tertiary);
 }
 
 .form-textarea:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--accent-light);
+  box-shadow: var(--shadow-glow-primary);
 }
 
 /* ── Chapter card ── */
@@ -334,7 +336,7 @@ onMounted(fetch)
   text-transform: uppercase;
   letter-spacing: 0.6px;
   color: var(--accent);
-  background: rgba(224, 85, 61, 0.1);
+  background: rgba(249, 115, 22, 0.1);
   padding: 2px 8px;
   border-radius: 3px;
   flex-shrink: 0;
@@ -405,7 +407,7 @@ onMounted(fetch)
 
 .icon-video {
   color: var(--accent);
-  background: rgba(224, 85, 61, 0.1);
+  background: rgba(249, 115, 22, 0.1);
 }
 
 .icon-notebook {

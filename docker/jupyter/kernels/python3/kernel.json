@@ -1,0 +1,14 @@
+{
+ "argv": [
+  "/opt/conda/bin/python",
+  "-m",
+  "ipykernel_launcher",
+  "-f",
+  "{connection_file}"
+ ],
+ "display_name": "Python 3.12.11",
+ "language": "python",
+ "metadata": {
+  "debugger": true
+ }
+}

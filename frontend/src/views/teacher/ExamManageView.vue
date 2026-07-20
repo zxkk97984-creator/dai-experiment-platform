@@ -34,7 +34,7 @@ onMounted(fetch)
 <template>
   <AppLayout>
     <div class="flex-between mb-4">
-      <h1 class="page-title" style="margin-bottom:0">考试管理</h1>
+      <h1 class="page-title" style="margin-bottom:0">考试管理 📋</h1>
       <button class="btn-primary" @click="showCreate = !showCreate">{{ showCreate ? '取消' : '创建考试' }}</button>
     </div>
 
@@ -77,7 +77,7 @@ onMounted(fetch)
 }
 
 .data-table th {
-  background: var(--surface-raised);
+  background: var(--surface-sunken);
   color: var(--text-secondary);
 }
 

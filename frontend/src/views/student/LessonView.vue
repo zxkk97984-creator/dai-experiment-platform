@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import { coursesAPI } from '../../api/courses.js'
 import { useAppStore } from '../../stores/app.js'
+import { sanitizeHtml } from '../../utils/sanitize.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,7 +34,7 @@ const flatLessons = computed(() => {
 })
 
 const currentIndex = computed(() => {
-  return flatLessons.value.findIndex(f => f.lesson.id == lessonId.value)
+  return flatLessons.value.findIndex(f => f.lesson.id === lessonId.value)
 })
 
 const prevLesson = computed(() => {
@@ -55,7 +56,7 @@ function findLesson() {
   for (let i = 0; i < chapters.value.length; i++) {
     const ch = chapters.value[i]
     if (ch.lessons) {
-      const found = ch.lessons.find(l => l.id == lessonId.value)
+      const found = ch.lessons.find(l => l.id === lessonId.value)
       if (found) { lesson.value = found; return }
     }
   }
@@ -109,7 +110,7 @@ function goCourse() {
 }
 
 function goJupyter() {
-  router.push('/student/jupyter')
+  router.push('/student/experiments')
 }
 
 function toggleDropdown() {
@@ -132,8 +133,8 @@ onBeforeUnmount(() => {
 })
 
 // 路由参数变化时重新查找
-watch(lessonId, async () => {
-  if (chapters.value.length === 0) {
+watch([lessonId, courseId], async ([newLid, newCid], [oldLid, oldCid]) => {
+  if (newCid !== oldCid || chapters.value.length === 0) {
     await fetchData()
   } else {
     findLesson()
@@ -185,7 +186,7 @@ watch(lessonId, async () => {
                 <div
                   v-for="l in ch.lessons" :key="l.id"
                   class="dropdown-item"
-                  :class="{ active: l.id == lesson.id }"
+                  :class="{ active: l.id === lesson.id }"
                   @click.stop="goLesson(l.id)"
                 >
                   <span class="dropdown-item-icon">
@@ -205,7 +206,7 @@ watch(lessonId, async () => {
 
       <!-- Content: markdown -->
       <div v-if="lesson.content_type === 'markdown'" class="lesson-content"
-        v-html="lesson.content || '<p class=\'text-secondary\'>暂无内容</p>'"></div>
+        v-html="sanitizeHtml(lesson.content) || '<p class=\'text-secondary\'>暂无内容</p>'"></div>
 
       <!-- Content: video -->
       <div v-else-if="lesson.content_type === 'video'" class="lesson-video">
@@ -361,12 +362,12 @@ watch(lessonId, async () => {
 
 .lesson-content :deep(h1) {
   font-family: var(--font-display);
-  font-size: var(--text-2xl); font-weight: 400;
+  font-size: var(--text-2xl); font-weight: 600;
   color: var(--ink); margin: 28px 0 12px; letter-spacing: -0.01em; line-height: 1.25;
 }
 .lesson-content :deep(h2) {
   font-family: var(--font-display);
-  font-size: var(--text-xl); font-weight: 400;
+  font-size: var(--text-xl); font-weight: 600;
   color: var(--ink); margin: 24px 0 10px; padding-top: var(--space-5);
   border-top: 1px solid var(--border); letter-spacing: -0.01em; line-height: 1.3;
 }
@@ -385,15 +386,15 @@ watch(lessonId, async () => {
 /* Inline code */
 .lesson-content :deep(code:not(pre code)) {
   font-family: var(--font-mono); font-size: 0.85em;
-  background: var(--surface-raised); color: var(--danger);
+  background: var(--surface-raised); color: var(--primary);
   padding: 1px 6px; border-radius: 3px;
 }
 
 /* Code block — Pythonista signature */
 .lesson-content :deep(pre) {
-  background: #1A1E2B; color: #D6DEEB;
+  background: #0F172A; color: #E2E8F0;
   padding: var(--space-4); border-radius: var(--radius-md);
-  overflow-x: auto; border: 1px solid #2A3040;
+  overflow-x: auto; border: 1px solid #1E293B;
   margin: 14px 0; line-height: 1.7;
 }
 .lesson-content :deep(pre code) {
@@ -458,7 +459,7 @@ watch(lessonId, async () => {
 }
 .notebook-card h3 {
   font-family: var(--font-display); font-size: var(--text-xl);
-  font-weight: 400; color: var(--ink); margin: 0; letter-spacing: -0.01em;
+  font-weight: 600; color: var(--ink); margin: 0; letter-spacing: -0.01em;
 }
 
 /* ── Bottom navigation ─────────────────────── */
@@ -475,7 +476,8 @@ watch(lessonId, async () => {
   flex: 1; max-width: 48%; color: var(--text); text-align: left;
 }
 .nav-btn:hover {
-  border-color: var(--primary); background: var(--surface-raised);
+  border-color: var(--border-strong); background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
 }
 .nav-btn.disabled {
   opacity: 0.35; cursor: not-allowed; pointer-events: none;

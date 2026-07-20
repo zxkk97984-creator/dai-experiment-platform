@@ -61,7 +61,7 @@ async function submitExam() {
     <div v-if="!exam" class="text-secondary">加载中...</div>
     <template v-else>
       <div class="flex-between mb-4">
-        <h1 class="page-title" style="margin-bottom:0">{{ exam.title }}</h1>
+        <h1 class="page-title" style="margin-bottom:0">📋 {{ exam.title }}</h1>
         <div v-if="started && !submitted" class="exam-timer">
           {{ timeDisplay }}
         </div>
@@ -137,6 +137,7 @@ async function submitExam() {
 .exam-submitted h3 {
   color: var(--success);
   font-size: var(--text-lg);
+  font-weight: 600;
   margin-bottom: var(--space-4);
 }
 .exam-submitted p {
@@ -146,9 +147,9 @@ async function submitExam() {
 /* ── Answer textarea (code block — keep dark) ─────────────────────────── */
 .code-editor {
   width: 100%;
-  background: #1B1F2B;
-  color: #D6DEEB;
-  border: 1px solid #2A3040;
+  background: #0F172A;
+  color: #E2E8F0;
+  border: 1px solid #1E293B;
   border-radius: var(--radius-md);
   padding: var(--space-4);
   font-family: var(--font-mono);
@@ -159,6 +160,6 @@ async function submitExam() {
 .code-editor:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(224, 85, 61, 0.18);
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.18);
 }
 </style>

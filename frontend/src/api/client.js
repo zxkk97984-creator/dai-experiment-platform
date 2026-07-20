@@ -17,9 +17,19 @@ client.interceptors.request.use((config) => {
   return config
 })
 
-// Response interceptor: handle 401  refresh  retry
+// Response interceptor: handle 401 → refresh → retry
 let isRefreshing = false
 let refreshQueue = []
+
+function resolveQueue(token) {
+  refreshQueue.forEach(({ resolve }) => resolve(token))
+  refreshQueue = []
+}
+
+function rejectQueue(error) {
+  refreshQueue.forEach(({ reject }) => reject(error))
+  refreshQueue = []
+}
 
 client.interceptors.response.use(
   (res) => res,
@@ -37,11 +47,12 @@ client.interceptors.response.use(
     }
 
     if (isRefreshing) {
-      return new Promise((resolve) => {
-        refreshQueue.push((token) => {
-          config.headers.Authorization = `Bearer ${token}`
-          resolve(client(config))
-        })
+      return new Promise((resolve, reject) => {
+        refreshQueue.push({ resolve, reject, config })
+      }).then((token) => {
+        config.headers.Authorization = `Bearer ${token}`
+        config._retry = true
+        return client(config)
       })
     }
 
@@ -51,20 +62,25 @@ client.interceptors.response.use(
     try {
       const res = await axios.post('/api/v1/auth/refresh', {
         refresh_token: auth.refreshToken,
-      })
+      }, { timeout: 10000 })
+
       const newToken = res.data.access_token
       const newRefresh = res.data.refresh_token
       auth.setTokens(newToken, newRefresh)
 
-      refreshQueue.forEach((cb) => cb(newToken))
-      refreshQueue = []
+      resolveQueue(newToken)
 
       config.headers.Authorization = `Bearer ${newToken}`
       return client(config)
-    } catch {
-      refreshQueue = []
-      auth.logout()
-      router.push('/login')
+    } catch (refreshError) {
+      if (refreshError.response?.status === 401) {
+        rejectQueue(refreshError)
+        auth.logout()
+        router.push('/login')
+      } else {
+        rejectQueue(refreshError)
+        isRefreshing = false
+      }
       return Promise.reject(error)
     } finally {
       isRefreshing = false

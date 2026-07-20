@@ -23,7 +23,7 @@ onMounted(async () => {
 
 <template>
   <AppLayout>
-    <h1 class="page-title">我的作业</h1>
+    <h1 class="page-title">我的作业 📝</h1>
     <div v-if="loading" class="loading-state">加载中...</div>
     <div v-else-if="assignments.length === 0" class="empty-card">
       <p class="empty-text">暂无作业</p>
@@ -55,9 +55,8 @@ onMounted(async () => {
               box-shadow var(--duration-normal) var(--ease-out);
 }
 .assignment-card:hover {
-  border-color: var(--accent);
-  box-shadow: 0 0 20px rgba(224, 85, 61, 0.15),
-              0 4px 20px rgba(0, 0, 0, 0.06);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
 }
 
 /* ── Title (link — Prussian blue) ───────────────────────────────────── */

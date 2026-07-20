@@ -35,7 +35,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 
 <template>
   <AppLayout>
-    <h1 class="page-title">判题结果</h1>
+    <h1 class="page-title">判题结果 ✅</h1>
 
     <div v-if="!submission" class="card submission-card" style="text-align:center;padding:48px">
       <p class="text-secondary">加载中...</p>
@@ -80,6 +80,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 .submission-title {
   margin: 0;
   color: var(--ink);
+  font-weight: 600;
 }
 
 .submission-meta {
@@ -91,8 +92,8 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 
 /* ── Terminal output blocks (code — keep dark) ──────────────────────── */
 .output-block {
-  background: #1B1F2B;
-  color: #D6DEEB;
+  background: #0F172A;
+  color: #E2E8F0;
   padding: var(--space-4);
   border-radius: var(--radius-md);
   overflow-x: auto;
@@ -100,7 +101,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
   font-size: var(--text-sm);
   line-height: 1.65;
   white-space: pre-wrap;
-  border: 1px solid #2A3040;
+  border: 1px solid #1E293B;
 }
 .output-error { color: #F5A3AB; }
 

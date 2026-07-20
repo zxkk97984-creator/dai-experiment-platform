@@ -28,7 +28,7 @@ export const JUDGE_STATUS_MAP = {
 
 export const EXAM_STATUS_MAP = {
   draft: { label: '草稿', color: 'neutral' },
-  published: { label: '已发布', color: 'info' },
+  published: { label: '已发布', color: 'success' },
   ongoing: { label: '进行中', color: 'warning' },
   ended: { label: '已结束', color: 'neutral' },
   archived: { label: '已归档', color: 'neutral' },

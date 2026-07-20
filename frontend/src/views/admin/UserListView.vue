@@ -36,7 +36,7 @@ onMounted(fetch)
 <template>
   <AppLayout>
     <div class="flex-between mb-4">
-      <h1 class="page-title" style="margin-bottom:0">用户管理</h1>
+      <h1 class="page-title" style="margin-bottom:0">用户管理 👥</h1>
       <button class="btn-primary" @click="router.push('/admin/users/new/edit')">创建用户</button>
     </div>
 
@@ -87,9 +87,9 @@ table.card {
   border-color: var(--border);
 }
 
-/* ── Table header ── */
+/* ── Table header (Code Studio: sunken surface + secondary text) ── */
 thead th {
-  background: var(--surface-raised);
+  background: var(--surface-sunken);
   color: var(--text-secondary);
   border-bottom-color: var(--border);
 }
@@ -100,10 +100,7 @@ tbody td {
   border-bottom-color: var(--border);
 }
 
-tbody tr:hover td { background: var(--surface-raised); }
-
-/* Secondary text */
-.text-secondary { color: var(--text-secondary); }
+tbody tr:hover td { background: var(--surface-sunken); }
 
 /* ── Username link ── */
 td a {
@@ -123,48 +120,9 @@ select {
 select:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(26, 92, 138, 0.18);
+  box-shadow: var(--shadow-glow-primary);
 }
 
-/* ── Buttons ── */
-button {
-  background: var(--surface);
-  border-color: var(--border);
-  color: var(--text-secondary);
-}
-
-button:hover:not(:disabled) {
-  background: var(--surface-raised);
-  border-color: var(--border);
-  color: var(--ink);
-}
-
-button:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-
-/* ── Primary button ── */
-button.btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-button.btn-primary:hover {
-  background: #C94A33;
-  border-color: #C94A33;
-}
-
-/* ── Danger button ── */
-button.btn-danger {
-  background: #D12E3E;
-  border-color: #D12E3E;
-  color: #fff;
-}
-
-button.btn-danger:hover {
-  background: #B82634;
-  border-color: #B82634;
-}
+/* Buttons (.btn-primary / .btn-danger / .btn-sm / default) inherit
+   Code Studio global styles from src/style.css. */
 </style>

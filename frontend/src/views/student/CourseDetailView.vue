@@ -45,22 +45,33 @@ const progressPercent = computed(() => {
 
 async function fetchAll() {
   loading.value = true
-  try {
-    const [cRes, chRes, aRes, eRes] = await Promise.all([
-      coursesAPI.get(courseId.value),
-      coursesAPI.getChapters(courseId.value),
-      assignmentsAPI.list({ course_id: courseId.value }),
-      examsAPI.list({ course_id: courseId.value }),
-    ])
-    course.value = cRes.data
-    chapters.value = chRes.data.items || chRes.data || []
-    assignments.value = (aRes.data.items || aRes.data || [])
-    exams.value = (eRes.data.items || eRes.data || [])
+  const results = await Promise.allSettled([
+    coursesAPI.get(courseId.value),
+    coursesAPI.getChapters(courseId.value),
+    assignmentsAPI.list({ course_id: courseId.value }),
+    examsAPI.list({ course_id: courseId.value }),
+  ])
+  if (results[0].status === 'fulfilled') {
+    course.value = results[0].value.data
+  }
+  if (results[1].status === 'fulfilled') {
+    chapters.value = results[1].value.data.items || results[1].value.data || []
+  }
+  if (results[2].status === 'fulfilled') {
+    assignments.value = results[2].value.data.items || results[2].value.data || []
+  }
+  if (results[3].status === 'fulfilled') {
+    exams.value = results[3].value.data.items || results[3].value.data || []
+  }
+  if (results[0].status === 'fulfilled') {
     enrolled.value = true
-  } catch (e) {
-    if (e.response?.status === 403) enrolled.value = false
-    else { fetchError.value = true; app.showToast('加载课程失败', 'error') }
-  } finally { loading.value = false }
+  } else if (results[0].reason?.response?.status === 403) {
+    enrolled.value = false
+  } else {
+    fetchError.value = true
+    app.showToast('加载课程失败', 'error')
+  }
+  loading.value = false
 }
 
 async function handleEnroll() {
@@ -139,7 +150,7 @@ onMounted(fetchAll)
 
       <!-- Info card -->
       <div class="course-hero">
-        <h1 class="course-hero-title">{{ course.title }}</h1>
+        <h1 class="course-hero-title">📚 {{ course.title }}</h1>
         <p class="course-hero-desc" v-if="course.description">{{ course.description }}</p>
         <div class="course-hero-stats">
           <div class="hero-stat">
@@ -231,14 +242,18 @@ onMounted(fetchAll)
   border-radius: var(--radius-lg);
   padding: var(--space-6);
   margin-bottom: var(--space-5);
-  transition: border-color var(--duration-normal) var(--ease-out);
+  transition: border-color var(--duration-normal) var(--ease-out),
+              box-shadow var(--duration-normal) var(--ease-out);
 }
-.course-hero:hover { border-color: #cfd5e0; }
+.course-hero:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
 
 .course-hero-title {
   font-family: var(--font-display);
   font-size: var(--text-2xl);
-  font-weight: 400;
+  font-weight: 600;
   color: var(--ink);
   letter-spacing: -0.01em;
   margin: 0 0 var(--space-2);
@@ -254,17 +269,17 @@ onMounted(fetchAll)
 
 .course-hero-stats { display: flex; gap: var(--space-6); margin-bottom: var(--space-4); }
 .hero-stat { display: flex; flex-direction: column; }
-.hero-stat-value { font-family: var(--font-display); font-size: 22px; color: var(--ink); }
+.hero-stat-value { font-family: var(--font-display); font-size: 22px; color: var(--ink); font-weight: 600; }
 .hero-stat-label { font-size: var(--text-xs); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
 
 /* Progress bar */
 .progress-wrap { display: flex; align-items: center; gap: var(--space-3); }
 .progress-bar {
-  flex: 1; height: 6px; background: #E4E8F0;
+  flex: 1; height: 6px; background: var(--surface-raised);
   border-radius: 3px; overflow: hidden;
 }
 .progress-fill {
-  height: 100%; background: var(--accent);
+  height: 100%; background: var(--primary);
   border-radius: 3px; transition: width var(--duration-slow) var(--ease-out);
 }
 .progress-text {
@@ -279,14 +294,18 @@ onMounted(fetchAll)
   border-radius: var(--radius-lg);
   padding: var(--space-5) var(--space-6);
   margin-bottom: var(--space-4);
-  transition: border-color var(--duration-normal) var(--ease-out);
+  transition: border-color var(--duration-normal) var(--ease-out),
+              box-shadow var(--duration-normal) var(--ease-out);
 }
-.quick-section:hover { border-color: #cfd5e0; }
+.quick-section:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
 
 .quick-section-title {
   font-family: var(--font-display);
   font-size: var(--text-md);
-  font-weight: 400;
+  font-weight: 600;
   color: var(--ink);
   margin: 0 0 var(--space-3);
   letter-spacing: -0.01em;
@@ -311,9 +330,13 @@ onMounted(fetchAll)
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-5) var(--space-6);
-  transition: border-color var(--duration-normal) var(--ease-out);
+  transition: border-color var(--duration-normal) var(--ease-out),
+              box-shadow var(--duration-normal) var(--ease-out);
 }
-.chapter-card:hover { border-color: #cfd5e0; }
+.chapter-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
 
 .chapter-title {
   font-size: var(--text-sm);
