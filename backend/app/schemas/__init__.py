@@ -355,3 +355,44 @@ class NotebookSubmitResponse(BaseModel):
 
 class TemplateUpgradeRequest(BaseModel):
     action: str  # "keep" | "discard"
+
+
+# ── 实验模块 Notebook 风格 API schemas ──────────────────────────
+
+
+class ExperimentCellOut(BaseModel):
+    """实验模块的代码 cell"""
+    id: str
+    source: str = ""
+    order: int = 0
+    outputs: dict | None = None  # {execution_count, outputs: [...]}
+    is_running: bool = False
+
+
+class ExperimentRecordDetailResponse(BaseModel):
+    """GET /experiments/records/{id} 完整响应"""
+    id: int
+    module_id: int
+    student_id: int
+    status: str
+    module_name: str = ""
+    module_description: str | None = None
+    cells: list[ExperimentCellOut] = Field(default_factory=list)
+    cell_order: list[str] = Field(default_factory=list)
+    execution_count: int = 0
+
+
+class ExperimentCellsSaveRequest(BaseModel):
+    """PUT /experiments/records/{id}/cells"""
+    cells: dict[str, str]  # {cell_id: source_code}
+    cell_order: list[str] = Field(default_factory=list)
+
+
+class ExperimentCellExecuteRequest(BaseModel):
+    code: str
+
+
+class ExperimentCellExecuteResponse(BaseModel):
+    outputs: list[dict] = Field(default_factory=list)
+    execution_time_ms: int | None = None
+    execution_count: int = 0

@@ -1,86 +1,50 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
-import { experimentsAPI } from '../../api/experiments.js'
-import { jupyterAPI } from '../../api/jupyter.js'
+import CodeCell from '../../components/notebook/CodeCell.vue'
+import { useExperimentStore } from '../../stores/experiment.js'
 import { useAppStore } from '../../stores/app.js'
-import { sanitizeHtml } from '../../utils/sanitize.js'
 
 const route = useRoute()
 const router = useRouter()
 const app = useAppStore()
-
-const module_ = ref(null)
-const iframeUrl = ref('')
-const loading = ref(true)
-const jupyterLoading = ref(false)
-const jupyterError = ref('')
-
-// Resizable Jupyter frame
-const frameHeight = ref(500)
-const isDragging = ref(false)
-const frameRef = ref(null)
-let dragStartY = 0
-let dragStartHeight = 0
-let dragStarted = false
-
-function onDragStart(e) {
-  e.preventDefault()
-  isDragging.value = true
-  dragStarted = false
-  dragStartY = e.clientY
-  dragStartHeight = frameRef.value?.offsetHeight || frameHeight.value
-  document.body.style.userSelect = 'none'
-  document.body.style.cursor = 'ns-resize'
-  document.addEventListener('mousemove', onDragMove)
-  document.addEventListener('mouseup', onDragEnd)
-}
-
-function onDragMove(e) {
-  if (!isDragging.value) return
-  const delta = e.clientY - dragStartY
-  if (!dragStarted && Math.abs(delta) < 5) return
-  dragStarted = true
-  e.preventDefault()
-  frameHeight.value = Math.max(200, dragStartHeight + delta)
-}
-
-function onDragEnd() {
-  isDragging.value = false
-  dragStarted = false
-  document.body.style.userSelect = ''
-  document.body.style.cursor = ''
-  document.removeEventListener('mousemove', onDragMove)
-  document.removeEventListener('mouseup', onDragEnd)
-}
+const store = useExperimentStore()
 
 onMounted(async () => {
   try {
-    const res = await experimentsAPI.getModule(route.params.id)
-    module_.value = res.data
+    await store.openExperiment(route.params.id)
   } catch {
     app.showToast('加载实验失败', 'error')
-  } finally { loading.value = false }
+  }
+})
 
-  // Load JupyterLab in parallel
-  jupyterLoading.value = true
-  try {
-    const jRes = await jupyterAPI.getEntry()
-    iframeUrl.value = jRes.data.iframe_url
-  } catch {
-    jupyterError.value = 'JupyterLab 暂时不可用'
-  } finally { jupyterLoading.value = false }
+// 页面离开前保存
+onBeforeUnmount(() => {
+  store.saveBeforeLeave()
 })
 
 function goBack() {
+  store.saveBeforeLeave()
   router.push('/student/experiments')
+}
+
+function handleRun(cellId) {
+  store.executeCell(cellId)
+}
+
+function handleUpdateSource(cellId, source) {
+  store.updateCellSource(cellId, source)
+}
+
+function handleRestart() {
+  store.restartKernel()
 }
 </script>
 
 <template>
   <AppLayout>
-    <!-- Back -->
+    <!-- 返回按钮 -->
     <button class="btn-ghost btn-sm back-btn" @click="goBack">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
         <path d="M10 3L5 8l5 5"/>
@@ -88,72 +52,70 @@ function goBack() {
       返回实验列表
     </button>
 
-    <!-- Loading -->
-    <div v-if="loading" class="loading-state">
-      <p class="skeleton" style="width:240px;height:28px;margin:0 auto 12px"></p>
-      <p class="skeleton" style="width:360px;height:14px;margin:0 auto"></p>
-    </div>
-
-    <!-- Error -->
-    <div v-else-if="!module_" class="empty-state">
-      <p>实验不存在</p>
-      <button class="btn-primary" @click="goBack" style="margin-top:12px">返回</button>
-    </div>
-
-    <template v-else>
-      <!-- Experiment header -->
-      <div class="experiment-hero">
-        <h1 class="experiment-title">{{ module_.name }}</h1>
-        <p class="experiment-desc" v-if="module_.description" v-html="sanitizeHtml(module_.description.replace(/\n/g, '<br>'))"></p>
-        <div class="experiment-meta">
-          <span class="badge" :class="'badge-' + (module_.status === 'published' ? 'success' : 'neutral')">
-            {{ module_.status === 'published' ? '已发布' : module_.status }}
-          </span>
-        </div>
+    <!-- 实验标题 -->
+    <div class="experiment-hero">
+      <h1 class="experiment-title">
+        <span class="experiment-icon">🧪</span>
+        {{ store.moduleName }}
+      </h1>
+      <p v-if="store.moduleDescription" class="experiment-desc">{{ store.moduleDescription }}</p>
+      <div class="experiment-meta">
+        <span class="meta-badge">执行次数：{{ store.executionCount }}</span>
+        <span class="meta-badge">代码单元格：{{ store.cells.length }}</span>
       </div>
+    </div>
 
-      <!-- JupyterLab workspace -->
-      <div class="workspace-section">
-        <div class="workspace-header">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="8" height="8" rx="1.5"/><path d="M5.5 3v8M3 5.5h8"/>
+    <!-- Cell 列表 -->
+    <div class="cells-area">
+      <CodeCell
+        v-for="cell in store.cells"
+        :key="cell.id"
+        :cell="cell"
+        :execution-count="cell.outputs?.execution_count ?? null"
+        :is-executing="cell.isRunning"
+        @execute="handleRun"
+        @update:source="handleUpdateSource"
+      >
+        <!-- 删除 cell 按钮插在工具栏区域？用自定义方式 -->
+      </CodeCell>
+    </div>
+
+    <!-- 操作栏 -->
+    <div class="action-bar">
+      <button class="btn-add-cell" @click="store.addCell()">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <path d="M7 3v8M3 7h8"/>
+        </svg>
+        添加代码单元格
+      </button>
+
+      <div class="action-right">
+        <button class="btn-restart" @click="handleRestart">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 7a5 5 0 0 1 9.5-2"/><path d="M12 2v3H9"/><path d="M12 7a5 5 0 0 1-9.5 2"/><path d="M2 12v-3h3"/>
           </svg>
-          JupyterLab 实验环境
-        </div>
-
-        <div v-if="jupyterLoading" class="jupyter-placeholder">
-          <span class="spinner"></span>
-          <p>正在连接实验环境...</p>
-        </div>
-        <div v-else-if="jupyterError" class="jupyter-placeholder">
-          <p class="text-secondary">{{ jupyterError }}</p>
-          <button class="btn-primary" @click="goBack" style="margin-top:8px">返回</button>
-        </div>
-        <template v-else>
-          <div class="jupyter-frame" ref="frameRef" :style="{ height: frameHeight + 'px' }">
-            <iframe :src="iframeUrl" frameborder="0" style="width:100%;height:100%;border:none" />
-          </div>
-          <div class="resize-handle" @mousedown="onDragStart">
-            <div class="resize-grip"></div>
-          </div>
-        </template>
+          重启 Kernel
+        </button>
       </div>
-    </template>
+    </div>
+
+    <!-- 空状态提示 -->
+    <div v-if="store.cells.length === 0" class="empty-hint">
+      <p>点击「添加代码单元格」开始编写 Python 代码</p>
+    </div>
   </AppLayout>
 </template>
 
 <style scoped>
-/* Back */
+/* ── 返回 ───────────────────────────────── */
 .back-btn {
   display: inline-flex; align-items: center; gap: 4px;
-  color: var(--text-secondary); font-size: var(--text-sm); margin-bottom: var(--space-5);
+  color: var(--text-secondary); font-size: var(--text-sm);
+  margin-bottom: var(--space-4);
 }
 .back-btn:hover { color: var(--text); }
 
-/* Loading */
-.loading-state { padding: var(--space-4) 0; text-align: center; }
-
-/* Hero */
+/* ── 标题区 ─────────────────────────────── */
 .experiment-hero {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -168,102 +130,85 @@ function goBack() {
   color: var(--ink);
   margin: 0 0 var(--space-3);
   letter-spacing: -0.01em;
+  display: flex; align-items: center; gap: 8px;
 }
+.experiment-icon { font-size: 24px; }
 .experiment-desc {
   font-size: var(--text-sm);
   color: var(--text);
-  line-height: 1.75;
+  line-height: 1.7;
+  margin-bottom: var(--space-3);
+}
+.experiment-meta { display: flex; gap: var(--space-3); }
+.meta-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 10px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+}
+
+/* ── Cells ──────────────────────────────── */
+.cells-area {
   margin-bottom: var(--space-4);
 }
-.experiment-meta { display: flex; gap: var(--space-2); }
 
-/* Workspace */
-.workspace-section {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
+/* ── 操作栏 ─────────────────────────────── */
+.action-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
 }
-.workspace-header {
-  display: flex; align-items: center; gap: 8px;
-  padding: var(--space-3) var(--space-5);
-  background: var(--surface-raised);
-  border-bottom: 1px solid var(--border);
+
+.btn-add-cell {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-secondary);
   font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--text);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
 }
-/* Resize handle — bottom edge, like browser devtools panel resizer */
-.resize-handle {
-  height: 4px;
-  background: var(--border);
-  cursor: ns-resize;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  user-select: none;
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-  position: relative;
+.btn-add-cell:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-light);
 }
-/* Invisible larger hit area */
-.resize-handle::before {
-  content: '';
-  position: absolute;
-  inset: -4px 0;
-}
-.resize-handle:hover,
-.resize-handle:active {
-  background: var(--border-strong);
-}
-.resize-grip {
-  width: 48px;
-  height: 3px;
-  border-radius: 2px;
+
+.action-right { display: flex; gap: var(--space-3); }
+
+.btn-restart {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   background: var(--surface);
-  opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease-out);
-}
-.resize-handle:hover .resize-grip,
-.resize-handle:active .resize-grip {
-  opacity: 0.8;
-}
-
-/* Prevent text selection while dragging */
-.resize-handle:active *,
-.resize-handle:active + * {
-  user-select: none;
-}
-
-.jupyter-frame {
-  height: 500px;
-  min-height: 200px;
-}
-.jupyter-placeholder {
-  text-align: center; padding: var(--space-12) var(--space-6);
   color: var(--text-secondary);
-  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
 }
-.jupyter-placeholder p { font-size: var(--text-sm); }
+.btn-restart:hover {
+  border-color: var(--warning);
+  color: var(--warning);
+  background: var(--warning-light);
+}
 
-/* Spinner */
-.spinner {
-  width: 24px; height: 24px;
-  border: 2px solid var(--border);
-  border-top-color: var(--primary);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
+/* ── 空状态 ─────────────────────────────── */
+.empty-hint {
+  text-align: center; padding: var(--space-8);
+  color: var(--text-secondary); font-size: var(--text-sm);
 }
-@keyframes spin { to { transform: rotate(360deg); } }
 
-/* Shared */
-.text-secondary { color: var(--text-secondary); }
-.btn-primary {
-  background: var(--accent); color: #fff; border-color: var(--accent);
+/* ── 响应式 ─────────────────────────────── */
+@media (max-width: 768px) {
+  .action-bar { flex-direction: column; }
+  .action-right { width: 100%; }
+  .btn-add-cell, .btn-restart { width: 100%; justify-content: center; }
 }
-.btn-primary:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
-.empty-state {
-  text-align: center; padding: var(--space-12) var(--space-6);
-  color: var(--text-secondary);
-}
-.empty-state p { font-size: var(--text-sm); margin-bottom: var(--space-3); }
 </style>
