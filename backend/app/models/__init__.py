@@ -209,3 +209,47 @@ class ExperimentRecord(TimestampMixin, Base):
 
     module: Mapped[ExperimentModule] = relationship()
     student: Mapped[User] = relationship()
+
+
+class NotebookRecord(TimestampMixin, Base):
+    """学生笔记本副本：每个学生+课时一条记录"""
+    __tablename__ = "notebook_records"
+    __table_args__ = (
+        UniqueConstraint("lesson_id", "student_id", name="uq_notebook_lesson_student"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"), index=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="started")
+    template_version: Mapped[int] = mapped_column(Integer, default=1)
+    template_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    cells_sources: Mapped[dict] = mapped_column(JSON, default=dict)
+    cells_outputs: Mapped[dict] = mapped_column(JSON, default=dict)
+    cell_order: Mapped[list] = mapped_column(JSON, default=list)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    lesson: Mapped[Lesson] = relationship()
+    student: Mapped[User] = relationship()
+    submissions: Mapped[list["NotebookSubmission"]] = relationship(
+        back_populates="record", cascade="all, delete-orphan"
+    )
+
+
+class NotebookSubmission(TimestampMixin, Base):
+    """每次提交的记录，cells_snapshot 不可变"""
+    __tablename__ = "notebook_submissions"
+    __table_args__ = (
+        UniqueConstraint("record_id", "attempt_number", name="uq_notebook_submission_attempt"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    record_id: Mapped[int] = mapped_column(ForeignKey("notebook_records.id"), index=True)
+    attempt_number: Mapped[int] = mapped_column(Integer, default=1)
+    cells_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    artifacts_dir: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    record: Mapped[NotebookRecord] = relationship(back_populates="submissions")

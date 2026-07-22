@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import { coursesAPI } from '../../api/courses.js'
+import { notebooksAPI } from '../../api/notebooks.js'
 import { useAppStore } from '../../stores/app.js'
 
 const route = useRoute()
@@ -14,6 +15,8 @@ const showChForm = ref(false)
 const showLesForm = ref({})
 const chForm = ref({ title: '' })
 const lesForm = ref({ title: '', content_type: 'markdown', content: '' })
+const notebookFile = ref(null)
+const notebookFileName = ref('')
 
 async function fetch() {
   loading.value = true
@@ -23,7 +26,9 @@ async function fetch() {
       coursesAPI.getChapters(route.params.id),
     ])
     course.value = cRes.data
-    chapters.value = chRes.data
+    // 分页接口返回 {items: [...], page: ..., total: ...}
+    const rawData = chRes.data
+    chapters.value = Array.isArray(rawData) ? rawData : (rawData.items || [])
   } catch { app.showToast('加载失败', 'error') }
   finally { loading.value = false }
 }
@@ -46,12 +51,23 @@ async function createLesson(chId) {
   const f = lesForm.value
   if (!f.title) return
   try {
-    await coursesAPI.createLesson(chId, { ...f, order_index: 0 })
+    const res = await coursesAPI.createLesson(chId, { ...f, order_index: 0 })
+    // 如果是 notebook 类型且有上传文件，则上传 .ipynb
+    if (f.content_type === 'notebook' && notebookFile.value) {
+      await notebooksAPI.uploadNotebook(res.data.id, notebookFile.value)
+      notebookFile.value = null
+      notebookFileName.value = ''
+    }
     lesForm.value = { title: '', content_type: 'markdown', content: '' }
     showLesForm.value[chId] = false
     fetch()
     app.showToast('课时已创建', 'success')
   } catch { app.showToast('创建失败', 'error') }
+}
+
+function onFileSelected(e) {
+  notebookFile.value = e.target.files[0]
+  notebookFileName.value = e.target.files[0]?.name || ''
 }
 
 function typeLabel(ct) {
@@ -123,6 +139,15 @@ onMounted(fetch)
             placeholder="Markdown 内容"
             class="form-textarea"
           ></textarea>
+        </div>
+        <div v-if="lesForm.content_type === 'notebook'" class="lesson-form-row">
+          <input
+            type="file"
+            accept=".ipynb,.zip"
+            @change="onFileSelected"
+            class="form-file"
+          />
+          <span v-if="notebookFileName" class="file-name">{{ notebookFileName }}</span>
         </div>
         <button class="btn-accent btn-accent-sm" @click="createLesson(ch.id)">确认添加</button>
       </div>
@@ -306,6 +331,30 @@ onMounted(fetch)
 .form-textarea:focus {
   border-color: var(--primary);
   box-shadow: var(--shadow-glow-primary);
+}
+
+.form-file {
+  padding: 8px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  background: var(--surface-raised);
+  width: 100%;
+  transition: border-color var(--duration-fast);
+}
+
+.form-file:hover {
+  border-color: var(--primary);
+}
+
+.file-name {
+  font-size: var(--text-xs);
+  color: var(--primary);
+  font-weight: 500;
+  margin-top: 4px;
+  display: inline-block;
 }
 
 /* ── Chapter card ── */

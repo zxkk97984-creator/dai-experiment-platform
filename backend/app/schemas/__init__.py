@@ -303,3 +303,55 @@ class NotebookTemplateRead(BaseModel):
 class NotebookCopyResponse(BaseModel):
     template_id: str
     target_path: str
+
+
+# ── Notebook API schemas ──────────────────────────────────────
+
+
+class NotebookCellOut(BaseModel):
+    """返回给前端的 notebook cell"""
+    id: str
+    cell_type: str  # "markdown" | "code"
+    source: str
+    rendered_html: str | None = None
+    outputs: dict | None = None
+    execution_count: int | None = None
+    status: str | None = None
+
+
+class NotebookResponse(BaseModel):
+    """GET /notebooks/{lesson_id} 的完整响应"""
+    record_id: int
+    lesson_id: int
+    status: str  # "started" | "submitted"
+    cells: list[NotebookCellOut]
+    cell_order: list[str]
+    template_outdated: bool = False
+
+
+class CellExecuteRequest(BaseModel):
+    code: str
+
+
+class CellExecuteResponse(BaseModel):
+    outputs: list[dict] = Field(default_factory=list)
+    execution_time_ms: int | None = None
+
+
+class NotebookCellsSaveRequest(BaseModel):
+    """PUT /notebooks/records/{id}/cells 请求体"""
+    cells: dict[str, str]  # {cell_id: source_code}
+
+
+class NotebookSaveResponse(BaseModel):
+    record_id: int
+
+
+class NotebookSubmitResponse(BaseModel):
+    record_id: int
+    attempt_number: int
+    submitted_at: str
+
+
+class TemplateUpgradeRequest(BaseModel):
+    action: str  # "keep" | "discard"

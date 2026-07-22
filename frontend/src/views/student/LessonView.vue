@@ -56,8 +56,15 @@ function findLesson() {
   for (let i = 0; i < chapters.value.length; i++) {
     const ch = chapters.value[i]
     if (ch.lessons) {
-      const found = ch.lessons.find(l => l.id === lessonId.value)
-      if (found) { lesson.value = found; return }
+      const found = ch.lessons.find(l => String(l.id) === String(lessonId.value))
+      if (found) {
+        lesson.value = found
+        // notebook 类型自动跳转到 NotebookView
+        if (found.content_type === 'notebook') {
+          router.replace(`/student/courses/${courseId.value}/notebook/${found.id}`)
+        }
+        return
+      }
     }
   }
   lesson.value = null
@@ -83,7 +90,8 @@ async function fetchData() {
       coursesAPI.getChapters(courseId.value),
       coursesAPI.get(courseId.value),
     ])
-    chapters.value = chRes.data
+    const raw = chRes.data
+    chapters.value = Array.isArray(raw) ? raw : (raw.items || [])
     course.value = cRes.data
     findLesson()
     if (lesson.value) markComplete()
