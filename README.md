@@ -117,34 +117,59 @@ cd backend
 .venv\Scripts\python.exe -m app.cli create-admin --username admin --password Passw0rd! --real-name Administrator
 ```
 
-构建判题镜像：
+构建判题和 Kernel 镜像（只需执行一次，后续启动跳过）：
 
 ```bat
 cd backend
 docker build -t dai-judge-python:latest docker\judge
+docker build -t dai-kernel-python:latest docker\kernel
 ```
 
 ### 2. 每次联调启动
 
-启动后端 API：
+#### 环境检查
+
+启动前先确认 Docker 和基础服务是否就绪，避免重复操作：
 
 ```bat
+:: 确认 Docker 在运行
+docker ps >nul 2>&1 || (echo Docker 未启动，请先打开 Docker Desktop && exit /b 1)
+
+:: 确认基础容器是否已在运行，未运行则启动
+docker ps --filter name=dai-mysql --format "{{.Status}}" | findstr "Up" >nul || (
+    echo 启动基础服务...
+    docker compose up -d mysql redis jupyter
+)
+
+:: 确认镜像是否存在，不存在才构建
+docker image inspect dai-judge-python:latest >nul 2>&1 || (
+    echo 构建判题镜像...
+    docker build -t dai-judge-python:latest backend\docker\judge
+)
+docker image inspect dai-kernel-python:latest >nul 2>&1 || (
+    echo 构建 Kernel 镜像...
+    docker build -t dai-kernel-python:latest backend\docker\kernel
+)
+
+:: 数据库迁移
+cd backend
+.venv\Scripts\python.exe -m alembic upgrade head
+```
+
+#### 启动服务
+
+```bat
+:: 后端 API
 cd backend
 .venv\Scripts\python.exe -m uvicorn app.main:app --reload
-```
 
-需要测试代码提交和判题时，另开一个终端启动 Worker：
+:: 前端开发服务器（新终端）
+cd frontend
+npm run dev
 
-```bat
+:: 判题 Worker（需要判题时另开终端）
 cd backend
 .venv\Scripts\python.exe -m app.worker.judge_worker
-```
-
-如果 Docker 服务没开，先执行：
-
-```bat
-
-docker compose up -d mysql redis jupyter
 ```
 
 ## 前端鉴权方式
