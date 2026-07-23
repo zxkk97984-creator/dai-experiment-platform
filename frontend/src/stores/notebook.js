@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { notebooksAPI } from '../api/notebooks.js'
 import { useAppStore } from './app.js'
 
@@ -10,8 +10,6 @@ export const useNotebookStore = defineStore('notebook', () => {
   const recordId = ref(null)
   const cells = ref([])         // {id, cell_type, source, rendered_html, outputs}
   const cellOrder = ref([])
-  const recordStatus = ref('started')
-  const templateOutdated = ref(false)
   const isDirty = ref(false)
   const isSaving = ref(false)
   const executingCellId = ref(null)
@@ -24,8 +22,6 @@ export const useNotebookStore = defineStore('notebook', () => {
     recordId.value = res.data.record_id
     cells.value = res.data.cells
     cellOrder.value = res.data.cell_order
-    recordStatus.value = res.data.status
-    templateOutdated.value = res.data.template_outdated
     isDirty.value = false
   }
 
@@ -39,7 +35,7 @@ export const useNotebookStore = defineStore('notebook', () => {
     }
   }
 
-  // ── 自动保存 ──────────────────────────────────
+  // ── 自动保存（30秒防抖）──────────────────────
 
   let saveTimer = null
   watch(cells, () => {
@@ -92,6 +88,14 @@ export const useNotebookStore = defineStore('notebook', () => {
     }
   }
 
+  async function executeAllCells() {
+    const codeCells = cells.value.filter(c => c.cell_type === 'code')
+    if (codeCells.length === 0) return
+    for (const cell of codeCells) {
+      await executeCell(cell.id)
+    }
+  }
+
   async function interruptKernel() {
     try {
       await notebooksAPI.interrupt(recordId.value)
@@ -104,7 +108,6 @@ export const useNotebookStore = defineStore('notebook', () => {
   async function restartKernel() {
     try {
       await notebooksAPI.restartKernel(recordId.value)
-      // 清空所有 outputs
       for (const cell of cells.value) {
         if (cell.cell_type === 'code') {
           cell.outputs = null
@@ -116,47 +119,10 @@ export const useNotebookStore = defineStore('notebook', () => {
     }
   }
 
-  // ── 重置 / 提交 ──────────────────────────────
-
-  async function resetNotebook() {
-    if (!confirm('确定要重置为教师模板吗？你当前的修改将丢失。')) return
-    try {
-      await notebooksAPI.reset(recordId.value)
-      await openNotebook(lessonId.value)
-      app.showToast('已重置为模板', 'success')
-    } catch {
-      app.showToast('重置失败', 'error')
-    }
-  }
-
-  async function submitNotebook() {
-    if (!confirm('确定要提交作业吗？提交后将生成不可变快照。')) return
-    try {
-      // 先保存
-      await saveProgress()
-      await notebooksAPI.submit(recordId.value)
-      recordStatus.value = 'submitted'
-      app.showToast('提交成功！', 'success')
-    } catch {
-      app.showToast('提交失败', 'error')
-    }
-  }
-
-  async function handleTemplateUpgrade(action) {
-    try {
-      await notebooksAPI.upgradeTemplate(recordId.value, action)
-      await openNotebook(lessonId.value)
-      app.showToast(action === 'discard' ? '已加载新版本' : '已保留当前版本', 'success')
-    } catch {
-      app.showToast('操作失败', 'error')
-    }
-  }
-
   return {
-    lessonId, recordId, cells, cellOrder, recordStatus,
-    templateOutdated, isDirty, isSaving, executingCellId,
+    lessonId, recordId, cells, cellOrder,
+    isDirty, isSaving, executingCellId,
     openNotebook, updateCellSource, saveProgress,
-    executeCell, interruptKernel, restartKernel,
-    resetNotebook, submitNotebook, handleTemplateUpgrade,
+    executeCell, executeAllCells, interruptKernel, restartKernel,
   }
 })

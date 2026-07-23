@@ -13,14 +13,6 @@ export const notebooksAPI = {
   executeCell(recordId, cellId, code) {
     return client.post(`/notebooks/records/${recordId}/cells/${cellId}/execute`, { code })
   },
-  /** 重置为教师模板 */
-  reset(recordId) {
-    return client.post(`/notebooks/records/${recordId}/reset`)
-  },
-  /** 提交笔记本 */
-  submit(recordId) {
-    return client.post(`/notebooks/records/${recordId}/submit`)
-  },
   /** 中断 kernel */
   interrupt(recordId) {
     return client.post(`/notebooks/records/${recordId}/interrupt`)
@@ -28,10 +20,6 @@ export const notebooksAPI = {
   /** 重启 kernel */
   restartKernel(recordId) {
     return client.post(`/notebooks/records/${recordId}/restart-kernel`)
-  },
-  /** 处理模板升级 */
-  upgradeTemplate(recordId, action) {
-    return client.post(`/notebooks/records/${recordId}/upgrade-template`, { action })
   },
   /** 教师上传 notebook */
   uploadNotebook(lessonId, file) {

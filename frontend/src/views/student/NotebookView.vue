@@ -21,8 +21,6 @@ const statusText = computed(() => {
   return '已保存'
 })
 
-const canInteract = computed(() => store.recordStatus !== 'submitted')
-
 onMounted(async () => {
   try {
     await store.openNotebook(lessonId.value)
@@ -64,23 +62,12 @@ function getExecutionCount(cellId) {
           <span class="status-dot"></span>
           {{ statusText }}
         </span>
-        <span v-if="store.templateOutdated" class="badge-warn">课件已更新</span>
-        <span v-if="store.recordStatus === 'submitted'" class="badge-done">已提交</span>
-      </div>
-    </div>
-
-    <!-- 模板过期提示 -->
-    <div v-if="store.templateOutdated" class="template-update-banner">
-      <p>⚠ 教师的课件已更新。你可以选择保留当前进度继续使用旧版本，或放弃进度加载新版本。</p>
-      <div class="banner-actions">
-        <button class="btn-ghost btn-sm" @click="store.handleTemplateUpgrade('keep')">保留我的进度</button>
-        <button class="btn-accent btn-sm" @click="store.handleTemplateUpgrade('discard')">加载新版本</button>
       </div>
     </div>
 
     <!-- 操作栏 -->
     <div class="action-bar">
-      <button class="btn-ghost btn-sm" @click="store.executeAllCells" :disabled="!canInteract">
+      <button class="btn-ghost btn-sm" @click="store.executeAllCells" :disabled="store.executingCellId !== null">
         ▶ 全部运行
       </button>
       <button class="btn-ghost btn-sm" @click="store.interruptKernel" :disabled="!store.executingCellId">
@@ -92,12 +79,6 @@ function getExecutionCount(cellId) {
       <div class="action-spacer"></div>
       <button class="btn-ghost btn-sm" @click="store.saveProgress" :disabled="store.isSaving">
         💾 保存
-      </button>
-      <button class="btn-ghost btn-sm" @click="store.resetNotebook" :disabled="!canInteract">
-        ↺ 重置
-      </button>
-      <button class="btn-accent btn-sm" @click="store.submitNotebook" :disabled="!canInteract">
-        ✓ 提交
       </button>
     </div>
 
@@ -112,24 +93,11 @@ function getExecutionCount(cellId) {
         v-else-if="cell.cell_type === 'code'"
         :cell="cell"
         :execution-count="getExecutionCount(cell.id)"
-        :disabled="!canInteract"
+        :disabled="false"
         :is-executing="store.executingCellId === cell.id"
         @execute="store.executeCell"
         @update:source="store.updateCellSource"
       />
-    </div>
-
-    <!-- 底部操作 -->
-    <div class="bottom-bar">
-      <button class="btn-ghost btn-sm" @click="store.resetNotebook" :disabled="!canInteract">
-        ↺ 重置模板
-      </button>
-      <button class="btn-ghost btn-sm" @click="store.saveProgress" :disabled="store.isSaving">
-        💾 保存进度
-      </button>
-      <button class="btn-accent btn-sm" @click="store.submitNotebook" :disabled="!canInteract">
-        ✓ 提交作业
-      </button>
     </div>
   </AppLayout>
 </template>
@@ -184,43 +152,6 @@ function getExecutionCount(cellId) {
   50% { opacity: 0.3; }
 }
 
-.badge-warn {
-  font-size: var(--text-xs);
-  padding: 2px 8px;
-  border-radius: 12px;
-  background: var(--warning-light);
-  color: #7C5E0A;
-  font-weight: 500;
-}
-
-.badge-done {
-  font-size: var(--text-xs);
-  padding: 2px 8px;
-  border-radius: 12px;
-  background: var(--success-light);
-  color: var(--success-dark, #166534);
-  font-weight: 500;
-}
-
-.template-update-banner {
-  background: var(--warning-light);
-  border: 1px solid var(--warning);
-  border-radius: var(--radius-md);
-  padding: var(--space-4);
-  margin-bottom: var(--space-4);
-}
-
-.template-update-banner p {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-sm);
-  color: #7C5E0A;
-}
-
-.banner-actions {
-  display: flex;
-  gap: var(--space-3);
-}
-
 .action-bar {
   display: flex;
   align-items: center;
@@ -241,42 +172,7 @@ function getExecutionCount(cellId) {
   color: var(--text-secondary);
 }
 
-.cell-wrapper {
-  /* spacing handled by cell components */
-}
-
-.bottom-bar {
-  display: flex;
-  justify-content: center;
-  gap: var(--space-3);
-  padding: var(--space-6) 0;
-  border-top: 1px solid var(--border);
-  margin-top: var(--space-4);
-}
-
 /* Buttons */
-.btn-accent {
-  background: var(--accent);
-  color: #fff;
-  border: 1px solid var(--accent);
-  padding: 6px 16px;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--duration-fast);
-}
-
-.btn-accent:hover:not(:disabled) {
-  background: var(--accent-dark);
-  border-color: var(--accent-dark);
-}
-
-.btn-accent:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .btn-ghost {
   background: none;
   border: 1px solid var(--border);
