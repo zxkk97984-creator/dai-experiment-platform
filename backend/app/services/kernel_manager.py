@@ -1,38 +1,68 @@
 """
 Kernel Session 管理器
 
-管理 Docker 容器中的 ipykernel 实例，提供代码执行、中断、重启功能。
-关键设计：
-- connection file 在容器内生成，宿主机通过 docker cp 获取（避免 Docker Desktop WSL2 路径问题）
-- 使用 Redis 记录 session 状态，支持后端重启恢复
-- 每 record_id 一把 Redis 互斥锁
+架构：
+- docker run 启动持久 ipykernel（network none，无 -p），conn file 在 /tmp/conn.json
+- 每次 execute 用 docker exec -i <container> python /.dai/kernel_runner.py
+- trusted runner 在容器内通过 jupyter_client.BlockingKernelClient 连接 ipykernel
+- 学生代码通过 stdin JSON 传入，不出现于 argv
+- 硬超时 30s → rm -f 旧容器 + 立即 create_session 重建
+- Redis 持久化 session + hidden init marker
 """
 import json
+import logging
 import os
+import secrets
 import subprocess
 import time
 from typing import Optional
 
 from app.config import Settings, get_settings
 
+logger = logging.getLogger("kernel_manager")
+
+KERNEL_HARD_TIMEOUT = 30
+RUNNER_PATH = "/.dai/kernel_runner.py"
+
 
 class KernelSession:
     """单个 kernel session 的运行时状态"""
 
-    def __init__(self, record_id: int, container_name: str, conn_info: dict):
+    def __init__(self, record_id: int, container_name: str, conn_info: dict,
+                 lesson_storage_dir: str = "",
+                 initialized_template_version_id: int | None = None):
         self.record_id = record_id
         self.container_name = container_name
         self.conn_info = conn_info
+        self.lesson_storage_dir = lesson_storage_dir
+        self.initialized_template_version_id = initialized_template_version_id
         self.last_active_at = time.time()
 
     @property
     def is_alive(self) -> bool:
-        """检查容器是否存活"""
         result = subprocess.run(
             ["docker", "ps", "-q", "-f", f"name={self.container_name}"],
             capture_output=True, text=True,
         )
         return bool(result.stdout.strip())
+
+    def to_redis_dict(self) -> dict:
+        return {
+            "container_name": self.container_name,
+            "conn_info": self.conn_info,
+            "lesson_storage_dir": self.lesson_storage_dir,
+            "initialized_template_version_id": self.initialized_template_version_id,
+        }
+
+    @classmethod
+    def from_redis_dict(cls, record_id: int, data: dict) -> "KernelSession":
+        return cls(
+            record_id=record_id,
+            container_name=data["container_name"],
+            conn_info=data["conn_info"],
+            lesson_storage_dir=data.get("lesson_storage_dir", ""),
+            initialized_template_version_id=data.get("initialized_template_version_id"),
+        )
 
 
 class KernelManager:
@@ -41,53 +71,107 @@ class KernelManager:
     def __init__(self, settings: Optional[Settings] = None):
         self.settings = settings or get_settings()
         self._sessions: dict[int, KernelSession] = {}
-        self._lock_key_prefix = "kernel:lock"
 
     def _make_container_name(self, record_id: int) -> str:
         return f"dai-kernel-rec-{record_id}"
 
-    def _generate_conn_info(self, record_id: int) -> tuple[str, dict]:
-        """在宿主机生成 connection file，返回 (file_path, conn_info)"""
+    def _make_lock_token(self) -> str:
+        return secrets.token_hex(16)
+
+    def _generate_conn_file(self, record_id: int) -> tuple[str, dict]:
         from jupyter_client import write_connection_file
-        import secrets
 
         tmp_dir = os.path.join(os.environ.get("TEMP", "/tmp"), "dai-kernels")
         os.makedirs(tmp_dir, exist_ok=True)
         conn_path = os.path.join(tmp_dir, f"kernel-rec-{record_id}.json")
         key = secrets.token_hex(24).encode("ascii")
         write_connection_file(conn_path, ip="0.0.0.0", key=key)
-        # 读取并确保 ip（debug 日志）
         with open(conn_path) as f:
             conn_info = json.load(f)
-        print(f"[DEBUG kernel_manager] wrote conn file: ip={conn_info.get('ip')} ports={conn_info.get('shell_port')}", flush=True)
-        if conn_info.get("ip") != "0.0.0.0":
-            print(f"[DEBUG kernel_manager] WARNING: ip was {conn_info['ip']}, fixing to 0.0.0.0", flush=True)
-            conn_info["ip"] = "0.0.0.0"
-            with open(conn_path, "w") as f:
-                json.dump(conn_info, f)
+        conn_info["ip"] = "0.0.0.0"
+        with open(conn_path, "w") as f:
+            json.dump(conn_info, f)
         return conn_path, conn_info
 
+    def _write_session_redis(self, record_id: int, session: KernelSession):
+        """写 Redis session 元数据"""
+        try:
+            import redis
+            r = redis.from_url(self.settings.redis_url)
+            r.setex(
+                f"kernel:session:{record_id}", 3600,
+                json.dumps(session.to_redis_dict()),
+            )
+        except Exception as e:
+            raise RuntimeError(f"Redis 写入失败: {e}") from e
+
+    def _read_session_redis(self, record_id: int) -> KernelSession | None:
+        try:
+            import redis
+            r = redis.from_url(self.settings.redis_url)
+            data_str = r.get(f"kernel:session:{record_id}")
+            if data_str:
+                return KernelSession.from_redis_dict(record_id, json.loads(data_str))
+        except Exception:
+            pass
+        return None
+
+    def is_template_initialized(self, record_id: int, version_id: int) -> bool:
+        """检查 template version 是否已初始化"""
+        try:
+            import redis
+            r = redis.from_url(self.settings.redis_url)
+            marker = r.get(f"kernel:init:{record_id}")
+            if marker:
+                return int(marker) == version_id
+        except Exception:
+            pass
+        session = self._sessions.get(record_id)
+        return (session is not None and
+                session.initialized_template_version_id == version_id)
+
+    def mark_template_initialized(self, record_id: int, version_id: int):
+        """标记 template version 已初始化（Redis + 内存）"""
+        session = self._sessions.get(record_id)
+        if not session:
+            raise RuntimeError(f"Kernel session {record_id} 不可用")
+
+        previous_version_id = session.initialized_template_version_id
+        try:
+            import redis
+            r = redis.from_url(self.settings.redis_url)
+            r.setex(f"kernel:init:{record_id}", 3600, str(version_id))
+            session.initialized_template_version_id = version_id
+            self._write_session_redis(record_id, session)
+        except Exception as exc:
+            session.initialized_template_version_id = previous_version_id
+            try:
+                r.delete(f"kernel:init:{record_id}")
+            except Exception:
+                pass
+            raise RuntimeError(f"Kernel 初始化标记持久化失败: {exc}") from exc
+
     def create_session(self, record_id: int, lesson_storage_dir: str) -> KernelSession:
-        """创建新 kernel session。宿主机生成连接文件 → 挂载到容器 → 端口映射。"""
         container_name = self._make_container_name(record_id)
         subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
 
-        # 宿主机生成连接文件
-        conn_path, conn_info = self._generate_conn_info(record_id)
-        ports = [conn_info[k] for k in ("shell_port","iopub_port","stdin_port","control_port","hb_port")]
+        conn_path, conn_info = self._generate_conn_file(record_id)
 
         work_dir = os.path.join(os.environ.get("TEMP", "/tmp"), "dai-workspaces", f"student_{record_id}")
         os.makedirs(work_dir, exist_ok=True)
 
         cmd = [
             "docker", "run", "-d", "--name", container_name,
-            "--cpus", "1", "--memory", "512m", "--pids-limit", "50",
+            "--network", "none",
+            "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges",
+            "--read-only",
+            "--tmpfs", "/tmp:exec,size=64m",
+            "--cpus", "1", "--memory", "256m", "--pids-limit", "50",
             "-l", f"dai.record_id={record_id}",
             "-v", f"{conn_path}:/tmp/conn.json:ro",
-            "-v", f"{work_dir}:/work",
+            "-v", f"{work_dir}:/work:rw",
         ]
-        for p in ports:
-            cmd.extend(["-p", f"127.0.0.1:{p}:{p}"])
         if os.path.isdir(lesson_storage_dir):
             cmd.extend(["-v", f"{lesson_storage_dir}:/course:ro"])
         cmd.extend(["dai-kernel-python:latest", "python", "-m", "ipykernel_launcher", "-f", "/tmp/conn.json"])
@@ -106,118 +190,131 @@ class KernelManager:
                 break
             time.sleep(1)
         else:
-            raise RuntimeError(f"Kernel 容器未存活")
+            raise RuntimeError("Kernel 容器未存活")
 
-        conn_info["ip"] = "127.0.0.1"
-        session = KernelSession(record_id, container_name, conn_info)
+        session = KernelSession(record_id, container_name, conn_info,
+                                lesson_storage_dir=lesson_storage_dir)
+        try:
+            self._write_session_redis(record_id, session)
+        except Exception:
+            subprocess.run(
+                ["docker", "rm", "-f", container_name],
+                capture_output=True,
+            )
+            raise
         self._sessions[record_id] = session
         return session
 
     def get_or_create_session(self, record_id: int, lesson_storage_dir: str = "") -> KernelSession:
-        """获取已有 session 或创建新 session"""
-        # 1. 检查内存缓存
         session = self._sessions.get(record_id)
         if session and session.is_alive:
             session.last_active_at = time.time()
             return session
 
-        # 2. 检查 Redis 中是否有记录
-        try:
-            import redis
-            r = redis.from_url(self.settings.redis_url)
-            data_str = r.get(f"kernel:session:{record_id}")
-            if data_str:
-                data = json.loads(data_str)
-                container_name = data["container_name"]
-                alive = subprocess.run(
-                    ["docker", "ps", "-q", "-f", f"name={container_name}"],
-                    capture_output=True, text=True,
-                )
-                if alive.stdout.strip():
-                    session = KernelSession(record_id, container_name, data["conn_info"])
-                    self._sessions[record_id] = session
-                    return session
-                else:
+        session = self._read_session_redis(record_id)
+        if session:
+            alive = subprocess.run(
+                ["docker", "ps", "-q", "-f", f"name={session.container_name}"],
+                capture_output=True, text=True,
+            )
+            if alive.stdout.strip():
+                self._sessions[record_id] = session
+                return session
+            else:
+                try:
+                    import redis
+                    r = redis.from_url(self.settings.redis_url)
                     r.delete(f"kernel:session:{record_id}")
-        except Exception:
-            pass
+                except Exception:
+                    pass
 
-        # 3. 创建新 session
         return self.create_session(record_id, lesson_storage_dir)
 
     def execute(self, record_id: int, code: str) -> dict:
-        """
-        在指定 session 中执行代码，返回 {outputs: [...], execution_time_ms: int}
-
-        使用 Redis 互斥锁（如果可用）保证同一 kernel 串行执行。
-        """
+        """通过 docker exec + trusted runner 在持久 ipykernel 中执行代码"""
         session = self._sessions.get(record_id)
         if not session or not session.is_alive:
             raise RuntimeError(f"Kernel session {record_id} 不可用")
 
-        # 尝试获取锁
-        lock_key = f"{self._lock_key_prefix}:{record_id}"
-        lock = None
+        # Redis 互斥锁（fail closed）
+        import redis
+        lock_key = f"kernel:lock:{record_id}"
+        lock_token = self._make_lock_token()
         try:
-            import redis
             r = redis.from_url(self.settings.redis_url)
-            lock = r.set(lock_key, "1", nx=True, ex=60)
-            if not lock:
+            acquired = r.set(lock_key, lock_token, nx=True, ex=60)
+            if not acquired:
                 raise RuntimeError("Kernel 正忙，请等待当前代码执行完成")
-        except Exception:
-            pass
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError(f"Redis 不可用，无法获取执行锁: {e}") from e
 
         try:
-            # 连接到 kernel 并执行
-            conn_info = dict(session.conn_info)
-            conn_info["kernel_name"] = ""
-
-            from jupyter_client import BlockingKernelClient
-            kc = BlockingKernelClient()
-            kc.load_connection_info(conn_info)
-
+            # docker exec 运行 trusted runner，代码通过 stdin JSON 传入
+            exec_cmd = [
+                "docker", "exec", "-i", session.container_name,
+                "python", RUNNER_PATH,
+            ]
             start = time.perf_counter()
-            kc.start_channels()
-            kc.wait_for_ready(timeout=10)
-
-            msg_id = kc.execute(code)
-            outputs = []
-            while True:
+            try:
+                result = subprocess.run(
+                    exec_cmd,
+                    input=json.dumps({"code": code}),
+                    capture_output=True, text=True,
+                    timeout=KERNEL_HARD_TIMEOUT,
+                )
+                elapsed_ms = int((time.perf_counter() - start) * 1000)
+            except subprocess.TimeoutExpired:
+                elapsed_ms = int((time.perf_counter() - start) * 1000)
+                # 保存旧 session 信息
+                old_storage = session.lesson_storage_dir
+                # 销毁旧容器
+                self.destroy(record_id)
+                # 立即重建
                 try:
-                    msg = kc.get_iopub_msg(timeout=self.settings.judge_timeout_seconds or 30)
-                    mt = msg.get("msg_type", "")
-                    if mt == "status":
-                        if msg["content"].get("execution_state") == "idle":
-                            break
-                    elif mt in ("stream", "display_data", "execute_result", "error"):
-                        content = dict(msg["content"])
-                        # 将 bytes 转为可 JSON 序列化
-                        if "data" in content:
-                            content["data"] = {
-                                k: (v.decode("utf-8", errors="replace") if isinstance(v, bytes) else v)
-                                for k, v in content["data"].items()
-                            }
-                        outputs.append({"msg_type": mt, "content": content})
-                except Exception:
-                    break
+                    self.create_session(record_id, old_storage)
+                except Exception as rebuild_err:
+                    raise RuntimeError(
+                        f"代码执行超时（>{KERNEL_HARD_TIMEOUT}s），重建 kernel 失败: {rebuild_err}"
+                    ) from rebuild_err
+                raise RuntimeError(
+                    f"代码执行超时（>{KERNEL_HARD_TIMEOUT}s），kernel 已重建"
+                )
 
-            kc.stop_channels()
-            elapsed = int((time.perf_counter() - start) * 1000)
+            if result.returncode != 0:
+                runner_error = (result.stderr or result.stdout or "unknown runner error").strip()
+                raise RuntimeError(f"Kernel runner 执行失败: {runner_error}")
 
-            return {"outputs": outputs, "execution_time_ms": elapsed}
+            # 解析 runner 输出
+            outputs = []
+            try:
+                data = json.loads(result.stdout.strip() or "{}")
+                if data.get("error"):
+                    outputs.append({"msg_type": "error", "content": {"text": data["error"]}})
+                for o in data.get("outputs", []):
+                    outputs.append(o)
+            except json.JSONDecodeError:
+                if result.stdout:
+                    outputs.append({"msg_type": "stream", "content": {"name": "stdout", "text": result.stdout}})
+                if result.stderr:
+                    outputs.append({"msg_type": "stream", "content": {"name": "stderr", "text": result.stderr}})
+
+            return {"outputs": outputs, "execution_time_ms": elapsed_ms}
 
         finally:
-            if lock:
-                try:
-                    import redis
-                    r = redis.from_url(self.settings.redis_url)
-                    r.delete(lock_key)
-                except Exception:
-                    pass
+            # token-safe unlock
+            try:
+                r = redis.from_url(self.settings.redis_url)
+                r.eval(
+                    "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+                    1, lock_key, lock_token,
+                )
+            except Exception:
+                pass
             session.last_active_at = time.time()
 
     def interrupt(self, record_id: int):
-        """中断当前 kernel 执行"""
         session = self._sessions.get(record_id)
         if session and session.is_alive:
             subprocess.run(
@@ -226,12 +323,14 @@ class KernelManager:
             )
 
     def restart(self, record_id: int, lesson_storage_dir: str = "") -> KernelSession:
-        """重启 kernel（销毁旧容器，创建新的）"""
+        if not lesson_storage_dir:
+            existing = self._sessions.get(record_id)
+            if existing:
+                lesson_storage_dir = existing.lesson_storage_dir
         self.destroy(record_id)
         return self.create_session(record_id, lesson_storage_dir)
 
     def destroy(self, record_id: int):
-        """销毁 kernel session"""
         session = self._sessions.pop(record_id, None)
         if session:
             subprocess.run(
@@ -242,21 +341,18 @@ class KernelManager:
             import redis
             r = redis.from_url(self.settings.redis_url)
             r.delete(f"kernel:session:{record_id}")
+            r.delete(f"kernel:init:{record_id}")
         except Exception:
             pass
 
-    def cleanup_idle(self, max_idle_seconds: int = 1800):
-        """清理超过 max_idle_seconds 未使用的 session"""
+    def cleanup_idle(self, max_idle_seconds: int = 900):
         now = time.time()
-        to_clean = []
         for rid, session in list(self._sessions.items()):
             if now - session.last_active_at > max_idle_seconds:
-                to_clean.append(rid)
-        for rid in to_clean:
-            self.destroy(rid)
+                self.destroy(rid)
 
     def recover_from_docker(self):
-        """从 Docker label 恢复所有未记录的 session"""
+        """从 Docker label dai.record_id 恢复所有未记录的 session，重建 Redis 元数据"""
         result = subprocess.run(
             ["docker", "ps", "-q", "--filter", "label=dai.record_id"],
             capture_output=True, text=True,
@@ -265,15 +361,58 @@ class KernelManager:
         for cid in container_ids:
             if not cid:
                 continue
-            labels = subprocess.run(
-                ["docker", "inspect", "-f", "{{.Config.Labels}}", cid],
-                capture_output=True, text=True,
-            )
-            # 解析 label 恢复 record_id...（简化实现，后续完善）
-            pass
+            try:
+                name_result = subprocess.run(
+                    ["docker", "inspect", "-f", "{{.Name}}", cid],
+                    capture_output=True, text=True,
+                )
+                container_name = name_result.stdout.strip().lstrip("/")
+                if not container_name or not container_name.startswith("dai-kernel-rec-"):
+                    continue
+
+                label_result = subprocess.run(
+                    ["docker", "inspect", "-f", '{{index .Config.Labels "dai.record_id"}}', cid],
+                    capture_output=True, text=True,
+                )
+                try:
+                    record_id = int(label_result.stdout.strip())
+                except ValueError:
+                    continue
+
+                if record_id in self._sessions:
+                    continue
+
+                # 从容器内读 conn file
+                conn_info = None
+                cp_result = subprocess.run(
+                    ["docker", "exec", cid, "cat", "/tmp/conn.json"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if cp_result.returncode == 0:
+                    try:
+                        conn_info = json.loads(cp_result.stdout)
+                    except json.JSONDecodeError:
+                        pass
+
+                if not conn_info:
+                    # fallback: try Redis
+                    session = self._read_session_redis(record_id)
+                    if session:
+                        conn_info = session.conn_info
+
+                if conn_info:
+                    session = KernelSession(record_id, container_name, conn_info)
+                    self._sessions[record_id] = session
+                    # 重建 Redis 元数据
+                    try:
+                        self._write_session_redis(record_id, session)
+                    except Exception:
+                        pass
+                    logger.info("Recovered kernel session %d from Docker label", record_id)
+            except Exception as e:
+                logger.warning("Failed to recover container %s: %s", cid, e)
 
 
-# 全局单例
 _kernel_manager: Optional[KernelManager] = None
 
 

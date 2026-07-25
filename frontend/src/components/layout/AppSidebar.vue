@@ -36,6 +36,15 @@ const menuItems = computed(() => {
     { path: '/admin/courses',       label: '课程',     sub: 'Courses',     icon: 'courses',     key: 'courses' },
     { path: '/admin/experiments',   label: '实验',     sub: 'Experiments', icon: 'experiments', key: 'experiments' },
   ]
+  if (auth.isDeveloper) return [
+    {
+      path: '/developer/templates',
+      label: '实验模板',
+      sub: 'Templates',
+      icon: 'experiments',
+      key: 'templates',
+    },
+  ]
   return base
 })
 

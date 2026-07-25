@@ -12,6 +12,9 @@ RUN pip install --no-cache-dir \
     scikit-learn \
     matplotlib
 
+# kernel runner（容器内连接 ipykernel 的可信脚本）
+COPY kernel_runner.py /.dai/kernel_runner.py
+
 # 创建非 root 用户用于执行
 RUN useradd --create-home --shell /bin/bash student
 

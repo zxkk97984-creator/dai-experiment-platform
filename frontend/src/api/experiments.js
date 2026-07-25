@@ -1,30 +1,48 @@
 import client from './client.js'
 
+/** 统一的实验 API — 仅此入口，不再调用 /notebooks */
 export const experimentsAPI = {
-  // 模块
-  listModules(params) { return client.get('/experiments/modules', { params }) },
-  createModule(data) { return client.post('/experiments/modules', data) },
-  getModule(id) { return client.get(`/experiments/modules/${id}`) },
-
-  // 记录
-  createRecord(data) { return client.post('/experiments/records', data) },
-  listRecords(params) { return client.get('/experiments/records', { params }) },
-  /** 确保学生有实验记录（不存在则创建） */
-  ensureRecord(moduleId) { return client.post(`/experiments/records/ensure/${moduleId}`) },
-  /** 获取实验记录详情（含 cells + outputs） */
-  getRecordDetail(recordId) { return client.get(`/experiments/records/${recordId}`) },
-
-  // Cells 操作
-  /** 保存 cells 源码 */
-  saveCells(recordId, cells, cellOrder) {
-    return client.put(`/experiments/records/${recordId}/cells`, { cells, cell_order: cellOrder })
+  /** 确保学生有 lesson notebook 记录 */
+  ensureForLesson(lessonId) {
+    return client.post(`/experiments/records/ensure-for-lesson/${lessonId}`)
   },
-  /** 执行代码 */
+
+  /** 确保学生有 module 实验记录 */
+  ensureForModule(moduleId) {
+    return client.post(`/experiments/records/ensure-for-module/${moduleId}`)
+  },
+
+  /** 获取记录详情（含 cells + outputs） */
+  getRecordDetail(recordId) {
+    return client.get(`/experiments/records/${recordId}`)
+  },
+
+  /** 保存 cells 源码（含 record_revision） */
+  saveCells(recordId, cells, recordRevision) {
+    return client.put(`/experiments/records/${recordId}/cells`, {
+      cells,
+      record_revision: recordRevision,
+    })
+  },
+
+  /** 执行 cell */
   executeCell(recordId, cellId, code) {
     return client.post(`/experiments/records/${recordId}/cells/${cellId}/execute`, { code })
   },
-  /** 中断执行 */
-  interrupt(recordId) { return client.post(`/experiments/records/${recordId}/interrupt`) },
+
+  /** 中断 kernel */
+  interrupt(recordId) {
+    return client.post(`/experiments/records/${recordId}/interrupt`)
+  },
+
   /** 重启 kernel */
-  restartKernel(recordId) { return client.post(`/experiments/records/${recordId}/restart`) },
+  restart(recordId) {
+    return client.post(`/experiments/records/${recordId}/restart`)
+  },
+
+  // 模块管理
+  listModules(params) { return client.get('/experiments/modules', { params }) },
+  getModule(id) { return client.get(`/experiments/modules/${id}`) },
+  createModule(payload) { return client.post('/experiments/modules', payload) },
+  updateModule(id, payload) { return client.patch(`/experiments/modules/${id}`, payload) },
 }

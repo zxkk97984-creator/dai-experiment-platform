@@ -27,7 +27,9 @@ const routes = [
   { path: '/teacher/assignments/:id/edit', name: 'TeacherQuestionEdit', component: () => import('../views/teacher/QuestionEditView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/exams', name: 'TeacherExams', component: () => import('../views/teacher/ExamManageView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/exams/:id/grades', name: 'TeacherGrades', component: () => import('../views/teacher/GradesView.vue'), meta: { role: 'teacher' } },
-  { path: '/teacher/experiments', name: 'TeacherExperiments', component: () => import('../views/teacher/ExperimentManageView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/exams/:id/edit', name: 'TeacherQuestionEdit', component: () => import('../views/teacher/ExamQuestionEditView.vue'), meta: { role: 'teacher' } },
+ { path: '/teacher/experiments', name: 'TeacherExperiments', component: () => import('../views/teacher/ExperimentManageView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/courses/:id/studio/:lid', name: 'TeacherStudio', component: () => import('../views/teacher/StudioView.vue'), meta: { role: 'teacher' } },
 
   // Admin
   { path: '/admin', name: 'AdminHome', component: () => import('../views/admin/DashboardView.vue'), meta: { role: 'admin' } },
@@ -35,6 +37,10 @@ const routes = [
   { path: '/admin/users/:id/edit', name: 'AdminUserEdit', component: () => import('../views/admin/UserEditView.vue'), meta: { role: 'admin' } },
   { path: '/admin/courses', name: 'AdminCourses', component: () => import('../views/teacher/CourseManageView.vue'), meta: { role: 'admin' } },
   { path: '/admin/experiments', name: 'AdminExperiments', component: () => import('../views/admin/ExperimentManageView.vue'), meta: { role: 'admin' } },
+
+  // Developer
+  { path: '/developer/templates', name: 'DeveloperTemplates', component: () => import('../views/developer/TemplateManageView.vue'), meta: { role: 'developer' } },
+  { path: '/developer/studio/:id', name: 'DeveloperStudio', component: () => import('../views/developer/StudioView.vue'), meta: { role: 'developer' } },
 
   { path: '/', redirect: '/welcome' },
   { path: '/:pathMatch(.*)*', redirect: '/welcome' },
@@ -45,7 +51,12 @@ const router = createRouter({
   routes,
 })
 
-const roleHome = { student: '/student/courses', teacher: '/teacher/courses', admin: '/admin/users', developer: '/admin/users' }
+const roleHome = {
+  student: '/student/courses',
+  teacher: '/teacher/courses',
+  admin: '/admin/users',
+  developer: '/developer/templates',
+}
 
 let fetchMePromise = null
 

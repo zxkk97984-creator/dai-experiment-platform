@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, ForeignKeyConstraint, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -16,6 +16,9 @@ class TimestampMixin:
     )
 
 
+# ── 用户 ─────────────────────────────────────────────────────
+
+
 class User(TimestampMixin, Base):
     __tablename__ = "users"
 
@@ -25,6 +28,9 @@ class User(TimestampMixin, Base):
     real_name: Mapped[str] = mapped_column(String(120))
     role: Mapped[str] = mapped_column(String(30), index=True)
     status: Mapped[str] = mapped_column(String(30), default="active", index=True)
+
+
+# ── 课程 / 章节 / 课时 ────────────────────────────────────────
 
 
 class Course(TimestampMixin, Base):
@@ -68,11 +74,16 @@ class Lesson(TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(200))
     content_type: Mapped[str] = mapped_column(String(30), default="markdown")
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    template_id: Mapped[int | None] = mapped_column(ForeignKey("notebook_templates.id"), nullable=True)
     notebook_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     video_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, default=0)
 
     chapter: Mapped[Chapter] = relationship(back_populates="lessons")
+    notebook_template: Mapped["NotebookTemplate | None"] = relationship(foreign_keys=[template_id])
+
+
+# ── 选课 ─────────────────────────────────────────────────────
 
 
 class CourseEnrollment(TimestampMixin, Base):
@@ -86,6 +97,9 @@ class CourseEnrollment(TimestampMixin, Base):
 
     course: Mapped[Course] = relationship()
     student: Mapped[User] = relationship()
+
+
+# ── 作业与判题 ───────────────────────────────────────────────
 
 
 class Assignment(TimestampMixin, Base):
@@ -143,6 +157,9 @@ class Submission(TimestampMixin, Base):
     student: Mapped[User] = relationship()
 
 
+# ── 考试 ─────────────────────────────────────────────────────
+
+
 class Exam(TimestampMixin, Base):
     __tablename__ = "exams"
 
@@ -156,23 +173,34 @@ class Exam(TimestampMixin, Base):
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     course: Mapped[Course] = relationship()
+    questions: Mapped[list["ExamQuestion"]] = relationship(back_populates="exam", cascade="all, delete-orphan")
 
 
 class ExamSubmission(TimestampMixin, Base):
+    """考试提交记录。answers 已删除，ExamAnswer 是唯一事实源。"""
     __tablename__ = "exam_submissions"
-    __table_args__ = (UniqueConstraint("exam_id", "student_id", name="uq_exam_student"),)
+    __table_args__ = (
+        UniqueConstraint("exam_id", "student_id", name="uq_exam_student"),
+        CheckConstraint(
+            "status IN ('started', 'submitted', 'grading', 'graded')",
+            name="ck_exam_submission_status",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     exam_id: Mapped[int] = mapped_column(ForeignKey("exams.id"), index=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     status: Mapped[str] = mapped_column(String(30), default="started", index=True)
-    answers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # started -> submitted -> grading -> graded
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    graded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     exam: Mapped[Exam] = relationship()
     student: Mapped[User] = relationship()
+    answers: Mapped[list["ExamAnswer"]] = relationship(back_populates="submission", cascade="all, delete-orphan")
 
 
 class ExamGrade(TimestampMixin, Base):
@@ -188,6 +216,121 @@ class ExamGrade(TimestampMixin, Base):
     student: Mapped[User] = relationship()
 
 
+class ExamQuestion(TimestampMixin, Base):
+    """考试题目"""
+    __tablename__ = "exam_questions"
+    __table_args__ = (
+        CheckConstraint(
+            "question_type IN ('single_choice', 'multi_choice', 'code')",
+            name="ck_exam_question_type",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    exam_id: Mapped[int] = mapped_column(ForeignKey("exams.id"), index=True)
+    question_type: Mapped[str] = mapped_column(String(20))  # single_choice / multi_choice / code
+    prompt: Mapped[str] = mapped_column(Text)
+    options: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    correct_answer: Mapped[dict] = mapped_column(JSON)  # {"correct":["A"]} 或 {"test_file":"..."}
+    points: Mapped[float] = mapped_column(Float, default=0)
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    starter_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    public_cases: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    hidden_tests: Mapped[str | None] = mapped_column(Text, nullable=True)
+    time_limit_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    memory_limit_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    exam: Mapped[Exam] = relationship(back_populates="questions")
+
+
+class ExamAnswer(TimestampMixin, Base):
+    """考试答题唯一事实源——逐题行记录，禁止并发改整块 JSON"""
+    __tablename__ = "exam_answers"
+    __table_args__ = (
+        UniqueConstraint("submission_id", "question_id", name="uq_exam_answer_q"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    submission_id: Mapped[int] = mapped_column(ForeignKey("exam_submissions.id"), index=True)
+    question_id: Mapped[int] = mapped_column(ForeignKey("exam_questions.id"), index=True)
+    selected_options: Mapped[list | None] = mapped_column(JSON, nullable=True)  # 选择题答案
+    code_answer: Mapped[str | None] = mapped_column(Text, nullable=True)  # 编程题答案
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    grading_status: Mapped[str] = mapped_column(String(20), default="pending")  # pending / running / completed
+    result_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    system_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    submission: Mapped[ExamSubmission] = relationship(back_populates="answers")
+    question: Mapped[ExamQuestion] = relationship()
+
+
+# ── Notebook 模板与版本 ───────────────────────────────────────
+
+
+class NotebookTemplate(TimestampMixin, Base):
+    """教师创建/编辑的实验模板"""
+    __tablename__ = "notebook_templates"
+    __table_args__ = (
+        # FK 单独定义以使用 use_alter 解决循环依赖
+        # migration 中通过 batch_alter_table 单独创建
+        ForeignKeyConstraint(
+            ["current_version_id"], ["notebook_template_versions.id"],
+            use_alter=True, name="fk_template_current_version",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft / published
+    current_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    draft_cells: Mapped[list] = mapped_column(JSON, default=list)
+    draft_revision: Mapped[int] = mapped_column(Integer, default=1)
+    draft_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    draft_assets_dir: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    owner: Mapped[User] = relationship(foreign_keys=[owner_id])
+    versions: Mapped[list["NotebookTemplateVersion"]] = relationship(
+        back_populates="template", cascade="all, delete-orphan",
+        order_by="NotebookTemplateVersion.version_number",
+        foreign_keys="[NotebookTemplateVersion.template_id]",
+    )
+    current_version: Mapped["NotebookTemplateVersion | None"] = relationship(
+        foreign_keys=[current_version_id],
+        primaryjoin="NotebookTemplate.current_version_id == NotebookTemplateVersion.id",
+        post_update=True,
+    )
+
+
+class NotebookTemplateVersion(Base):
+    """每次发布的不可变快照——资源路径为相对路径"""
+    __tablename__ = "notebook_template_versions"
+    __table_args__ = (
+        UniqueConstraint("template_id", "version_number", name="uq_version_number_per_template"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    template_id: Mapped[int] = mapped_column(ForeignKey("notebook_templates.id"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    cells: Mapped[list] = mapped_column(JSON, default=list)  # 不可变快照
+    cell_order: Mapped[list] = mapped_column(JSON, default=list)
+    notebook_metadata: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    assets_dir: Mapped[str | None] = mapped_column(String(500), nullable=True)  # 相对路径
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    published_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+
+    template: Mapped[NotebookTemplate] = relationship(
+        back_populates="versions",
+        foreign_keys=[template_id],
+    )
+    published_by: Mapped[User] = relationship()
+
+
+# ── 实验模块 ──────────────────────────────────────────────────
+
+
 class ExperimentModule(TimestampMixin, Base):
     __tablename__ = "experiment_modules"
 
@@ -195,61 +338,64 @@ class ExperimentModule(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     entry_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    template_id: Mapped[int | None] = mapped_column(ForeignKey("notebook_templates.id"), nullable=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
+
+    notebook_template: Mapped[NotebookTemplate | None] = relationship(foreign_keys=[template_id])
+    owner: Mapped[User | None] = relationship(foreign_keys=[owner_id])
+
+
+# ── 统一实验记录（替代 NotebookRecord）─────────────────────────
 
 
 class ExperimentRecord(TimestampMixin, Base):
+    """统一的实验/Notebook 学生记录。lesson_id 和 module_id 二选一。"""
     __tablename__ = "experiment_records"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    module_id: Mapped[int] = mapped_column(ForeignKey("experiment_modules.id"), index=True)
-    student_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    status: Mapped[str] = mapped_column(String(30), default="started")
-    metadata_json: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
-
-    module: Mapped[ExperimentModule] = relationship()
-    student: Mapped[User] = relationship()
-
-
-class NotebookRecord(TimestampMixin, Base):
-    """学生笔记本副本：每个学生+课时一条记录"""
-    __tablename__ = "notebook_records"
     __table_args__ = (
-        UniqueConstraint("lesson_id", "student_id", name="uq_notebook_lesson_student"),
+        UniqueConstraint("lesson_id", "student_id", name="uq_record_lesson_student"),
+        UniqueConstraint("module_id", "student_id", name="uq_record_module_student"),
+        CheckConstraint(
+            "(lesson_id IS NULL) != (module_id IS NULL)",
+            name="ck_record_entry_type",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"), index=True)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("lessons.id"), nullable=True, index=True)
+    module_id: Mapped[int | None] = mapped_column(ForeignKey("experiment_modules.id"), nullable=True, index=True)
+    template_version_id: Mapped[int] = mapped_column(ForeignKey("notebook_template_versions.id"))
     student_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     status: Mapped[str] = mapped_column(String(30), default="started")
-    template_version: Mapped[int] = mapped_column(Integer, default=1)
-    template_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    cells_sources: Mapped[dict] = mapped_column(JSON, default=dict)
-    cells_outputs: Mapped[dict] = mapped_column(JSON, default=dict)
-    cell_order: Mapped[list] = mapped_column(JSON, default=list)
+    cells_sources: Mapped[dict] = mapped_column(JSON, default=dict)  # {cell_id: source}
+    cells_outputs: Mapped[dict] = mapped_column(JSON, default=dict)  # {cell_id: {outputs, execution_count}}
+    record_revision: Mapped[int] = mapped_column(Integer, default=1)  # 乐观并发控制
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    lesson: Mapped[Lesson] = relationship()
+    lesson: Mapped[Lesson | None] = relationship(foreign_keys=[lesson_id])
+    module: Mapped[ExperimentModule | None] = relationship(foreign_keys=[module_id])
+    template_version: Mapped[NotebookTemplateVersion] = relationship()
     student: Mapped[User] = relationship()
-    submissions: Mapped[list["NotebookSubmission"]] = relationship(
+    submissions: Mapped[list["ExperimentSubmission"]] = relationship(
         back_populates="record", cascade="all, delete-orphan"
     )
 
 
-class NotebookSubmission(TimestampMixin, Base):
+class ExperimentSubmission(TimestampMixin, Base):
     """每次提交的记录，cells_snapshot 不可变"""
-    __tablename__ = "notebook_submissions"
+    __tablename__ = "experiment_submissions"
     __table_args__ = (
-        UniqueConstraint("record_id", "attempt_number", name="uq_notebook_submission_attempt"),
+        UniqueConstraint("record_id", "attempt_number", name="uq_experiment_submission_attempt"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    record_id: Mapped[int] = mapped_column(ForeignKey("notebook_records.id"), index=True)
+    record_id: Mapped[int] = mapped_column(ForeignKey("experiment_records.id"), index=True)
     attempt_number: Mapped[int] = mapped_column(Integer, default=1)
     cells_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
-    artifacts_dir: Mapped[str | None] = mapped_column(String(255), nullable=True)
     submitted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
-    record: Mapped[NotebookRecord] = relationship(back_populates="submissions")
+    record: Mapped[ExperimentRecord] = relationship(back_populates="submissions")

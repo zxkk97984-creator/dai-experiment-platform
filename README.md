@@ -1,6 +1,6 @@
 # DAI 实验平台
 
-面向人工智能课程的在线实验平台，支持课程管理、作业提交、Python 函数判题、考试成绩、JupyterLab 实验入口和实验记录。
+面向人工智能课程的一站式在线实验平台。教师通过 **Notebook Studio** 创建交互式课件，学生通过统一 **Notebook Player** 进行实验，支持 **完整考试系统**（选择题 + 编程题自动判题）、课程管理、作业提交和 Docker 沙箱判题。
 
 > 当前重点：后端接口已经实现并验收，`frontend/` 由前端同学继续开发。前端对接请优先看本文档和 Swagger。
 
@@ -20,7 +20,8 @@
 | 数据库 | MySQL |
 | 缓存与队列 | Redis |
 | 判题隔离 | Docker + pytest |
-| 交互实验 | 单 JupyterLab iframe 接入 |
+| 交互实验 | Notebook Studio 编辑器 + 统一 Student Player |
+| 考试系统 | 选择题 + 编程题 Docker 异步判题 |
 | 接口文档 | Swagger UI |
 
 ## 项目结构
@@ -50,7 +51,6 @@
 - Swagger：<http://localhost:8000/docs>
 - OpenAPI JSON：<http://localhost:8000/openapi.json>
 - 健康检查：<http://localhost:8000/health>
-- JupyterLab：<http://localhost:8888/lab>
 
 默认管理员账号：
 
@@ -102,11 +102,11 @@ py -3 -m venv .venv
 copy .env.example .env
 ```
 
-启动 MySQL、Redis、JupyterLab：
+启动 MySQL、Redis：
 
 ```bat
 
-docker compose up -d mysql redis jupyter
+docker compose up -d mysql redis
 ```
 
 执行数据库迁移，并创建或刷新管理员账号：
@@ -262,7 +262,7 @@ Bearer <access_token>
 | 代码提交/结果 | `/api/v1/judge` | 学生提交代码、查看判题状态和结果 |
 | 考试 | `/api/v1/exams` | 创建考试、开始考试、提交考试、查询成绩 |
 | 实验模块 | `/api/v1/experiments` | 实验模块和学生实验记录 |
-| Jupyter 入口 | `/api/v1/jupyter` | iframe 地址、Notebook 模板、复制模板 |
+| Jupyter 入口（默认关闭） | `/api/v1/jupyter` | 返回 503，启用需设 `DAI_JUPYTER_ENABLED=true` |
 
 ## 前端页面和接口对应关系
 

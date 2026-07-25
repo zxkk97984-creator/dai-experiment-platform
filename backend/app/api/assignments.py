@@ -2,10 +2,10 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.courses import can_view_course, ensure_course_manager, require_course
+from app.api.courses import can_view_course, require_course
 from app.dependencies import get_current_user, get_db, require_roles
 from app.errors import api_error
-from app.models import Assignment, Course, JudgeQuestion, User
+from app.models import Assignment, Course, CourseEnrollment, JudgeQuestion, User
 from app.schemas import (
     AssignmentCreate,
     AssignmentRead,
@@ -25,10 +25,11 @@ def require_assignment(assignment_id: int, db: Session) -> Assignment:
     return assignment
 
 
-def ensure_assignment_manager(assignment: Assignment, user: User):
+def ensure_assignment_manager(assignment: Assignment, user: User, db: Session):
     if user.role == "admin":
         return
-    if user.role == "teacher" and assignment.created_by_id == user.id:
+    course = db.get(Course, assignment.course_id)
+    if user.role == "teacher" and course and course.teacher_id == user.id:
         return
     raise api_error(403, "FORBIDDEN", "没有权限管理该作业")
 
@@ -47,11 +48,30 @@ def list_assignments(
         query = query.where(Assignment.course_id == course_id)
         count_query = count_query.where(Assignment.course_id == course_id)
     if current_user.role == "student":
-        query = query.where(Assignment.status == "published")
-        count_query = count_query.where(Assignment.status == "published")
+        # 学生只看到 published assignment + published course + enrolled
+        query = (
+            query.join(Course, Assignment.course_id == Course.id)
+            .join(CourseEnrollment, Course.id == CourseEnrollment.course_id)
+            .where(Assignment.status == "published")
+            .where(Course.status == "published")
+            .where(CourseEnrollment.student_id == current_user.id)
+            .where(CourseEnrollment.status == "enrolled")
+        )
+        count_query = (
+            count_query.join(Course, Assignment.course_id == Course.id)
+            .join(CourseEnrollment, Course.id == CourseEnrollment.course_id)
+            .where(Assignment.status == "published")
+            .where(Course.status == "published")
+            .where(CourseEnrollment.student_id == current_user.id)
+            .where(CourseEnrollment.status == "enrolled")
+        )
     elif current_user.role == "teacher":
-        query = query.where(Assignment.created_by_id == current_user.id)
-        count_query = count_query.where(Assignment.created_by_id == current_user.id)
+        query = query.join(Course, Assignment.course_id == Course.id).where(Course.teacher_id == current_user.id)
+        count_query = count_query.join(Course, Assignment.course_id == Course.id).where(Course.teacher_id == current_user.id)
+    elif current_user.role != "admin":
+        # developer or any unsupported role: empty
+        query = query.where(Assignment.id == -1)
+        count_query = count_query.where(Assignment.id == -1)
     total = db.scalar(count_query) or 0
     assignments = db.scalars(query.order_by(Assignment.id).offset((page - 1) * page_size).limit(page_size)).all()
     return PaginatedResponse(items=[AssignmentRead.model_validate(item) for item in assignments], page=page, page_size=page_size, total=total)
@@ -65,9 +85,8 @@ def create_assignment(
 ):
     course = require_course(payload.course_id, db)
     if current_user.role == "teacher":
-        if course.teacher_id is None:
-            course.teacher_id = current_user.id
-        ensure_course_manager(course, current_user)
+        if course.teacher_id != current_user.id:
+            raise api_error(403, "FORBIDDEN", "只能在自己的课程中创建作业")
     assignment = Assignment(**payload.model_dump(), created_by_id=current_user.id)
     db.add(assignment)
     db.commit()
@@ -85,6 +104,8 @@ def get_assignment(
     course = db.get(Course, assignment.course_id)
     if not course or not can_view_course(course, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限查看该作业")
+    if current_user.role == "student" and assignment.status != "published":
+        raise api_error(403, "ASSIGNMENT_NOT_AVAILABLE", "作业未发布")
     return assignment
 
 
@@ -96,7 +117,7 @@ def update_assignment(
     current_user: User = Depends(get_current_user),
 ):
     assignment = require_assignment(assignment_id, db)
-    ensure_assignment_manager(assignment, current_user)
+    ensure_assignment_manager(assignment, current_user, db)
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(assignment, key, value)
     db.commit()
@@ -111,7 +132,7 @@ def publish_assignment(
     current_user: User = Depends(get_current_user),
 ):
     assignment = require_assignment(assignment_id, db)
-    ensure_assignment_manager(assignment, current_user)
+    ensure_assignment_manager(assignment, current_user, db)
     assignment.status = "published"
     db.commit()
     db.refresh(assignment)
@@ -128,6 +149,8 @@ def list_questions(
     course = db.get(Course, assignment.course_id)
     if not course or not can_view_course(course, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限查看题目")
+    if current_user.role == "student" and assignment.status != "published":
+        raise api_error(403, "ASSIGNMENT_NOT_AVAILABLE", "作业未发布")
     questions = db.scalars(select(JudgeQuestion).where(JudgeQuestion.assignment_id == assignment_id).order_by(JudgeQuestion.id)).all()
     return PaginatedResponse(items=[JudgeQuestionRead.model_validate(question) for question in questions], page=1, page_size=len(questions) or 20, total=len(questions))
 
@@ -140,7 +163,7 @@ def create_question(
     current_user: User = Depends(get_current_user),
 ):
     assignment = require_assignment(assignment_id, db)
-    ensure_assignment_manager(assignment, current_user)
+    ensure_assignment_manager(assignment, current_user, db)
     question = JudgeQuestion(assignment_id=assignment_id, **payload.model_dump())
     db.add(question)
     db.commit()

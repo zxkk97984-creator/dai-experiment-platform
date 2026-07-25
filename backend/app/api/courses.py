@@ -42,20 +42,32 @@ def ensure_course_manager(course: Course, user: User):
     raise api_error(403, "FORBIDDEN", "没有权限管理该课程")
 
 
-def can_view_course(course: Course, user: User, db: Session) -> bool:
-    if user.role in {"admin", "teacher", "developer"}:
-        return True
-    if course.status == "published":
-        return True
+def is_student_enrolled(course_id: int, student_id: int, db: Session) -> bool:
+    """学生是否已选课且 enrollment 状态为 enrolled"""
     return bool(
         db.scalar(
             select(CourseEnrollment).where(
-                CourseEnrollment.course_id == course.id,
-                CourseEnrollment.student_id == user.id,
+                CourseEnrollment.course_id == course_id,
+                CourseEnrollment.student_id == student_id,
                 CourseEnrollment.status == "enrolled",
             )
         )
     )
+
+
+def can_view_course(course: Course, user: User, db: Session) -> bool:
+    """内容权限：admin 全部，teacher 仅自己的课程，student 需 published + enrolled"""
+    if user.role == "admin":
+        return True
+    if user.role == "teacher":
+        return course.teacher_id == user.id
+    if user.role in ("student", "developer"):
+        # developer 不与 student 同权限；统一要求 enrolled
+        return (
+            course.status == "published"
+            and is_student_enrolled(course.id, user.id, db)
+        )
+    return False
 
 
 @router.get("/courses", response_model=PaginatedResponse)
@@ -73,6 +85,9 @@ def list_courses(
     elif current_user.role == "teacher":
         query = query.where(Course.teacher_id == current_user.id)
         count_query = count_query.where(Course.teacher_id == current_user.id)
+    elif current_user.role == "developer":
+        query = query.where(Course.id == -1)  # empty
+        count_query = count_query.where(Course.id == -1)
     total = db.scalar(count_query) or 0
     courses = db.scalars(query.order_by(Course.id).offset((page - 1) * page_size).limit(page_size)).all()
     return PaginatedResponse(items=[CourseRead.model_validate(course) for course in courses], page=page, page_size=page_size, total=total)

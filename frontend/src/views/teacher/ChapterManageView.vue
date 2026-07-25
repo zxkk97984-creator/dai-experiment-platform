@@ -3,10 +3,11 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import { coursesAPI } from '../../api/courses.js'
-import { notebooksAPI } from '../../api/notebooks.js'
+import { studioAPI } from '../../api/studio.js'
 import { useAppStore } from '../../stores/app.js'
 
-const route = useRoute()
+const route = useRoute()
+const router = useRouter()
 const app = useAppStore()
 const course = ref(null)
 const chapters = ref([])
@@ -15,8 +16,6 @@ const showChForm = ref(false)
 const showLesForm = ref({})
 const chForm = ref({ title: '' })
 const lesForm = ref({ title: '', content_type: 'markdown', content: '' })
-const notebookFile = ref(null)
-const notebookFileName = ref('')
 
 async function fetch() {
   loading.value = true
@@ -52,22 +51,16 @@ async function createLesson(chId) {
   if (!f.title) return
   try {
     const res = await coursesAPI.createLesson(chId, { ...f, order_index: 0 })
-    // 如果是 notebook 类型且有上传文件，则上传 .ipynb
-    if (f.content_type === 'notebook' && notebookFile.value) {
-      await notebooksAPI.uploadNotebook(res.data.id, notebookFile.value)
-      notebookFile.value = null
-      notebookFileName.value = ''
+    if (f.content_type === 'notebook') {
+      const tmpl = await studioAPI.createTemplate({ name: f.title, lesson_id: res.data.id })
+      router.push(`/teacher/courses/${route.params.id}/studio/${tmpl.data.id}`)
+      return
     }
     lesForm.value = { title: '', content_type: 'markdown', content: '' }
     showLesForm.value[chId] = false
     fetch()
     app.showToast('课时已创建', 'success')
   } catch { app.showToast('创建失败', 'error') }
-}
-
-function onFileSelected(e) {
-  notebookFile.value = e.target.files[0]
-  notebookFileName.value = e.target.files[0]?.name || ''
 }
 
 function typeLabel(ct) {
@@ -140,15 +133,7 @@ onMounted(fetch)
             class="form-textarea"
           ></textarea>
         </div>
-        <div v-if="lesForm.content_type === 'notebook'" class="lesson-form-row">
-          <input
-            type="file"
-            accept=".ipynb,.zip"
-            @change="onFileSelected"
-            class="form-file"
-          />
-          <span v-if="notebookFileName" class="file-name">{{ notebookFileName }}</span>
-        </div>
+        
         <button class="btn-accent btn-accent-sm" @click="createLesson(ch.id)">确认添加</button>
       </div>
 

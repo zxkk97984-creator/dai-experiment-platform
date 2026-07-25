@@ -8,6 +8,7 @@ from .experiments import router as experiments_router
 from .judge import router as judge_router
 from .jupyter import router as jupyter_router
 from .notebooks import router as notebooks_router
+from .studio import router as studio_router
 from .users import router as users_router
 
 api_router = APIRouter(prefix="/api/v1")
@@ -20,3 +21,4 @@ api_router.include_router(exams_router)
 api_router.include_router(experiments_router)
 api_router.include_router(jupyter_router)
 api_router.include_router(notebooks_router)
+api_router.include_router(studio_router)

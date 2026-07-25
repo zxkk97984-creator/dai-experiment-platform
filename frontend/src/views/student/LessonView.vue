@@ -117,9 +117,6 @@ function goCourse() {
   router.push(`/student/courses/${courseId.value}`)
 }
 
-function goJupyter() {
-  router.push('/student/experiments')
-}
 
 function toggleDropdown() {
   dropdownOpen.value = !dropdownOpen.value
@@ -237,17 +234,7 @@ watch([lessonId, courseId], async ([newLid, newCid], [oldLid, oldCid]) => {
 
       <!-- Content: notebook -->
       <div v-else class="lesson-notebook">
-        <div class="notebook-card">
-          <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1" opacity="0.4">
-            <rect x="6" y="6" width="28" height="28" rx="2"/><path d="M14 14h12M14 20h8M14 26h6"/>
-          </svg>
-          <h3>{{ lesson.title }}</h3>
-          <p class="text-sm text-secondary" v-if="lesson.content">{{ lesson.content }}</p>
-          <button class="btn-primary" @click="goJupyter" style="margin-top:12px;display:inline-flex;align-items:center;gap:6px">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="10" height="10" rx="1"/><path d="M5 6h4M5 9h2"/></svg>
-            在 JupyterLab 中打开
-          </button>
-        </div>
+        <p>Notebook 课时：{{ lesson.title }}</p>
       </div>
 
       <hr class="lesson-divider" />

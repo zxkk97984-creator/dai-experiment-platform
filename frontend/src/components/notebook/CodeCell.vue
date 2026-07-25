@@ -1,11 +1,20 @@
 <script setup>
-import { ref, watch, onMounted, nextTick, shallowRef } from 'vue'
+import {
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue'
 
 const props = defineProps({
   cell: { type: Object, required: true },
   executionCount: { type: Number, default: null },
   disabled: { type: Boolean, default: false },
   isExecuting: { type: Boolean, default: false },
+  /** 编辑只读：CodeMirror/textarea 不可编辑，不 emit update:source。运行仍可执行原源码 */
+  readonly: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['execute', 'update:source'])
@@ -14,21 +23,42 @@ const editorEl = ref(null)
 const cmView = shallowRef(null)
 const cmLoaded = ref(false)
 const code = ref(props.cell.source || '')
+let syncingFromParent = false
 
-// 同步代码回父组件
+// 同步代码回父组件（readonly 时不 emit）
 watch(code, (val) => {
-  emit('update:source', props.cell.id, val)
-})
+  if (!props.readonly && !syncingFromParent) {
+    emit('update:source', props.cell.id, val)
+  }
+}, { flush: 'sync' })
 
-// 外部 source 变化时同步
+// 外部 source 变化时同步到本地状态和 CodeMirror，但不把它误报为学生编辑。
 watch(() => props.cell.source, (val) => {
-  if (val !== code.value) {
-    code.value = val
+  const nextSource = val || ''
+  if (nextSource === code.value && cmView.value?.state.doc.toString() === nextSource) {
+    return
+  }
+
+  syncingFromParent = true
+  try {
+    code.value = nextSource
+    const view = cmView.value
+    if (view && view.state.doc.toString() !== nextSource) {
+      view.dispatch({
+        changes: {
+          from: 0,
+          to: view.state.doc.length,
+          insert: nextSource,
+        },
+      })
+    }
+  } finally {
+    syncingFromParent = false
   }
 })
 
-// 初始化 CodeMirror 6
-onMounted(async () => {
+// CodeMirror 初始化
+async function initCodeMirror() {
   try {
     const [
       { EditorView, keymap, lineNumbers, highlightActiveLine },
@@ -47,12 +77,6 @@ onMounted(async () => {
     await nextTick()
     if (!editorEl.value) return
 
-    // 销毁旧实例
-    if (cmView.value) {
-      cmView.value.destroy()
-      cmView.value = null
-    }
-
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         code.value = update.state.doc.toString()
@@ -60,7 +84,7 @@ onMounted(async () => {
     })
 
     const state = EditorState.create({
-      doc: props.cell.source || '',
+      doc: code.value,
       extensions: [
         lineNumbers(),
         highlightActiveLine(),
@@ -68,7 +92,7 @@ onMounted(async () => {
         oneDark,
         keymap.of([...defaultKeymap, indentWithTab]),
         updateListener,
-        EditorView.editable.of(!props.disabled),
+        EditorView.editable.of(!props.readonly),
       ],
     })
 
@@ -78,10 +102,10 @@ onMounted(async () => {
     console.warn('CodeMirror load failed, using textarea fallback:', e.message)
     cmLoaded.value = false
   }
-})
+}
 
-// 清理
-import { onBeforeUnmount } from 'vue'
+onMounted(initCodeMirror)
+
 onBeforeUnmount(() => {
   if (cmView.value) {
     cmView.value.destroy()
@@ -116,6 +140,16 @@ function handleRun() {
   if (props.disabled || props.isExecuting) return
   emit('execute', props.cell.id)
 }
+
+// readonly prop 变化时重建 editor
+watch(() => props.readonly, () => {
+  if (cmView.value) {
+    cmView.value.destroy()
+    cmView.value = null
+    cmLoaded.value = false
+    nextTick(() => initCodeMirror())
+  }
+})
 </script>
 
 <template>
@@ -137,7 +171,8 @@ function handleRun() {
           v-if="!cmLoaded"
           v-model="code"
           class="code-textarea"
-          :disabled="disabled || isExecuting"
+          :readonly="readonly"
+          :aria-readonly="readonly"
           spellcheck="false"
           placeholder="在此输入 Python 代码..."
         ></textarea>

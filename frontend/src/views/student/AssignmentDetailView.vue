@@ -53,11 +53,11 @@ const publicCasesPretty = computed(() => {
 
 const TERMINAL_STATUSES = ['accepted', 'wrong_answer', 'runtime_error', 'time_limit_exceeded', 'system_error']
 
-const TEST_STATUS_ICON = { accepted: '✓', wrong_answer: '✗', runtime_error: '✗', time_limit_exceeded: '⏱', system_error: '✗' }
-const TEST_STATUS_LABEL = { accepted: '全部测试通过', wrong_answer: '测试未通过 — 答案错误', runtime_error: '运行错误', time_limit_exceeded: '执行超时', system_error: '系统错误' }
-const TEST_STATUS_CLASS = { accepted: 'success', wrong_answer: 'error', runtime_error: 'error', time_limit_exceeded: 'warning', system_error: 'error' }
+const TEST_STATUS_ICON = { queued: '⏳', running: '🔄', accepted: '✓', wrong_answer: '✗', runtime_error: '✗', time_limit_exceeded: '⏱', system_error: '✗', no_public_cases: '—' }
+const TEST_STATUS_LABEL = { queued: '排队等待判题...', running: '正在判题中...', accepted: '全部测试通过', wrong_answer: '答案错误', runtime_error: '运行错误', time_limit_exceeded: '执行超时', system_error: '系统错误', no_public_cases: '无公开样例' }
+const TEST_STATUS_CLASS = { queued: 'muted', running: 'muted', accepted: 'success', wrong_answer: 'error', runtime_error: 'error', time_limit_exceeded: 'warning', system_error: 'error', no_public_cases: 'muted' }
 
-const SUBMIT_STATUS_LABEL = { accepted: '✓ 通过', wrong_answer: '✗ 答案错误', runtime_error: '✗ 运行错误', time_limit_exceeded: '⏱ 超时' }
+const SUBMIT_STATUS_LABEL = { queued: '⏳ 排队等待判题...', running: '🔄 正在判题中...', accepted: '✓ 全部通过', wrong_answer: '✗ 答案错误', runtime_error: '✗ 运行错误', time_limit_exceeded: '⏱ 执行超时', system_error: '⚠ 系统错误' }
 
 const submitResult = ref(null)
 const submitPolling = ref(false)

@@ -205,6 +205,13 @@ class SubmissionRead(BaseModel):
     execution_time_ms: int | None = None
 
 
+class SampleRunResponse(BaseModel):
+    """sample-run 响应"""
+    output: str = ""
+    status: str = ""
+    execution_time_ms: int = 0
+
+
 class ExamCreate(BaseModel):
     course_id: int
     title: str
@@ -235,8 +242,34 @@ class ExamRead(BaseModel):
 
 
 class ExamSubmitRequest(BaseModel):
-    answers: dict[str, Any] = Field(default_factory=dict)
     score: float = 0
+
+
+class ExamQuestionCreate(BaseModel):
+    question_type: str
+    prompt: str
+    options: dict | None = None
+    correct_answer: dict = Field(default_factory=dict)
+    points: float = 1
+    order_index: int = 0
+    starter_code: str | None = None
+    public_cases: list | None = None
+    hidden_tests: str | None = None
+    time_limit_ms: int | None = None
+    memory_limit_mb: int | None = None
+
+
+class ExamQuestionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    exam_id: int
+    question_type: str
+    prompt: str
+    options: dict | None = None
+    points: float
+    order_index: int
+    starter_code: str | None = None
+    public_cases: list | None = None
 
 
 class ExamSubmissionRead(BaseModel):
@@ -246,8 +279,8 @@ class ExamSubmissionRead(BaseModel):
     exam_id: int
     student_id: int
     status: str
-    answers: dict | None = None
     score: float | None = None
+    expires_at: datetime | None = None
 
 
 class ExamGradeRead(BaseModel):
@@ -259,133 +292,80 @@ class ExamGradeRead(BaseModel):
     score: float
 
 
+# ── Notebook 模板 Schemas ─────────────────────────────────────
+
+
+class NotebookCellSchema(BaseModel):
+    """统一的 Cell 定义"""
+    id: str
+    type: str  # "markdown" | "code"
+    source: str = ""
+    order: int = 0
+    student_editable: bool = True
+    source_hidden: bool = False
+
+
+class NotebookTemplateCreate(BaseModel):
+    name: str
+    description: str | None = None
+
+
+class NotebookTemplateUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+
+
+class NotebookTemplateRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    description: str | None = None
+    status: str
+    current_version_id: int | None = None
+    owner_id: int
+    draft_revision: int
+
+
+class NotebookTemplateVersionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    template_id: int
+    version_number: int
+    sha256: str
+    cells: list[NotebookCellSchema] = Field(default_factory=list)
+    cell_order: list[str] = Field(default_factory=list)
+    assets_dir: str | None = None
+    published_at: datetime
+
+
+# ── 实验模块 Schemas ──────────────────────────────────────────
+
+
 class ExperimentModuleCreate(BaseModel):
     name: str
     description: str | None = None
-    entry_url: str | None = None
+    template_id: int | None = None
     status: str = "draft"
 
 
 class ExperimentModuleRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     name: str
     description: str | None = None
     entry_url: str | None = None
+    template_id: int | None = None
+    owner_id: int | None = None
     status: str
 
 
-class ExperimentRecordCreate(BaseModel):
-    module_id: int
-    status: str = "started"
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class ExperimentRecordRead(BaseModel):
-    id: int
-    module_id: int
-    student_id: int
-    status: str
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class JupyterEntryResponse(BaseModel):
-    iframe_url: str
-
-
-class NotebookTemplateRead(BaseModel):
-    id: str
-    name: str
-    path: str
-
-
-class NotebookCopyResponse(BaseModel):
-    template_id: str
-    target_path: str
-
-
-# ── Notebook API schemas ──────────────────────────────────────
-
-
-class NotebookCellOut(BaseModel):
-    """返回给前端的 notebook cell"""
-    id: str
-    cell_type: str  # "markdown" | "code"
-    source: str
-    rendered_html: str | None = None
-    outputs: dict | None = None
-    execution_count: int | None = None
-    status: str | None = None
-
-
-class NotebookResponse(BaseModel):
-    """GET /notebooks/{lesson_id} 的完整响应"""
-    record_id: int
-    lesson_id: int
-    status: str  # "started" | "submitted"
-    cells: list[NotebookCellOut]
-    cell_order: list[str]
-    template_outdated: bool = False
-
-
-class CellExecuteRequest(BaseModel):
-    code: str
-
-
-class CellExecuteResponse(BaseModel):
-    outputs: list[dict] = Field(default_factory=list)
-    execution_time_ms: int | None = None
-
-
-class NotebookCellsSaveRequest(BaseModel):
-    """PUT /notebooks/records/{id}/cells 请求体"""
-    cells: dict[str, str]  # {cell_id: source_code}
-
-
-class NotebookSaveResponse(BaseModel):
-    record_id: int
-
-
-class NotebookSubmitResponse(BaseModel):
-    record_id: int
-    attempt_number: int
-    submitted_at: str
-
-
-class TemplateUpgradeRequest(BaseModel):
-    action: str  # "keep" | "discard"
-
-
-# ── 实验模块 Notebook 风格 API schemas ──────────────────────────
-
-
-class ExperimentCellOut(BaseModel):
-    """实验模块的代码 cell"""
-    id: str
-    source: str = ""
-    order: int = 0
-    outputs: dict | None = None  # {execution_count, outputs: [...]}
-    is_running: bool = False
-
-
-class ExperimentRecordDetailResponse(BaseModel):
-    """GET /experiments/records/{id} 完整响应"""
-    id: int
-    module_id: int
-    student_id: int
-    status: str
-    module_name: str = ""
-    module_description: str | None = None
-    cells: list[ExperimentCellOut] = Field(default_factory=list)
-    cell_order: list[str] = Field(default_factory=list)
-    execution_count: int = 0
+# ── 统一实验记录 Schemas ──────────────────────────────────────
 
 
 class ExperimentCellsSaveRequest(BaseModel):
-    """PUT /experiments/records/{id}/cells"""
+    """学生保存 cells。仅 student_editable code cells。"""
     cells: dict[str, str]  # {cell_id: source_code}
-    cell_order: list[str] = Field(default_factory=list)
+    record_revision: int    # 乐观并发控制
 
 
 class ExperimentCellExecuteRequest(BaseModel):
@@ -396,3 +376,124 @@ class ExperimentCellExecuteResponse(BaseModel):
     outputs: list[dict] = Field(default_factory=list)
     execution_time_ms: int | None = None
     execution_count: int = 0
+
+
+class ExperimentCellOut(BaseModel):
+    """返回给前端的 cell（学生视角不包含 source_hidden cells）"""
+    id: str
+    type: str  # "markdown" | "code"
+    source: str = ""
+    order: int = 0
+    student_editable: bool = True
+    # source_hidden=true 的 cell 完全不返回
+    outputs: dict | None = None
+    is_running: bool = False
+
+
+class ExperimentRecordRead(BaseModel):
+    id: int
+    lesson_id: int | None = None
+    module_id: int | None = None
+    student_id: int
+    status: str
+    template_version_id: int
+    record_revision: int
+    cells_sources: dict[str, str] = Field(default_factory=dict)
+    started_at: datetime | None = None
+    submitted_at: datetime | None = None
+
+
+class ExperimentRecordDetailResponse(BaseModel):
+    """GET /records/{id} 完整响应（学生不含 source_hidden cells）"""
+    id: int
+    lesson_id: int | None = None
+    module_id: int | None = None
+    student_id: int
+    status: str
+    template_version_id: int
+    record_revision: int
+    entry_name: str = ""             # 模块名或课时名
+    entry_description: str | None = None
+    cells: list[ExperimentCellOut] = Field(default_factory=list)
+    execution_count: int = 0
+
+
+# ── Jupyter（旧）──────────────────────────────────────────────
+
+
+class JupyterEntryResponse(BaseModel):
+    iframe_url: str
+    deprecated: bool = True
+
+
+class NotebookCopyResponse(BaseModel):
+    template_id: str
+    target_path: str
+    deprecated: bool = True
+
+
+class JupyterTemplateRead(BaseModel):
+    """旧 Jupyter 模板（仅兼容旧 API）"""
+    id: str
+    name: str
+    path: str
+
+
+# ── 废弃的旧 Schema（保留兼容，标记 deprecated）───────────────
+
+
+class NotebookCellOut(BaseModel):
+    """[已废弃] 旧 notebook cell schema"""
+    id: str
+    cell_type: str
+    source: str
+    rendered_html: str | None = None
+    outputs: dict | None = None
+    execution_count: int | None = None
+    status: str | None = None
+
+
+class NotebookResponse(BaseModel):
+    """[已废弃] GET /notebooks/{lesson_id}"""
+    record_id: int
+    lesson_id: int
+    status: str
+    cells: list[NotebookCellOut]
+    cell_order: list[str]
+    template_outdated: bool = False
+    deprecated: bool = True
+
+
+class NotebookCellsSaveRequest(BaseModel):
+    """[已废弃]"""
+    cells: dict[str, str]
+
+
+class NotebookSaveResponse(BaseModel):
+    """[已废弃]"""
+    record_id: int
+    deprecated: bool = True
+
+
+class ExperimentRecordCreate(BaseModel):
+    """[已废弃] 旧实验记录创建"""
+    module_id: int
+    status: str = "started"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+# Studio schemas live in a dedicated module to keep this compatibility module
+# importable for existing API consumers.
+from .studio import (  # noqa: E402
+    StudioCell,
+    StudioDraftUpdate,
+    StudioImportCreate,
+    StudioImportExisting,
+    StudioPreviewRunRequest,
+    StudioPreviewRunResponse,
+    StudioTemplateBindRequest,
+    StudioTemplateCreate,
+    StudioTemplateMetadataUpdate,
+    StudioTemplateRead,
+    StudioVersionRead,
+)

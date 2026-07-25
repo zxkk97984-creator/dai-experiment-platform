@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session
 from app.api.courses import can_view_course, ensure_course_manager, require_course
 from app.dependencies import get_current_user, get_db, require_roles
 from app.errors import api_error
-from app.models import Exam, ExamGrade, ExamSubmission, User
-from app.schemas import ExamCreate, ExamGradeRead, ExamRead, ExamSubmitRequest, ExamSubmissionRead, ExamUpdate, PaginatedResponse
+from app.models import Course, CourseEnrollment, Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission, User
+from app.schemas import ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamRead, ExamSubmitRequest, ExamSubmissionRead, ExamUpdate, PaginatedResponse
+from app.services.exam_service import create_question, delete_question, get_my_grade, get_question, list_questions, require_exam_editable, save_answer, start_exam as svc_start_exam, submit_exam as svc_submit_exam, update_question, validate_publish
 
 router = APIRouter(prefix="/exams", tags=["exams"])
 
@@ -30,8 +31,29 @@ def list_exams(
     query = select(Exam)
     count_query = select(func.count()).select_from(Exam)
     if current_user.role == "student":
-        query = query.where(Exam.status == "published")
-        count_query = count_query.where(Exam.status == "published")
+        query = (
+            query.join(Course, Exam.course_id == Course.id)
+            .join(CourseEnrollment, Course.id == CourseEnrollment.course_id)
+            .where(Exam.status == "published")
+            .where(Course.status == "published")
+            .where(CourseEnrollment.student_id == current_user.id)
+            .where(CourseEnrollment.status == "enrolled")
+        )
+        count_query = (
+            count_query.join(Course, Exam.course_id == Course.id)
+            .join(CourseEnrollment, Course.id == CourseEnrollment.course_id)
+            .where(Exam.status == "published")
+            .where(Course.status == "published")
+            .where(CourseEnrollment.student_id == current_user.id)
+            .where(CourseEnrollment.status == "enrolled")
+        )
+    elif current_user.role == "teacher":
+        query = query.join(Course, Exam.course_id == Course.id).where(Course.teacher_id == current_user.id)
+        count_query = count_query.join(Course, Exam.course_id == Course.id).where(Course.teacher_id == current_user.id)
+    elif current_user.role != "admin":
+        # developer or any unsupported role: empty
+        query = query.where(Exam.id == -1)
+        count_query = count_query.where(Exam.id == -1)
     total = db.scalar(count_query) or 0
     exams = db.scalars(query.order_by(Exam.id).offset((page - 1) * page_size).limit(page_size)).all()
     return PaginatedResponse(items=[ExamRead.model_validate(exam) for exam in exams], page=page, page_size=page_size, total=total)
@@ -45,9 +67,8 @@ def create_exam(
 ):
     course = require_course(payload.course_id, db)
     if current_user.role == "teacher":
-        if course.teacher_id is None:
-            course.teacher_id = current_user.id
-        ensure_course_manager(course, current_user)
+        if course.teacher_id != current_user.id:
+            raise api_error(403, "FORBIDDEN", "只能在自己的课程中创建考试")
     exam = Exam(**payload.model_dump(), created_by_id=current_user.id)
     db.add(exam)
     db.commit()
@@ -60,6 +81,8 @@ def get_exam(exam_id: int, db: Session = Depends(get_db), current_user: User = D
     exam = require_exam(exam_id, db)
     if not can_view_course(exam.course, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限查看该考试")
+    if current_user.role == "student" and exam.status != "published":
+        raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
     return exam
 
 
@@ -86,45 +109,27 @@ def start_exam(
     current_user: User = Depends(require_roles("student")),
 ):
     exam = require_exam(exam_id, db)
+    course = db.get(Course, exam.course_id)
+    if not course or not can_view_course(course, current_user, db):
+        raise api_error(403, "FORBIDDEN", "没有权限参加该考试")
     if exam.status != "published":
-        raise api_error(400, "EXAM_NOT_AVAILABLE", "考试不可开始")
-    submission = db.scalar(select(ExamSubmission).where(ExamSubmission.exam_id == exam_id, ExamSubmission.student_id == current_user.id))
-    if not submission:
-        submission = ExamSubmission(exam_id=exam_id, student_id=current_user.id, status="started", started_at=datetime.now(UTC))
-        db.add(submission)
-    db.commit()
-    db.refresh(submission)
-    return submission
+        raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
+    return svc_start_exam(exam, current_user, db)
 
 
 @router.post("/{exam_id}/submit", response_model=ExamSubmissionRead, status_code=status.HTTP_201_CREATED)
 def submit_exam(
     exam_id: int,
-    payload: ExamSubmitRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("student")),
 ):
     exam = require_exam(exam_id, db)
+    course = db.get(Course, exam.course_id)
+    if not course or not can_view_course(course, current_user, db):
+        raise api_error(403, "FORBIDDEN", "没有权限提交该考试")
     if exam.status != "published":
-        raise api_error(400, "EXAM_NOT_AVAILABLE", "考试不可提交")
-    submission = db.scalar(select(ExamSubmission).where(ExamSubmission.exam_id == exam_id, ExamSubmission.student_id == current_user.id))
-    if not submission:
-        submission = ExamSubmission(exam_id=exam_id, student_id=current_user.id, started_at=datetime.now(UTC))
-        db.add(submission)
-        db.flush()
-    submission.status = "submitted"
-    submission.answers = payload.answers
-    submission.score = payload.score
-    submission.submitted_at = datetime.now(UTC)
-    grade = db.scalar(select(ExamGrade).where(ExamGrade.exam_id == exam_id, ExamGrade.student_id == current_user.id))
-    if not grade:
-        grade = ExamGrade(exam_id=exam_id, student_id=current_user.id, score=payload.score)
-        db.add(grade)
-    else:
-        grade.score = payload.score
-    db.commit()
-    db.refresh(submission)
-    return submission
+        raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
+    return svc_submit_exam(exam, current_user, db)
 
 
 @router.get("/{exam_id}/grades", response_model=PaginatedResponse)
@@ -138,3 +143,35 @@ def exam_grades(
         ensure_course_manager(exam.course, current_user)
     grades = db.scalars(select(ExamGrade).where(ExamGrade.exam_id == exam_id).order_by(ExamGrade.id)).all()
     return PaginatedResponse(items=[ExamGradeRead.model_validate(grade) for grade in grades], page=1, page_size=len(grades) or 20, total=len(grades))
+
+
+# ── 考试题目管理 ──
+
+@router.get("/{exam_id}/questions", response_model=PaginatedResponse)
+def get_questions(exam_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    questions = list_questions(db, exam_id)
+    items = [ExamQuestionRead.model_validate(q) for q in questions]
+    return PaginatedResponse(items=items, page=1, page_size=len(items), total=len(items))
+
+@router.post("/{exam_id}/questions", response_model=ExamQuestionRead, status_code=status.HTTP_201_CREATED)
+def post_question(exam_id: int, payload: ExamQuestionCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return create_question(db, exam_id, payload.model_dump(), current_user)
+
+@router.patch("/{exam_id}/questions/{question_id}", response_model=ExamQuestionRead)
+def patch_question(exam_id: int, question_id: int, payload: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return update_question(db, exam_id, question_id, payload, current_user)
+
+@router.delete("/{exam_id}/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
+def del_question(exam_id: int, question_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    delete_question(db, exam_id, question_id, current_user)
+    return None
+
+# ── 学生答题 ──
+
+@router.put("/{exam_id}/answers/{question_id}", status_code=status.HTTP_201_CREATED)
+def put_answer(exam_id: int, question_id: int, payload: dict, db: Session = Depends(get_db), current_user: User = Depends(require_roles("student"))):
+    return save_answer(db, exam_id, question_id, current_user, payload)
+
+@router.get("/{exam_id}/my-grade")
+def my_grade(exam_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_roles("student"))):
+    return get_my_grade(exam_id, current_user, db)

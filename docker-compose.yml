@@ -31,6 +31,7 @@ services:
       retries: 10
 
   jupyter:
+    profiles: [legacy-jupyter]
     image: quay.io/jupyter/scipy-notebook:python-3.12
     container_name: dai-jupyter
     environment:
@@ -42,7 +43,7 @@ services:
       - --ServerApp.allow_origin='*'
       - --ServerApp.ip='0.0.0.0'
     ports:
-      - "8888:8888"
+      - "127.0.0.1:8888:8888"
     volumes:
       - dai_jupyter_data:/home/jovyan/work
       - ./docker/jupyter/jupyter_server_config.py:/etc/jupyter/jupyter_server_config.py:ro

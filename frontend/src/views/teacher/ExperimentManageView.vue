@@ -39,7 +39,7 @@ async function handleCreate() {
 async function toggleStatus(m) {
   const newStatus = m.status === 'published' ? 'draft' : 'published'
   try {
-    await experimentsAPI.createModule({ ...m, status: newStatus })
+    await experimentsAPI.updateModule(m.id, { status: newStatus })
     app.showToast(newStatus === 'published' ? '已发布' : '已下架', 'success')
     fetch()
   } catch {

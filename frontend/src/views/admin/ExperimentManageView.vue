@@ -26,7 +26,7 @@ async function handleCreate() {
 
 async function handleUpdate(m) {
   const newStatus = m.status === 'published' ? 'draft' : 'published'
-  try { await experimentsAPI.createModule({ ...m, status: newStatus }); app.showToast('状态已更新', 'success'); fetch() }
+  try { await experimentsAPI.updateModule(m.id, { status: newStatus }); app.showToast('状态已更新', 'success'); fetch() }
   catch { app.showToast('操作失败', 'error') }
 }
 

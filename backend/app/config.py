@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -28,10 +29,18 @@ class Settings(BaseSettings):
     judge_timeout_seconds: int = 10
     judge_memory_limit_mb: int = 256
     judge_cpu_limit: float = 1.0
+    jupyter_enabled: bool = False
+    studio_storage_dir: str = str(
+        Path(__file__).resolve().parents[1] / "storage" / "studio"
+    )
 
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def studio_storage_path(self) -> Path:
+        return Path(self.studio_storage_dir).resolve()
 
 
 @lru_cache

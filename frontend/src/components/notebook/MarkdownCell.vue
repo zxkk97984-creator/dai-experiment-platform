@@ -1,8 +1,25 @@
 <script setup>
+import { computed } from 'vue'
+import { marked } from 'marked'
 import { sanitizeHtml } from '../../utils/sanitize.js'
 
 const props = defineProps({
   cell: { type: Object, required: true },
+})
+
+const rendered = computed(() => {
+  const src = props.cell.source || props.cell.rendered_html || ''
+  // 如果是 HTML（旧版 rendered_html），直接清洗
+  if (props.cell.rendered_html && !props.cell.source) {
+    return sanitizeHtml(props.cell.rendered_html)
+  }
+  // 新版：raw markdown → marked → sanitize
+  try {
+    const html = marked.parse(src, { async: false })
+    return sanitizeHtml(typeof html === 'string' ? html : '')
+  } catch {
+    return sanitizeHtml(src)
+  }
 })
 </script>
 
@@ -14,7 +31,7 @@ const props = defineProps({
       </svg>
       <span class="cell-label">讲解</span>
     </div>
-    <div class="cell-body" v-html="sanitizeHtml(cell.rendered_html || '')"></div>
+    <div class="cell-body" v-html="rendered"></div>
   </div>
 </template>
 
