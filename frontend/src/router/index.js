@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
 
 const routes = [
+  { path: '/welcome', name: 'Welcome', component: () => import('../views/WelcomeView.vue'), meta: { guest: true } },
   { path: '/login', name: 'Login', component: () => import('../views/LoginView.vue'), meta: { guest: true } },
 
   // Student
@@ -34,8 +35,8 @@ const routes = [
   { path: '/admin/courses', name: 'AdminCourses', component: () => import('../views/teacher/CourseManageView.vue'), meta: { role: 'admin' } },
   { path: '/admin/experiments', name: 'AdminExperiments', component: () => import('../views/admin/ExperimentManageView.vue'), meta: { role: 'admin' } },
 
-  { path: '/', redirect: '/login' },
-  { path: '/:pathMatch(.*)*', redirect: '/login' },
+  { path: '/', redirect: '/welcome' },
+  { path: '/:pathMatch(.*)*', redirect: '/welcome' },
 ]
 
 const router = createRouter({
