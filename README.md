@@ -96,6 +96,65 @@ npm run dev
 
 ---
 
+## 判题架构
+
+### 正式提交（异步）
+
+```text
+学生提交代码 → API 创建 Submission(status=queued) → 入队 Redis judge:queue
+                                                        ↓
+                                               Worker brpop 消费
+                                                        ↓
+                                              Docker sandbox 运行 pytest
+                                                        ↓
+                                              更新 Submission status/score
+                                                        ↓
+                                              前端轮询 GET /result 获取结果
+```
+
+### 自测（同步）
+
+```text
+学生点击自测 → API sample-run → 仅用公开样例构建测试 → Docker sandbox 同步运行
+                                                              ↓
+                                                    直接返回 output/status/execution_time_ms
+                                                    （不创建 Submission，不计次数）
+```
+
+### 考试判题
+
+```text
+学生交卷 → 选择题立即评分 → 代码题入队 Redis judge:exam:queue
+                                    ↓
+                           Worker 消费判题（与普通作业共用进程）
+                                    ↓
+                          全部答案 completed → 生成 ExamGrade
+```
+
+### 后台任务（FastAPI lifespan）
+
+| 任务 | 间隔 | 说明 |
+|------|------|------|
+| 过期考试扫描 | 15 秒 | 自动交卷超时考试 |
+| Kernel 清理 | 5 分钟 | 销毁 15 分钟无活动的 Kernel 会话 |
+
+### 启动方式
+
+```bash
+# 终端 1：后端 API（含 lifespan 后台任务）
+cd backend
+.venv/Scripts/python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# 终端 2：判题 Worker（消费 judge:queue 和 judge:exam:queue）
+cd backend
+.venv/Scripts/python.exe -m app.worker.judge_worker
+
+# 终端 3：前端
+cd frontend
+npm run dev
+```
+
+---
 ## 技术栈
 
 | 层面 | 技术 |

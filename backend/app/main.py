@@ -1,15 +1,20 @@
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
-import asyncio
-from contextlib import asynccontextmanager
 
 from app.api import api_router
 from app.config import Settings, get_settings
 from app.database import SessionLocal
 from app.services.exam_service import scan_expired_exams
+
+logger = logging.getLogger("dai.main")
 
 
 def _normalize_detail(detail):
@@ -23,21 +28,37 @@ def _normalize_detail(detail):
 
 
 async def _expiry_scanner():
+    """定期扫描过期考试，自动交卷"""
     while True:
         try:
             await asyncio.sleep(15)
-            from datetime import datetime, timezone
             with SessionLocal() as db:
-                scan_expired_exams(db, datetime.now(timezone.utc))
+                count = scan_expired_exams(db, datetime.now(timezone.utc))
+                if count > 0:
+                    logger.info("过期考试扫描：自动交卷 %d 份", count)
         except Exception:
-            pass
+            logger.exception("过期考试扫描异常")
+
+
+async def _kernel_cleanup():
+    """定期清理空闲 Kernel session"""
+    while True:
+        try:
+            await asyncio.sleep(300)  # 每 5 分钟清理一次
+            from app.services.kernel_manager import get_kernel_manager
+            km = get_kernel_manager()
+            km.cleanup_idle(max_idle_seconds=900)  # 15 分钟无活动则销毁
+        except Exception:
+            logger.exception("Kernel 清理异常")
 
 
 @asynccontextmanager
 async def lifespan(app):
-    task = asyncio.create_task(_expiry_scanner())
+    expiry_task = asyncio.create_task(_expiry_scanner())
+    cleanup_task = asyncio.create_task(_kernel_cleanup())
     yield
-    task.cancel()
+    expiry_task.cancel()
+    cleanup_task.cancel()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -69,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(Exception)
     async def general_exception_handler(_: Request, exc: Exception):
+        logger.exception("未处理的服务器异常: %s", exc)
         return JSONResponse(status_code=500, content={"detail": {"code": "INTERNAL_ERROR", "message": "服务器内部错误", "fields": {}}})
 
     @app.get("/health", tags=["health"])

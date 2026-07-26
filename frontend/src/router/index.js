@@ -24,10 +24,10 @@ const routes = [
   { path: '/teacher/courses', name: 'TeacherCourses', component: () => import('../views/teacher/CourseManageView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/courses/:id/manage', name: 'TeacherChapterManage', component: () => import('../views/teacher/ChapterManageView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/assignments', name: 'TeacherAssignments', component: () => import('../views/teacher/AssignmentManageView.vue'), meta: { role: 'teacher' } },
-  { path: '/teacher/assignments/:id/edit', name: 'TeacherQuestionEdit', component: () => import('../views/teacher/QuestionEditView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/assignments/:id/edit', name: 'TeacherAssignmentQuestionEdit', component: () => import('../views/teacher/QuestionEditView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/exams', name: 'TeacherExams', component: () => import('../views/teacher/ExamManageView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/exams/:id/grades', name: 'TeacherGrades', component: () => import('../views/teacher/GradesView.vue'), meta: { role: 'teacher' } },
-  { path: '/teacher/exams/:id/edit', name: 'TeacherQuestionEdit', component: () => import('../views/teacher/ExamQuestionEditView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/exams/:id/edit', name: 'TeacherExamQuestionEdit', component: () => import('../views/teacher/ExamQuestionEditView.vue'), meta: { role: 'teacher' } },
  { path: '/teacher/experiments', name: 'TeacherExperiments', component: () => import('../views/teacher/ExperimentManageView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/courses/:id/studio/:lid', name: 'TeacherStudio', component: () => import('../views/teacher/StudioView.vue'), meta: { role: 'teacher' } },
 

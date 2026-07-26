@@ -113,7 +113,7 @@ class KernelManager:
             if data_str:
                 return KernelSession.from_redis_dict(record_id, json.loads(data_str))
         except Exception:
-            pass
+            logger.debug("Redis 读取 kernel session %d 失败", record_id, exc_info=True)
         return None
 
     def is_template_initialized(self, record_id: int, version_id: int) -> bool:
@@ -125,7 +125,7 @@ class KernelManager:
             if marker:
                 return int(marker) == version_id
         except Exception:
-            pass
+            logger.debug("Redis 读取 kernel init 标记 %d 失败", record_id, exc_info=True)
         session = self._sessions.get(record_id)
         return (session is not None and
                 session.initialized_template_version_id == version_id)
@@ -148,7 +148,7 @@ class KernelManager:
             try:
                 r.delete(f"kernel:init:{record_id}")
             except Exception:
-                pass
+                logger.warning("Redis 删除 kernel init 标记 %d 失败", record_id, exc_info=True)
             raise RuntimeError(f"Kernel 初始化标记持久化失败: {exc}") from exc
 
     def create_session(self, record_id: int, lesson_storage_dir: str) -> KernelSession:
@@ -226,7 +226,7 @@ class KernelManager:
                     r = redis.from_url(self.settings.redis_url)
                     r.delete(f"kernel:session:{record_id}")
                 except Exception:
-                    pass
+                    logger.warning("Redis 删除旧 kernel session %d 失败", record_id, exc_info=True)
 
         return self.create_session(record_id, lesson_storage_dir)
 
@@ -311,7 +311,7 @@ class KernelManager:
                     1, lock_key, lock_token,
                 )
             except Exception:
-                pass
+                logger.debug("锁释放失败或已过期 record_id=%d", record_id, exc_info=True)
             session.last_active_at = time.time()
 
     def interrupt(self, record_id: int):
@@ -343,7 +343,7 @@ class KernelManager:
             r.delete(f"kernel:session:{record_id}")
             r.delete(f"kernel:init:{record_id}")
         except Exception:
-            pass
+            logger.warning("Redis 删除 kernel 记录 %d 失败", record_id, exc_info=True)
 
     def cleanup_idle(self, max_idle_seconds: int = 900):
         now = time.time()
@@ -407,7 +407,7 @@ class KernelManager:
                     try:
                         self._write_session_redis(record_id, session)
                     except Exception:
-                        pass
+                        logger.warning("恢复 kernel session %d Redis 写入失败", record_id, exc_info=True)
                     logger.info("Recovered kernel session %d from Docker label", record_id)
             except Exception as e:
                 logger.warning("Failed to recover container %s: %s", cid, e)
