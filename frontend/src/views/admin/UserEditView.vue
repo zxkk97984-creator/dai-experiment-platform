@@ -55,36 +55,73 @@ async function handleSave() {
 
 <template>
   <AppLayout>
-    <h1 class="page-title">{{ isNew ? '创建用户 👤' : '编辑用户 ✏️' }}</h1>
-    <div class="card" style="max-width:500px">
-      <div class="form-group"><label>用户名</label><input v-model="form.username" /></div>
-      <div class="form-group"><label>真实姓名</label><input v-model="form.real_name" /></div>
-      <div class="form-group">
-        <label>角色</label>
-        <select v-model="form.role">
-          <option value="student">学生</option><option value="teacher">教师</option>
-          <option value="admin">管理员</option><option value="developer">开发者</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>{{ isNew ? '密码' : '新密码 (留空不修改)' }}</label>
-        <input v-model="form.password" type="password" />
-      </div>
-      <div style="display:flex;gap:10px">
-        <button class="btn-primary" :disabled="saving" @click="handleSave">
-          {{ saving ? '保存中...' : '保存' }}
-        </button>
-        <button @click="router.push('/admin/users')">取消</button>
+    <div class="page">
+      <!-- ── Page Head ─────────────────────────────────────────────────── -->
+      <header class="page-head">
+        <div>
+          <h1 class="page-title">{{ isNew ? '创建用户' : '编辑用户' }}</h1>
+          <p class="page-sub">{{ isNew ? '添加新的平台用户账号' : '修改用户信息与角色权限' }}</p>
+        </div>
+      </header>
+
+      <div class="card form-card">
+        <div class="form-group"><label>用户名</label><input v-model="form.username" placeholder="输入用户名" /></div>
+        <div class="form-group"><label>真实姓名</label><input v-model="form.real_name" placeholder="输入真实姓名" /></div>
+        <div class="form-group">
+          <label>角色</label>
+          <select v-model="form.role">
+            <option value="student">学生</option>
+            <option value="teacher">教师</option>
+            <option value="admin">管理员</option>
+            <option value="developer">开发者</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>{{ isNew ? '密码' : '新密码（留空不修改）' }}</label>
+          <input v-model="form.password" type="password" :placeholder="isNew ? '设置密码' : '留空则不修改密码'" />
+        </div>
+        <div class="form-actions">
+          <button class="btn-primary" :disabled="saving" @click="handleSave">
+            {{ saving ? '保存中...' : '保存' }}
+          </button>
+          <button class="btn-ghost" @click="router.push('/admin/users')">取消</button>
+        </div>
       </div>
     </div>
   </AppLayout>
 </template>
 
 <style scoped>
-/* ── Page title ── */
-.page-title { color: var(--ink); }
+/* ═══════════════════════════════════════════════════════════════════════
+   User Edit — Code Studio
+   page-head + form card
+   ═══════════════════════════════════════════════════════════════════════ */
+.page { display: flex; flex-direction: column; gap: 24px; }
 
-/* Form card, inputs, labels and buttons inherit Code Studio global
-   styles from src/style.css (.card, .form-group label, input/select:focus,
-   .btn-primary, default button). Inputs use var(--shadow-glow-primary) on focus. */
+/* ── Page Head ─────────────────────────────────────────────────────── */
+.page-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 16px;
+}
+.page-title {
+  font-size: 28px; font-weight: 700;
+  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
+  margin: 0 0 6px;
+}
+.page-sub {
+  font-size: var(--text-sm); color: var(--text-secondary); margin: 0;
+}
+
+/* ── Form Card ─────────────────────────────────────────────────────── */
+.form-card {
+  max-width: 520px; padding: 28px;
+}
+.form-actions {
+  display: flex; gap: 10px; padding-top: 8px;
+}
+
+@media (max-width: 768px) {
+  .page-title { font-size: 24px; }
+  .form-card { max-width: 100%; padding: 20px; }
+}
 </style>

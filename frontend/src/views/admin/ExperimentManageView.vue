@@ -35,41 +35,123 @@ onMounted(fetch)
 
 <template>
   <AppLayout>
-    <div class="flex-between mb-4">
-      <h1 class="page-title" style="margin-bottom:0">实验模块管理 🧪</h1>
-      <button class="btn-primary" @click="showCreate = !showCreate">{{ showCreate ? '取消' : '创建模块' }}</button>
-    </div>
+    <div class="page">
+      <!-- ── Page Head ─────────────────────────────────────────────────── -->
+      <header class="page-head">
+        <div>
+          <h1 class="page-title">实验模块管理</h1>
+          <p class="page-sub">配置与维护实验模块、镜像与数据集</p>
+        </div>
+        <div class="page-meta">
+          <button class="btn-primary" @click="showCreate = !showCreate">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            {{ showCreate ? '取消' : '创建模块' }}
+          </button>
+        </div>
+      </header>
 
-    <div v-if="showCreate" class="card mb-4">
-      <div class="form-group"><label>模块名称</label><input v-model="form.name" /></div>
-      <div class="form-group"><label>描述</label><textarea v-model="form.description" rows="2"></textarea></div>
-      <div class="form-group"><label>入口 URL</label><input v-model="form.entry_url" /></div>
-      <button class="btn-primary" @click="handleCreate">确认创建</button>
-    </div>
+      <!-- ── Create Form ───────────────────────────────────────────────── -->
+      <div v-if="showCreate" class="card create-form">
+        <div class="form-group"><label>模块名称</label><input v-model="form.name" placeholder="输入模块名称" /></div>
+        <div class="form-group"><label>描述</label><textarea v-model="form.description" rows="2" placeholder="模块描述"></textarea></div>
+        <div class="form-group"><label>入口 URL（可选）</label><input v-model="form.entry_url" placeholder="外部链接，留空使用默认环境" /></div>
+        <button class="btn-primary" @click="handleCreate">确认创建</button>
+      </div>
 
-    <div v-if="loading" class="text-secondary">加载中...</div>
-    <table v-else-if="modules.length" class="card" style="padding:0">
-      <thead><tr><th>名称</th><th>描述</th><th>状态</th><th>操作</th></tr></thead>
-      <tbody>
-        <tr v-for="m in modules" :key="m.id">
-          <td>{{ m.name }}</td>
-          <td class="text-sm text-secondary">{{ m.description || '-' }}</td>
-          <td><span class="badge" :class="'badge-' + statusBadge(PUBLISH_STATUS_MAP, m.status).color">{{ statusBadge(PUBLISH_STATUS_MAP, m.status).label }}</span></td>
-          <td><button class="btn-sm" @click="handleUpdate(m)">{{ m.status === 'published' ? '下架' : '发布' }}</button></td>
-        </tr>
-      </tbody>
-    </table>
-    <div v-else class="card" style="text-align:center;padding:48px"><p class="text-secondary">暂无实验模块</p></div>
+      <!-- ── Loading ────────────────────────────────────────────────────── -->
+      <div v-if="loading" class="card table-card">
+        <div class="skeleton-row" v-for="i in 4" :key="i">
+          <div class="skeleton skel-cell w-25"></div>
+          <div class="skeleton skel-cell w-40"></div>
+          <div class="skeleton skel-cell w-15"></div>
+          <div class="skeleton skel-cell w-15"></div>
+        </div>
+      </div>
+
+      <!-- ── Empty ──────────────────────────────────────────────────────── -->
+      <div v-else-if="modules.length === 0" class="empty-state">
+        <p>🧪 暂无实验模块</p>
+      </div>
+
+      <!-- ── Table ──────────────────────────────────────────────────────── -->
+      <div v-else class="card table-card">
+        <table>
+          <thead>
+            <tr><th>名称</th><th>描述</th><th>状态</th><th>操作</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="m in modules" :key="m.id">
+              <td class="title-cell">{{ m.name }}</td>
+              <td class="text-sm text-secondary">{{ m.description || '—' }}</td>
+              <td>
+                <span class="badge" :class="'badge-' + statusBadge(PUBLISH_STATUS_MAP, m.status).color">
+                  {{ statusBadge(PUBLISH_STATUS_MAP, m.status).label }}
+                </span>
+              </td>
+              <td>
+                <button class="btn-ghost btn-sm" @click="handleUpdate(m)">
+                  {{ m.status === 'published' ? '下架' : '发布' }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </AppLayout>
 </template>
 
 <style scoped>
-/* ── Page title ── */
+/* ═══════════════════════════════════════════════════════════════════════
+   Admin Experiment Manage — Code Studio
+   page-head + create form + skeleton table + data table
+   ═══════════════════════════════════════════════════════════════════════ */
+.page { display: flex; flex-direction: column; gap: 24px; }
+
+/* ── Page Head ─────────────────────────────────────────────────────── */
+.page-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 16px;
+}
 .page-title {
-  color: var(--ink);
+  font-size: 28px; font-weight: 700;
+  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
+  margin: 0 0 6px;
+}
+.page-sub {
+  font-size: var(--text-sm); color: var(--text-secondary); margin: 0;
 }
 
-/* Table, inputs, buttons and labels inherit Code Studio global styles
-   from src/style.css (th/td with surface-sunken header, input/textarea:focus
-   with var(--shadow-glow-primary), .btn-primary, .btn-sm, .form-group label). */
+/* ── Create Form ───────────────────────────────────────────────────── */
+.create-form {
+  padding: 24px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.create-form .form-group { margin-bottom: var(--space-3); }
+
+/* ── Table card ────────────────────────────────────────────────────── */
+.table-card {
+  padding: 0; overflow: hidden;
+}
+.table-card table { margin: 0; }
+
+/* ── Skeleton ──────────────────────────────────────────────────────── */
+.skeleton-row {
+  display: flex; gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.skeleton-row:last-child { border-bottom: none; }
+.skel-cell { height: 16px; border-radius: var(--radius-sm); }
+.w-15 { width: 15%; }
+.w-25 { width: 25%; }
+.w-40 { width: 40%; }
+
+/* ── Cells ─────────────────────────────────────────────────────────── */
+.title-cell { font-weight: 500; color: var(--ink); }
+
+@media (max-width: 768px) {
+  .page-head { flex-direction: column; }
+  .page-title { font-size: 24px; }
+}
 </style>

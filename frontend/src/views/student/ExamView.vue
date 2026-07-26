@@ -39,14 +39,21 @@ async function saveAnswer(qId, value) { answers.value = { ...answers.value, [qId
 async function submitExam() { if (!confirm('确定要交卷吗？交卷后无法修改答案。')) return; try { const res = await examsAPI.submit(route.params.id, {}); submission.value = res.data; submitted.value = true; clearInterval(timer); app.showToast('交卷成功', 'success') } catch(e) { app.showToast(e.response?.data?.detail?.message || '交卷失败', 'error') } }
 function isSelected(qId, optKey) { const ans = answers.value[qId]; return ans && ans.includes(optKey) }
 </script>
+
 <template>
   <AppLayout>
-    <div v-if="loading" class="loading">加载中...</div>
+    <!-- ── Loading ──────────────────────────────────────────────────────── -->
+    <div v-if="loading" class="card" style="padding:48px;text-align:center">
+      <div class="skeleton" style="height:22px;width:240px;margin:0 auto 16px"></div>
+      <div class="skeleton" style="height:14px;width:360px;margin:0 auto"></div>
+    </div>
+
     <template v-else>
+      <!-- ── Page Head ─────────────────────────────────────────────────── -->
       <div class="exam-header">
         <div class="header-left">
           <h1 class="exam-title">{{ exam?.title }}</h1>
-          <div v-if="statusText" class="status-text">{{ statusText }}</div>
+          <p v-if="statusText" class="status-text">{{ statusText }}</p>
         </div>
         <div v-if="started && !submitted" class="header-right">
           <div class="timer-box">
@@ -56,39 +63,48 @@ function isSelected(qId, optKey) { const ans = answers.value[qId]; return ans &&
         </div>
       </div>
 
-      <div v-if="graded" class="result-card">
+      <!-- ── Graded Result ─────────────────────────────────────────────── -->
+      <div v-if="graded" class="card result-card">
         <div class="result-score">{{ submission?.score ?? 0 }} <span class="result-unit">/ {{ totalPoints }} 分</span></div>
         <p class="result-text">考试已完成</p>
       </div>
 
-      <div v-else-if="submitted" class="result-card">
+      <!-- ── Submitted ─────────────────────────────────────────────────── -->
+      <div v-else-if="submitted" class="card result-card">
         <div class="result-icon">&#10003;</div>
         <p class="result-text">已交卷，等待评分...</p>
       </div>
 
-      <div v-else-if="!started" class="start-card">
+      <!-- ── Start ─────────────────────────────────────────────────────── -->
+      <div v-else-if="!started" class="card start-card">
         <div class="start-info">
           <p>考试时长：<strong>{{ exam?.duration_minutes }} 分钟</strong></p>
           <p>题目数量：<strong>{{ questions.length }} 题</strong></p>
           <p>总分：<strong>{{ totalPoints }} 分</strong></p>
         </div>
-        <button class="start-btn" @click="startExam">开始考试</button>
+        <button class="btn-accent start-btn" @click="startExam">开始考试</button>
       </div>
 
+      <!-- ── Exam Body ─────────────────────────────────────────────────── -->
       <div v-else class="exam-body">
-        <div class="progress-bar-wrap">
-          <div class="progress-bar"><div class="progress-fill" :style="{ width: progressPercent + '%' }"></div></div>
+        <div class="progress-wrap">
+          <div class="progress-bar">
+            <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
+          </div>
           <span class="progress-text">已答 {{ answeredCount }} / {{ questions.length }} 题（{{ progressPercent }}%）</span>
         </div>
 
-        <div v-for="(q,i) in questions" :key="q.id" class="question-card" :id="'q-' + q.id">
+        <div v-for="(q,i) in questions" :key="q.id" class="card question-card" :id="'q-' + q.id">
           <div class="question-header">
             <span class="question-num">第 {{ i + 1 }} 题</span>
-            <span class="question-type">{{ typeLabel(q.question_type) }}</span>
+            <span class="question-type badge" :class="q.question_type === 'single_choice' ? 'badge-primary' : q.question_type === 'multi_choice' ? 'badge-info' : 'badge-neutral'">
+              {{ typeLabel(q.question_type) }}
+            </span>
             <span class="question-points">{{ q.points }} 分</span>
           </div>
           <p class="question-prompt">{{ q.prompt }}</p>
 
+          <!-- 单选题 -->
           <div v-if="q.question_type === 'single_choice'" class="options-list">
             <label v-for="(opt,k) in q.options" :key="k" class="option-row" :class="{ selected: isSelected(q.id, k) }">
               <input type="radio" :name="'q'+q.id" class="option-radio" :checked="isSelected(q.id, k)" @change="saveAnswer(q.id, [k])" />
@@ -97,6 +113,7 @@ function isSelected(qId, optKey) { const ans = answers.value[qId]; return ans &&
             </label>
           </div>
 
+          <!-- 多选题 -->
           <div v-else-if="q.question_type === 'multi_choice'" class="options-list">
             <label v-for="(opt,k) in q.options" :key="k" class="option-row" :class="{ selected: isSelected(q.id, k) }">
               <input type="checkbox" class="option-checkbox" :checked="isSelected(q.id, k)" @change="saveAnswer(q.id, isSelected(q.id, k) ? (answers[q.id]||[]).filter(v=>v!==k) : [...(answers[q.id]||[]),k])" />
@@ -105,13 +122,14 @@ function isSelected(qId, optKey) { const ans = answers.value[qId]; return ans &&
             </label>
           </div>
 
+          <!-- 编程题 -->
           <div v-else class="code-area">
             <textarea :value="answers[q.id] || q.starter_code || ''" @input="saveAnswer(q.id, $event.target.value)" class="code-editor" rows="8" :placeholder="q.starter_code || '在此编写代码...'"></textarea>
           </div>
         </div>
 
         <div class="submit-area">
-          <button class="submit-btn" @click="submitExam">交卷</button>
+          <button class="btn-accent submit-btn" @click="submitExam">交卷</button>
         </div>
       </div>
     </template>
@@ -119,60 +137,151 @@ function isSelected(qId, optKey) { const ans = answers.value[qId]; return ans &&
 </template>
 
 <style scoped>
-.loading { padding: 48px; text-align: center; color: #6b7280; }
+/* ═══════════════════════════════════════════════════════════════════════
+   Exam View — Code Studio
+   page-head + timer + option cards + code editor + submit
+   ═══════════════════════════════════════════════════════════════════════ */
 
-.exam-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
-.exam-title { font-size: 20px; font-weight: 600; margin: 0 0 4px 0; }
-.status-text { font-size: 13px; color: #6b7280; }
-.header-right { flex-shrink: 0; }
-.timer-box { display: flex; flex-direction: column; align-items: center; background: #f97316; color: #fff; padding: 8px 20px; border-radius: 8px; }
-.timer-label { font-size: 11px; opacity: .85; }
-.timer-value { font-family: monospace; font-size: 22px; font-weight: 700; }
+/* ── Page Head ─────────────────────────────────────────────────────── */
+.exam-header {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
+}
+.exam-title {
+  font-size: 28px; font-weight: 700;
+  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
+  margin: 0 0 4px;
+}
+.status-text {
+  font-size: var(--text-sm); color: var(--text-secondary);
+}
 
-.result-card { text-align: center; padding: 48px 24px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; }
-.result-score { font-size: 36px; font-weight: 700; color: #16a34a; }
-.result-unit { font-size: 18px; color: #6b7280; font-weight: 400; }
-.result-text { color: #6b7280; margin-top: 8px; font-size: 14px; }
-.result-icon { font-size: 48px; color: #16a34a; margin-bottom: 8px; }
+/* ── Timer ─────────────────────────────────────────────────────────── */
+.timer-box {
+  display: flex; flex-direction: column; align-items: center;
+  background: var(--accent); color: var(--surface);
+  padding: 10px 24px; border-radius: var(--radius-lg);
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.25);
+}
+.timer-label { font-size: 11px; opacity: 0.85; }
+.timer-value {
+  font-family: var(--font-mono); font-size: 24px; font-weight: 700;
+  letter-spacing: 0.04em;
+}
 
-.start-card { text-align: center; padding: 48px 24px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; }
-.start-info { margin-bottom: 24px; line-height: 2; color: #374151; font-size: 15px; }
-.start-btn { padding: 12px 48px; background: #f97316; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
-.start-btn:hover { background: #ea580c; }
+/* ── Result / Start cards ──────────────────────────────────────────── */
+.result-card {
+  text-align: center; padding: 48px 24px;
+}
+.result-score {
+  font-size: 36px; font-weight: 700; color: var(--success);
+}
+.result-unit {
+  font-size: 18px; color: var(--text-secondary); font-weight: 400;
+}
+.result-text {
+  color: var(--text-secondary); margin-top: 8px; font-size: var(--text-sm);
+}
+.result-icon {
+  font-size: 48px; color: var(--success); margin-bottom: 8px;
+}
 
+.start-card {
+  text-align: center; padding: 56px 24px;
+}
+.start-info { margin-bottom: 24px; line-height: 2.2; color: var(--ink); font-size: 15px; }
+.start-info strong { font-weight: 600; color: var(--ink); }
+.start-btn {
+  padding: 12px 48px; font-size: 16px; font-weight: 600;
+}
+
+/* ── Exam body ─────────────────────────────────────────────────────── */
 .exam-body { max-width: 800px; }
 
-.progress-bar-wrap { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-.progress-bar { flex: 1; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; }
-.progress-fill { height: 100%; background: #f97316; border-radius: 3px; transition: width .3s; }
-.progress-text { font-size: 12px; color: #6b7280; white-space: nowrap; }
+/* Progress */
+.progress-wrap {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 24px;
+}
+.progress-bar {
+  flex: 1; height: 6px; background: var(--surface-raised);
+  border-radius: var(--radius-full); overflow: hidden;
+}
+.progress-fill {
+  height: 100%; background: var(--accent);
+  border-radius: var(--radius-full);
+  transition: width var(--duration-slow) var(--ease-out);
+}
+.progress-text {
+  font-size: var(--text-xs); color: var(--text-secondary); white-space: nowrap;
+}
 
-.question-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
-.question-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-.question-num { font-size: 14px; font-weight: 600; color: #374151; }
-.question-type { font-size: 11px; padding: 2px 10px; border-radius: 4px; background: #eff6ff; color: #2563eb; font-weight: 500; }
-.question-points { font-size: 12px; color: #6b7280; margin-left: auto; }
-.question-prompt { font-size: 14px; color: #374151; line-height: 1.7; margin-bottom: 16px; }
+/* Question card */
+.question-card {
+  padding: 24px; margin-bottom: 16px;
+}
+.question-header {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+}
+.question-num {
+  font-size: var(--text-sm); font-weight: 600; color: var(--ink);
+}
+.question-points {
+  font-size: var(--text-xs); color: var(--text-secondary); margin-left: auto;
+}
+.question-prompt {
+  font-size: var(--text-sm); color: var(--ink); line-height: 1.7; margin-bottom: 18px;
+}
 
-.options-list { display: flex; flex-direction: column; gap: 1px; }
-.option-row { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 6px; cursor: pointer; transition: background .15s; border: 1px solid transparent; }
-.option-row:hover { background: #f9fafb; }
-.option-row.selected { background: #eff6ff; border-color: #93c5fd; }
-.option-radio, .option-checkbox { width: 16px; height: 16px; margin: 0; accent-color: #2563eb; flex-shrink: 0; }
-.option-letter { font-weight: 600; font-size: 14px; color: #374151; min-width: 20px; }
-.option-text { font-size: 14px; color: #374151; line-height: 1.5; word-break: break-word; }
+/* Options */
+.options-list { display: flex; flex-direction: column; gap: 2px; }
+.option-row {
+  display: grid; grid-template-columns: auto auto 1fr; align-items: center;
+  gap: 10px; padding: 12px 14px; border-radius: var(--radius-md);
+  cursor: pointer; border: 1px solid transparent;
+  transition: background var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out);
+}
+.option-row:hover { background: var(--surface-raised); }
+.option-row.selected {
+  background: var(--primary-light);
+  border-color: var(--primary-soft);
+}
+.option-radio, .option-checkbox {
+  width: 16px; height: 16px; margin: 0;
+  accent-color: var(--primary); flex-shrink: 0;
+}
+.option-letter {
+  font-weight: 600; font-size: var(--text-sm); color: var(--ink);
+  min-width: 20px;
+}
+.option-text {
+  font-size: var(--text-sm); color: var(--ink);
+  line-height: 1.5; word-break: break-word;
+}
 
+/* Code editor */
 .code-area { margin-top: 8px; }
-.code-editor { width: 100%; background: #0f172a; color: #e2e8f0; border: 1px solid #1e293b; border-radius: 6px; padding: 14px; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; line-height: 1.6; resize: vertical; box-sizing: border-box; }
-.code-editor:focus { outline: none; border-color: #f97316; }
+.code-editor {
+  width: 100%; background: #0F172A; color: #E2E8F0;
+  border: 1px solid #1E293B; border-radius: var(--radius-md);
+  padding: 14px;
+  font-family: var(--font-mono); font-size: 13px;
+  line-height: 1.65; resize: vertical;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+.code-editor:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.12);
+}
 
-.submit-area { text-align: center; padding: 24px 0 48px; }
-.submit-btn { padding: 12px 56px; background: #f97316; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
-.submit-btn:hover { background: #ea580c; }
+/* Submit */
+.submit-area { text-align: center; padding: 32px 0 48px; }
+.submit-btn { padding: 12px 56px; font-size: 16px; font-weight: 600; }
 
 @media (max-width: 640px) {
   .exam-header { flex-direction: column; }
   .option-row { padding: 10px 10px; gap: 8px; }
-  .question-card { padding: 14px; }
+  .question-card { padding: 18px; }
+  .exam-title { font-size: 24px; }
 }
 </style>

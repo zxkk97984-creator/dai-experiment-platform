@@ -59,12 +59,16 @@ onMounted(fetch)
 <template>
   <AppLayout>
     <div class="question-editor">
-      <div class="flex-between mb-4">
-        <h1 class="page-title" style="margin-bottom:0">{{ assignment?.title || '作业' }} - 题目管理 🧩</h1>
+      <header class="page-head">
+        <div>
+          <h1 class="page-title">{{ assignment?.title || '作业' }} - 题目管理</h1>
+          <p class="page-sub">添加与编辑判题题目，配置测试用例</p>
+        </div>
         <button class="btn-primary" @click="showForm = !showForm">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           {{ showForm ? '取消' : '添加题目' }}
         </button>
-      </div>
+      </header>
 
       <div v-if="showForm" class="card mb-4">
         <div class="grid-2">
@@ -120,13 +124,13 @@ onMounted(fetch)
         </button>
       </div>
 
-      <div v-if="loading" class="text-secondary">加载中...</div>
+      <div v-if="loading" class="card" style="padding:48px;text-align:center">
+        <div class="skeleton" style="height:22px;width:200px;margin:0 auto 12px"></div>
+        <div class="skeleton" style="height:14px;width:300px;margin:0 auto"></div>
+      </div>
 
-      <div v-else-if="questions.length === 0" class="card empty-card">
-        <p class="empty-text">暂无题目</p>
-        <p class="text-secondary" style="font-size: var(--text-sm); margin-top: var(--space-2)">
-          点击上方「添加题目」按钮创建第一道题目
-        </p>
+      <div v-else-if="questions.length === 0" class="empty-state">
+        <p>🧩 暂无题目，点击「添加题目」创建第一道题目</p>
       </div>
 
       <div v-else v-for="(q, i) in questions" :key="q.id" class="card question-card mb-3">
@@ -145,15 +149,24 @@ onMounted(fetch)
 </template>
 
 <style scoped>
-/* ── Cards ── */
-.empty-card {
-  text-align: center;
-  padding: var(--space-12) !important;
+/* ═══════════════════════════════════════════════════════════════════════
+   Question Edit — Code Studio
+   page-head + create form + question cards
+   ═══════════════════════════════════════════════════════════════════════ */
+.question-editor { display: flex; flex-direction: column; gap: 24px; }
+
+/* ── Page head ─────────────────────────────────────────────────────── */
+.page-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 16px;
 }
-.empty-text {
-  color: var(--text-secondary);
-  font-size: var(--text-base);
-  margin-bottom: 0;
+.page-title {
+  font-size: 28px; font-weight: 700;
+  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
+  margin: 0 0 6px;
+}
+.page-sub {
+  font-size: var(--text-sm); color: var(--text-secondary); margin: 0;
 }
 
 /* ── Code editor (keep dark surface) ── */

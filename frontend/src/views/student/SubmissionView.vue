@@ -35,90 +35,109 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 
 <template>
   <AppLayout>
-    <h1 class="page-title">判题结果 ✅</h1>
+    <div class="page">
+      <!-- ── Page Head ─────────────────────────────────────────────────── -->
+      <header class="page-head">
+        <h1 class="page-title">判题结果</h1>
+      </header>
 
-    <div v-if="!submission" class="card submission-card" style="text-align:center;padding:48px">
-      <p class="text-secondary">加载中...</p>
-    </div>
+      <!-- ── Loading ────────────────────────────────────────────────────── -->
+      <div v-if="!submission" class="card" style="padding:48px;text-align:center">
+        <div class="skeleton" style="height:22px;width:200px;margin:0 auto 12px"></div>
+        <div class="skeleton" style="height:14px;width:300px;margin:0 auto"></div>
+      </div>
 
-    <template v-else>
-      <div class="card submission-card mb-4">
-        <div class="flex-between mb-4">
-          <h3 class="submission-title">提交 #{{ submission.id }}</h3>
-          <span class="badge"
-            :class="'badge-' + statusBadge(JUDGE_STATUS_MAP, submission.status).color">
-            {{ statusBadge(JUDGE_STATUS_MAP, submission.status).label }}
-          </span>
-        </div>
-        <div class="submission-meta grid-2 text-sm mb-4">
-          <div>状态: <strong>{{ submission.status }}</strong></div>
-          <div v-if="submission.score != null">得分: <strong>{{ submission.score }}</strong></div>
-          <div v-if="submission.execution_time_ms != null">
-            执行时间: <strong>{{ submission.execution_time_ms }}ms</strong>
+      <template v-else>
+        <!-- ── Submission Card ──────────────────────────────────────────── -->
+        <div class="card submission-card">
+          <div class="flex-between mb-4">
+            <h3 class="submission-title">提交 #{{ submission.id }}</h3>
+            <span class="badge" :class="'badge-' + statusBadge(JUDGE_STATUS_MAP, submission.status).color">
+              {{ statusBadge(JUDGE_STATUS_MAP, submission.status).label }}
+            </span>
           </div>
-          <div>提交时间: <strong>{{ formatDateTime(submission.created_at) }}</strong></div>
+          <div class="submission-meta grid-2">
+            <div>状态: <strong>{{ submission.status }}</strong></div>
+            <div v-if="submission.score != null">得分: <strong>{{ submission.score }}</strong></div>
+            <div v-if="submission.execution_time_ms != null">执行时间: <strong>{{ submission.execution_time_ms }}ms</strong></div>
+            <div>提交时间: <strong>{{ formatDateTime(submission.created_at) }}</strong></div>
+          </div>
         </div>
-      </div>
 
+        <!-- ── Polling ──────────────────────────────────────────────────── -->
+        <div v-if="polling" class="polling-hint">
+          <span class="spinner-sm"></span>
+          <span>判题进行中，自动刷新中...</span>
+        </div>
 
-      <div v-if="polling" class="polling-text text-sm mt-4 flex-center gap-2">
-        <span>判题进行中，自动刷新中...</span>
-      </div>
-    </template>
+        <!-- ── stdout / stderr ──────────────────────────────────────────── -->
+        <div v-if="submission.stdout" class="card output-card">
+          <div class="output-label">标准输出</div>
+          <pre class="output-block">{{ submission.stdout }}</pre>
+        </div>
+        <div v-if="submission.stderr" class="card output-card">
+          <div class="output-label">标准错误</div>
+          <pre class="output-block output-error">{{ submission.stderr }}</pre>
+        </div>
+
+        <!-- ── Result Details ───────────────────────────────────────────── -->
+        <div v-if="submission.result_details" class="card output-card">
+          <div class="output-label">判题详情</div>
+          <pre class="output-block">{{ JSON.stringify(submission.result_details, null, 2) }}</pre>
+        </div>
+      </template>
+    </div>
   </AppLayout>
 </template>
 
 <style scoped>
-/* ── Card ────────────────────────────────────────────────── */
-.submission-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-6);
-}
+/* ═══════════════════════════════════════════════════════════════════════
+   Submission View — Code Studio
+   page-head + submission card + polling + output blocks
+   ═══════════════════════════════════════════════════════════════════════ */
+.page { display: flex; flex-direction: column; gap: 24px; }
 
-.submission-title {
+/* ── Page Head ─────────────────────────────────────────────────────── */
+.page-title {
+  font-size: 28px; font-weight: 700;
+  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
   margin: 0;
-  color: var(--ink);
-  font-weight: 600;
 }
 
-.submission-meta {
-  color: var(--text-secondary);
-}
-.submission-meta strong {
-  color: var(--ink);
-}
+/* ── Submission Card ────────────────────────────────────────────────── */
+.submission-card { padding: 24px; }
+.submission-title { margin: 0; color: var(--ink); font-weight: 600; font-size: 17px; }
+.submission-meta { font-size: var(--text-sm); color: var(--text-secondary); }
+.submission-meta strong { color: var(--ink); font-weight: 600; }
 
-/* ── Terminal output blocks (code — keep dark) ──────────────────────── */
+/* ── Output card ───────────────────────────────────────────────────── */
+.output-card { padding: 20px; }
+.output-label {
+  font-size: var(--text-xs); font-weight: 600;
+  color: var(--text-secondary); text-transform: uppercase;
+  letter-spacing: 0.05em; margin-bottom: 10px;
+}
 .output-block {
-  background: #0F172A;
-  color: #E2E8F0;
-  padding: var(--space-4);
-  border-radius: var(--radius-md);
-  overflow-x: auto;
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  line-height: 1.65;
-  white-space: pre-wrap;
-  border: 1px solid #1E293B;
+  background: #0F172A; color: #E2E8F0;
+  padding: var(--space-4); border-radius: var(--radius-md);
+  overflow-x: auto; font-family: var(--font-mono);
+  font-size: var(--text-sm); line-height: 1.7;
+  white-space: pre-wrap; border: 1px solid #1E293B;
+  margin: 0;
 }
 .output-error { color: #F5A3AB; }
 
-/* ── Polling text ──────────────────────────────────────────────────── */
-.polling-text {
-  color: var(--text-secondary);
+/* ── Polling ────────────────────────────────────────────────────────── */
+.polling-hint {
+  display: flex; align-items: center; gap: 8px;
+  font-size: var(--text-sm); color: var(--text-secondary);
 }
-
-/* ── Badges (light theme from global CSS) ──────────────────────────── */
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  line-height: 1.6;
+.spinner-sm {
+  width: 14px; height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
 }
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>

@@ -63,14 +63,13 @@ function navigate(path) {
     <!-- Logo -->
     <div class="logo" @click="navigate(menuItems[0]?.path || '/')">
       <div class="logo-mark">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
           <path d="M12 2L3 7v10l9 5 9-5V7l-9-5z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
           <path d="M12 2v20 M3 7l9 5 9-5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
         </svg>
       </div>
       <div class="logo-text" v-if="!app.sidebarCollapsed">
-        <span class="logo-name">DAI</span>
-        <span class="logo-sub">实验平台</span>
+        <span class="logo-name">DAI 实验平台</span>
       </div>
     </div>
 
@@ -89,10 +88,7 @@ function navigate(path) {
             <path :d="ICONS[item.icon]" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </span>
-        <span class="nav-body" v-if="!app.sidebarCollapsed">
-          <span class="nav-label-text">{{ item.label }}</span>
-          <span class="nav-sub">{{ item.sub }}</span>
-        </span>
+        <span class="nav-text" v-if="!app.sidebarCollapsed">{{ item.label }}</span>
         <span class="nav-active-dot" v-if="isActive(item.path) && app.sidebarCollapsed"></span>
       </button>
     </nav>
@@ -116,61 +112,61 @@ function navigate(path) {
 </template>
 
 <style scoped>
+/* ═══════════════════════════════════════════════════════════════════════
+   App Sidebar — Light theme
+   白底 + 右侧边框 + 蓝色 active 态
+   ═══════════════════════════════════════════════════════════════════════ */
 .sidebar {
   position: fixed;
   left: 0; top: 0; bottom: 0;
-  width: 240px;
-  background: var(--bg-sidebar);
+  width: 224px;
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   z-index: 100;
   transition: width var(--duration-slow) var(--ease-out);
-  color: #FFFFFF;
+  color: var(--ink);
+  border-right: 1px solid var(--border);
 }
 
-.sidebar.collapsed { width: 64px; }
+.sidebar.collapsed { width: 56px; }
 
 /* ── Logo ──────────────────────────────────────────────────────────── */
 .logo {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 20px 18px;
+  gap: 10px;
+  padding: 16px;
   cursor: pointer;
   user-select: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border);
 }
 
 .logo-mark {
-  width: 36px; height: 36px;
+  width: 28px; height: 28px;
   border-radius: var(--radius-md);
-  background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
   display: flex; align-items: center; justify-content: center;
-  color: #FFFFFF;
+  color: var(--surface);
   flex-shrink: 0;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
 }
 
 .logo-text {
-  display: flex; flex-direction: column; gap: 1px;
+  display: flex; flex-direction: column; gap: 0px;
   min-width: 0;
 }
 .logo-name {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
-  color: #FFFFFF;
+  color: var(--ink);
   letter-spacing: -0.01em;
   line-height: 1;
-}
-.logo-sub {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
-  font-weight: 500;
-  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .sidebar.collapsed .logo {
-  padding: 20px 0;
+  padding: 16px 0;
   justify-content: center;
 }
 
@@ -189,19 +185,19 @@ function navigate(path) {
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   padding: 12px 12px 6px;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
+  gap: 10px;
+  padding: 8px 12px;
   background: transparent;
   border: none;
   border-radius: var(--radius-md);
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-secondary);
   font-family: var(--font-body);
   font-size: var(--text-sm);
   font-weight: 500;
@@ -216,21 +212,21 @@ function navigate(path) {
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #FFFFFF;
+  background: var(--primary-light);
+  color: var(--primary);
   border-color: transparent;
 }
 
 .nav-item.active {
-  background: rgba(37, 99, 235, 0.15);
-  color: #FFFFFF;
+  background: var(--primary-light);
+  color: var(--primary);
 }
 .nav-item.active::before {
   content: '';
   position: absolute;
   left: 0; top: 50%;
   transform: translateY(-50%);
-  width: 3px; height: 18px;
+  width: 2px; height: 16px;
   background: var(--primary);
   border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
 }
@@ -241,25 +237,13 @@ function navigate(path) {
   flex-shrink: 0;
   color: currentColor;
 }
-.nav-item.active .nav-icon { color: var(--primary); }
 
-.nav-body {
-  display: flex; flex-direction: column; gap: 0px;
-  flex: 1; min-width: 0;
-}
-.nav-label-text {
-  font-size: 14px;
+.nav-text {
+  font-size: var(--text-sm);
   font-weight: 500;
   line-height: 1.3;
   color: inherit;
 }
-.nav-sub {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.35);
-  font-weight: 400;
-  line-height: 1.3;
-}
-.nav-item.active .nav-sub { color: rgba(255, 255, 255, 0.55); }
 
 .nav-active-dot {
   position: absolute;
@@ -281,7 +265,7 @@ function navigate(path) {
 /* ── Footer ─────────────────────────────────────────────────────────── */
 .sidebar-footer {
   padding: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--border);
 }
 
 .collapse-btn {
@@ -290,7 +274,7 @@ function navigate(path) {
   gap: 8px;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-tertiary);
   padding: 8px;
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -300,12 +284,12 @@ function navigate(path) {
   font-weight: 500;
 }
 .collapse-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #FFFFFF;
+  background: var(--surface-raised);
+  color: var(--ink);
   border-color: transparent;
 }
 .collapse-text {
-  font-size: 12px;
+  font-size: var(--text-xs);
   letter-spacing: 0.02em;
 }
 

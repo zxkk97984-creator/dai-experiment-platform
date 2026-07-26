@@ -27,19 +27,10 @@ const roleBadge = computed(() => statusBadge(ROLE_MAP, auth.role))
 <template>
   <header class="header">
     <div class="header-left">
-      <div class="greeting">
-        <span class="greet-text">{{ greeting }}，</span>
-        <span class="greet-name">{{ auth.user?.real_name || auth.user?.username || '同学' }}</span>
-        <span class="greet-emoji">👋</span>
-      </div>
+      <span class="header-user">{{ auth.user?.real_name || auth.user?.username || '同学' }}</span>
     </div>
 
     <div class="header-right">
-      <div class="header-chip">
-        <span class="chip-dot" :class="'dot-' + roleBadge.color"></span>
-        <span class="chip-text">{{ roleBadge.label }}端</span>
-      </div>
-
       <div class="user-block">
         <div class="user-avatar" aria-hidden="true">
           {{ (auth.user?.real_name || auth.user?.username || '?').charAt(0) }}
@@ -62,25 +53,16 @@ const roleBadge = computed(() => statusBadge(ROLE_MAP, auth.role))
   padding: 0 32px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  height: 64px;
+  height: 52px;
   flex-shrink: 0;
 }
 
-/* ── Greeting ──────────────────────────────────────────────────────── */
-.greeting {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--text-sm);
+/* ── User name ─────────────────────────────────────────────────────── */
+.header-user {
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text-secondary);
 }
-.greet-text { font-weight: 400; }
-.greet-name {
-  font-weight: 600;
-  color: var(--ink);
-  letter-spacing: -0.005em;
-}
-.greet-emoji { margin-left: 2px; font-size: 14px; }
 
 /* ── Right ─────────────────────────────────────────────────────────── */
 .header-right {
@@ -88,30 +70,6 @@ const roleBadge = computed(() => statusBadge(ROLE_MAP, auth.role))
   align-items: center;
   gap: 12px;
 }
-
-/* Role chip */
-.header-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px 5px 9px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-.chip-dot {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--text-tertiary);
-}
-.dot-success { background: var(--success); }
-.dot-warning { background: var(--warning); }
-.dot-danger  { background: var(--danger); }
-.dot-info    { background: var(--info); }
-.dot-neutral { background: var(--text-tertiary); }
 
 /* User block */
 .user-block {
@@ -150,8 +108,5 @@ const roleBadge = computed(() => statusBadge(ROLE_MAP, auth.role))
 
 @media (max-width: 768px) {
   .header { padding: 0 16px; }
-  .greet-text { display: none; }
-  .greet-name { font-size: 14px; }
-  .header-chip { display: none; }
 }
 </style>

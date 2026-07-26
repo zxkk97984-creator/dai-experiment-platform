@@ -40,6 +40,9 @@ export const experimentsAPI = {
     return client.post(`/experiments/records/${recordId}/restart`)
   },
 
+  /** 获取实验记录列表 */
+  listRecords(params) { return client.get('/experiments/records', { params }) },
+
   // 模块管理
   listModules(params) { return client.get('/experiments/modules', { params }) },
   getModule(id) { return client.get(`/experiments/modules/${id}`) },

@@ -6,7 +6,7 @@ import { coursesAPI } from '../../api/courses.js'
 import { studioAPI } from '../../api/studio.js'
 import { useAppStore } from '../../stores/app.js'
 
-const route = useRoute()
+const route = useRoute()
 const router = useRouter()
 const app = useAppStore()
 const course = ref(null)
@@ -73,15 +73,16 @@ onMounted(fetch)
 
 <template>
   <AppLayout>
-    <div class="page-header">
-      <h1 class="page-title">{{ course?.title || '课程详情' }}</h1>
-      <button class="btn-accent" @click="showChForm = !showChForm">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" class="btn-icon">
-          <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-        {{ showChForm ? '取消' : '添加章节' }}
-      </button>
-    </div>
+    <header class="page-head">
+        <div>
+          <h1 class="page-title">{{ course?.title || '课程详情' }}</h1>
+          <p class="page-sub">管理章节与课时安排</p>
+        </div>
+        <button class="btn-accent" @click="showChForm = !showChForm">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          {{ showChForm ? '取消' : '添加章节' }}
+        </button>
+    </header>
 
     <!-- Chapter creation form -->
     <div v-if="showChForm" class="chapter-form">
@@ -94,7 +95,14 @@ onMounted(fetch)
       <button class="btn-accent" @click="createChapter">确认添加</button>
     </div>
 
-    <div v-if="loading" class="loading-text">加载中...</div>
+<div v-if="loading" class="card" style="padding:48px;text-align:center">
+      <div class="skeleton" style="height:22px;width:240px;margin:0 auto 12px"></div>
+      <div class="skeleton" style="height:14px;width:360px;margin:0 auto"></div>
+    </div>
+
+    <div v-else-if="chapters.length === 0 && !showChForm" class="empty-state">
+      <p>📖 暂无章节，点击「添加章节」开始构建课程</p>
+    </div>
 
     <!-- Chapter cards -->
     <div v-for="(ch, chi) in chapters" :key="ch.id" class="chapter-card">
@@ -172,39 +180,37 @@ onMounted(fetch)
 </template>
 
 <style scoped>
-/* ── Page header ── */
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
+/* ── Page head ── */
+.page-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 24px; gap: 16px;
+}
+.page-sub {
+  font-size: var(--text-sm); color: var(--text-secondary); margin: 6px 0 0;
 }
 
 .page-title {
   font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--ink);
-  margin: 0;
-  letter-spacing: -0.3px;
+  font-size: 28px; font-weight: 700;
+  color: var(--ink); margin: 0;
+  letter-spacing: -0.02em;
 }
 
 /* ── Accent CTA button ── */
 .btn-accent {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  align-items: center; gap: 6px;
   padding: 8px 16px;
   background: var(--accent);
-  color: #fff;
+  color: var(--surface);
   border: 1px solid var(--accent);
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm); font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s, box-shadow 0.15s;
-  font-family: var(--font-body);
-  line-height: 1.4;
+  transition: background var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+  font-family: var(--font-body); line-height: 1.4;
+  white-space: nowrap;
 }
 
 .btn-accent:hover {
@@ -475,9 +481,8 @@ onMounted(fetch)
   padding: 8px 0;
 }
 
-.loading-text {
-  font-size: 13px;
-  color: var(--text-secondary);
-  padding: 24px 0;
+@media (max-width: 768px) {
+  .page-head { flex-direction: column; }
+  .page-title { font-size: 24px; }
 }
 </style>

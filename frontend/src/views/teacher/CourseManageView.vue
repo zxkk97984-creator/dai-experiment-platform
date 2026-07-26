@@ -45,15 +45,23 @@ onMounted(fetch)
 
 <template>
   <AppLayout>
-    <div class="course-manage-page">
-      <div class="flex-between mb-4">
-        <h1 class="page-title" style="margin-bottom:0">课程管理 📚</h1>
-        <button class="btn-primary" @click="showCreate = !showCreate">
-          {{ showCreate ? '取消' : '创建课程' }}
-        </button>
-      </div>
+    <div class="page">
+      <!-- ── Page Head ─────────────────────────────────────────────────── -->
+      <header class="page-head">
+        <div>
+          <h1 class="page-title">课程管理</h1>
+          <p class="page-sub">创建与维护课程，管理章节和课时安排</p>
+        </div>
+        <div class="page-meta">
+          <button class="btn-primary" @click="showCreate = !showCreate">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            {{ showCreate ? '取消' : '创建课程' }}
+          </button>
+        </div>
+      </header>
 
-      <div v-if="showCreate" class="card create-form mb-4">
+      <!-- ── Create Form ───────────────────────────────────────────────── -->
+      <div v-if="showCreate" class="card create-form">
         <div class="form-group">
           <label>课程名称</label>
           <input v-model="form.title" placeholder="输入课程名称" />
@@ -67,158 +75,119 @@ onMounted(fetch)
         </button>
       </div>
 
-      <div v-if="loading" class="card loading-card">
-        <div class="skeleton-row" v-for="i in 3" :key="i">
-          <div class="skeleton skeleton-cell" style="width:40%" />
-          <div class="skeleton skeleton-cell" style="width:15%" />
-          <div class="skeleton skeleton-cell" style="width:30%" />
+      <!-- ── Loading ────────────────────────────────────────────────────── -->
+      <div v-if="loading" class="card table-card">
+        <div class="skeleton-row" v-for="i in 4" :key="i">
+          <div class="skeleton skel-cell w-40"></div>
+          <div class="skeleton skel-cell w-20"></div>
+          <div class="skeleton skel-cell w-35"></div>
         </div>
       </div>
 
-      <div v-else-if="courses.length === 0" class="card empty-card">
-        <p class="empty-text">暂无课程，点击上方按钮创建第一个课程</p>
+      <!-- ── Empty ──────────────────────────────────────────────────────── -->
+      <div v-else-if="courses.length === 0" class="empty-state">
+        <p>📚 暂无课程，点击上方按钮创建第一个课程</p>
       </div>
 
-      <table v-else class="data-table">
-        <thead>
-          <tr>
-            <th>名称</th>
-            <th>状态</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="c in courses" :key="c.id" class="course-row">
-            <td>
-              <a class="course-link" @click="router.push(`/teacher/courses/${c.id}/manage`)">{{ c.title }}</a>
-            </td>
-            <td>
-              <span class="badge" :class="'badge-' + statusBadge(PUBLISH_STATUS_MAP, c.status).color">
-                {{ statusBadge(PUBLISH_STATUS_MAP, c.status).label }}
-              </span>
-            </td>
-            <td class="actions-cell">
-              <button class="btn-ghost btn-sm" @click="router.push(`/teacher/courses/${c.id}/manage`)">章节课时</button>
-              <button v-if="c.status === 'draft'" class="btn-ghost btn-sm btn-publish" @click="handlePublish(c)">发布</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <!-- ── Table ──────────────────────────────────────────────────────── -->
+      <div v-else class="card table-card">
+        <table>
+          <thead>
+            <tr>
+              <th>名称</th><th>状态</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in courses" :key="c.id">
+              <td>
+                <a class="course-link" @click="router.push(`/teacher/courses/${c.id}/manage`)">{{ c.title }}</a>
+              </td>
+              <td>
+                <span class="badge" :class="'badge-' + statusBadge(PUBLISH_STATUS_MAP, c.status).color">
+                  {{ statusBadge(PUBLISH_STATUS_MAP, c.status).label }}
+                </span>
+              </td>
+              <td class="actions-cell">
+                <button class="btn-ghost btn-sm" @click="router.push(`/teacher/courses/${c.id}/manage`)">章节课时</button>
+                <button v-if="c.status === 'draft'" class="btn-sm btn-publish" @click="handlePublish(c)">发布</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </AppLayout>
 </template>
 
 <style scoped>
-/* ── Create form ── */
-.create-form .form-group label {
-  color: var(--text-secondary);
-}
+/* ═══════════════════════════════════════════════════════════════════════
+   Teacher Course Manage — Code Studio
+   page-head + create form card + skeleton table + data table
+   ═══════════════════════════════════════════════════════════════════════ */
+.page { display: flex; flex-direction: column; gap: 24px; }
 
-.create-form input,
-.create-form textarea {
-  background: var(--surface);
-  border-color: var(--border);
-  color: var(--ink);
-}
-.create-form input::placeholder,
-.create-form textarea::placeholder {
-  color: var(--text-tertiary);
-}
-.create-form input:focus,
-.create-form textarea:focus {
-  border-color: var(--primary);
-  box-shadow: var(--shadow-glow-primary);
-  outline: none;
-}
-
-/* ── Loading skeleton ── */
-.loading-card {
-  padding: 0;
-  overflow: hidden;
-}
-.skeleton-row {
-  display: flex;
+/* ── Page Head ─────────────────────────────────────────────────────── */
+.page-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
   gap: 16px;
+}
+.page-title {
+  font-size: 28px; font-weight: 700;
+  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
+  margin: 0 0 6px;
+}
+.page-sub {
+  font-size: var(--text-sm); color: var(--text-secondary); margin: 0;
+}
+
+/* ── Create Form ───────────────────────────────────────────────────── */
+.create-form {
+  padding: 24px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.create-form .form-group { margin-bottom: var(--space-4); }
+
+/* ── Table card ────────────────────────────────────────────────────── */
+.table-card {
+  padding: 0; overflow: hidden;
+}
+.table-card table { margin: 0; }
+
+/* ── Skeleton rows ─────────────────────────────────────────────────── */
+.skeleton-row {
+  display: flex; gap: 16px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
 }
-.skeleton-row:last-child {
-  border-bottom: none;
-}
-.skeleton-cell {
-  height: 16px;
-  border-radius: 4px;
-}
+.skeleton-row:last-child { border-bottom: none; }
+.skel-cell { height: 16px; border-radius: var(--radius-sm); }
+.w-20 { width: 20%; }
+.w-35 { width: 35%; }
+.w-40 { width: 40%; }
 
-/* ── Empty state ── */
-.empty-card {
-  text-align: center;
-  padding: 48px;
-}
-.empty-text {
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-}
-
-/* ── Data table ── */
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--text-sm);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-}
-
-.data-table th {
-  background: var(--surface-sunken);
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-}
-
-.data-table td {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-  color: var(--ink);
-}
-
-.course-row:hover td {
-  background: var(--surface-raised);
-}
-.course-row:last-child td {
-  border-bottom: none;
-}
-
-/* ── Course link ── */
+/* ── Course link ───────────────────────────────────────────────────── */
 .course-link {
-  color: var(--primary);
-  cursor: pointer;
-  font-weight: 500;
-  transition: color 120ms ease;
+  color: var(--primary); cursor: pointer; font-weight: 500;
+  transition: color var(--duration-fast) var(--ease-out);
 }
-.course-link:hover {
-  color: var(--accent-hover);
-}
+.course-link:hover { color: var(--primary-dark); }
 
-/* ── Action buttons ── */
-.actions-cell {
-  display: flex;
-  gap: 8px;
-}
-
+/* ── Actions ───────────────────────────────────────────────────────── */
+.actions-cell { display: flex; gap: 8px; }
 .btn-publish {
   color: var(--accent);
-  border-color: rgba(249, 115, 22, 0.3);
+  border-color: var(--accent);
+  background: transparent;
 }
 .btn-publish:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--surface);
   border-color: var(--accent);
+}
+
+@media (max-width: 768px) {
+  .page-head { flex-direction: column; }
+  .page-title { font-size: 24px; }
+  .create-form { padding: 18px; }
 }
 </style>

@@ -32,12 +32,12 @@ const app = useAppStore()
   flex: 1;
   display: flex;
   flex-direction: column;
-  margin-left: 240px;
+  margin-left: 224px;
   transition: margin-left var(--duration-slow) var(--ease-out);
   min-width: 0;
   background: var(--paper);
 }
-.main-area.collapsed { margin-left: 64px; }
+.main-area.collapsed { margin-left: 56px; }
 
 .content {
   flex: 1;

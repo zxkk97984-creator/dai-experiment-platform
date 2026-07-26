@@ -43,8 +43,8 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
 <template>
   <AppLayout>
     <div class="dash">
-      <!-- ── Hero ───────────────────────────────────────────────────── -->
-      <section class="hero">
+      <!-- ── Hero / Page Head ──────────────────────────────────────────── -->
+      <header class="page-head hero">
         <div class="hero-content">
           <div class="hero-eyebrow">
             <span class="eyebrow-dot"></span>
@@ -77,11 +77,11 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
             </div>
           </div>
         </div>
-      </section>
+      </header>
 
-      <!-- ── Stats ──────────────────────────────────────────────────── -->
+      <!-- ── Stats ──────────────────────────────────────────────────────── -->
       <section class="stats">
-        <div v-for="s in stats" :key="s.label" class="stat-card" :class="'stat-' + s.color">
+        <article v-for="s in stats" :key="s.label" class="card stat-card" :class="'stat-' + s.color">
           <div class="stat-icon">{{ s.icon }}</div>
           <div class="stat-body">
             <div class="stat-value">
@@ -91,13 +91,13 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
             <div class="stat-label">{{ s.label }}</div>
             <div class="stat-trend">{{ s.trend }}</div>
           </div>
-        </div>
+        </article>
       </section>
 
-      <!-- ── Main grid ──────────────────────────────────────────────── -->
+      <!-- ── Main grid ──────────────────────────────────────────────────── -->
       <div class="dash-grid">
-        <!-- My courses -->
-        <section class="panel">
+        <!-- 我的课程 -->
+        <section class="card panel-card">
           <div class="panel-head">
             <div>
               <h2 class="panel-title">我的课程</h2>
@@ -107,7 +107,8 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
               全部 →
             </button>
           </div>
-          <div class="course-list">
+          <!-- 有课程时显示列表 -->
+          <div v-if="courses.length" class="course-list">
             <div
               v-for="c in courses" :key="c.id"
               class="course-card"
@@ -136,17 +137,22 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
               </div>
             </div>
           </div>
+          <!-- 空状态 -->
+          <div v-else class="empty-state">
+            <p>📭 暂未加入任何课程</p>
+            <button class="btn-primary btn-sm" @click="go('/student/courses')">浏览课程</button>
+          </div>
         </section>
 
-        <!-- Todos -->
-        <section class="panel">
+        <!-- 待办事项 -->
+        <section class="card panel-card">
           <div class="panel-head">
             <div>
               <h2 class="panel-title">待办事项</h2>
               <p class="panel-sub">{{ todos.filter(t => !t.done).length }} 项待处理</p>
             </div>
           </div>
-          <ul class="todo-list">
+          <ul v-if="todos.length" class="todo-list">
             <li v-for="t in todos" :key="t.id" class="todo-item">
               <div class="todo-checkbox" :class="{ checked: t.done }" aria-hidden="true">
                 <svg v-if="t.done" width="10" height="10" viewBox="0 0 12 12" fill="none">
@@ -166,10 +172,13 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
               </span>
             </li>
           </ul>
+          <div v-else class="empty-state">
+            <p>🎉 暂无待办事项，继续保持！</p>
+          </div>
         </section>
       </div>
 
-      <!-- ── Shortcuts ──────────────────────────────────────────────── -->
+      <!-- ── 快捷入口 ──────────────────────────────────────────────────── -->
       <section class="shortcuts">
         <div class="panel-head">
           <h2 class="panel-title">快速入口</h2>
@@ -177,7 +186,7 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
         <div class="shortcut-grid">
           <button
             v-for="s in shortcuts" :key="s.label"
-            class="shortcut-card"
+            class="card shortcut-card"
             :class="'sc-' + s.color"
             @click="go(s.path)"
           >
@@ -200,12 +209,13 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
 /* ═══════════════════════════════════════════════════════════════════════
    Student Dashboard — Code Studio
    Hero + KPI stats + course progress + todos + shortcuts.
+   设计系统：全局 card / badge / btn-* / progress，颜色全用 var()
    ═══════════════════════════════════════════════════════════════════════ */
 .dash { display: flex; flex-direction: column; gap: 32px; }
 
 /* ── Hero ─────────────────────────────────────────────────────────── */
 .hero {
-  background: linear-gradient(135deg, #0F172A 0%, #1E3A8A 70%, #2563EB 100%);
+  background: linear-gradient(135deg, #0F172A 0%, #1E3A8A 70%, var(--primary) 100%);
   border-radius: var(--radius-2xl);
   padding: 36px 36px;
   color: #FFFFFF;
@@ -215,7 +225,7 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
   align-items: center;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
+  box-shadow: var(--shadow-xl);
 }
 .hero::before {
   content: '';
@@ -242,14 +252,14 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: var(--radius-full);
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: rgba(255, 255, 255, 0.85);
   font-weight: 500;
   margin-bottom: 14px;
 }
 .eyebrow-dot {
   width: 6px; height: 6px;
-  background: #10B981;
+  background: var(--success);
   border-radius: 50%;
   box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
   animation: pulse 2s infinite;
@@ -272,7 +282,7 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
   line-height: 1.55;
   margin: 0 0 18px;
 }
-.hero-sub strong { color: #FCD34D; font-weight: 600; }
+.hero-sub strong { color: var(--warning-soft); font-weight: 600; }
 .hero-actions {
   display: flex; gap: 10px; flex-wrap: wrap;
 }
@@ -298,9 +308,7 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
   border-color: rgba(255, 255, 255, 0.3);
 }
 
-.hero-visual {
-  position: relative; z-index: 1;
-}
+.hero-visual { position: relative; z-index: 1; }
 .streak-card {
   display: flex; align-items: center; gap: 14px;
   background: rgba(255, 255, 255, 0.08);
@@ -313,7 +321,7 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
 .streak-num {
   font-size: 28px;
   font-weight: 700;
-  color: #FCD34D;
+  color: var(--warning-soft);
   letter-spacing: -0.02em;
   line-height: 1;
 }
@@ -325,16 +333,13 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
   margin-top: 4px;
 }
 
-/* ── Stats ─────────────────────────────────────────────────────────── */
+/* ── Stats — 复用 .card 提供 bg/border/radius/hover ─────────────── */
 .stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 16px;
 }
 .stat-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
   padding: 18px;
   display: flex; align-items: flex-start; gap: 14px;
   transition: border-color var(--duration-normal) var(--ease-out),
@@ -342,8 +347,6 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
               transform var(--duration-fast) var(--ease-out);
 }
 .stat-card:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-md);
   transform: translateY(-2px);
 }
 .stat-icon {
@@ -373,12 +376,12 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
   line-height: 1;
 }
 .stat-unit {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   font-weight: 500;
 }
 .stat-label {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--ink);
   font-weight: 500;
   margin-bottom: 4px;
@@ -397,11 +400,8 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
   align-items: start;
 }
 
-/* Panel */
-.panel {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+/* 面板卡片 — 继承全局 .card，仅覆盖 padding */
+.panel-card {
   padding: 24px;
 }
 .panel-head {
@@ -416,12 +416,12 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
   margin: 0;
 }
 .panel-sub {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   margin: 3px 0 0;
 }
 
-/* Course cards */
+/* 课程卡片 */
 .course-list {
   display: flex; flex-direction: column; gap: 12px;
 }
@@ -446,20 +446,15 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
   flex-shrink: 0;
   background: var(--primary);
 }
-.course-blue .course-color   { background: #2563EB; }
-.course-green .course-color  { background: #10B981; }
-.course-orange .course-color { background: #F97316; }
-.course-purple .course-color { background: #8B5CF6; }
+.course-blue .course-color   { background: var(--primary); }
+.course-green .course-color  { background: var(--success); }
+.course-orange .course-color { background: var(--accent); }
+.course-purple .course-color { background: var(--purple); }
 
-.course-body {
-  flex: 1;
-  padding: 14px 16px;
-  min-width: 0;
-}
+.course-body { flex: 1; padding: 14px 16px; min-width: 0; }
 .course-head {
   display: flex; justify-content: space-between; align-items: flex-start;
-  margin-bottom: 10px;
-  gap: 12px;
+  margin-bottom: 10px; gap: 12px;
 }
 .course-code {
   font-size: 11px;
@@ -470,14 +465,14 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
   margin-bottom: 2px;
 }
 .course-title {
-  font-size: 14px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--ink);
   letter-spacing: -0.005em;
   line-height: 1.3;
 }
 .course-progress-num {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 700;
   color: var(--primary);
   font-family: var(--font-mono);
@@ -494,7 +489,7 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
   color: var(--text-secondary);
 }
 
-/* Todo list */
+/* 待办列表 */
 .todo-list { list-style: none; padding: 0; margin: 0; }
 .todo-item {
   display: flex; align-items: flex-start; gap: 12px;
@@ -507,38 +502,28 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
   width: 20px; height: 20px;
   border: 1.5px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  flex-shrink: 0;
-  margin-top: 1px;
+  flex-shrink: 0; margin-top: 1px;
   display: flex; align-items: center; justify-content: center;
-  color: #FFFFFF;
+  color: var(--surface);
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out),
               border-color var(--duration-fast) var(--ease-out);
 }
-.todo-checkbox:hover {
-  border-color: var(--primary);
-}
+.todo-checkbox:hover { border-color: var(--primary); }
 .todo-checkbox.checked {
   background: var(--success);
   border-color: var(--success);
 }
-
 .todo-body { flex: 1; min-width: 0; }
 .todo-title {
-  font-size: 14px;
-  color: var(--ink);
-  font-weight: 500;
-  line-height: 1.4;
-  margin-bottom: 4px;
+  font-size: var(--text-sm);
+  color: var(--ink); font-weight: 500;
+  line-height: 1.4; margin-bottom: 4px;
 }
-.todo-title.done {
-  text-decoration: line-through;
-  color: var(--text-tertiary);
-}
+.todo-title.done { text-decoration: line-through; color: var(--text-tertiary); }
 .todo-meta {
   display: flex; gap: 6px;
-  font-size: 11px;
-  color: var(--text-secondary);
+  font-size: 11px; color: var(--text-secondary);
 }
 .todo-course { color: var(--text-secondary); }
 .todo-sep { color: var(--text-tertiary); }
@@ -546,7 +531,7 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
 .todo-due.due-medium { color: var(--warning); }
 .todo-due.due-low    { color: var(--text-tertiary); }
 
-/* Shortcuts */
+/* 快捷入口 — 复用 .card */
 .shortcut-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -554,29 +539,18 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
 }
 .shortcut-card {
   display: flex; align-items: center; gap: 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
   padding: 16px;
-  cursor: pointer;
-  text-align: left;
-  width: 100%;
+  cursor: pointer; text-align: left; width: 100%;
   transition: border-color var(--duration-fast) var(--ease-out),
-              background var(--duration-fast) var(--ease-out),
-              transform var(--duration-fast) var(--ease-out),
-              box-shadow var(--duration-fast) var(--ease-out);
+              box-shadow var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out);
 }
-.shortcut-card:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
-}
+.shortcut-card:hover { transform: translateY(-2px); }
 .sc-icon {
   width: 36px; height: 36px;
   border-radius: var(--radius-md);
   display: flex; align-items: center; justify-content: center;
-  font-size: 17px;
-  flex-shrink: 0;
+  font-size: 17px; flex-shrink: 0;
   background: var(--primary-light);
 }
 .sc-blue .sc-icon   { background: var(--primary-light); }
@@ -586,28 +560,19 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
 
 .sc-body { flex: 1; min-width: 0; }
 .sc-label {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink);
-  letter-spacing: -0.005em;
-  line-height: 1.2;
+  font-size: var(--text-sm); font-weight: 600;
+  color: var(--ink); letter-spacing: -0.005em; line-height: 1.2;
 }
 .sc-sub {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  margin-top: 2px;
+  font-size: 11px; color: var(--text-tertiary);
+  font-family: var(--font-mono); margin-top: 2px;
 }
 .sc-arrow {
-  color: var(--text-tertiary);
-  flex-shrink: 0;
+  color: var(--text-tertiary); flex-shrink: 0;
   transition: transform var(--duration-fast) var(--ease-out),
               color var(--duration-fast) var(--ease-out);
 }
-.shortcut-card:hover .sc-arrow {
-  color: var(--primary);
-  transform: translateX(2px);
-}
+.shortcut-card:hover .sc-arrow { color: var(--primary); transform: translateX(2px); }
 
 /* ── Responsive ─────────────────────────────────────────────────────── */
 @media (max-width: 1024px) {
@@ -622,7 +587,7 @@ function goCourse(id) { router.push(`/student/courses/${id}`) }
   .stats { grid-template-columns: 1fr 1fr; gap: 12px; }
   .stat-card { padding: 14px; }
   .stat-num { font-size: 20px; }
-  .panel { padding: 18px; }
+  .panel-card { padding: 18px; }
   .shortcut-grid { grid-template-columns: 1fr 1fr; }
 }
 </style>

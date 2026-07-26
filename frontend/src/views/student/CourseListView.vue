@@ -246,11 +246,11 @@ onMounted(fetchCourses)
   opacity: 0.85;
   z-index: 0;
 }
-.card-blue   .card-top::before { background: linear-gradient(135deg, #DBEAFE 0%, #BFDBFE 100%); }
-.card-green  .card-top::before { background: linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 100%); }
-.card-orange .card-top::before { background: linear-gradient(135deg, #FED7AA 0%, #FDBA74 100%); }
-.card-purple .card-top::before { background: linear-gradient(135deg, #E9D5FF 0%, #DDD6FE 100%); }
-.card-cyan   .card-top::before { background: linear-gradient(135deg, #CFFAFE 0%, #A5F3FC 100%); }
+.card-blue   .card-top::before { background: linear-gradient(135deg, var(--primary-soft) 0%, var(--primary-light) 100%); }
+.card-green  .card-top::before { background: linear-gradient(135deg, var(--success-soft) 0%, var(--success-light) 100%); }
+.card-orange .card-top::before { background: linear-gradient(135deg, var(--accent-soft) 0%, var(--accent-light) 100%); }
+.card-purple .card-top::before { background: linear-gradient(135deg, var(--purple-soft) 0%, var(--purple-light) 100%); }
+.card-cyan   .card-top::before { background: linear-gradient(135deg, var(--info-soft) 0%, var(--info-light) 100%); }
 .card-pink   .card-top::before { background: linear-gradient(135deg, #FBCFE8 0%, #F9A8D4 100%); }
 
 .card-icon {

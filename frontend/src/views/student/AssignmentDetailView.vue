@@ -723,7 +723,7 @@ function stopSubmitPolling() {
   font-size: var(--text-xs);
   font-weight: 500;
   color: var(--text-secondary);
-  background: #E0E3EA;
+  background: var(--surface-raised);
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   border: 1px solid transparent;
   cursor: default;

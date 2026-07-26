@@ -8,37 +8,147 @@ const router = useRouter(); const app = useAppStore()
 const exams = ref([]); const loading = ref(true); const showCreate = ref(false)
 const form = ref({ title: '', course_id: '', duration_minutes: 60, start_at: '', end_at: '' })
 function badgeClass(status) { return status === 'published' ? 'badge-success' : 'badge-neutral' }
-function badgeLabel(status) { return status === 'published' ? 'published' : 'draft' }
-async function fetch() { loading.value = true; try { const res = await examsAPI.list(); exams.value = res.data.items || res.data } catch { app.showToast('load err', 'error') } finally { loading.value = false } }
-async function handleCreate() { if (!form.value.title) return; try { await examsAPI.create({ ...form.value, course_id: parseInt(form.value.course_id) || undefined }); app.showToast('created', 'success'); showCreate.value = false; fetch() } catch (e) { app.showToast(e.response?.data?.detail?.message || 'err', 'error') } }
-async function publishExam(id) { try { await examsAPI.update(id, { status: 'published' }); app.showToast('published', 'success'); fetch() } catch (e) { app.showToast(e.response?.data?.detail?.message || 'err', 'error') } }
+function badgeLabel(status) { return status === 'published' ? '已发布' : '草稿' }
+async function fetch() { loading.value = true; try { const res = await examsAPI.list(); exams.value = res.data.items || res.data } catch { app.showToast('加载失败', 'error') } finally { loading.value = false } }
+async function handleCreate() { if (!form.value.title) return; try { await examsAPI.create({ ...form.value, course_id: parseInt(form.value.course_id) || undefined }); app.showToast('创建成功', 'success'); showCreate.value = false; fetch() } catch (e) { app.showToast(e.response?.data?.detail?.message || '创建失败', 'error') } }
+async function publishExam(id) { try { await examsAPI.update(id, { status: 'published' }); app.showToast('已发布', 'success'); fetch() } catch (e) { app.showToast(e.response?.data?.detail?.message || '操作失败', 'error') } }
 onMounted(fetch)
 </script>
+
 <template>
   <AppLayout>
-    <div class="tb"><h1 class="t">Exams</h1><button class="btn" @click="showCreate = !showCreate">{{ showCreate ? 'cancel' : 'new' }}</button></div>
-    <div v-if="showCreate" class="card"><div class="fg"><label>title</label><input v-model="form.title" /></div><div class="fg"><label>course ID</label><input v-model="form.course_id" type="number" /></div><div class="fg"><label>duration (min)</label><input v-model.number="form.duration_minutes" type="number" /></div><div class="fg"><label>start</label><input v-model="form.start_at" type="datetime-local" /></div><button class="btn" @click="handleCreate">create</button></div>
-    <div v-if="loading">loading...</div>
-    <table v-else-if="exams.length" class="dt"><thead><tr><th>title</th><th>status</th><th>duration</th><th>actions</th></tr></thead><tbody><tr v-for="e in exams" :key="e.id"><td>{{ e.title }}</td><td><span class="badge" :class="badgeClass(e.status)">{{ badgeLabel(e.status) }}</span></td><td>{{ e.duration_minutes }} min</td><td class="ac"><button class="b" @click="router.push('/teacher/exams/'+e.id+'/edit')">questions</button><button class="b" @click="router.push('/teacher/exams/'+e.id+'/grades')">grades</button><button v-if="e.status==='draft'" class="b ba" @click="publishExam(e.id)">publish</button></td></tr></tbody></table>
-    <div v-else class="card" style="text-align:center;padding:48px"><p>no exams</p></div>
+    <div class="page">
+      <!-- ── Page Head ─────────────────────────────────────────────────── -->
+      <header class="page-head">
+        <div>
+          <h1 class="page-title">考试管理</h1>
+          <p class="page-sub">创建考试、配置题目、查看成绩单与统计</p>
+        </div>
+        <div class="page-meta">
+          <button class="btn-primary" @click="showCreate = !showCreate">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            {{ showCreate ? '取消' : '创建考试' }}
+          </button>
+        </div>
+      </header>
+
+      <!-- ── Create Form ───────────────────────────────────────────────── -->
+      <div v-if="showCreate" class="card create-form">
+        <div class="form-group"><label>考试名称</label><input v-model="form.title" placeholder="输入考试名称" /></div>
+        <div class="grid-2">
+          <div class="form-group"><label>课程 ID</label><input v-model="form.course_id" type="number" placeholder="关联课程 ID" /></div>
+          <div class="form-group"><label>时长（分钟）</label><input v-model.number="form.duration_minutes" type="number" placeholder="60" /></div>
+        </div>
+        <div class="form-group"><label>开始时间</label><input v-model="form.start_at" type="datetime-local" /></div>
+        <button class="btn-primary" @click="handleCreate">确认创建</button>
+      </div>
+
+      <!-- ── Loading ────────────────────────────────────────────────────── -->
+      <div v-if="loading" class="card table-card">
+        <div class="skeleton-row" v-for="i in 4" :key="i">
+          <div class="skeleton skel-cell w-35"></div>
+          <div class="skeleton skel-cell w-15"></div>
+          <div class="skeleton skel-cell w-20"></div>
+          <div class="skeleton skel-cell w-25"></div>
+        </div>
+      </div>
+
+      <!-- ── Empty ──────────────────────────────────────────────────────── -->
+      <div v-else-if="exams.length === 0" class="empty-state">
+        <p>📝 暂无考试，点击「创建考试」开始</p>
+      </div>
+
+      <!-- ── Table ──────────────────────────────────────────────────────── -->
+      <div v-else class="card table-card">
+        <table>
+          <thead>
+            <tr><th>名称</th><th>状态</th><th>时长</th><th>操作</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="e in exams" :key="e.id">
+              <td class="title-cell">{{ e.title }}</td>
+              <td>
+                <span class="badge" :class="badgeClass(e.status)">{{ badgeLabel(e.status) }}</span>
+              </td>
+              <td class="text-sm text-secondary">{{ e.duration_minutes }} 分钟</td>
+              <td class="actions-cell">
+                <button class="btn-ghost btn-sm" @click="router.push('/teacher/exams/' + e.id + '/edit')">编辑题目</button>
+                <button class="btn-ghost btn-sm" @click="router.push('/teacher/exams/' + e.id + '/grades')">成绩</button>
+                <button v-if="e.status === 'draft'" class="btn-sm btn-publish" @click="publishExam(e.id)">发布</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </AppLayout>
 </template>
+
 <style scoped>
-.tb{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
-.t{font-size:20px;font-weight:600;margin:0}
-.btn{padding:8px 16px;background:var(--accent,#f97316);color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer}
-.card{background:var(--surface,#fff);border:1px solid var(--border,#e5e7eb);border-radius:8px;padding:16px;margin-bottom:16px}
-.fg{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
-.fg label{font-size:11px;color:var(--text-secondary,#6b7280)}
-.fg input{padding:6px 10px;border:1px solid var(--border,#d1d5db);border-radius:4px;font-size:13px}
-.dt{width:100%;border-collapse:collapse;font-size:13px;background:var(--surface,#fff);border:1px solid var(--border,#e5e7eb);border-radius:8px;overflow:hidden}
-.dt th{background:var(--surface-sunken,#f9fafb);color:var(--text-secondary,#6b7280);padding:8px 12px;text-align:left}
-.dt td{padding:8px 12px;border-bottom:1px solid var(--border,#e5e7eb)}
-.badge{font-size:10px;padding:2px 8px;border-radius:3px}
-.badge-neutral{background:#eff6ff;color:#2563eb}
-.badge-success{background:#dcfce7;color:#16a34a}
-.ac{display:flex;gap:4px}
-.b{padding:4px 8px;border:1px solid var(--border,#d1d5db);border-radius:4px;background:var(--surface,#fff);font-size:11px;cursor:pointer}
-.b:hover{background:var(--surface-raised,#f3f4f6)}
-.ba{background:var(--accent,#f97316);color:#fff;border-color:var(--accent,#f97316)}
+/* ═══════════════════════════════════════════════════════════════════════
+   Teacher Exam Manage — Code Studio
+   page-head + create form + skeleton table + data table
+   ═══════════════════════════════════════════════════════════════════════ */
+.page { display: flex; flex-direction: column; gap: 24px; }
+
+/* ── Page Head ─────────────────────────────────────────────────────── */
+.page-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 16px;
+}
+.page-title {
+  font-size: 28px; font-weight: 700;
+  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
+  margin: 0 0 6px;
+}
+.page-sub {
+  font-size: var(--text-sm); color: var(--text-secondary); margin: 0;
+}
+
+/* ── Create Form ───────────────────────────────────────────────────── */
+.create-form {
+  padding: 24px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.create-form .form-group { margin-bottom: var(--space-3); }
+
+/* ── Table card ────────────────────────────────────────────────────── */
+.table-card {
+  padding: 0; overflow: hidden;
+}
+.table-card table { margin: 0; }
+
+/* ── Skeleton ──────────────────────────────────────────────────────── */
+.skeleton-row {
+  display: flex; gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.skeleton-row:last-child { border-bottom: none; }
+.skel-cell { height: 16px; border-radius: var(--radius-sm); }
+.w-15 { width: 15%; }
+.w-20 { width: 20%; }
+.w-25 { width: 25%; }
+.w-35 { width: 35%; }
+
+/* ── Cells ─────────────────────────────────────────────────────────── */
+.title-cell { font-weight: 500; color: var(--ink); }
+
+/* ── Actions ───────────────────────────────────────────────────────── */
+.actions-cell { display: flex; gap: 8px; }
+.btn-publish {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: transparent;
+}
+.btn-publish:hover {
+  background: var(--accent);
+  color: var(--surface);
+  border-color: var(--accent);
+}
+
+@media (max-width: 768px) {
+  .page-head { flex-direction: column; }
+  .page-title { font-size: 24px; }
+}
 </style>

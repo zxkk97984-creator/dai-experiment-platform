@@ -64,28 +64,41 @@ export const useExperimentStore = defineStore('experiment', () => {
     saved.value = false
     dirtySources.value = {}
 
-    const ensRes = lessonId != null
-      ? await experimentsAPI.ensureForLesson(lessonId)
-      : await experimentsAPI.ensureForModule(moduleId)
-    recordId.value = ensRes.data.id
-    recordRevision.value = ensRes.data.record_revision
+    try {
+      const ensRes = lessonId != null
+        ? await experimentsAPI.ensureForLesson(lessonId)
+        : await experimentsAPI.ensureForModule(moduleId)
+      recordId.value = ensRes.data.id
+      recordRevision.value = ensRes.data.record_revision
 
-    const detail = await experimentsAPI.getRecordDetail(recordId.value)
-    const d = detail.data
-    const raw = (d.cells || []).map(c => ({
-      id: c.id, type: c.type || 'code', source: c.source || '',
-      order: c.order || 0,
-      student_editable: c.student_editable !== false,
-      outputs: c.outputs || null, isRunning: false,
-    }))
-    raw.sort((a, b) => a.order - b.order)
-    cells.value = raw
-    entryName.value = d.entry_name || ''
-    entryDescription.value = d.entry_description || ''
-    if (context.value) context.value.title = entryName.value
-    if (d.record_revision != null) recordRevision.value = d.record_revision
-    saved.value = true
-    _startSafety()
+      const detail = await experimentsAPI.getRecordDetail(recordId.value)
+      const d = detail.data
+      const raw = (d.cells || []).map(c => ({
+        id: c.id, type: c.type || 'code', source: c.source || '',
+        order: c.order || 0,
+        student_editable: c.student_editable !== false,
+        outputs: c.outputs || null, isRunning: false,
+      }))
+      raw.sort((a, b) => a.order - b.order)
+      cells.value = raw
+      entryName.value = d.entry_name || ''
+      entryDescription.value = d.entry_description || ''
+      if (context.value) context.value.title = entryName.value
+      if (d.record_revision != null) recordRevision.value = d.record_revision
+      saved.value = true
+      _startSafety()
+    } catch (e) {
+      const code = e.response?.data?.detail?.code
+      const message = e.response?.data?.detail?.message
+      if (e.response?.status === 404) {
+        error.value = { code: code || 'NOT_FOUND', message: message || '实验资源不存在或已被删除' }
+      } else if (e.response?.status === 403) {
+        error.value = { code: code || 'FORBIDDEN', message: message || '无权访问该实验' }
+      } else {
+        error.value = { code: code || 'LOAD_FAILED', message: message || '加载实验失败，请稍后重试' }
+      }
+      throw error.value
+    }
   }
 
   // ── 编辑 ──
