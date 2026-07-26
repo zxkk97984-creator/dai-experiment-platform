@@ -72,6 +72,10 @@ def save_answer(db, exam_id, question_id, student, payload):
 
 
 def submit_exam(exam, student, db):
+    """交卷：先 DB 持久化答案 → 再入队 Redis → 最后汇总成绩。
+
+    幂等：已 submitted/grading/graded 的提交直接返回。
+    """
     now = datetime.now(timezone.utc)
     sub = db.scalar(select(ExamSubmission).where(
         ExamSubmission.exam_id == exam.id, ExamSubmission.student_id == student.id))
@@ -82,14 +86,19 @@ def submit_exam(exam, student, db):
         db.flush()
     if sub.status in ("submitted", "grading", "graded"):
         return sub
+
     sub.status = "grading"
     sub.submitted_at = now
     db.commit()
+
     questions = db.scalars(select(ExamQuestion).where(ExamQuestion.exam_id == exam.id)).all()
     answers = db.scalars(select(ExamAnswer).where(ExamAnswer.submission_id == sub.id)).all()
     by_qid = {a.question_id: a for a in answers}
+
+    code_answers_to_enqueue = []  # (ans, q)
     total = 0.0
     all_done = True
+
     for q in questions:
         ans = by_qid.get(q.id)
         if not ans:
@@ -109,30 +118,58 @@ def submit_exam(exam, student, db):
             total += score
         elif q.question_type == "code":
             if ans.code_answer and q.hidden_tests:
-                try:
-                    from app.worker.judge_worker import enqueue_exam_answer
-                    enqueue_exam_answer(sub.id, ans.id, q)
-                    ans.grading_status = "pending"
-                    all_done = False
-                except Exception:
-                    ans.grading_status = "completed"
-                    ans.system_error = "判题队列不可用"
+                ans.grading_status = "pending"
+                code_answers_to_enqueue.append((ans, q))
+                all_done = False
             else:
                 ans.score = 0
                 ans.grading_status = "completed"
-    if all_done:
-        _finalize_grade(sub, total, db)
+
+    # 先持久化所有答案状态到数据库
+    db.commit()
+
+    # 数据库提交成功后再入队 Redis；入队失败则回写 system_error
+    for ans, q in code_answers_to_enqueue:
+        try:
+            from app.worker.judge_worker import enqueue_exam_answer
+            enqueue_exam_answer(sub.id, ans.id, q)
+        except Exception:
+            ans.grading_status = "completed"
+            ans.system_error = "判题队列不可用"
+            ans.score = 0
+            db.commit()
+
+    # 重新检查是否所有答案都已完成（入队失败的已被标记为 completed）
+    remaining_pending = db.scalar(
+        select(ExamAnswer).where(
+            ExamAnswer.submission_id == sub.id,
+            ExamAnswer.grading_status == "pending",
+        ).limit(1)
+    )
+    if not remaining_pending:
+        total = db.scalar(
+            select(func.sum(ExamAnswer.score)).where(
+                ExamAnswer.submission_id == sub.id,
+                ExamAnswer.grading_status == "completed",
+            )
+        ) or 0.0
+        _finalize_grade(sub, float(total), db)
+        db.commit()
+
     db.refresh(sub)
     return sub
 
 
 def _auto_submit(sub, db, now):
+    """自动交卷：先评分选择题 → 提交 DB → 代码题入队 → 汇总"""
     sub.status = "grading"
     sub.submitted_at = now
     questions = db.scalars(select(ExamQuestion).where(ExamQuestion.exam_id == sub.exam_id)).all()
     answers = db.scalars(select(ExamAnswer).where(ExamAnswer.submission_id == sub.id)).all()
     by_qid = {a.question_id: a for a in answers}
     total = 0.0
+    code_answers_to_enqueue = []
+
     for q in questions:
         ans = by_qid.get(q.id)
         if not ans:
@@ -144,10 +181,43 @@ def _auto_submit(sub, db, now):
             ans.grading_status = "completed"
             total += ans.score
         elif q.question_type == "code":
-            ans.score = 0
-            ans.grading_status = "completed"
-    _finalize_grade(sub, total, db)
+            if ans.code_answer and q.hidden_tests:
+                ans.grading_status = "pending"
+                code_answers_to_enqueue.append((ans, q))
+            else:
+                ans.score = 0
+                ans.grading_status = "completed"
+
+    # 先持久化
     db.commit()
+
+    # 入队代码题
+    for ans, q in code_answers_to_enqueue:
+        try:
+            from app.worker.judge_worker import enqueue_exam_answer
+            enqueue_exam_answer(sub.id, ans.id, q)
+        except Exception:
+            ans.grading_status = "completed"
+            ans.system_error = "判题队列不可用"
+            ans.score = 0
+            db.commit()
+
+    # 检查是否全部完成
+    remaining_pending = db.scalar(
+        select(ExamAnswer).where(
+            ExamAnswer.submission_id == sub.id,
+            ExamAnswer.grading_status == "pending",
+        ).limit(1)
+    )
+    if not remaining_pending:
+        total = db.scalar(
+            select(func.sum(ExamAnswer.score)).where(
+                ExamAnswer.submission_id == sub.id,
+                ExamAnswer.grading_status == "completed",
+            )
+        ) or 0.0
+        _finalize_grade(sub, float(total), db)
+        db.commit()
 
 
 def _finalize_grade(sub, score, db):

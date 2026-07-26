@@ -123,21 +123,40 @@ def process_submission(db: Session, redis_client, settings: Settings, submission
     return submission
 
 
+EXAM_JUDGE_QUEUE = "judge:exam:queue"
+
+
 def run_worker_loop():
+    """主循环：同时消费普通判题队列和考试判题队列"""
     import redis
+    import json as _json
 
     settings = get_settings()
     redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
     while True:
-        _, raw_submission_id = redis_client.brpop(settings.judge_queue_name)
+        # brpop 支持多 key，返回 (queue_name, value)
+        queue_name, raw_data = redis_client.brpop(
+            settings.judge_queue_name, EXAM_JUDGE_QUEUE
+        )
         with SessionLocal() as db:
-            process_submission(db, redis_client, settings, int(raw_submission_id))
+            try:
+                if queue_name == EXAM_JUDGE_QUEUE:
+                    payload = _json.loads(raw_data)
+                    process_exam_answer(
+                        db, redis_client, settings, payload["answer_id"]
+                    )
+                else:
+                    process_submission(
+                        db, redis_client, settings, int(raw_data)
+                    )
+            except Exception:
+                # 记录异常但继续消费，避免单次失败导致 Worker 退出
+                import traceback
+                traceback.print_exc()
 
 
 if __name__ == "__main__":
     run_worker_loop()
-
-EXAM_JUDGE_QUEUE = "judge:exam:queue"
 
 def enqueue_exam_answer(submission_id: int, answer_id: int, question: ExamQuestion):
     """把考试编程题答案推入 Redis 判题队列"""
@@ -151,6 +170,9 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
     answer = db.get(ExamAnswer, answer_id)
     if not answer:
         raise ValueError(f"ExamAnswer {answer_id} does not exist")
+    # 幂等：已完成的答案不重复判题
+    if answer.grading_status == "completed":
+        return answer
     question = db.get(ExamQuestion, answer.question_id)
     if not question or not question.hidden_tests:
         answer.system_error = "题目未配置隐藏测试"
