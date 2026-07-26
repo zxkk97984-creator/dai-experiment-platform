@@ -19,7 +19,6 @@ const submitting = ref(false)
 const testing = ref(false)
 const bottomTab = ref('self-test')
 const showProblem = ref(true)
-const customInput = ref('')
 const testResult = ref(null)
 
 const MAX_POLL_COUNT = 120
@@ -100,10 +99,9 @@ const currentCompleted = computed(() => {
   return qid != null && completedQuestions.value.has(qid)
 })
 
-onUnmounted(() => { stopPolling(); stopSubmitPolling() })
+onUnmounted(() => { stopSubmitPolling() })
 
 function selectQuestion(idx) {
-  stopPolling()
   stopSubmitPolling()
   activeQ.value = idx
   code.value = questions.value[idx]?.starter_code || ''
@@ -120,6 +118,7 @@ function syncScroll() {
 }
 
 // ── Self-test ─────────────────────────────────────────────────────────
+// sample-run 同步返回结果，无需轮询
 async function handleSelfTest() {
   const q = questions.value[activeQ.value]
   if (!q) return
@@ -129,54 +128,15 @@ async function handleSelfTest() {
     const res = await judgeAPI.sampleRun(q.id, {
       question_id: q.id,
       code: code.value,
-      input: customInput.value,
     })
-    const submissionId = res.data.id
-    if (submissionId != null) {
-      pollResult(submissionId)
-    } else {
-      app.showToast('自测请求未返回有效ID', 'error')
-      testing.value = false
-    }
+    // sample-run 直接返回 {output, status, execution_time_ms}，无 submission ID
+    testResult.value = res.data
+    testing.value = false
   } catch (e) {
     const msg = e.response?.data?.detail?.message || '自测请求失败'
     app.showToast(msg, 'error')
     testing.value = false
   }
-}
-
-function pollResult(submissionId) {
-  stopPolling()
-  pollCount = 0
-  let failCount = 0
-  pollTimer = setInterval(async () => {
-    pollCount++
-    try {
-      const res = await judgeAPI.getResult(submissionId)
-      testResult.value = res.data
-      failCount = 0
-      if (TERMINAL_STATUSES.includes(res.data.status)) {
-        stopPolling()
-        testing.value = false
-      }
-    } catch {
-      failCount++
-      if (failCount >= 5) {
-        stopPolling()
-        testing.value = false
-        app.showToast('判题服务无响应，请重试', 'error')
-      }
-    }
-    if (pollCount >= MAX_POLL_COUNT) {
-      stopPolling()
-      testing.value = false
-      app.showToast('判题超时，请重试', 'error')
-    }
-  }, 1000)
-}
-
-function stopPolling() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
 }
 
 // ── Submit ────────────────────────────────────────────────────────────
@@ -412,17 +372,6 @@ function stopSubmitPolling() {
           <!-- Self-test content -->
           <transition name="tab-fade">
             <div v-if="bottomTab === 'self-test'" class="tab-content" key="self-test">
-              <div class="self-test-input-group">
-                <label class="input-label">自定义输入</label>
-                <textarea
-                  v-model="customInput"
-                  class="custom-input"
-                  rows="3"
-                  placeholder="输入测试数据（可选）例如: [1, 2, 3, 4, 5]"
-                  spellcheck="false"
-                ></textarea>
-              </div>
-
               <!-- Terminal output -->
               <div class="terminal-panel" v-if="testResult || testing">
                 <div class="terminal-header">

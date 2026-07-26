@@ -35,7 +35,7 @@ def _setup_course(client, db_session_factory, course_status="published", assignm
     aid = a.json()['id']
     q = client.post(f'/api/v1/assignments/{aid}/questions', headers=auth_header(t_tok), json={
         'title': 'Q1', 'function_name': 'add',
-        'public_cases': [{'input': '1,2', 'expected': '3'}],
+        'public_cases': [{'args': [1, 2], 'expected': 3}],
         'hidden_tests': 'HIDDEN_SENTINEL_XYZ\ndef test_hidden(): assert add(1,2)==3',
     })
     qid = q.json()['id']

@@ -1,4 +1,4 @@
-import math
+﻿import math
 import tempfile
 from pathlib import Path
 
@@ -45,6 +45,7 @@ def create_submission(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
     current_user: User = Depends(get_current_user),
+    redis_client = Depends(get_redis_client),
 ):
     if current_user.role != "student":
         raise api_error(403, "FORBIDDEN", "只有学生可以提交代码")
@@ -77,46 +78,17 @@ def create_submission(
     db.commit()
     db.refresh(submission)
 
-    # Process synchronously with hidden tests
+    # 异步入队到 Redis，由 Worker 处理判题
     try:
-        submission.status = "running"
+        redis_client.rpush(settings.judge_queue_name, str(submission.id))
+    except Exception:
+        # 入队失败则标记为 system_error，前端轮询可发现
+        submission.status = "system_error"
+        submission.stdout = "判题队列不可用"
         db.commit()
+        db.refresh(submission)
 
-        with tempfile.TemporaryDirectory(prefix="dai-judge-") as temp_dir:
-            workdir = Path(temp_dir)
-            user_code_path = workdir / "user_code.py"
-            user_code_path.write_text(payload.code, encoding="utf-8")
-
-            hidden_tests = question.hidden_tests
-            if "import user_code" not in hidden_tests and "from user_code" not in hidden_tests:
-                hidden_tests = f"import user_code\n\n{hidden_tests}"
-            test_path = workdir / "test_user_code.py"
-            test_path.write_text(hidden_tests, encoding="utf-8")
-
-            timeout_seconds = _get_timeout(question, settings)
-            memory_mb = question.memory_limit_mb or settings.judge_memory_limit_mb
-
-            stdout, stderr, returncode, elapsed_ms = _run_docker_pytest(
-                workdir, settings, timeout_seconds, memory_mb
-            )
-
-        status_text, score_val = _status_from_pytest(returncode, stdout, stderr)
-        submission.status = status_text
-        submission.score = score_val
-        submission.stdout = stdout[-5000:]
-        submission.stderr = stderr[-5000:]
-        submission.execution_time_ms = elapsed_ms
-    except FileNotFoundError:
-        submission.status = "system_error"
-        submission.stdout = "Docker not available"
-    except Exception as e:
-        submission.status = "system_error"
-        submission.stdout = str(e)[:500]
-
-    db.commit()
-    db.refresh(submission)
     return submission
-
 
 @router.get("/submissions", response_model=PaginatedResponse)
 def list_submissions(
@@ -211,9 +183,11 @@ def sample_run(
     # 仅用公开样例构建测试文件
     test_code = f"{payload.code}\n\n"
     test_code += "def test_public_cases():\n"
-    for case in public_cases:
-        test_code += f"    assert {question.function_name}({case.get('input', '')}) == {case.get('expected', '')}\n"
-
+    for idx, case in enumerate(public_cases):
+        args = case.get("args", [])
+        expected = case.get("expected")
+        args_str = ", ".join(repr(a) for a in args)
+        test_code += f"    assert {question.function_name}({args_str}) == {repr(expected)}\n"
     with tempfile.TemporaryDirectory(prefix="dai-sample-") as temp_dir:
         workdir = Path(temp_dir)
         (workdir / "test_sample.py").write_text(test_code, encoding="utf-8")

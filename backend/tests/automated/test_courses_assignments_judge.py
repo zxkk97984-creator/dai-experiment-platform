@@ -83,7 +83,7 @@ def test_course_assignment_submission_and_worker_result(
             "function_name": "add",
             "signature": "def add(a: int, b: int) -> int",
             "starter_code": "def add(a, b):\n    return 0\n",
-            "public_cases": [{"input": [1, 2], "expected": 3}],
+            "public_cases": [{"args": [1, 2], "expected": 3}],
             "hidden_tests": "def test_add():\n    assert user_code.add(1, 2) == 3\n    assert user_code.add(-1, 1) == 0\n",
             "time_limit_ms": 5000,
             "memory_limit_mb": 256,

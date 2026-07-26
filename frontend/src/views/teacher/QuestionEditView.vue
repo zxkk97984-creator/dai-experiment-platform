@@ -100,7 +100,7 @@ onMounted(fetch)
         <div class="grid-2">
           <div class="form-group">
             <label>公开样例 (JSON)</label>
-            <textarea v-model="form.public_cases" rows="4" class="code-editor" placeholder='[{"input": [1, 2], "expected": 3}]'></textarea>
+            <textarea v-model="form.public_cases" rows="4" class="code-editor" placeholder='[{"args": [1, 2], "expected": 3}]'></textarea>
           </div>
           <div class="form-group">
             <label>隐藏测试 (pytest 代码)</label>

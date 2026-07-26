@@ -489,7 +489,7 @@ def create_assignments_and_questions(
         function_name="add_two",
         signature="def add_two(a: int, b: int) -> int:",
         starter_code="def add_two(a, b):\n    # 在这里写你的代码\n    pass",
-        public_cases=[{"input": "add_two(1,2)", "expected": "3"}, {"input": "add_two(-5,10)", "expected": "5"}],
+        public_cases=[{"args": [1, 2], "expected": 3}, {"args": [-5, 10], "expected": 5}],
         hidden_tests="""import pytest
 import user_code
 
@@ -521,7 +521,7 @@ def test_add_two_floats():
         function_name="is_prime",
         signature="def is_prime(n: int) -> bool:",
         starter_code="def is_prime(n):\n    pass",
-        public_cases=[{"input": "is_prime(7)", "expected": "True"}, {"input": "is_prime(10)", "expected": "False"}],
+        public_cases=[{"args": [7], "expected": True}, {"args": [10], "expected": False}],
         hidden_tests="""import pytest
 import user_code
 
@@ -556,7 +556,7 @@ def test_is_prime_large_non_prime():
         function_name="fibonacci",
         signature="def fibonacci(n: int) -> list:",
         starter_code="def fibonacci(n):\n    pass",
-        public_cases=[{"input": "fibonacci(5)", "expected": "[0,1,1,2,3]"}, {"input": "fibonacci(1)", "expected": "[0]"}],
+        public_cases=[{"args": [5], "expected": [0, 1, 1, 2, 3]}, {"args": [1], "expected": [0]}],
         hidden_tests="""import pytest
 import user_code
 
@@ -586,7 +586,7 @@ def test_fibonacci_10_len():
         function_name="reverse_string",
         signature="def reverse_string(s: str) -> str:",
         starter_code="def reverse_string(s):\n    pass",
-        public_cases=[{"input": "reverse_string('hello')", "expected": "'olleh'"}, {"input": "reverse_string('')", "expected": "''"}],
+        public_cases=[{"args": ["hello"], "expected": "olleh"}, {"args": [""], "expected": ""}],
         hidden_tests="""import pytest
 import user_code
 
@@ -634,7 +634,7 @@ def test_unicode():
         function_name="unique_sorted",
         signature="def unique_sorted(lst: list) -> list:",
         starter_code="def unique_sorted(lst):\n    pass",
-        public_cases=[{"input": "unique_sorted([3,1,2,1,3])", "expected": "[1,2,3]"}],
+        public_cases=[{"args": [[3, 1, 2, 1, 3]], "expected": [1, 2, 3]}],
         hidden_tests="""import pytest
 import user_code
 
@@ -666,7 +666,7 @@ def test_all_same():
         function_name="word_count",
         signature="def word_count(text: str) -> dict:",
         starter_code="def word_count(text):\n    pass",
-        public_cases=[{"input": "word_count('Hello world Hello')", "expected": "{'hello':2,'world':1}"}],
+        public_cases=[{"args": ["Hello world Hello"], "expected": {"hello": 2, "world": 1}}],
         hidden_tests=r"""import pytest
 import user_code
 
@@ -714,7 +714,7 @@ def test_case():
         function_name="matrix_multiply",
         signature="def matrix_multiply(A: list, B: list) -> list:",
         starter_code="def matrix_multiply(A, B):\n    pass",
-        public_cases=[{"input": "matrix_multiply([[1,2],[3,4]], [[5,6],[7,8]])", "expected": "[[19,22],[43,50]]"}],
+        public_cases=[{"args": [[[1, 2], [3, 4]], [[5, 6], [7, 8]]], "expected": [[19, 22], [43, 50]]}],
         hidden_tests="""import pytest
 import user_code
 
@@ -886,7 +886,7 @@ def create_exams_and_questions(
         points=25,
         order_index=4,
         starter_code="def add_two(a, b):\n    # 在这里写你的代码\n    pass",
-        public_cases=[{"input": "add_two(1,2)", "expected": "3"}, {"input": "add_two(-5,10)", "expected": "5"}],
+        public_cases=[{"args": [1, 2], "expected": 3}, {"args": [-5, 10], "expected": 5}],
         hidden_tests="""import pytest
 import user_code
 
@@ -920,7 +920,7 @@ def test_add_two_floats():
         points=25,
         order_index=5,
         starter_code="def reverse_string(s):\n    pass",
-        public_cases=[{"input": "reverse_string('hello')", "expected": "'olleh'"}, {"input": "reverse_string('')", "expected": "''"}],
+        public_cases=[{"args": ["hello"], "expected": "olleh"}, {"args": [""], "expected": ""}],
         hidden_tests="""import pytest
 import user_code
 
@@ -998,7 +998,7 @@ def test_unicode():
         points=30,
         order_index=2,
         starter_code="def unique_sorted(lst):\n    pass",
-        public_cases=[{"input": "unique_sorted([3,1,2,1,3])", "expected": "[1,2,3]"}],
+        public_cases=[{"args": [[3, 1, 2, 1, 3]], "expected": [1, 2, 3]}],
         hidden_tests="""import pytest
 import user_code
 
