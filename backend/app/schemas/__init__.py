@@ -403,6 +403,17 @@ class ExperimentRecordRead(BaseModel):
     submitted_at: datetime | None = None
 
 
+class ExperimentSubmissionRead(BaseModel):
+    """实验提交记录"""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    record_id: int
+    attempt_number: int
+    cells_snapshot: dict = Field(default_factory=dict)
+    submitted_at: datetime | None = None
+
+
 class ExperimentRecordDetailResponse(BaseModel):
     """GET /records/{id} 完整响应（学生不含 source_hidden cells）"""
     id: int

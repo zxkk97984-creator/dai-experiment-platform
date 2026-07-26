@@ -48,4 +48,12 @@ export const experimentsAPI = {
   getModule(id) { return client.get(`/experiments/modules/${id}`) },
   createModule(payload) { return client.post('/experiments/modules', payload) },
   updateModule(id, payload) { return client.patch(`/experiments/modules/${id}`, payload) },
+
+  // 实验提交
+  /** 学生提交实验快照 */
+  submitRecord(recordId) { return client.post(`/experiments/records/${recordId}/submit`) },
+  /** 查看提交列表 */
+  listSubmissions(params) { return client.get('/experiments/submissions', { params }) },
+  /** 查看单次提交详情 */
+  getSubmission(id) { return client.get(`/experiments/submissions/${id}`) },
 }

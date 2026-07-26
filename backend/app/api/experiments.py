@@ -2,15 +2,17 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db, require_roles
 from app.errors import api_error
 from app.models import (
+    Course,
     CourseEnrollment,
     ExperimentModule,
     ExperimentRecord,
+    ExperimentSubmission,
     Lesson,
     NotebookTemplate,
     NotebookTemplateVersion,
@@ -25,6 +27,7 @@ from app.schemas import (
     ExperimentModuleRead,
     ExperimentRecordDetailResponse,
     ExperimentRecordRead,
+    ExperimentSubmissionRead,
     PaginatedResponse,
 )
 from app.services.kernel_manager import get_kernel_manager
@@ -530,3 +533,150 @@ def restart_kernel(
     km = get_kernel_manager()
     km.restart(record_id)
     return {"status": "restarted"}
+
+
+# ── 实验提交（快照）─────────────────────────────────────────────
+
+
+@router.post("/records/{record_id}/submit", response_model=ExperimentSubmissionRead, status_code=status.HTTP_201_CREATED)
+def submit_record(
+    record_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("student")),
+):
+    """学生提交实验：保存 cells 不可变快照，更新记录状态"""
+    record = db.get(ExperimentRecord, record_id)
+    if not record:
+        raise api_error(404, "RECORD_NOT_FOUND", "实验记录不存在")
+    _require_owner(record, current_user)
+
+    if record.status != "started":
+        raise api_error(400, "ALREADY_SUBMITTED", "实验已提交，不能重复提交")
+
+    # 计算提交次数
+    max_attempt = db.scalar(
+        select(ExperimentSubmission.attempt_number)
+        .where(ExperimentSubmission.record_id == record_id)
+        .order_by(ExperimentSubmission.attempt_number.desc())
+    )
+    attempt_number = (max_attempt or 0) + 1
+
+    now = datetime.now(timezone.utc)
+    submission = ExperimentSubmission(
+        record_id=record_id,
+        attempt_number=attempt_number,
+        cells_snapshot=dict(record.cells_sources),  # 不可变快照
+        submitted_at=now,
+    )
+    db.add(submission)
+
+    # 更新记录状态：提交时间、revision 保持一致
+    record.status = "submitted"
+    record.submitted_at = now
+    record.record_revision += 1
+
+    db.commit()
+    db.refresh(submission)
+    return submission
+
+
+@router.get("/submissions", response_model=PaginatedResponse)
+def list_submissions(
+    record_id: int | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """查看实验提交列表。
+
+    权限：
+    - 学生：仅自己的提交
+    - 教师：仅自己课程（通过 lesson→chapter→course）的提交
+    - 开发者：仅自己模块的提交
+    - 管理员：全部
+    """
+    # 构建可见记录 ID 子查询
+    visible_ids = select(ExperimentRecord.id)
+
+    if current_user.role == "student":
+        visible_ids = visible_ids.where(ExperimentRecord.student_id == current_user.id)
+    elif current_user.role == "teacher":
+        # 教师通过 lesson → chapter → course 查看
+        visible_ids = (
+            visible_ids
+            .join(Lesson, ExperimentRecord.lesson_id == Lesson.id)
+            .join(Course, Lesson.chapter.has())
+            .where(Course.teacher_id == current_user.id)
+        )
+    elif current_user.role == "developer":
+        # 开发者通过 module → owner 查看
+        visible_ids = (
+            visible_ids
+            .join(ExperimentModule, ExperimentRecord.module_id == ExperimentModule.id)
+            .where(ExperimentModule.owner_id == current_user.id)
+        )
+    # admin 不限制
+
+    query = select(ExperimentSubmission).where(
+        ExperimentSubmission.record_id.in_(visible_ids)
+    )
+    count_query = select(func.count()).select_from(ExperimentSubmission).where(
+        ExperimentSubmission.record_id.in_(visible_ids)
+    )
+
+    if record_id is not None:
+        query = query.where(ExperimentSubmission.record_id == record_id)
+        count_query = count_query.where(ExperimentSubmission.record_id == record_id)
+
+    total = db.scalar(count_query) or 0
+    submissions = db.scalars(
+        query.order_by(ExperimentSubmission.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+    return PaginatedResponse(
+        items=[ExperimentSubmissionRead.model_validate(s) for s in submissions],
+        page=page, page_size=page_size, total=total,
+    )
+
+
+@router.get("/submissions/{submission_id}", response_model=ExperimentSubmissionRead)
+def get_submission(
+    submission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """查看单次提交详情"""
+    submission = db.get(ExperimentSubmission, submission_id)
+    if not submission:
+        raise api_error(404, "SUBMISSION_NOT_FOUND", "提交记录不存在")
+
+    record = db.get(ExperimentRecord, submission.record_id)
+    if not record:
+        raise api_error(404, "RECORD_NOT_FOUND", "实验记录不存在")
+
+    # 权限检查
+    if current_user.role == "student":
+        if record.student_id != current_user.id:
+            raise api_error(403, "FORBIDDEN", "无权查看该提交")
+    elif current_user.role == "teacher":
+        # 检查课程归属
+        if record.lesson_id:
+            lesson = db.get(Lesson, record.lesson_id)
+            if lesson and lesson.chapter and lesson.chapter.course:
+                if lesson.chapter.course.teacher_id != current_user.id:
+                    raise api_error(403, "FORBIDDEN", "无权查看该提交")
+            else:
+                raise api_error(403, "FORBIDDEN", "无权查看该提交")
+        else:
+            raise api_error(403, "FORBIDDEN", "无权查看该提交")
+    elif current_user.role == "developer":
+        if record.module_id:
+            module = db.get(ExperimentModule, record.module_id)
+            if not module or module.owner_id != current_user.id:
+                raise api_error(403, "FORBIDDEN", "无权查看该提交")
+        else:
+            raise api_error(403, "FORBIDDEN", "无权查看该提交")
+
+    return submission
