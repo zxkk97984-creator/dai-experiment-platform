@@ -35,3 +35,13 @@ frontend/.vite/
 # 系统文件
 Thumbs.db
 .DS_Store
+
+# Playwright / 自动化截图
+.playwright-mcp/
+*.png
+
+# 临时计划文件
+.pt-tmp/
+
+# 本地启动脚本
+start.bat
