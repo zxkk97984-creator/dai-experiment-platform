@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import { examsAPI } from '../../api/exams.js'
 import { useAppStore } from '../../stores/app.js'
@@ -10,6 +10,65 @@ const started = ref(false); const submitted = ref(false); const graded = ref(fal
 const timeLeft = ref(0); const answers = ref({}); const loading = ref(true)
 let timer = null
 
+// ── 防抖保存 ─────────────────────────────────────────────────────────
+const DEBOUNCE_MS = 1000   // 1 秒防抖
+const FALLBACK_MS = 30000  // 30 秒兜底
+const saveTimers = {}       // qId → setTimeout
+const pendingSaves = {}     // qId → value（待发送的数据）
+let fallbackTimer = null
+
+/** 刷新单个题目的待保存数据 */
+async function flushSave(qId) {
+  if (saveTimers[qId]) { clearTimeout(saveTimers[qId]); delete saveTimers[qId] }
+  const value = pendingSaves[qId]
+  if (value === undefined) return
+  delete pendingSaves[qId]
+  try {
+    if (typeof value === 'string') {
+      await examsAPI.saveAnswer(route.params.id, qId, { code_answer: value })
+    } else {
+      await examsAPI.saveAnswer(route.params.id, qId, { selected_options: value })
+    }
+  } catch (e) {
+    // 恢复待保存数据，下次兜底重试
+    pendingSaves[qId] = value
+    const detail = e.response?.data?.detail?.message
+    app.showToast(detail || '自动保存失败，请检查网络连接', 'error')
+  }
+}
+
+/** 刷新所有待保存答案 */
+async function flushAllSaves() {
+  const ids = Object.keys(pendingSaves)
+  if (ids.length === 0) return
+  await Promise.all(ids.map(id => flushSave(id)))
+}
+
+/** 防抖保存入口：立即更新本地状态，1 秒后发送到服务端 */
+function saveAnswer(qId, value) {
+  // 立即更新本地 UI
+  answers.value = { ...answers.value, [qId]: value }
+  // 记录待保存数据
+  pendingSaves[qId] = value
+  // 清除已有定时器，重新计时
+  if (saveTimers[qId]) clearTimeout(saveTimers[qId])
+  saveTimers[qId] = setTimeout(() => flushSave(qId), DEBOUNCE_MS)
+}
+
+/** 启动 30 秒兜底定时器 */
+function startFallbackTimer() {
+  if (fallbackTimer) clearInterval(fallbackTimer)
+  fallbackTimer = setInterval(() => flushAllSaves(), FALLBACK_MS)
+}
+
+/** 清理所有定时器 */
+function cleanupTimers() {
+  clearInterval(timer)
+  if (fallbackTimer) { clearInterval(fallbackTimer); fallbackTimer = null }
+  Object.values(saveTimers).forEach(t => clearTimeout(t))
+}
+
+// ── 题型标签 ─────────────────────────────────────────────────────────
 const typeLabel = (t) => ({ single_choice: '单选题', multi_choice: '多选题', code: '编程题' }[t] || t)
 const answeredCount = computed(() => Object.keys(answers.value).filter(k => answers.value[k] !== '' && answers.value[k] != null && (!Array.isArray(answers.value[k]) || answers.value[k].length > 0)).length)
 const totalPoints = computed(() => questions.value.reduce((s,q) => s + (q.points||0), 0))
@@ -17,6 +76,7 @@ const progressPercent = computed(() => questions.value.length ? Math.round(answe
 const timeDisplay = computed(() => { const m = Math.floor(timeLeft.value / 60); const s = timeLeft.value % 60; return m + ':' + s.toString().padStart(2, '0') })
 const statusText = computed(() => { if (graded.value) return '已评分：' + (submission.value?.score ?? 0) + ' 分'; if (submitted.value) return '已交卷，等待评分'; return '' })
 
+// ── 生命周期 ─────────────────────────────────────────────────────────
 async function load() {
   loading.value = true
   try {
@@ -27,16 +87,56 @@ async function load() {
       submission.value = gRes.data
       if (gRes.data.status === 'graded') { graded.value = true; submitted.value = true }
       else if (gRes.data.status !== 'started') { submitted.value = true }
-      else { started.value = true; timeLeft.value = Math.max(0, Math.floor((new Date(gRes.data.expires_at).getTime() - Date.now()) / 1000)); startTimer() }
-    } catch {}
+      else { started.value = true; timeLeft.value = Math.max(0, Math.floor((new Date(gRes.data.expires_at).getTime() - Date.now()) / 1000)); startTimer(); startFallbackTimer() }
+    } catch { /* 首次进入无提交记录，正常情况 */ }
   } catch { app.showToast('加载失败', 'error') }
   finally { loading.value = false }
 }
 function startTimer() { clearInterval(timer); timer = setInterval(() => { if (timeLeft.value > 0) timeLeft.value-- }, 1000) }
-onMounted(load); onUnmounted(() => clearInterval(timer))
-async function startExam() { try { const res = await examsAPI.start(route.params.id); submission.value = res.data; started.value = true; timeLeft.value = Math.max(0, Math.floor((new Date(res.data.expires_at).getTime() - Date.now()) / 1000)); startTimer() } catch(e) { app.showToast(e.response?.data?.detail?.message || '开始失败', 'error') } }
-async function saveAnswer(qId, value) { answers.value = { ...answers.value, [qId]: value }; try { if (typeof value === 'string') await examsAPI.saveAnswer(route.params.id, qId, { code_answer: value }); else await examsAPI.saveAnswer(route.params.id, qId, { selected_options: value }) } catch {} }
-async function submitExam() { if (!confirm('确定要交卷吗？交卷后无法修改答案。')) return; try { const res = await examsAPI.submit(route.params.id, {}); submission.value = res.data; submitted.value = true; clearInterval(timer); app.showToast('交卷成功', 'success') } catch(e) { app.showToast(e.response?.data?.detail?.message || '交卷失败', 'error') } }
+onMounted(load)
+onUnmounted(() => cleanupTimers())
+
+// 路由离开前刷新待保存数据
+onBeforeRouteLeave(async (_to, _from, next) => {
+  if (started.value && !submitted.value) {
+    await flushAllSaves()
+  }
+  next()
+})
+
+// 页面关闭/刷新前尝试保存（浏览器尽力而为）
+window.addEventListener('beforeunload', () => {
+  if (started.value && !submitted.value) {
+    flushAllSaves()
+  }
+})
+
+// ── 操作 ─────────────────────────────────────────────────────────────
+async function startExam() {
+  try {
+    const res = await examsAPI.start(route.params.id)
+    submission.value = res.data; started.value = true
+    timeLeft.value = Math.max(0, Math.floor((new Date(res.data.expires_at).getTime() - Date.now()) / 1000))
+    startTimer(); startFallbackTimer()
+  } catch(e) {
+    app.showToast(e.response?.data?.detail?.message || '开始失败', 'error')
+  }
+}
+
+async function submitExam() {
+  if (!confirm('确定要交卷吗？交卷后无法修改答案。')) return
+  // 交卷前刷新所有待保存数据
+  await flushAllSaves()
+  try {
+    const res = await examsAPI.submit(route.params.id, {})
+    submission.value = res.data; submitted.value = true
+    cleanupTimers()
+    app.showToast('交卷成功', 'success')
+  } catch(e) {
+    app.showToast(e.response?.data?.detail?.message || '交卷失败', 'error')
+  }
+}
+
 function isSelected(qId, optKey) { const ans = answers.value[qId]; return ans && ans.includes(optKey) }
 </script>
 

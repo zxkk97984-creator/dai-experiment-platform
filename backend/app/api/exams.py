@@ -97,6 +97,9 @@ def update_exam(
     ensure_course_manager(exam.course, current_user)
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(exam, key, value)
+    # 发布时强制校验
+    if exam.status == "published":
+        validate_publish(exam, db)
     db.commit()
     db.refresh(exam)
     return exam
@@ -114,6 +117,14 @@ def start_exam(
         raise api_error(403, "FORBIDDEN", "没有权限参加该考试")
     if exam.status != "published":
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
+
+    # 检查时间窗口
+    now = datetime.now(UTC)
+    if exam.start_at is not None and exam.start_at.replace(tzinfo=UTC) > now:
+        raise api_error(403, "EXAM_NOT_STARTED", "考试尚未开始")
+    if exam.end_at is not None and exam.end_at.replace(tzinfo=UTC) < now:
+        raise api_error(403, "EXAM_EXPIRED", "考试已结束")
+
     return svc_start_exam(exam, current_user, db)
 
 
@@ -129,6 +140,15 @@ def submit_exam(
         raise api_error(403, "FORBIDDEN", "没有权限提交该考试")
     if exam.status != "published":
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
+    # 必须先开始考试
+    sub = db.scalar(
+        select(ExamSubmission).where(
+            ExamSubmission.exam_id == exam_id,
+            ExamSubmission.student_id == current_user.id,
+        )
+    )
+    if not sub or sub.status != "started":
+        raise api_error(403, "EXAM_NOT_STARTED", "请先开始考试")
     return svc_submit_exam(exam, current_user, db)
 
 
@@ -149,6 +169,22 @@ def exam_grades(
 
 @router.get("/{exam_id}/questions", response_model=PaginatedResponse)
 def get_questions(exam_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    exam = require_exam(exam_id, db)
+    if current_user.role == "student":
+        # 学生必须已选课且考试已发布
+        if exam.status != "published":
+            raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
+        if not can_view_course(exam.course, current_user, db):
+            raise api_error(403, "FORBIDDEN", "请先选课")
+        # 学生必须已开始考试
+        sub = db.scalar(
+            select(ExamSubmission).where(
+                ExamSubmission.exam_id == exam_id,
+                ExamSubmission.student_id == current_user.id,
+            )
+        )
+        if not sub or sub.status != "started":
+            raise api_error(403, "EXAM_NOT_STARTED", "请先开始考试")
     questions = list_questions(db, exam_id)
     items = [ExamQuestionRead.model_validate(q) for q in questions]
     return PaginatedResponse(items=items, page=1, page_size=len(items), total=len(items))
