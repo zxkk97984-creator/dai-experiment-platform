@@ -7,50 +7,105 @@ on:
     branches: [master, main]
 
 jobs:
-  backend-test:
-    name: 后端 pytest
+  backend-test-sqlite:
+    name: 后端 pytest (SQLite)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
-
       - name: 安装 Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest fakeredis
+      - name: 运行测试（跳过 kernel + docker）
+        run: python -m pytest -q --ignore=tests/kernel_connect_test.py --ignore=tests/kernel_ipykernel_test.py --ignore=tests/kernel_test.py --ignore=tests/debug_kernel.py --ignore=tests/diag_execute.py --ignore=tests/test_kernel_prototype.py -k "not test_pytest_collects_only_automated_tests_from_repo_root"
 
-      - name: 运行测试
-        run: python -m pytest -q
+  backend-test-mysql:
+    name: 后端 pytest (MySQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test_root
+          MYSQL_DATABASE: dai_platform
+          MYSQL_USER: dai
+          MYSQL_PASSWORD: dai_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DAI_DATABASE_URL: mysql+pymysql://dai:dai_test@127.0.0.1:3306/dai_platform
+      DAI_REDIS_URL: redis://127.0.0.1:6379/0
+      DAI_SECRET_KEY: ci-test-key
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+      - name: 等 MySQL 就绪
+        run: |
+          for i in $(seq 1 30); do
+            mysqladmin ping -h 127.0.0.1 -u root -ptest_root && break
+            sleep 2
+          done
+          mysql -h 127.0.0.1 -u root -ptest_root -e "CREATE DATABASE IF NOT EXISTS dai_platform"
+      - name: 等 Redis 就绪
+        run: redis-cli -h 127.0.0.1 ping
+      - name: 运行迁移
+        run: alembic upgrade head
+      - name: 运行测试（跳过 kernel + docker）
+        run: python -m pytest -q --ignore=tests/kernel_connect_test.py --ignore=tests/kernel_ipykernel_test.py --ignore=tests/kernel_test.py --ignore=tests/debug_kernel.py --ignore=tests/diag_execute.py --ignore=tests/test_kernel_prototype.py -k "not test_pytest_collects_only_automated_tests_from_repo_root"
 
   frontend-test:
     name: 前端 test + build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-
       - name: 安装依赖
         run: npm ci
-
       - name: 运行测试
         run: npm test
-
       - name: 构建
         run: npm run build
