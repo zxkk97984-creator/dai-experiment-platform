@@ -29,6 +29,7 @@ from app.schemas import (
     ExperimentRecordDetailResponse,
     ExperimentRecordRead,
     ExperimentSubmissionRead,
+    ExperimentSubmitRequest,
     PaginatedResponse,
 )
 from app.services.kernel_manager import get_kernel_manager
@@ -542,20 +543,41 @@ def restart_kernel(
 @router.post("/records/{record_id}/submit", response_model=ExperimentSubmissionRead, status_code=status.HTTP_201_CREATED)
 def submit_record(
     record_id: int,
+    payload: ExperimentSubmitRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("student")),
 ):
-    """学生提交实验：保存 cells 不可变快照，更新记录状态"""
-    record = db.get(ExperimentRecord, record_id)
+    """学生提交实验：保存 cells 不可变快照，更新记录状态。
+
+    幂等：同一 client_request_id 多次请求返回已有提交。
+    """
+    client_request_id = payload.client_request_id
+
+    # 0. 幂等检查：同一 client_request_id 已存在 → 直接返回
+    existing = db.scalar(
+        select(ExperimentSubmission).where(
+            ExperimentSubmission.record_id == record_id,
+            ExperimentSubmission.client_request_id == client_request_id,
+        )
+    )
+    if existing:
+        return ExperimentSubmissionRead.model_validate(existing)
+
+    # 1. 锁定记录行（MySQL 下防并发）
+    record = db.scalar(
+        select(ExperimentRecord)
+        .where(ExperimentRecord.id == record_id)
+        .with_for_update()
+    )
     if not record:
         raise api_error(404, "RECORD_NOT_FOUND", "实验记录不存在")
     _require_owner(record, current_user)
 
-    # 仅终态（graded/completed）禁止重新提交，started 和 submitted 均可提交
+    # 2. 仅终态（graded/completed）禁止重新提交
     if record.status not in ("started", "submitted"):
         raise api_error(400, "ALREADY_GRADED", "实验已评分，不能再次提交")
 
-    # 计算提交次数
+    # 3. 锁内计算下一个 attempt_number（避免幻读）
     max_attempt = db.scalar(
         select(ExperimentSubmission.attempt_number)
         .where(ExperimentSubmission.record_id == record_id)
@@ -563,23 +585,40 @@ def submit_record(
     )
     attempt_number = (max_attempt or 0) + 1
 
+    # 4. 深复制 cells_snapshot（确保后续保存 cells 不改变历史提交）
+    import copy
+    snapshot = copy.deepcopy(record.cells_sources)
+
     now = datetime.now(timezone.utc)
     submission = ExperimentSubmission(
         record_id=record_id,
         attempt_number=attempt_number,
-        cells_snapshot=dict(record.cells_sources),  # 不可变快照
+        client_request_id=client_request_id,
+        cells_snapshot=snapshot,
         submitted_at=now,
     )
-    db.add(submission)
 
-    # 更新记录状态：标记为 submitted（可再次提交），记录提交时间和 revision
-    record.status = "submitted"
-    record.submitted_at = now
-    record.record_revision += 1
+    try:
+        db.add(submission)
+        record.status = "submitted"
+        record.submitted_at = now
+        record.record_revision += 1
+        db.commit()
+    except Exception:
+        # 唯一键冲突（并发提交同一 client_request_id）→ 重新读取已有记录
+        db.rollback()
+        existing2 = db.scalar(
+            select(ExperimentSubmission).where(
+                ExperimentSubmission.record_id == record_id,
+                ExperimentSubmission.client_request_id == client_request_id,
+            )
+        )
+        if existing2:
+            return ExperimentSubmissionRead.model_validate(existing2)
+        raise api_error(500, "SUBMIT_FAILED", "提交失败，请重试")
 
-    db.commit()
     db.refresh(submission)
-    return submission
+    return ExperimentSubmissionRead.model_validate(submission)
 
 
 @router.get("/submissions", response_model=PaginatedResponse)

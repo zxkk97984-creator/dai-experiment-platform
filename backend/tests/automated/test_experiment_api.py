@@ -133,7 +133,8 @@ def test_p0_4_teacher_submission_isolation(client, db_session_factory):
                         headers=auth_header(s_a_tok))
     rid_a = rec_a.json()["id"]
     sub_a = client.post(f"/api/v1/experiments/records/{rid_a}/submit",
-                        headers=auth_header(s_a_tok))
+                        headers=auth_header(s_a_tok),
+                        json={"client_request_id": "00000000-0000-0000-0000-000000000001"})
     assert sub_a.status_code == 201
 
     # 教师 A 可以查看自己课程的提交

@@ -456,8 +456,14 @@ class ExperimentSubmissionRead(BaseModel):
     id: int
     record_id: int
     attempt_number: int
+    client_request_id: str | None = None
     cells_snapshot: dict = Field(default_factory=dict)
     submitted_at: datetime | None = None
+
+
+class ExperimentSubmitRequest(BaseModel):
+    """实验提交请求——client_request_id 用于幂等"""
+    client_request_id: str  # UUID v4
 
 
 class ExperimentRecordDetailResponse(BaseModel):

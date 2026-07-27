@@ -401,15 +401,22 @@ class ExperimentRecord(TimestampMixin, Base):
 
 
 class ExperimentSubmission(TimestampMixin, Base):
-    """每次提交的记录，cells_snapshot 不可变"""
+    """每次提交的记录，cells_snapshot 不可变
+
+    client_request_id 由前端生成，用于幂等提交：
+      同一 record_id + client_request_id 重复请求返回已有提交。
+    """
     __tablename__ = "experiment_submissions"
     __table_args__ = (
         UniqueConstraint("record_id", "attempt_number", name="uq_experiment_submission_attempt"),
+        UniqueConstraint("record_id", "client_request_id", name="uq_experiment_submission_idempotency"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     record_id: Mapped[int] = mapped_column(ForeignKey("experiment_records.id"), index=True)
     attempt_number: Mapped[int] = mapped_column(Integer, default=1)
+    client_request_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    # UUID v4，前端提交时传入；同一 key 的重复请求返回已有提交
     cells_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
     submitted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
