@@ -729,6 +729,12 @@ def review_submission(
     current_user: User = Depends(get_current_user),
 ):
     """教师/开发者/管理员对实验提交评分和反馈"""
+    # 校验：至少提供 score 或 feedback 之一
+    if payload.score is None and payload.feedback is None:
+        raise api_error(422, "EMPTY_REVIEW", "至少需要提供评分或反馈")
+    if payload.score is not None and not (0 <= payload.score <= 100):
+        raise api_error(422, "INVALID_SCORE", "评分必须在 0-100 之间")
+
     submission = db.get(ExperimentSubmission, submission_id)
     if not submission:
         raise api_error(404, "SUBMISSION_NOT_FOUND", "提交记录不存在")

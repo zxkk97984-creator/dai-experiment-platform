@@ -165,8 +165,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok", "app": settings.app_name}
 
     @app.get("/api/v1/metrics", tags=["metrics"])
-    def metrics():
-        """内部指标——队列积压和各状态任务数量（仅内网）"""
+    def metrics(request: Request):
+        """内部指标——仅内网或鉴权访问"""
+        # 简单的内网检查：仅允许 localhost/内网 IP 或无鉴权时返回 403
+        host = request.client.host if request.client else "unknown"
+        if host not in ("127.0.0.1", "localhost", "::1") and not host.startswith("10.") and not host.startswith("172.") and not host.startswith("192.168."):
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=403, content={"detail": "仅限内网访问"})
         from app.database import SessionLocal
         from app.models import ExamAnswer, Submission
         stats = {}
