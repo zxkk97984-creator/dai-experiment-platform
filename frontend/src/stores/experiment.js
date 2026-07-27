@@ -20,6 +20,13 @@ export const useExperimentStore = defineStore('experiment', () => {
   const conflict = ref(false)
   const executingCellId = ref(null)
 
+  // ── 提交状态 ──
+  const submitting = ref(false)
+  const lastSubmitTime = ref(null)
+  const submitAttemptCount = ref(0)
+  const submissions = ref([])
+  const currentClientRequestId = ref(null)
+
   const dirtySources = ref({})
 
   let debounceTimer = null
@@ -253,6 +260,75 @@ export const useExperimentStore = defineStore('experiment', () => {
     } catch { app.showToast('重启失败', 'error') }
   }
 
+  // ── 提交 ──
+  async function submitExperiment() {
+    if (!recordId.value) return false
+
+    // 先 flush 所有待保存数据
+    if (dirty.value || saving.value || pendingFlush) {
+      const ok = await flushSave()
+      if (!ok) {
+        app.showToast('保存失败，请检查网络后重试提交', 'error')
+        return false
+      }
+    }
+
+    // 生成/复用 client_request_id
+    if (!currentClientRequestId.value) {
+      currentClientRequestId.value = crypto.randomUUID()
+    }
+
+    submitting.value = true
+    try {
+      const res = await experimentsAPI.submitRecord(
+        recordId.value,
+        currentClientRequestId.value,
+      )
+      const sub = res.data
+      lastSubmitTime.value = new Date().toISOString()
+      submitAttemptCount.value = sub.attempt_number
+
+      // 添加/更新提交列表
+      const existing = submissions.value.findIndex(s => s.id === sub.id)
+      if (existing >= 0) {
+        submissions.value[existing] = sub
+      } else {
+        submissions.value.unshift(sub)
+      }
+
+      // 提交成功后清除 request_id，下次提交生成新的
+      currentClientRequestId.value = null
+      app.showToast(`提交成功（第 ${sub.attempt_number} 次提交）`, 'success')
+      return true
+    } catch (e) {
+      const detail = e.response?.data?.detail
+      if (detail?.code === 'ALREADY_GRADED') {
+        app.showToast('实验已评分，无法再次提交', 'warning')
+      } else {
+        // 网络错误时保留 client_request_id 以便重试幂等
+        app.showToast(detail?.message || '提交失败，请重试', 'error')
+      }
+      return false
+    } finally {
+      submitting.value = false
+    }
+  }
+
+  /** 加载提交历史 */
+  async function loadSubmissions() {
+    if (!recordId.value) return
+    try {
+      const res = await experimentsAPI.listSubmissions({ record_id: recordId.value })
+      submissions.value = res.data?.items || []
+      if (submissions.value.length > 0) {
+        submitAttemptCount.value = submissions.value[0].attempt_number
+        lastSubmitTime.value = submissions.value[0].submitted_at
+      }
+    } catch {
+      // 静默失败
+    }
+  }
+
   function destroy() {
     clearTimeout(debounceTimer)
     _stopSafety()
@@ -261,9 +337,11 @@ export const useExperimentStore = defineStore('experiment', () => {
   return {
     context, recordId, recordRevision, cells, entryName, entryDescription,
     dirty, saving, saved, error, conflict, executingCellId,
+    submitting, lastSubmitTime, submitAttemptCount, submissions, currentClientRequestId,
     openLesson, openModule,
     updateCellSource, flushSave, canNavigate,
     executeCell, executeAllCells, interruptKernel, restartKernel,
+    submitExperiment, loadSubmissions,
     destroy,
   }
 })

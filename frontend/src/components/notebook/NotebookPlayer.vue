@@ -44,6 +44,8 @@ onMounted(async () => {
     } else {
       await store.openModule(props.entryId)
     }
+    // 加载提交历史
+    await store.loadSubmissions()
   } catch (e) {
     loadError.value = store.error || { code: 'LOAD_FAILED', message: '加载笔记本失败' }
   } finally {
@@ -158,12 +160,32 @@ function handleUpdateSource(cellId, source) {
             <button class="menu-item" role="menuitem" @click="store.flushSave(); showMenu = false" :disabled="!store.dirty">
               💾 强制保存
             </button>
+            <div class="menu-divider"></div>
+            <button class="menu-item menu-submit" role="menuitem"
+              @click="store.submitExperiment(); showMenu = false"
+              :disabled="store.submitting">
+              📤 {{ store.submitting ? '提交中…' : '提交实验' }}
+            </button>
           </div>
         </div>
       </div>
     </div>
 
     <p v-if="store.entryDescription" class="player-desc">{{ store.entryDescription }}</p>
+
+    <!-- 提交状态栏 -->
+    <div v-if="store.submitAttemptCount > 0 || store.submitting" class="submit-bar">
+      <span v-if="store.submitting" class="submit-status submitting">📤 正在提交...</span>
+      <span v-else class="submit-status submitted">
+        ✅ 最近提交：第 {{ store.submitAttemptCount }} 次
+        <span v-if="store.lastSubmitTime">
+          （{{ new Date(store.lastSubmitTime).toLocaleString('zh-CN') }}）
+        </span>
+      </span>
+      <span v-if="store.submissions.length > 1" class="submit-history-hint">
+        | 共 {{ store.submissions.length }} 次提交记录
+      </span>
+    </div>
 
     <div v-if="store.cells.length === 0" class="player-empty">
       <p>暂无内容</p>
@@ -252,6 +274,19 @@ function handleUpdateSource(cellId, source) {
 }
 .menu-item:hover { background: var(--surface-raised); }
 .menu-item:disabled { opacity: .4; cursor: not-allowed; }
+.menu-divider { border-top: 1px solid var(--border); margin: 4px 0; }
+.menu-submit { color: var(--accent); font-weight: 500; }
+
+.submit-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; margin-bottom: var(--space-3);
+  background: var(--surface-raised); border-radius: var(--radius-md);
+  font-size: var(--text-xs); color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+.submit-status.submitting { color: var(--warning); }
+.submit-status.submitted { color: var(--success); }
+.submit-history-hint { opacity: 0.7; }
 
 .player-desc { font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--space-4); }
 .player-empty { text-align: center; padding: var(--space-12); color: var(--text-secondary); }

@@ -50,8 +50,10 @@ export const experimentsAPI = {
   updateModule(id, payload) { return client.patch(`/experiments/modules/${id}`, payload) },
 
   // 实验提交
-  /** 学生提交实验快照 */
-  submitRecord(recordId) { return client.post(`/experiments/records/${recordId}/submit`) },
+  /** 学生提交实验快照——client_request_id 保证幂等 */
+  submitRecord(recordId, clientRequestId) {
+    return client.post(`/experiments/records/${recordId}/submit`, { client_request_id: clientRequestId })
+  },
   /** 查看提交列表 */
   listSubmissions(params) { return client.get('/experiments/submissions', { params }) },
   /** 查看单次提交详情 */
