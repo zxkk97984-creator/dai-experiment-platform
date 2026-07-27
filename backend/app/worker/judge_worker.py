@@ -234,6 +234,12 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
         # 原子抢占：queued → running
         claimed = claim_job(db, job_type="exam", object_id=answer_id)
 
+        # 抢占失败：说明已被其他 Worker 领取或状态不对（非 queued），直接返回
+        # 旧 pending 数据由恢复扫描 requeue_stale_jobs 统一转为 queued，不在此绕过
+        if not claimed:
+            logger.debug("抢占 ExamAnswer %s 失败（已被其他 Worker 领取或状态非 queued），跳过", answer_id)
+            return answer
+
         question = db.get(ExamQuestion, answer.question_id)
         if not question or not question.hidden_tests:
             fail_job(db, job_type="exam", object_id=answer_id,
@@ -243,11 +249,6 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
             db.commit()
             _maybe_finalize_exam(answer.submission_id, db)
             return answer
-
-        # 未抢占到也继续执行（兼容直接 pending 状态的旧数据）
-        if not claimed and answer.grading_status != "running":
-            answer.grading_status = "running"
-            db.commit()
 
         import tempfile
         with tempfile.TemporaryDirectory(prefix="dai-exam-judge-") as temp_dir:

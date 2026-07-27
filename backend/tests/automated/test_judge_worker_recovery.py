@@ -292,3 +292,44 @@ def test_stale_running_exam_trigger_finalize(db_session_factory):
         ans = db.get(ExamAnswer, aid)
         assert ans.grading_status == "queued"
         assert ans.attempt_count == 2  # 第二次尝试
+
+
+# ═══════════════════════════════════════════════════════════════
+# P0-1: 考试重复判题——claim_job 失败必须立即返回
+# ═══════════════════════════════════════════════════════════════
+
+def test_p0_1_duplicate_exam_message_not_judged_twice(db_session_factory):
+    """P0-1: claim_job 抢占失败必须立即返回，不能绕过抢占继续执行 Docker"""
+    from app.worker.judge_worker import process_exam_answer
+    from app.config import get_settings
+    import fakeredis
+
+    aid = _setup_exam_answer(db_session_factory)
+    settings = get_settings()
+
+    # 入队 → status = queued
+    with db_session_factory() as db:
+        enqueue_job(db, job_type="exam", object_id=aid)
+
+    docker_call_count = 0
+
+    def counting_docker(*args, **kwargs):
+        nonlocal docker_call_count
+        docker_call_count += 1
+        return ("1 passed", "", 0, 150)
+
+    # Step 1: Worker-1 抢占成功（claim_job 把 queued→running），但尚未执行 Docker
+    with db_session_factory() as db_w1:
+        claim_job(db_w1, job_type="exam", object_id=aid)
+
+    # Step 2: Worker-2 收到重复 Redis 消息，调用 process_exam_answer
+    #   answer.grading_status 在 DB 中是 "running"（Worker-1 抢占的）
+    #   claim_job 返回 False（因为 grading_status 不是 queued）
+    #   → 应该立即返回，不执行 Docker
+    with db_session_factory() as db_w2:
+        with patch("app.worker.judge_worker._run_docker_pytest", side_effect=counting_docker):
+            result2 = process_exam_answer(db_w2, fakeredis.FakeStrictRedis(), settings, aid)
+
+    # 断言：Docker 调用次数必须是 0（Worker-2 claim 失败后不容许绕过抢占）
+    assert docker_call_count == 0, \
+        f"claim_job 失败后不应执行 Docker，实际调用了 {docker_call_count} 次"

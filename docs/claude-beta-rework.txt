@@ -1,0 +1,66 @@
+DAI Experiment Platform Beta 验收返工单
+
+结论：本轮暂不通过。请按以下顺序修复，先补失败测试，再实现；每组问题单独提交。不要使用 -k、skip、删除测试等方式绕过失败。完成后不要推送，提交实施报告和 commit hash。
+
+【P0-1 考试重复判题】
+文件：backend/app/worker/judge_worker.py，process_exam_answer()。
+claim_job() 返回 False 后当前仍继续执行 Docker。必须立即返回，禁止重复 Redis 消息或两个 Worker 同时执行同一答案。旧 pending 数据只能由恢复扫描转换为 queued，不能在 Worker 内绕过抢占。
+测试：两个独立 Session/Worker 处理同一 answer，_run_docker_pytest 只能调用一次。
+
+【P0-2 最大重试终态不完整】
+文件：backend/app/services/judge_queue.py。
+达到 MAX_ATTEMPTS 后：
+1. 普通 Submission 同步写 status=system_error、grading_status=system_error、score=0、错误信息，否则前端永远显示 queued。
+2. ExamAnswer 写 system_error、score=0 后立即调用 finalize_if_ready，不能依赖五分钟后的另一轮扫描。
+3. queued 任务重新推送后更新 queued_at，避免每 15 秒无限制造重复消息。
+测试普通作业停止轮询、考试立即汇总、队列长度不无限增长。
+
+【P0-3 生产配置校验未生效】
+文件：backend/app/config.py、backend/app/main.py、docker-compose.prod.yml。
+validate_production() 当前未调用，且不拒绝空 secret。生产启动时必须直接拒绝：空/默认/过短 secret、默认数据库密码、localhost 或不安全 CORS。Compose 中 DAI_SECRET_KEY 未设置时必须配置展开失败，不能变成空字符串。增加启动失败测试。
+
+【P0-4 Compose 判题目录不可见】
+Worker 容器内 tempfile 不能通过宿主机 docker.sock 自动被 judge 容器看到。配置一个宿主机 bind 工作目录，以完全相同绝对路径挂入 Worker；判题临时文件只能创建在该目录，再传给宿主 Docker daemon。补真实 Compose judge smoke，验证 accepted、timeout 和目录清理。
+
+【P1-1 Refresh Token 仍暴露】
+backend/app/api/auth.py 仍返回包含 refresh_token 的 TokenResponse，Nginx 并未剥离 JSON。拆分内部 token pair 与公开响应，login/refresh body 只能返回 access_token、expires_in、user。前端启动时清除旧 localStorage.access_token/refresh_token。补 Cookie 属性、轮换、旧 token 重放、logout、并发 refresh 测试；实现计划要求的 Origin 校验。
+
+【P1-2 实验幂等越权】
+backend/app/api/experiments.py 在 _require_owner() 前返回 existing submission。必须先加载 record 并验证所有权，再执行幂等查询。ExperimentSubmitRequest 使用 UUID 类型而非普通 str。补“学生 B 使用学生 A 的真实 record_id + client_request_id”必须 403 的测试。
+
+【P1-3 PublicCase 转换错误】
+当前 model_dump 结果仍同时含 input 和 args，并会修改调用者原 dict；Alembic migration 有相同问题。先复制 dict，再从副本 pop input，结果中必须只剩 args。input 与 args 同时出现（包括 args=[]）必须拒绝。修复 migration，并测试升级后数据库 JSON 不含 input。
+
+【P1-4 日志系统报错和并发污染】
+logging_config.py 将 Filter 加在 root logger，子 logger 会报 KeyError: request_id。Filter 应加到 handler；request_id 使用 contextvars.ContextVar，并在请求结束 reset。补普通子 logger、并发请求 ID 隔离、500 日志测试。
+
+【P1-5 CI 并未测试 MySQL】
+conftest.py 无条件使用 SQLite，所谓 MySQL job 仍运行 SQLite。增加可由环境变量选择真实 MySQL 的 fixture；MySQL job 必须验证 SELECT FOR UPDATE、唯一约束、JSON、时区和真实并发。test_exam_finalization_concurrency 当前是两个 Session 顺序调用，改成真正并发并用同步屏障控制。
+
+【P1-6 全量 pytest 失败】
+当前 python -m pytest -q 结果为 1 failed, 176 passed, 3 skipped。backend/tests/manual-tools 会被仓库根 pytest 收集并在 import 时执行 Docker/sys.exit。把手动脚本移出 tests，或改名并配置明确 norecursedirs；不要在 CI 用 -k 排除 test_pytest_collects_only_automated_tests_from_repo_root。根目录和 backend 目录运行 pytest 都必须通过。
+
+【P1-7 实验前端状态串页】
+frontend/src/stores/experiment.js 的 _load() 必须重置 submissions、submitAttemptCount、lastSubmitTime、currentClientRequestId、submitting。同一路由切换 lesson/module 后重新 loadSubmissions。补 ExperimentDetailView/Store 测试。
+
+【未完成任务必须补齐】
+1. 教师实验提交列表页、只读快照详情页、评分反馈页及路由。
+2. 列表 API 返回学生、课程/模块等展示字段，避免 N+1。
+3. 评分 score 做合法范围校验，空 review 请求拒绝。
+4. Playwright 四条 E2E：课程学习、作业判题、考试、Notebook 实验提交评分。
+5. Docker judge/kernel smoke 独立 CI job。
+6. Auth Cookie、observability 专项测试。
+7. /metrics 仅内网或鉴权访问；ready 必须按约定检查 MySQL 和 Redis。
+8. README、架构文档与当前队列、Cookie、部署、实验评分流程同步。
+
+【最终验收】
+必须提供以下命令的完整结果：
+1. backend：python -m pytest -q，0 failed，且不能用 -k/skip 绕过。
+2. 仓库根目录：python -m pytest --collect-only -q，退出码 0。
+3. frontend：npm test、npm run build。
+4. alembic 从空库升级、历史库升级、单一 head。
+5. docker compose -f docker-compose.prod.yml config 和真实 smoke。
+6. Playwright 四条主流程。
+7. 人工终止 Worker 后 stale-running 能恢复且不重复计分。
+8. 浏览器 localStorage 不存在 access/refresh token。
+9. git diff --check，工作区仅包含预期修改。
