@@ -20,10 +20,14 @@ from app.security import hash_password
 
 @pytest.fixture()
 def test_settings(tmp_path):
-    db_path = tmp_path / "test.db"
+    # 可通过 DAI_DATABASE_URL 环境变量切换到 MySQL（CI job 设置此变量）
+    db_url = os.environ.get("DAI_DATABASE_URL", "")
+    if not db_url or "sqlite" not in db_url:
+        db_path = tmp_path / "test.db"
+        db_url = f"sqlite:///{db_path}"
     return Settings(
-        database_url=f"sqlite:///{db_path}",
-        redis_url="redis://localhost:6379/15",
+        database_url=db_url,
+        redis_url=os.environ.get("DAI_REDIS_URL", "redis://localhost:6379/15"),
         secret_key="test-secret-key",
         access_token_expire_minutes=30,
         refresh_token_expire_days=7,

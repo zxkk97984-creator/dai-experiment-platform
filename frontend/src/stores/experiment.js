@@ -70,6 +70,12 @@ export const useExperimentStore = defineStore('experiment', () => {
     dirty.value = false
     saved.value = false
     dirtySources.value = {}
+    // 重置提交相关状态，避免串页
+    submissions.value = []
+    submitAttemptCount.value = 0
+    lastSubmitTime.value = null
+    currentClientRequestId.value = null
+    submitting.value = false
 
     try {
       const ensRes = lessonId != null
