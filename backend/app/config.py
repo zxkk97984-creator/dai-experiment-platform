@@ -42,6 +42,21 @@ class Settings(BaseSettings):
     def studio_storage_path(self) -> Path:
         return Path(self.studio_storage_dir).resolve()
 
+    def validate_production(self) -> list[str]:
+        """生产环境安全校验——启动时调用。返回警告列表，空=通过。"""
+        warnings = []
+        if self.environment == "production":
+            if self.secret_key == "change-me-in-production":
+                warnings.append("DAI_SECRET_KEY 使用了默认值")
+            if "change_me" in self.database_url or "dai_password" in self.database_url:
+                warnings.append("DAI_DATABASE_URL 可能使用了默认密码")
+            if "localhost" in self.redis_url and "redis" not in self.redis_url.split("@")[-1]:
+                pass  # 容器环境 redis 主机名为 redis
+            if self.cors_origins == "http://localhost:5173,http://127.0.0.1:5173" and \
+               "localhost" not in (self.cors_origins or ""):
+                warnings.append("DAI_CORS_ORIGINS 使用了开发默认值")
+        return warnings
+
 
 @lru_cache
 def get_settings() -> Settings:

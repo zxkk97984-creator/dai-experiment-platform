@@ -1,0 +1,87 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DAI_DB_ROOT_PASSWORD:-root_secret}
+      MYSQL_DATABASE: dai_platform
+      MYSQL_USER: ${DAI_DB_USER:-dai}
+      MYSQL_PASSWORD: ${DAI_DB_PASSWORD:-dai_password}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ./backend
+    command: sh -c "alembic upgrade head && uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000"
+    environment:
+      DAI_ENVIRONMENT: production
+      DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
+      DAI_REDIS_URL: redis://redis:6379/0
+      DAI_SECRET_KEY: ${DAI_SECRET_KEY}
+      DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:-http://localhost}
+      DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
+      DAI_STUDIO_STORAGE_DIR: /app/storage/studio
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - studio_data:/app/storage/studio
+
+  worker:
+    build: ./backend
+    command: python -m app.worker.judge_worker
+    environment:
+      DAI_ENVIRONMENT: production
+      DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
+      DAI_REDIS_URL: redis://redis:6379/0
+      DAI_SECRET_KEY: ${DAI_SECRET_KEY}
+      DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
+      DAI_STUDIO_STORAGE_DIR: /app/storage/studio
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - studio_data:/app/storage/studio
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      - api
+    networks:
+      - internal
+
+volumes:
+  mysql_data:
+  studio_data:
+
+networks:
+  internal:
+    driver: bridge

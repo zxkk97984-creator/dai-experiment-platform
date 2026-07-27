@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from sqlalchemy import select
+
 from app.api import api_router
 from app.config import Settings, get_settings
 from app.database import SessionLocal
@@ -105,6 +107,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def general_exception_handler(_: Request, exc: Exception):
         logger.exception("未处理的服务器异常: %s", exc)
         return JSONResponse(status_code=500, content={"detail": {"code": "INTERNAL_ERROR", "message": "服务器内部错误", "fields": {}}})
+
+    @app.get("/api/v1/health/live", tags=["health"])
+    def health_live():
+        """存活检查——总是返回 ok"""
+        return {"status": "ok", "app": settings.app_name}
+
+    @app.get("/api/v1/health/ready", tags=["health"])
+    def health_ready():
+        """就绪检查——验证 MySQL + Redis 可达"""
+        import redis as _redis
+        ready = True
+        details = {}
+
+        # MySQL
+        try:
+            from app.database import SessionLocal
+            db = SessionLocal()
+            db.execute(select(1)) if True else None  # simplified check
+            db.close()
+            details["mysql"] = "ok"
+        except Exception as e:
+            ready = False
+            details["mysql"] = str(e)[:100]
+
+        # Redis
+        try:
+            r = _redis.Redis.from_url(settings.redis_url, socket_connect_timeout=2)
+            r.ping()
+            details["redis"] = "ok"
+        except Exception as e:
+            details["redis"] = str(e)[:100]
+            # Redis 不可用不影响 ready（判题暂时无法入队但不阻塞 API）
+
+        status_code = 200 if ready else 503
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=status_code,
+            content={"status": "ready" if ready else "degraded", "checks": details},
+        )
 
     @app.get("/health", tags=["health"])
     def health():
