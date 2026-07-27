@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -80,6 +81,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
+    # Request ID 中间件
+    from app.logging_config import RequestIDFilter, setup_logging
+    setup_logging()
+
+    @app.middleware("http")
+    async def request_id_middleware(request: Request, call_next):
+        rid = request.headers.get("X-Request-ID", "") or str(uuid.uuid4())[:8]
+        RequestIDFilter.set_request_id(rid)
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = rid
+        return response
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -150,6 +163,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health", tags=["health"])
     def health():
         return {"status": "ok", "app": settings.app_name}
+
+    @app.get("/api/v1/metrics", tags=["metrics"])
+    def metrics():
+        """内部指标——队列积压和各状态任务数量（仅内网）"""
+        from app.database import SessionLocal
+        from app.models import ExamAnswer, Submission
+        stats = {}
+        try:
+            db = SessionLocal()
+            stats["assignment_queued"] = db.query(Submission).filter(
+                Submission.grading_status == "queued").count()
+            stats["assignment_running"] = db.query(Submission).filter(
+                Submission.grading_status == "running").count()
+            stats["assignment_pending"] = db.query(Submission).filter(
+                Submission.grading_status == "pending").count()
+            stats["exam_queued"] = db.query(ExamAnswer).filter(
+                ExamAnswer.grading_status == "queued").count()
+            stats["exam_running"] = db.query(ExamAnswer).filter(
+                ExamAnswer.grading_status == "running").count()
+            stats["exam_pending"] = db.query(ExamAnswer).filter(
+                ExamAnswer.grading_status == "pending").count()
+            db.close()
+        except Exception as e:
+            stats["error"] = str(e)[:100]
+        return {"metrics": stats}
 
     app.include_router(api_router)
     return app
