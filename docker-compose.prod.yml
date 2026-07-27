@@ -33,7 +33,7 @@ services:
       DAI_ENVIRONMENT: production
       DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
       DAI_REDIS_URL: redis://redis:6379/0
-      DAI_SECRET_KEY: ${DAI_SECRET_KEY}
+      DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
       DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:-http://localhost}
       DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
       DAI_STUDIO_STORAGE_DIR: /app/storage/studio
@@ -55,7 +55,7 @@ services:
       DAI_ENVIRONMENT: production
       DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
       DAI_REDIS_URL: redis://redis:6379/0
-      DAI_SECRET_KEY: ${DAI_SECRET_KEY}
+      DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
       DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
       DAI_STUDIO_STORAGE_DIR: /app/storage/studio
     depends_on:
