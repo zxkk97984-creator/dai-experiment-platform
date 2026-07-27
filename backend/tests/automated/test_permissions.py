@@ -34,9 +34,20 @@ def _setup_full(client, db_session_factory, course_status="published"):
     })
     qid = q.json()["id"]
     e = client.post(f"{API}/exams", headers=auth_header(t_tok), json={
-        "course_id": cid, "title": "Exam", "status": "published", "duration_minutes": 30,
+        "course_id": cid, "title": "Exam", "duration_minutes": 30,
     })
     eid = e.json()["id"]
+    # 添加一道选择题满足 validate_publish 要求，然后发布
+    client.post(f"{API}/exams/{eid}/questions", headers=auth_header(t_tok), json={
+        "question_type": "single_choice",
+        "prompt": "Q1?",
+        "options": {"A": "a", "B": "b"},
+        "correct_answer": {"correct": ["A"]},
+        "points": 1,
+    })
+    client.patch(f"{API}/exams/{eid}", headers=auth_header(t_tok), json={
+        "status": "published",
+    })
     return {"t_tok": t_tok, "s_yes_tok": s_yes_tok, "s_no_tok": s_no_tok,
             "cid": cid, "chid": chid, "lid": le.json()["id"], "aid": aid, "qid": qid, "eid": eid}
 
@@ -163,9 +174,14 @@ def test_teacher_b_cannot_manage_teacher_a_resources(client, db_session_factory)
         "title": "Q", "function_name": "f", "hidden_tests": "def test(): pass",
     })
     e = client.post(f"{API}/exams", headers=auth_header(ta_tok), json={
-        "course_id": cid, "title": "E", "status": "published", "duration_minutes": 30,
+        "course_id": cid, "title": "E", "duration_minutes": 30,
     })
     eid = e.json()["id"]
+    client.post(f"{API}/exams/{eid}/questions", headers=auth_header(ta_tok), json={
+        "question_type": "single_choice", "prompt": "Q1?", "options": {"A": "a"},
+        "correct_answer": {"correct": ["A"]}, "points": 1,
+    })
+    client.patch(f"{API}/exams/{eid}", headers=auth_header(ta_tok), json={"status": "published"})
 
     # tb 全拒绝
     for path in [f"/courses/{cid}", f"/courses/{cid}/chapters"]:
@@ -259,9 +275,14 @@ def test_error_developer_has_no_course_access(client, db_session_factory):
     })
     aid = a.json()["id"]
     e = client.post(f"{API}/exams", headers=auth_header(t_tok), json={
-        "course_id": cid, "title": "E1", "status": "published", "duration_minutes": 30,
+        "course_id": cid, "title": "E1", "duration_minutes": 30,
     })
     eid = e.json()["id"]
+    client.post(f"{API}/exams/{eid}/questions", headers=auth_header(t_tok), json={
+        "question_type": "single_choice", "prompt": "Q1?", "options": {"A": "a"},
+        "correct_answer": {"correct": ["A"]}, "points": 1,
+    })
+    client.patch(f"{API}/exams/{eid}", headers=auth_header(t_tok), json={"status": "published"})
 
     # student 能看到
     r = client.get(f"{API}/assignments", headers=auth_header(s_tok))
@@ -350,7 +371,7 @@ def test_teacher_b_full_mutation_rejection(client, db_session_factory):
     cid = c.json()["id"]
     a = client.post(f"{API}/assignments", headers=auth_header(ta_tok), json={"course_id": cid, "title": "A", "status": "published"})
     aid = a.json()["id"]
-    e = client.post(f"{API}/exams", headers=auth_header(ta_tok), json={"course_id": cid, "title": "E", "status": "published", "duration_minutes": 30})
+    e = client.post(f"{API}/exams", headers=auth_header(ta_tok), json={"course_id": cid, "title": "E", "duration_minutes": 30})
     eid = e.json()["id"]
 
     # tb 不能 create question

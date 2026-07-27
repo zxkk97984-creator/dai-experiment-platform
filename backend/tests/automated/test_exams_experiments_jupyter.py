@@ -21,12 +21,29 @@ def test_exam_submission_and_grade_visibility(client, db_session_factory):
         json={
             "course_id": course_id,
             "title": "期末考试",
-            "status": "published",
             "duration_minutes": 90,
         },
     )
     assert exam_response.status_code == 201
     exam_id = exam_response.json()["id"]
+
+    # 添加题目并发布（创建强制 draft，需显式发布）
+    client.post(
+        f"/api/v1/exams/{exam_id}/questions",
+        headers=auth_header(teacher_token),
+        json={
+            "question_type": "single_choice",
+            "prompt": "1+1=?",
+            "options": {"A": "2", "B": "3"},
+            "correct_answer": {"correct": ["A"]},
+            "points": 10,
+        },
+    )
+    client.patch(
+        f"/api/v1/exams/{exam_id}",
+        headers=auth_header(teacher_token),
+        json={"status": "published"},
+    )
 
     start_response = client.post(
         f"/api/v1/exams/{exam_id}/start",

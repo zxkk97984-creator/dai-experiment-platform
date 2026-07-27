@@ -17,11 +17,11 @@ const saveTimers = {}       // qId → setTimeout
 const pendingSaves = {}     // qId → value（待发送的数据）
 let fallbackTimer = null
 
-/** 刷新单个题目的待保存数据 */
+/** 刷新单个题目的待保存数据，返回 true=成功 */
 async function flushSave(qId) {
   if (saveTimers[qId]) { clearTimeout(saveTimers[qId]); delete saveTimers[qId] }
   const value = pendingSaves[qId]
-  if (value === undefined) return
+  if (value === undefined) return true  // 无待保存数据，视为成功
   delete pendingSaves[qId]
   try {
     if (typeof value === 'string') {
@@ -29,19 +29,22 @@ async function flushSave(qId) {
     } else {
       await examsAPI.saveAnswer(route.params.id, qId, { selected_options: value })
     }
+    return true
   } catch (e) {
     // 恢复待保存数据，下次兜底重试
     pendingSaves[qId] = value
     const detail = e.response?.data?.detail?.message
     app.showToast(detail || '自动保存失败，请检查网络连接', 'error')
+    return false
   }
 }
 
-/** 刷新所有待保存答案 */
+/** 刷新所有待保存答案，返回 { hasFailures } */
 async function flushAllSaves() {
   const ids = Object.keys(pendingSaves)
-  if (ids.length === 0) return
-  await Promise.all(ids.map(id => flushSave(id)))
+  if (ids.length === 0) return { hasFailures: false }
+  const results = await Promise.all(ids.map(id => flushSave(id)))
+  return { hasFailures: results.some(r => !r) }
 }
 
 /** 防抖保存入口：立即更新本地状态，1 秒后发送到服务端 */
@@ -118,6 +121,14 @@ async function startExam() {
     submission.value = res.data; started.value = true
     timeLeft.value = Math.max(0, Math.floor((new Date(res.data.expires_at).getTime() - Date.now()) / 1000))
     startTimer(); startFallbackTimer()
+
+    // 开始成功后重新加载题目（此时已获得查看权限）
+    try {
+      const qRes = await examsAPI.getQuestions(route.params.id)
+      questions.value = qRes.data?.items || qRes.data || []
+    } catch {
+      app.showToast('题目加载失败，请刷新页面', 'error')
+    }
   } catch(e) {
     app.showToast(e.response?.data?.detail?.message || '开始失败', 'error')
   }
@@ -126,7 +137,11 @@ async function startExam() {
 async function submitExam() {
   if (!confirm('确定要交卷吗？交卷后无法修改答案。')) return
   // 交卷前刷新所有待保存数据
-  await flushAllSaves()
+  const flushResult = await flushAllSaves()
+  if (flushResult.hasFailures) {
+    app.showToast('部分答案保存失败，请检查网络后重试交卷', 'error')
+    return
+  }
   try {
     const res = await examsAPI.submit(route.params.id, {})
     submission.value = res.data; submitted.value = true

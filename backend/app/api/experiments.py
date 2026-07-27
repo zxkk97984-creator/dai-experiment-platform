@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.dependencies import get_current_user, get_db, require_roles
 from app.errors import api_error
 from app.models import (
+    Chapter,
     Course,
     CourseEnrollment,
     ExperimentModule,
@@ -550,8 +551,9 @@ def submit_record(
         raise api_error(404, "RECORD_NOT_FOUND", "实验记录不存在")
     _require_owner(record, current_user)
 
-    if record.status != "started":
-        raise api_error(400, "ALREADY_SUBMITTED", "实验已提交，不能重复提交")
+    # 仅终态（graded/completed）禁止重新提交，started 和 submitted 均可提交
+    if record.status not in ("started", "submitted"):
+        raise api_error(400, "ALREADY_GRADED", "实验已评分，不能再次提交")
 
     # 计算提交次数
     max_attempt = db.scalar(
@@ -570,7 +572,7 @@ def submit_record(
     )
     db.add(submission)
 
-    # 更新记录状态：提交时间、revision 保持一致
+    # 更新记录状态：标记为 submitted（可再次提交），记录提交时间和 revision
     record.status = "submitted"
     record.submitted_at = now
     record.record_revision += 1
@@ -602,11 +604,12 @@ def list_submissions(
     if current_user.role == "student":
         visible_ids = visible_ids.where(ExperimentRecord.student_id == current_user.id)
     elif current_user.role == "teacher":
-        # 教师通过 lesson → chapter → course 查看
+        # 教师通过 lesson → chapter → course 查看，显式 join 完整链条
         visible_ids = (
             visible_ids
             .join(Lesson, ExperimentRecord.lesson_id == Lesson.id)
-            .join(Course, Lesson.chapter.has())
+            .join(Chapter, Lesson.chapter_id == Chapter.id)
+            .join(Course, Chapter.course_id == Course.id)
             .where(Course.teacher_id == current_user.id)
         )
     elif current_user.role == "developer":

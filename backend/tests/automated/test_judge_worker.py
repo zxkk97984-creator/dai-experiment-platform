@@ -257,3 +257,70 @@ def test_get_timeout_values():
     q.time_limit_ms = 60000; assert _get_timeout(q, s) == 30
     q.time_limit_ms = 0; assert _get_timeout(q, s) == 1
     q.time_limit_ms = 100; assert _get_timeout(q, s) == 1
+
+
+# ═══════════════════════════════════════════════════════════════
+# P0 回归测试
+# ═══════════════════════════════════════════════════════════════
+
+def test_p0_1_brpop_receives_list_of_queues():
+    """P0-1: Worker 必须用 brpop([q1, q2], timeout=0) 而不是 brpop(q1, q2)"""
+    import fakeredis
+    from app.config import Settings
+
+    r = fakeredis.FakeRedis(decode_responses=True)
+    # 用正确的调用方式验证可以正常阻塞（fakeredis 支持 brpop 列表参数）
+    r.rpush("judge:queue", "123")
+    result = r.brpop(["judge:queue", "judge:exam:queue"], timeout=0)
+    assert result is not None
+    queue_name, value = result
+    assert queue_name == "judge:queue"
+    assert value == "123"
+
+    # 验证不带列表的调用会报错（第二个参数被当作 timeout）
+    with pytest.raises(Exception):
+        r.brpop("judge:queue", "judge:exam:queue")
+
+
+def test_p0_2_exam_functions_defined_at_module_level():
+    """P0-2: process_exam_answer 和 enqueue_exam_answer 在模块导入时可访问"""
+    from app.worker import judge_worker as jw
+    assert hasattr(jw, "process_exam_answer"), "process_exam_answer 未在模块顶层定义"
+    assert hasattr(jw, "enqueue_exam_answer"), "enqueue_exam_answer 未在模块顶层定义"
+    assert hasattr(jw, "EXAM_JUDGE_QUEUE"), "EXAM_JUDGE_QUEUE 未在模块顶层定义"
+    assert callable(jw.process_exam_answer)
+    assert callable(jw.enqueue_exam_answer)
+
+
+def test_p0_5_maybe_finalize_blocks_on_running():
+    """P0-5: _maybe_finalize_exam 不应在存在 running 答案时汇总"""
+    from app.worker.judge_worker import _maybe_finalize_exam
+
+    # 测试1: 存在 running 答案 → 不应汇总
+    db = MagicMock()
+    mock_sub = MagicMock()
+    mock_sub.status = "grading"
+    db.get.return_value = mock_sub
+    # scalar: unfinished check 返回有值（存在 running 答案）
+    db.scalar.return_value = MagicMock()
+
+    _maybe_finalize_exam(1, db)
+
+    # scalar 应该只被调用了1次（unfinished check），没有第二次 total query
+    assert db.scalar.call_count == 1, f"应该在发现未完成答案后立即返回，但调用了 {db.scalar.call_count} 次"
+    # 不应该 commit（因为没有汇总）
+    assert not db.commit.called, "存在未完成答案时不应提交汇总"
+
+    # 测试2: 全部完成 → 应该汇总
+    db2 = MagicMock()
+    mock_sub2 = MagicMock()
+    mock_sub2.status = "grading"
+    db2.get.return_value = mock_sub2
+    # scalar: unfinished check 返回 None（无 pending/running），total 返回 100
+    db2.scalar.side_effect = [None, 100.0]
+
+    with patch("app.services.exam_service._finalize_grade") as mock_fg:
+        _maybe_finalize_exam(1, db2)
+        assert db2.scalar.call_count == 2, "应该在确认无未完成后查询 total"
+        assert db2.commit.called, "应该提交最终成绩"
+        mock_fg.assert_called_once()

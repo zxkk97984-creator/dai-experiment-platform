@@ -70,3 +70,80 @@ def test_ensure_record_validation(client, db_session_factory):
     )
     assert r.status_code == 404
     assert r.json()["detail"]["code"] == "TEMPLATE_NOT_FOUND"
+
+
+def test_p0_4_teacher_submission_isolation(client, db_session_factory):
+    """P0-4: 教师 A 不能看到教师 B 课程的实验提交"""
+    # 创建教师 A 和课程 A
+    create_user(db_session_factory, "t_iso_a", "teacher")
+    create_user(db_session_factory, "s_iso_a", "student")
+    t_a_tok, _ = login(client, "t_iso_a")
+    s_a_tok, _ = login(client, "s_iso_a")
+
+    # 教师 B 和课程 B
+    create_user(db_session_factory, "t_iso_b", "teacher")
+    create_user(db_session_factory, "s_iso_b", "student")
+    t_b_tok, _ = login(client, "t_iso_b")
+    s_b_tok, _ = login(client, "s_iso_b")
+
+    # 教师 A 创建课程、章节、课时
+    c_a = client.post("/api/v1/courses", headers=auth_header(t_a_tok), json={
+        "title": "教师A的课程", "status": "published",
+    })
+    cid_a = c_a.json()["id"]
+    client.post(f"/api/v1/courses/{cid_a}/enroll", headers=auth_header(s_a_tok))
+
+    ch_a = client.post(f"/api/v1/courses/{cid_a}/chapters", headers=auth_header(t_a_tok), json={
+        "title": "第一章", "order_index": 1,
+    })
+    chid_a = ch_a.json()["id"]
+
+    # 需要创建模板才能创建课时（使用测试的 db_session_factory）
+    from app.models import NotebookTemplate, NotebookTemplateVersion
+    with db_session_factory() as db:
+        tpl = NotebookTemplate(name="tpl_a", status="published", owner_id=1)
+        db.add(tpl)
+        db.flush()
+        ver = NotebookTemplateVersion(
+            template_id=tpl.id, version_number=1, sha256="abc",
+            cells=[{"id": "c1", "type": "code", "source": "print(1)", "order": 0}],
+            published_by_id=1,
+        )
+        db.add(ver)
+        db.flush()
+        tpl.current_version_id = ver.id
+        db.commit()
+        tpl_a_id = tpl.id
+
+    les_a = client.post(f"/api/v1/chapters/{chid_a}/lessons", headers=auth_header(t_a_tok), json={
+        "title": "课时A", "content_type": "markdown", "content": "# A",
+        "order_index": 1,
+    })
+    lid_a = les_a.json()["id"]
+    # 设置 template_id（LessonCreate schema 不含此字段，需单独更新）
+    from app.database import SessionLocal as _SL
+    from app.models import Lesson as _Lesson
+    with db_session_factory() as db:
+        lesson = db.get(_Lesson, lid_a)
+        lesson.template_id = tpl_a_id
+        db.commit()
+
+    # 学生 A 创建实验记录并提交
+    rec_a = client.post(f"/api/v1/experiments/records/ensure-for-lesson/{lid_a}",
+                        headers=auth_header(s_a_tok))
+    rid_a = rec_a.json()["id"]
+    sub_a = client.post(f"/api/v1/experiments/records/{rid_a}/submit",
+                        headers=auth_header(s_a_tok))
+    assert sub_a.status_code == 201
+
+    # 教师 A 可以查看自己课程的提交
+    r_a = client.get("/api/v1/experiments/submissions", headers=auth_header(t_a_tok))
+    assert r_a.status_code == 200
+    items_a = r_a.json()["items"]
+    assert len(items_a) >= 1, "教师 A 应该能看到自己课程的提交"
+
+    # 教师 B 不应该看到教师 A 课程的提交（教师 B 没有任何课程）
+    r_b = client.get("/api/v1/experiments/submissions", headers=auth_header(t_b_tok))
+    assert r_b.status_code == 200
+    items_b = r_b.json()["items"]
+    assert len(items_b) == 0, f"教师 B 不应看到其他教师的提交，但看到了 {len(items_b)} 条"

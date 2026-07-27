@@ -69,7 +69,10 @@ def create_exam(
     if current_user.role == "teacher":
         if course.teacher_id != current_user.id:
             raise api_error(403, "FORBIDDEN", "只能在自己的课程中创建考试")
-    exam = Exam(**payload.model_dump(), created_by_id=current_user.id)
+    # 创建考试时强制 draft，发布需通过 update 接口触发 validate_publish()
+    exam_data = payload.model_dump()
+    exam_data["status"] = "draft"
+    exam = Exam(**exam_data, created_by_id=current_user.id)
     db.add(exam)
     db.commit()
     db.refresh(exam)
@@ -185,6 +188,16 @@ def get_questions(exam_id: int, db: Session = Depends(get_db), current_user: Use
         )
         if not sub or sub.status != "started":
             raise api_error(403, "EXAM_NOT_STARTED", "请先开始考试")
+    elif current_user.role == "teacher":
+        # 教师只能看自己课程的考试题目
+        course = db.get(Course, exam.course_id)
+        if not course or course.teacher_id != current_user.id:
+            raise api_error(403, "FORBIDDEN", "无权查看该考试题目")
+    elif current_user.role == "developer":
+        # 开发者无权查看考试题目
+        raise api_error(403, "FORBIDDEN", "无权查看考试题目")
+    # admin 可以查看全部
+
     questions = list_questions(db, exam_id)
     items = [ExamQuestionRead.model_validate(q) for q in questions]
     return PaginatedResponse(items=items, page=1, page_size=len(items), total=len(items))

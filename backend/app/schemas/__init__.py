@@ -158,13 +158,19 @@ class AssignmentRead(BaseModel):
     due_at: datetime | None = None
 
 
+class PublicCase(BaseModel):
+    """公开样例——统一格式：{"args": [1, 2], "expected": 3}"""
+    args: list[Any] = Field(default_factory=list)
+    expected: Any = None
+
+
 class JudgeQuestionCreate(BaseModel):
     title: str
     description: str | None = None
     function_name: str
     signature: str | None = None
     starter_code: str | None = None
-    public_cases: list[Any] = Field(default_factory=list)
+    public_cases: list[PublicCase] = Field(default_factory=list)
     hidden_tests: str
     time_limit_ms: int = 10000
     memory_limit_mb: int = 256
@@ -253,7 +259,7 @@ class ExamQuestionCreate(BaseModel):
     points: float = 1
     order_index: int = 0
     starter_code: str | None = None
-    public_cases: list | None = None
+    public_cases: list[PublicCase] | None = None
     hidden_tests: str | None = None
     time_limit_ms: int | None = None
     memory_limit_mb: int | None = None

@@ -87,6 +87,13 @@ def submit_exam(exam, student, db):
     if sub.status in ("submitted", "grading", "graded"):
         return sub
 
+    # 检查是否已过期，过期则自动交卷并拒绝
+    if sub.status == "started" and sub.expires_at:
+        exp = sub.expires_at.replace(tzinfo=timezone.utc) if sub.expires_at.tzinfo is None else sub.expires_at
+        if exp < now:
+            _auto_submit(sub, db, now)
+            raise api_error(403, "EXAM_EXPIRED", "考试已过期")
+
     sub.status = "grading"
     sub.submitted_at = now
     db.commit()
