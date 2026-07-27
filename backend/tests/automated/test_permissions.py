@@ -178,7 +178,7 @@ def test_teacher_b_cannot_manage_teacher_a_resources(client, db_session_factory)
     })
     eid = e.json()["id"]
     client.post(f"{API}/exams/{eid}/questions", headers=auth_header(ta_tok), json={
-        "question_type": "single_choice", "prompt": "Q1?", "options": {"A": "a"},
+        "question_type": "single_choice", "prompt": "Q1?", "options": {"A": "a", "B": "b"},
         "correct_answer": {"correct": ["A"]}, "points": 1,
     })
     client.patch(f"{API}/exams/{eid}", headers=auth_header(ta_tok), json={"status": "published"})
@@ -279,7 +279,7 @@ def test_error_developer_has_no_course_access(client, db_session_factory):
     })
     eid = e.json()["id"]
     client.post(f"{API}/exams/{eid}/questions", headers=auth_header(t_tok), json={
-        "question_type": "single_choice", "prompt": "Q1?", "options": {"A": "a"},
+        "question_type": "single_choice", "prompt": "Q1?", "options": {"A": "a", "B": "b"},
         "correct_answer": {"correct": ["A"]}, "points": 1,
     })
     client.patch(f"{API}/exams/{eid}", headers=auth_header(t_tok), json={"status": "published"})

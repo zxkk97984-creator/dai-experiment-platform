@@ -8,7 +8,7 @@ from app.api.courses import can_view_course, ensure_course_manager, require_cour
 from app.dependencies import get_current_user, get_db, require_roles
 from app.errors import api_error
 from app.models import Course, CourseEnrollment, Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission, User
-from app.schemas import ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamRead, ExamSubmitRequest, ExamSubmissionRead, ExamUpdate, PaginatedResponse
+from app.schemas import ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionUpdate, ExamRead, ExamSubmitRequest, ExamSubmissionRead, ExamUpdate, PaginatedResponse
 from app.services.exam_service import create_question, delete_question, get_my_grade, get_question, list_questions, require_exam_editable, save_answer, start_exam as svc_start_exam, submit_exam as svc_submit_exam, update_question, validate_publish
 
 router = APIRouter(prefix="/exams", tags=["exams"])
@@ -210,8 +210,8 @@ def post_question(exam_id: int, payload: ExamQuestionCreate, db: Session = Depen
     return create_question(db, exam_id, payload.model_dump(), current_user)
 
 @router.patch("/{exam_id}/questions/{question_id}", response_model=ExamQuestionRead)
-def patch_question(exam_id: int, question_id: int, payload: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return update_question(db, exam_id, question_id, payload, current_user)
+def patch_question(exam_id: int, question_id: int, payload: ExamQuestionUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return update_question(db, exam_id, question_id, payload.model_dump(exclude_unset=True), current_user)
 
 @router.delete("/{exam_id}/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
 def del_question(exam_id: int, question_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

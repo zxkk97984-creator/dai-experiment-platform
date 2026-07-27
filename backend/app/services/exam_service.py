@@ -11,6 +11,46 @@ def require_exam_editable(exam, user):
     if exam.status != "draft":
         raise api_error(403, "EXAM_LOCKED", "考试已发布，不能修改题目")
 
+def validate_question(question) -> list[str]:
+    """逐题校验，返回错误列表（空=通过）"""
+    errors = []
+
+    # 所有题型通用校验
+    if not question.points or question.points <= 0:
+        errors.append(f"题目 {question.order_index}: 分值必须大于 0，当前为 {question.points}")
+
+    if question.question_type in ("single_choice", "multi_choice"):
+        options = question.options or {}
+        if len(options) < 2:
+            errors.append(f"题目 {question.order_index}: 选项至少需要 2 个，当前 {len(options)} 个")
+        correct = question.correct_answer.get("correct", [])
+        if question.question_type == "single_choice":
+            if len(correct) != 1:
+                errors.append(f"题目 {question.order_index}: 单选题必须有恰好 1 个正确答案，当前 {len(correct)} 个")
+        if question.question_type == "multi_choice":
+            if len(correct) < 1:
+                errors.append(f"题目 {question.order_index}: 多选题至少需要 1 个正确答案")
+        for key in correct:
+            if key not in options:
+                errors.append(f"题目 {question.order_index}: 正确答案 '{key}' 不在选项中")
+
+    elif question.question_type == "code":
+        if not question.hidden_tests or not question.hidden_tests.strip():
+            errors.append(f"题目 {question.order_index}: 编程题必须配置隐藏测试")
+        if question.time_limit_ms is not None and question.time_limit_ms <= 0:
+            errors.append(f"题目 {question.order_index}: 时间限制必须为正数")
+        if question.time_limit_ms is None:
+            # 默认 10000ms
+            pass
+        if question.memory_limit_mb is not None and question.memory_limit_mb <= 0:
+            errors.append(f"题目 {question.order_index}: 内存限制必须为正数")
+
+    else:
+        errors.append(f"题目 {question.order_index}: 不支持的题型 '{question.question_type}'")
+
+    return errors
+
+
 def validate_publish(exam, db):
     if exam.start_at and exam.end_at and exam.start_at >= exam.end_at:
         raise api_error(422, "PUBLISH_INVALID", "开始时间必须早于结束时间")
@@ -22,6 +62,12 @@ def validate_publish(exam, db):
     total = sum(q.points for q in questions)
     if total <= 0:
         raise api_error(422, "PUBLISH_INVALID", "总分必须大于0")
+    # 逐题校验
+    all_errors = []
+    for q in questions:
+        all_errors.extend(validate_question(q))
+    if all_errors:
+        raise api_error(422, "QUESTION_INVALID", "题目校验失败：" + "; ".join(all_errors))
 def start_exam(exam, student, db):
     now = datetime.now(timezone.utc)
     def _tz(dt): return dt.replace(tzinfo=timezone.utc) if dt and dt.tzinfo is None else dt
@@ -252,6 +298,12 @@ def create_question(db, exam_id, payload, user):
         raise api_error(404, "EXAM_NOT_FOUND", "考试不存在")
     require_exam_editable(exam, user)
     q = ExamQuestion(exam_id=exam_id, **payload)
+
+    # 创建时立即校验
+    errors = validate_question(q)
+    if errors:
+        raise api_error(422, "QUESTION_INVALID", "题目校验失败：" + "; ".join(errors))
+
     db.add(q)
     db.commit()
     db.refresh(q)
@@ -272,6 +324,12 @@ def update_question(db, exam_id, question_id, payload, user):
     q = get_question(db, exam_id, question_id)
     for key, value in payload.items():
         setattr(q, key, value)
+
+    # 更新后校验
+    errors = validate_question(q)
+    if errors:
+        raise api_error(422, "QUESTION_INVALID", "题目校验失败：" + "; ".join(errors))
+
     db.commit()
     db.refresh(q)
     return q

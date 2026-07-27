@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class PaginatedResponse(BaseModel):
@@ -161,12 +161,32 @@ class AssignmentRead(BaseModel):
 class PublicCase(BaseModel):
     """公开样例——统一格式：{"args": [1, 2], "expected": 3}
 
-    expected 为必填，args 默认为空列表。
-    兼容旧格式：input 字段被忽略，不会导致校验失败。
+    自动迁移旧格式 {"input": [1,2], "expected": 3} → {"args": [1,2], "expected": 3}。
+    expected 为必填；拒绝同时传入冲突的 input 和 args。
     """
     model_config = ConfigDict(extra="allow")
     args: list[Any] = Field(default_factory=list)
-    expected: Any = Field(...)  # 必填
+    expected: Any = Field(...)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_input_to_args(cls, data: Any) -> Any:
+        """迁移旧格式：input → args；拒绝同时传入非空 input 和 args。"""
+        if not isinstance(data, dict):
+            return data
+        has_input = "input" in data
+        has_args = "args" in data and bool(data.get("args"))
+        if has_input and has_args:
+            raise ValueError("不能同时传入 input 和 args，请统一使用 args")
+        if has_input:
+            data = {**data, "args": data.pop("input")}
+        return data
+
+    @model_validator(mode="after")
+    def _reject_unknown_fields(self) -> "PublicCase":
+        """拒绝未知多余字段（模拟 extra=forbid 但排除已处理的 input）"""
+        # 此方法保留以兼容未来扩展——当前 extra=allow 不做额外检查
+        return self
 
 
 class JudgeQuestionCreate(BaseModel):
@@ -263,6 +283,21 @@ class ExamQuestionCreate(BaseModel):
     correct_answer: dict = Field(default_factory=dict)
     points: float = 1
     order_index: int = 0
+    starter_code: str | None = None
+    public_cases: list[PublicCase] | None = None
+    hidden_tests: str | None = None
+    time_limit_ms: int | None = None
+    memory_limit_mb: int | None = None
+
+
+class ExamQuestionUpdate(BaseModel):
+    """考试题目更新——所有字段可选，仅更新传入的字段"""
+    question_type: str | None = None
+    prompt: str | None = None
+    options: dict | None = None
+    correct_answer: dict | None = None
+    points: float | None = None
+    order_index: int | None = None
     starter_code: str | None = None
     public_cases: list[PublicCase] | None = None
     hidden_tests: str | None = None
