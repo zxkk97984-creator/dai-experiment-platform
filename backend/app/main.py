@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -34,7 +34,8 @@ async def _expiry_scanner():
             await asyncio.sleep(15)
             with SessionLocal() as db:
                 # 考试过期扫描
-                count = scan_expired_exams(db, datetime.now(timezone.utc))
+                from app.services.time_utils import utc_now
+                count = scan_expired_exams(db, utc_now())
                 if count > 0:
                     logger.info("过期考试扫描：自动交卷 %d 份", count)
         except Exception:

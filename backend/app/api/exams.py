@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy import func, select
@@ -121,11 +121,12 @@ def start_exam(
     if exam.status != "published":
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
 
-    # 检查时间窗口
-    now = datetime.now(UTC)
-    if exam.start_at is not None and exam.start_at.replace(tzinfo=UTC) > now:
+    # 检查时间窗口（统一使用 as_utc 规范化）
+    from app.services.time_utils import as_utc, utc_now
+    now = utc_now()
+    if exam.start_at is not None and as_utc(exam.start_at) > now:
         raise api_error(403, "EXAM_NOT_STARTED", "考试尚未开始")
-    if exam.end_at is not None and exam.end_at.replace(tzinfo=UTC) < now:
+    if exam.end_at is not None and as_utc(exam.end_at) <= now:
         raise api_error(403, "EXAM_EXPIRED", "考试已结束")
 
     return svc_start_exam(exam, current_user, db)

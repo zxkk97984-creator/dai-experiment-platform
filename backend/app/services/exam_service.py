@@ -1,5 +1,5 @@
 ﻿"""考试系统业务逻辑"""
-from datetime import datetime, timezone, timedelta
+from datetime import timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.errors import api_error
@@ -69,20 +69,21 @@ def validate_publish(exam, db):
     if all_errors:
         raise api_error(422, "QUESTION_INVALID", "题目校验失败：" + "; ".join(all_errors))
 def start_exam(exam, student, db):
-    now = datetime.now(timezone.utc)
-    def _tz(dt): return dt.replace(tzinfo=timezone.utc) if dt and dt.tzinfo is None else dt
+    from app.services.time_utils import as_utc, utc_now
+    now = utc_now()
     existing = db.scalar(select(ExamSubmission).where(
         ExamSubmission.exam_id == exam.id, ExamSubmission.student_id == student.id))
     if existing:
         if existing.status == "started":
-            if existing.expires_at and _tz(existing.expires_at) < now:
+            if existing.expires_at and as_utc(existing.expires_at) < now:
                 _auto_submit(existing, db, now)
                 raise api_error(403, "EXAM_EXPIRED", "考试已过期")
             return existing
         raise api_error(403, "EXAM_ALREADY_SUBMITTED", "考试已提交")
     expires_at = now + timedelta(minutes=exam.duration_minutes)
-    if exam.end_at and expires_at > exam.end_at.replace(tzinfo=timezone.utc):
-        expires_at = exam.end_at.replace(tzinfo=timezone.utc)
+    end = as_utc(exam.end_at)
+    if end and expires_at > end:
+        expires_at = end
     sub = ExamSubmission(exam_id=exam.id, student_id=student.id, status="started",
                          started_at=now, expires_at=expires_at)
     db.add(sub)
@@ -92,12 +93,13 @@ def start_exam(exam, student, db):
 
 
 def save_answer(db, exam_id, question_id, student, payload):
+    from app.services.time_utils import as_utc, utc_now
     sub = db.scalar(select(ExamSubmission).where(
         ExamSubmission.exam_id == exam_id, ExamSubmission.student_id == student.id))
     if not sub or sub.status != "started":
         raise api_error(403, "EXAM_NOT_STARTED", "考试未开始或已结束")
-    now = datetime.now(timezone.utc)
-    if sub.expires_at and sub.expires_at.replace(tzinfo=timezone.utc) < now:
+    now = utc_now()
+    if sub.expires_at and as_utc(sub.expires_at) <= now:
         _auto_submit(sub, db, now)
         raise api_error(403, "EXAM_EXPIRED", "考试已过期")
     q = db.get(ExamQuestion, question_id)
@@ -122,7 +124,8 @@ def submit_exam(exam, student, db):
 
     幂等：已 submitted/grading/graded 的提交直接返回。
     """
-    now = datetime.now(timezone.utc)
+    from app.services.time_utils import as_utc, utc_now
+    now = utc_now()
     sub = db.scalar(select(ExamSubmission).where(
         ExamSubmission.exam_id == exam.id, ExamSubmission.student_id == student.id))
     if not sub:
@@ -135,8 +138,7 @@ def submit_exam(exam, student, db):
 
     # 检查是否已过期，过期则自动交卷并拒绝
     if sub.status == "started" and sub.expires_at:
-        exp = sub.expires_at.replace(tzinfo=timezone.utc) if sub.expires_at.tzinfo is None else sub.expires_at
-        if exp < now:
+        if as_utc(sub.expires_at) <= now:
             _auto_submit(sub, db, now)
             raise api_error(403, "EXAM_EXPIRED", "考试已过期")
 
@@ -242,7 +244,8 @@ def _finalize_grade(sub, score, db):
     """
     sub.score = float(score)
     sub.status = "graded"
-    sub.graded_at = datetime.now(timezone.utc)
+    from app.services.time_utils import utc_now
+    sub.graded_at = utc_now()
     grade = db.scalar(select(ExamGrade).where(
         ExamGrade.exam_id == sub.exam_id, ExamGrade.student_id == sub.student_id))
     if grade:
