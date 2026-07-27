@@ -233,9 +233,10 @@ def test_judge_docker_failure_sets_system_error():
 
     # Docker 异常 → process_submission 捕获并设置 system_error
     with patch('subprocess.run', side_effect=FileNotFoundError('No docker')):
-        result = process_submission(db, redis_client, settings, 1)
-        assert result.status == 'system_error'
-        assert result.score == 0
+        with patch('app.services.judge_queue.claim_job', return_value=True):
+            result = process_submission(db, redis_client, settings, 1)
+            assert result.status == 'system_error'
+            assert result.score == 0
 
 
 # ═══════════════════════════════════════════════════════════════

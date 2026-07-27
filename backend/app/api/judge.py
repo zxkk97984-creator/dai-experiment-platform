@@ -68,25 +68,22 @@ def create_submission(
         ) or 0
         if count >= question.max_attempts:
             raise api_error(400, "MAX_ATTEMPTS_REACHED", f"已达到最大提交次数（{question.max_attempts}次）")
+    # 先持久化 DB，grading_status=pending（初始状态）
     submission = Submission(
         question_id=payload.question_id,
         student_id=current_user.id,
         code=payload.code,
         status="queued",
+        grading_status="pending",
+        attempt_count=0,
     )
     db.add(submission)
     db.commit()
     db.refresh(submission)
 
-    # 异步入队到 Redis，由 Worker 处理判题
-    try:
-        redis_client.rpush(settings.judge_queue_name, str(submission.id))
-    except Exception:
-        # 入队失败则标记为 system_error，前端轮询可发现
-        submission.status = "system_error"
-        submission.stdout = "判题队列不可用"
-        db.commit()
-        db.refresh(submission)
+    # 使用统一入队入口：条件 UPDATE pending→queued + Redis 推送
+    from app.services.judge_queue import enqueue_job
+    enqueue_job(db, job_type="assignment", object_id=submission.id)
 
     return submission
 

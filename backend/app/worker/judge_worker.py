@@ -1,3 +1,13 @@
+"""判题 Worker——消费 Redis 队列，执行 Docker 沙箱判题。
+
+使用统一 judge_queue 协议进行状态管理：
+  - claim_job: 条件 UPDATE queued→running（原子抢占）
+  - complete_job: running→completed
+  - fail_job: 重试退回 pending / 终态 system_error
+"""
+
+import json as _json
+import logging
 import math
 import secrets
 import subprocess
@@ -5,17 +15,25 @@ import tempfile
 import time
 from pathlib import Path
 
-from sqlalchemy.orm import Session
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import SessionLocal
-from app.models import JudgeQuestion, Submission, ExamAnswer, ExamQuestion, ExamSubmission
+from app.models import ExamAnswer, ExamQuestion, ExamSubmission, JudgeQuestion, Submission
 
+logger = logging.getLogger("dai.worker")
+
+EXAM_JUDGE_QUEUE = "judge:exam:queue"
+
+
+# ═══════════════════════════════════════════════════════════════
+# 工具函数
+# ═══════════════════════════════════════════════════════════════
 
 def _get_timeout(question: JudgeQuestion, settings: Settings) -> int:
     """超时秒数：ceil(time_limit_ms / 1000)，受全局硬上限约束，至少 1 秒"""
-    raw = max(question.time_limit_ms, 1)  # 非正值至少 1ms
+    raw = max(question.time_limit_ms, 1)
     per_question = math.ceil(raw / 1000)
     return max(min(per_question, settings.judge_timeout_seconds), 1)
 
@@ -75,14 +93,34 @@ def _status_from_pytest(returncode: int, stdout: str, stderr: str) -> tuple[str,
     return "system_error", 0
 
 
+# ═══════════════════════════════════════════════════════════════
+# 判题处理（使用统一 judge_queue 协议）
+# ═══════════════════════════════════════════════════════════════
+
 def process_submission(db: Session, redis_client, settings: Settings, submission_id: int) -> Submission:
+    """处理普通作业判题——使用统一 judge_queue 状态机"""
+    from app.services.judge_queue import claim_job, complete_job, fail_job
+
     submission = db.get(Submission, submission_id)
     if not submission:
+        logger.error("Submission %s 不存在", submission_id)
         raise ValueError(f"Submission {submission_id} does not exist")
+
+    # 幂等：已完成的提交不重复判题
+    if submission.grading_status == "completed":
+        return submission
+
+    # 原子抢占：queued → running
+    if not claim_job(db, job_type="assignment", object_id=submission_id):
+        # 抢占失败：已被其他 Worker 领取或状态不对，跳过
+        logger.debug("抢占 Submission %s 失败，跳过", submission_id)
+        return submission
+
     question = db.get(JudgeQuestion, submission.question_id)
     if not question:
+        fail_job(db, job_type="assignment", object_id=submission_id,
+                 error="题目不存在", retryable=False)
         submission.status = "system_error"
-        submission.stderr = "Question not found"
         submission.score = 0
         db.commit()
         db.refresh(submission)
@@ -103,6 +141,9 @@ def process_submission(db: Session, redis_client, settings: Settings, submission
                 workdir, settings, timeout_seconds, memory_limit_mb,
             )
         except Exception as e:
+            # Docker 执行异常：可重试
+            fail_job(db, job_type="assignment", object_id=submission_id,
+                     error=f"Docker 判题失败: {e}", retryable=True)
             submission.status = "system_error"
             submission.score = 0
             submission.stderr = f"Docker 判题失败: {e}"
@@ -110,6 +151,7 @@ def process_submission(db: Session, redis_client, settings: Settings, submission
             db.commit()
             db.refresh(submission)
             redis_client.setex(f"judge:result:{submission.id}", 3600, submission.status)
+            logger.warning("Submission %s Docker 执行异常，已退回 pending", submission_id)
             return submission
 
     final_status, score = _status_from_pytest(returncode, stdout, stderr)
@@ -120,40 +162,46 @@ def process_submission(db: Session, redis_client, settings: Settings, submission
     submission.execution_time_ms = elapsed_ms
     submission.result_details = {"returncode": returncode}
     db.commit()
+
+    # 标记完成
+    complete_job(db, job_type="assignment", object_id=submission_id,
+                 score=score, result_details={"returncode": returncode})
     db.refresh(submission)
     redis_client.setex(f"judge:result:{submission.id}", 3600, submission.status)
+    logger.info("Submission %s 判题完成: %s (%.1f)", submission_id, final_status, score)
     return submission
 
 
-# ── 考试判题 ────────────────────────────────────────────────────────
-
-EXAM_JUDGE_QUEUE = "judge:exam:queue"
-
+# ═══════════════════════════════════════════════════════════════
+# 考试判题
+# ═══════════════════════════════════════════════════════════════
 
 def enqueue_exam_answer(submission_id: int, answer_id: int, question: ExamQuestion):
-    """把考试编程题答案推入 Redis 判题队列"""
-    import redis, json
-    settings = get_settings()
-    r = redis.Redis.from_url(settings.redis_url, decode_responses=False)
-    payload = json.dumps({"submission_id": submission_id, "answer_id": answer_id, "question_id": question.id})
-    r.rpush(EXAM_JUDGE_QUEUE, payload)
+    """考试编程题入队——委托给统一 judge_queue 入口。
+
+    保留此函数以兼容旧调用方。新代码应直接使用 judge_queue.enqueue_job。
+    """
+    from app.services.judge_queue import enqueue_job as _enq
+    from app.database import SessionLocal
+
+    # 需要 DB session 做条件更新
+    with SessionLocal() as db:
+        _enq(db, job_type="exam", object_id=answer_id)
 
 
 def _maybe_finalize_exam(submission_id: int, db: Session) -> None:
     """检查是否所有答案均已完成，是则汇总生成最终成绩。
 
     条件：submission.status == 'grading' 且没有任何答案处于 pending 或 running。
-    使用条件 UPDATE 防止多 Worker 竞态。
     """
     submission = db.get(ExamSubmission, submission_id)
     if not submission or submission.status != "grading":
         return
 
-    # 有任何未完成的答案（pending 或 running）则不汇总
     unfinished = db.scalar(
         select(ExamAnswer).where(
             ExamAnswer.submission_id == submission_id,
-            ExamAnswer.grading_status.in_(["pending", "running"]),
+            ExamAnswer.grading_status.in_(["pending", "running", "queued"]),
         ).limit(1)
     )
     if unfinished:
@@ -162,7 +210,7 @@ def _maybe_finalize_exam(submission_id: int, db: Session) -> None:
     total = db.scalar(
         select(func.sum(ExamAnswer.score)).where(
             ExamAnswer.submission_id == submission_id,
-            ExamAnswer.grading_status == "completed",
+            ExamAnswer.grading_status.in_(["completed", "system_error"]),
         )
     ) or 0.0
 
@@ -172,28 +220,42 @@ def _maybe_finalize_exam(submission_id: int, db: Session) -> None:
 
 
 def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id: int) -> ExamAnswer:
+    """处理考试编程题判题——使用统一 judge_queue 状态机"""
+    from app.services.judge_queue import claim_job, complete_job, fail_job
+
     answer = db.get(ExamAnswer, answer_id)
     if not answer:
+        logger.error("ExamAnswer %s 不存在", answer_id)
         raise ValueError(f"ExamAnswer {answer_id} does not exist")
 
     # 幂等：已完成的答案不重复判题
     if answer.grading_status == "completed":
-        # 仍需检查汇总（可能其他 Worker 刚完成最后一个答案）
         _maybe_finalize_exam(answer.submission_id, db)
         return answer
+
+    # 不是 queued 状态（可能是 pending 或 running），检查是否需要处理
+    if answer.grading_status != "queued":
+        # 可能是旧格式直接标 pending 的，尝试抢占
+        pass
+
+    # 原子抢占：queued → running
+    claimed = claim_job(db, job_type="exam", object_id=answer_id)
 
     question = db.get(ExamQuestion, answer.question_id)
     if not question or not question.hidden_tests:
+        fail_job(db, job_type="exam", object_id=answer_id,
+                 error="题目未配置隐藏测试", retryable=False)
         answer.system_error = "题目未配置隐藏测试"
-        answer.grading_status = "completed"
         answer.score = 0
         db.commit()
-        # 即使本题失败也要尝试汇总
         _maybe_finalize_exam(answer.submission_id, db)
         return answer
 
-    answer.grading_status = "running"
-    db.commit()
+    # 未抢占到也继续执行（兼容直接 pending 状态的旧数据）
+    if not claimed and answer.grading_status != "running":
+        # 手动设 running
+        answer.grading_status = "running"
+        db.commit()
 
     import tempfile
     with tempfile.TemporaryDirectory(prefix="dai-exam-judge-") as temp_dir:
@@ -212,38 +274,50 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
         try:
             stdout, stderr, returncode, elapsed_ms = _run_docker_pytest(workdir, settings, timeout_s, mem_mb)
         except Exception as e:
-            answer.grading_status = "completed"
+            fail_job(db, job_type="exam", object_id=answer_id,
+                     error=f"Docker 判题失败: {e}", retryable=True)
             answer.score = 0
             answer.system_error = f"Docker 判题失败: {e}"
             answer.result_details = {"error": str(e)}
             db.commit()
+            logger.warning("ExamAnswer %s Docker 执行异常，已退回 pending", answer_id)
             _maybe_finalize_exam(answer.submission_id, db)
             return answer
 
     final_status, _ = _status_from_pytest(returncode, stdout, stderr)
     score = float(question.points) if final_status == "accepted" else 0.0
-    answer.grading_status = "completed"
     answer.score = float(score)
+    answer.grading_status = "completed"
     answer.result_details = {"returncode": returncode, "stdout": stdout[-2000:], "stderr": stderr[-2000:]}
     db.commit()
+
+    complete_job(db, job_type="exam", object_id=answer_id,
+                 score=score, result_details=answer.result_details)
+    logger.info("ExamAnswer %s 判题完成: %s (%.1f)", answer_id, final_status, score)
 
     _maybe_finalize_exam(answer.submission_id, db)
     return answer
 
 
-# ── Worker 主循环 ────────────────────────────────────────────────────
-
+# ═══════════════════════════════════════════════════════════════
+# Worker 主循环
+# ═══════════════════════════════════════════════════════════════
 
 def run_worker_loop():
-    """主循环：同时消费普通判题队列和考试判题队列"""
-    import redis
-    import json as _json
+    """主循环：同时消费普通判题队列和考试判题队列。
+
+    消息格式（v2 统一协议）：
+      {"type": "assignment" | "exam", "id": 123, "attempt": 1}
+    """
+    import redis as _redis
 
     settings = get_settings()
-    redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+    redis_client = _redis.Redis.from_url(settings.redis_url, decode_responses=True)
+
+    logger.info("Worker 启动，监听队列: %s, %s", settings.judge_queue_name, EXAM_JUDGE_QUEUE)
+
     while True:
         try:
-            # brpop(list_of_keys, timeout=0) 阻塞等待多个队列
             result = redis_client.brpop(
                 [settings.judge_queue_name, EXAM_JUDGE_QUEUE], timeout=0
             )
@@ -251,25 +325,43 @@ def run_worker_loop():
                 continue
             queue_name, raw_data = result
         except Exception:
-            import traceback
-            traceback.print_exc()
+            logger.exception("brpop 异常，重试中...")
+            time.sleep(1)
             continue
+
+        # 解析统一 JSON 消息
+        try:
+            payload = _json.loads(raw_data)
+            job_type = payload.get("type", "assignment" if queue_name != EXAM_JUDGE_QUEUE else "exam")
+            job_id = payload["id"]
+            job_attempt = payload.get("attempt", 0)
+        except (ValueError, KeyError, _json.JSONDecodeError):
+            # 兼容旧格式：普通作业 → 纯数字字符串
+            logger.warning("无法解析消息格式，尝试旧格式兼容: %s", raw_data[:100])
+            if queue_name == EXAM_JUDGE_QUEUE:
+                try:
+                    legacy = _json.loads(raw_data)
+                    job_id = legacy.get("answer_id") or legacy.get("id")
+                except Exception:
+                    logger.exception("旧格式考试消息解析失败，丢弃")
+                    continue
+            else:
+                try:
+                    job_id = int(raw_data)
+                except ValueError:
+                    logger.exception("旧格式作业消息解析失败，丢弃")
+                    continue
+            job_type = "exam" if queue_name == EXAM_JUDGE_QUEUE else "assignment"
+            job_attempt = 0
 
         with SessionLocal() as db:
             try:
-                if queue_name == EXAM_JUDGE_QUEUE:
-                    payload = _json.loads(raw_data)
-                    process_exam_answer(
-                        db, redis_client, settings, payload["answer_id"]
-                    )
+                if job_type == "exam":
+                    process_exam_answer(db, redis_client, settings, job_id)
                 else:
-                    process_submission(
-                        db, redis_client, settings, int(raw_data)
-                    )
+                    process_submission(db, redis_client, settings, job_id)
             except Exception:
-                # 记录异常但继续消费，避免单次失败导致 Worker 退出
-                import traceback
-                traceback.print_exc()
+                logger.exception("判题异常: type=%s id=%s", job_type, job_id)
 
 
 if __name__ == "__main__":

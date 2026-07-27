@@ -226,12 +226,14 @@ def test_formal_docker_fail_system_error():
     sub.id = 1
     sub.code = 'pass'
     sub.status = 'queued'
+    sub.grading_status = 'queued'
     sub.question_id = 1
     db.get.side_effect = lambda m, i: q if m == models.JudgeQuestion else sub
     redis = MagicMock()
 
     with patch('subprocess.run', side_effect=FileNotFoundError('no docker')):
-        result = process_submission(db, redis, settings, 1)
+        with patch('app.services.judge_queue.claim_job', return_value=True):
+            result = process_submission(db, redis, settings, 1)
     assert result.status == 'system_error'
     assert result.score == 0
     db.commit.assert_called()

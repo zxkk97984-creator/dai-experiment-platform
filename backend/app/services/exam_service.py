@@ -135,16 +135,11 @@ def submit_exam(exam, student, db):
     # 先持久化所有答案状态到数据库
     db.commit()
 
-    # 数据库提交成功后再入队 Redis；入队失败则回写 system_error
+    # 数据库提交成功后再入队 Redis；使用统一入队入口
+    # 入队失败时任务留在 queued 状态，由恢复扫描重新推送
+    from app.services.judge_queue import enqueue_job as _enq
     for ans, q in code_answers_to_enqueue:
-        try:
-            from app.worker.judge_worker import enqueue_exam_answer
-            enqueue_exam_answer(sub.id, ans.id, q)
-        except Exception:
-            ans.grading_status = "completed"
-            ans.system_error = "判题队列不可用"
-            ans.score = 0
-            db.commit()
+        _enq(db, job_type="exam", object_id=ans.id)
 
     # 统一汇总：调用 _maybe_finalize 检查所有非 completed 答案
     _maybe_finalize(sub, db)
@@ -183,22 +178,17 @@ def _auto_submit(sub, db, now):
     # 先持久化
     db.commit()
 
-    # 入队代码题
+    # 入队代码题：使用统一入队入口
+    # 入队失败时任务留在 queued 状态，由恢复扫描重新推送
+    from app.services.judge_queue import enqueue_job as _enq
     for ans, q in code_answers_to_enqueue:
-        try:
-            from app.worker.judge_worker import enqueue_exam_answer
-            enqueue_exam_answer(sub.id, ans.id, q)
-        except Exception:
-            ans.grading_status = "completed"
-            ans.system_error = "判题队列不可用"
-            ans.score = 0
-            db.commit()
+        _enq(db, job_type="exam", object_id=ans.id)
 
     # 统一汇总：调用 _maybe_finalize 检查所有非 completed 答案
     _maybe_finalize(sub, db)
 
 def _maybe_finalize(sub, db):
-    """检查所有答案是否均已完成（无 pending/running），是则生成最终成绩。
+    """检查所有答案是否均已完成（无 pending/running/queued），是则生成最终成绩。
 
     与 Worker 中的 _maybe_finalize_exam 逻辑一致，供 submit_exam / _auto_submit 复用。
     """
@@ -207,7 +197,7 @@ def _maybe_finalize(sub, db):
     unfinished = db.scalar(
         select(ExamAnswer).where(
             ExamAnswer.submission_id == sub.id,
-            ExamAnswer.grading_status.in_(["pending", "running"]),
+            ExamAnswer.grading_status.in_(["pending", "running", "queued"]),
         ).limit(1)
     )
     if unfinished:
@@ -215,7 +205,7 @@ def _maybe_finalize(sub, db):
     total = db.scalar(
         select(func.sum(ExamAnswer.score)).where(
             ExamAnswer.submission_id == sub.id,
-            ExamAnswer.grading_status == "completed",
+            ExamAnswer.grading_status.in_(["completed", "system_error"]),
         )
     ) or 0.0
     _finalize_grade(sub, float(total), db)
@@ -261,30 +251,15 @@ def scan_expired_exams(db, now):
 
     # 扫描卡在 grading 的提交（进程崩溃等导致 Worker 未处理）
     from datetime import timedelta as _td
+    from app.services.judge_queue import requeue_stale_jobs
+    requeue_stale_jobs(db, job_type="exam")
+
     stuck_deadline = now - _td(minutes=5)
     stuck = db.scalars(select(ExamSubmission).where(
         ExamSubmission.status == "grading",
         ExamSubmission.submitted_at < stuck_deadline,
     )).all()
     for sub in stuck:
-        # 检查是否有 pending 答案未能入队，尝试重新入队
-        pending_answers = db.scalars(
-            select(ExamAnswer).where(
-                ExamAnswer.submission_id == sub.id,
-                ExamAnswer.grading_status == "pending",
-            )
-        ).all()
-        for ans in pending_answers:
-            q = db.get(ExamQuestion, ans.question_id)
-            if q and q.hidden_tests and ans.code_answer:
-                try:
-                    from app.worker.judge_worker import enqueue_exam_answer
-                    enqueue_exam_answer(sub.id, ans.id, q)
-                except Exception:
-                    ans.grading_status = "completed"
-                    ans.system_error = "判题队列不可用（恢复重试失败）"
-                    ans.score = 0
-                    db.commit()
         # 尝试汇总
         _maybe_finalize(sub, db)
 

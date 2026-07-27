@@ -147,6 +147,15 @@ class Submission(TimestampMixin, Base):
     student_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     code: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(40), default="queued", index=True)
+    # ── 判题队列状态机（Task 1） ──────────────────────────────
+    grading_status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    # pending / queued / running / completed / system_error
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ── 判题结果 ──────────────────────────────────────────────
     stdout: Mapped[str | None] = mapped_column(Text, nullable=True)
     stderr: Mapped[str | None] = mapped_column(Text, nullable=True)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -256,7 +265,15 @@ class ExamAnswer(TimestampMixin, Base):
     selected_options: Mapped[list | None] = mapped_column(JSON, nullable=True)  # 选择题答案
     code_answer: Mapped[str | None] = mapped_column(Text, nullable=True)  # 编程题答案
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    grading_status: Mapped[str] = mapped_column(String(20), default="pending")  # pending / running / completed
+    # ── 判题队列状态机（Task 1） ──────────────────────────────
+    grading_status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    # pending / queued / running / completed / system_error
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ── 判题结果 ──────────────────────────────────────────────
     result_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     system_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 

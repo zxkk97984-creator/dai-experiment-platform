@@ -103,7 +103,13 @@ def test_course_assignment_submission_and_worker_result(
     assert submit_response.status_code == 201, submit_response.text
     submission_id = submit_response.json()["id"]
     assert submit_response.json()["status"] == "queued"
-    assert redis_client.llen("judge:queue") == 1
+
+    # 验证 DB 状态：enqueue_job 已将 pending→queued
+    with db_session_factory() as db:
+        from app.models import Submission
+        sub = db.get(Submission, submission_id)
+        assert sub is not None
+        assert sub.grading_status == "queued", f"应为 queued: {sub.grading_status}"
 
     with db_session_factory() as db:
         settings = test_settings

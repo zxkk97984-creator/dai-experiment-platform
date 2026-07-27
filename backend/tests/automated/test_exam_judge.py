@@ -36,7 +36,7 @@ def test_correct_scores_full(client, db_session_factory):
     with db_session_factory() as db:
         from app.models import ExamAnswer
         ans = db.query(ExamAnswer).first()
-        assert ans.grading_status == "pending"
+        assert ans.grading_status == "queued"
     with patch("app.worker.judge_worker._run_docker_pytest", return_value=("1 passed","",0,150)):
         _process_sync(ans.id, db_session_factory)
     g = client.get(f"{API}/exams/{ctx['eid']}/my-grade", headers=_h(ctx["s_tok"]))
