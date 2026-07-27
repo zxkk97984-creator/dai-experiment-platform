@@ -143,15 +143,18 @@ def submit_exam(
         raise api_error(403, "FORBIDDEN", "没有权限提交该考试")
     if exam.status != "published":
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
-    # 必须先开始考试
+    # 必须有提交记录（至少 started），已 grading/graded/submitted 由 service 层幂等处理
     sub = db.scalar(
         select(ExamSubmission).where(
             ExamSubmission.exam_id == exam_id,
             ExamSubmission.student_id == current_user.id,
         )
     )
-    if not sub or sub.status != "started":
+    if not sub:
         raise api_error(403, "EXAM_NOT_STARTED", "请先开始考试")
+    # 幂等：重复提交返回当前状态，不报错
+    if sub.status in ("submitted", "grading", "graded"):
+        return ExamSubmissionRead.model_validate(sub)
     return svc_submit_exam(exam, current_user, db)
 
 

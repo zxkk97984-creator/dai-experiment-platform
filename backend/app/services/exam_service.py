@@ -1,4 +1,4 @@
-"""考试系统业务逻辑"""
+﻿"""考试系统业务逻辑"""
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -146,23 +146,8 @@ def submit_exam(exam, student, db):
             ans.score = 0
             db.commit()
 
-    # 重新检查是否所有答案都已完成（入队失败的已被标记为 completed）
-    remaining_pending = db.scalar(
-        select(ExamAnswer).where(
-            ExamAnswer.submission_id == sub.id,
-            ExamAnswer.grading_status == "pending",
-        ).limit(1)
-    )
-    if not remaining_pending:
-        total = db.scalar(
-            select(func.sum(ExamAnswer.score)).where(
-                ExamAnswer.submission_id == sub.id,
-                ExamAnswer.grading_status == "completed",
-            )
-        ) or 0.0
-        _finalize_grade(sub, float(total), db)
-        db.commit()
-
+    # 统一汇总：调用 _maybe_finalize 检查所有非 completed 答案
+    _maybe_finalize(sub, db)
     db.refresh(sub)
     return sub
 
@@ -209,22 +194,32 @@ def _auto_submit(sub, db, now):
             ans.score = 0
             db.commit()
 
-    # 检查是否全部完成
-    remaining_pending = db.scalar(
+    # 统一汇总：调用 _maybe_finalize 检查所有非 completed 答案
+    _maybe_finalize(sub, db)
+
+def _maybe_finalize(sub, db):
+    """检查所有答案是否均已完成（无 pending/running），是则生成最终成绩。
+
+    与 Worker 中的 _maybe_finalize_exam 逻辑一致，供 submit_exam / _auto_submit 复用。
+    """
+    if sub.status != "grading":
+        return
+    unfinished = db.scalar(
         select(ExamAnswer).where(
             ExamAnswer.submission_id == sub.id,
-            ExamAnswer.grading_status == "pending",
+            ExamAnswer.grading_status.in_(["pending", "running"]),
         ).limit(1)
     )
-    if not remaining_pending:
-        total = db.scalar(
-            select(func.sum(ExamAnswer.score)).where(
-                ExamAnswer.submission_id == sub.id,
-                ExamAnswer.grading_status == "completed",
-            )
-        ) or 0.0
-        _finalize_grade(sub, float(total), db)
-        db.commit()
+    if unfinished:
+        return
+    total = db.scalar(
+        select(func.sum(ExamAnswer.score)).where(
+            ExamAnswer.submission_id == sub.id,
+            ExamAnswer.grading_status == "completed",
+        )
+    ) or 0.0
+    _finalize_grade(sub, float(total), db)
+    db.commit()
 
 
 def _finalize_grade(sub, score, db):
@@ -254,11 +249,46 @@ def get_my_grade(exam_id, student, db):
 
 
 def scan_expired_exams(db, now):
+    """扫描过期考试 + 卡住的 grading 提交。
+
+    过期：started 状态且 expires_at < now → 自动交卷
+    卡住：grading 状态超过 5 分钟无进展 → 重新尝试汇总
+    """
     expired = db.scalars(select(ExamSubmission).where(
         ExamSubmission.status == "started", ExamSubmission.expires_at < now)).all()
     for sub in expired:
         _auto_submit(sub, db, now)
-    return len(expired)
+
+    # 扫描卡在 grading 的提交（进程崩溃等导致 Worker 未处理）
+    from datetime import timedelta as _td
+    stuck_deadline = now - _td(minutes=5)
+    stuck = db.scalars(select(ExamSubmission).where(
+        ExamSubmission.status == "grading",
+        ExamSubmission.submitted_at < stuck_deadline,
+    )).all()
+    for sub in stuck:
+        # 检查是否有 pending 答案未能入队，尝试重新入队
+        pending_answers = db.scalars(
+            select(ExamAnswer).where(
+                ExamAnswer.submission_id == sub.id,
+                ExamAnswer.grading_status == "pending",
+            )
+        ).all()
+        for ans in pending_answers:
+            q = db.get(ExamQuestion, ans.question_id)
+            if q and q.hidden_tests and ans.code_answer:
+                try:
+                    from app.worker.judge_worker import enqueue_exam_answer
+                    enqueue_exam_answer(sub.id, ans.id, q)
+                except Exception:
+                    ans.grading_status = "completed"
+                    ans.system_error = "判题队列不可用（恢复重试失败）"
+                    ans.score = 0
+                    db.commit()
+        # 尝试汇总
+        _maybe_finalize(sub, db)
+
+    return len(expired) + len(stuck)
 def create_question(db, exam_id, payload, user):
     exam = db.get(Exam, exam_id)
     if not exam:

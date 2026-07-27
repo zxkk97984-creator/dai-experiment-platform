@@ -31,8 +31,10 @@ async function flushSave(qId) {
     }
     return true
   } catch (e) {
-    // 恢复待保存数据，下次兜底重试
-    pendingSaves[qId] = value
+    // 仅在用户未做新编辑时恢复旧值，避免覆盖新输入
+    if (pendingSaves[qId] === undefined) {
+      pendingSaves[qId] = value
+    }
     const detail = e.response?.data?.detail?.message
     app.showToast(detail || '自动保存失败，请检查网络连接', 'error')
     return false

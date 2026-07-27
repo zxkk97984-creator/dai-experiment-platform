@@ -159,9 +159,14 @@ class AssignmentRead(BaseModel):
 
 
 class PublicCase(BaseModel):
-    """公开样例——统一格式：{"args": [1, 2], "expected": 3}"""
+    """公开样例——统一格式：{"args": [1, 2], "expected": 3}
+
+    expected 为必填，args 默认为空列表。
+    兼容旧格式：input 字段被忽略，不会导致校验失败。
+    """
+    model_config = ConfigDict(extra="allow")
     args: list[Any] = Field(default_factory=list)
-    expected: Any = None
+    expected: Any = Field(...)  # 必填
 
 
 class JudgeQuestionCreate(BaseModel):
