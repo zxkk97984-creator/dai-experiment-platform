@@ -28,6 +28,7 @@ from app.schemas import (
     ExperimentModuleRead,
     ExperimentRecordDetailResponse,
     ExperimentRecordRead,
+    ExperimentReviewUpdate,
     ExperimentSubmissionRead,
     ExperimentSubmitRequest,
     PaginatedResponse,
@@ -722,3 +723,53 @@ def get_submission(
             raise api_error(403, "FORBIDDEN", "无权查看该提交")
 
     return submission
+
+
+@router.patch("/submissions/{submission_id}/review", response_model=ExperimentSubmissionRead)
+def review_submission(
+    submission_id: int,
+    payload: ExperimentReviewUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """教师/开发者/管理员对实验提交评分和反馈"""
+    submission = db.get(ExperimentSubmission, submission_id)
+    if not submission:
+        raise api_error(404, "SUBMISSION_NOT_FOUND", "提交记录不存在")
+
+    record = db.get(ExperimentRecord, submission.record_id)
+    if not record:
+        raise api_error(404, "RECORD_NOT_FOUND", "实验记录不存在")
+
+    # 权限：教师→自己课程，开发者→自己模块，管理员→全部
+    if current_user.role == "teacher":
+        if not record.lesson_id:
+            raise api_error(403, "FORBIDDEN", "无权评分该提交")
+        lesson = db.get(Lesson, record.lesson_id)
+        if not (lesson and lesson.chapter and lesson.chapter.course
+                and lesson.chapter.course.teacher_id == current_user.id):
+            raise api_error(403, "FORBIDDEN", "无权评分该提交")
+    elif current_user.role == "developer":
+        if not record.module_id:
+            raise api_error(403, "FORBIDDEN", "无权评分该提交")
+        module = db.get(ExperimentModule, record.module_id)
+        if not module or module.owner_id != current_user.id:
+            raise api_error(403, "FORBIDDEN", "无权评分该提交")
+    elif current_user.role not in ("admin",):
+        raise api_error(403, "FORBIDDEN", "无权评分")
+
+    from datetime import datetime, timezone
+    if payload.score is not None:
+        submission.score = payload.score
+    if payload.feedback is not None:
+        submission.feedback = payload.feedback
+    submission.reviewed_by_id = current_user.id
+    submission.reviewed_at = datetime.now(timezone.utc)
+
+    # 评分后更新 record 状态为 graded
+    if payload.score is not None:
+        record.status = "graded"
+
+    db.commit()
+    db.refresh(submission)
+    return ExperimentSubmissionRead.model_validate(submission)

@@ -416,10 +416,15 @@ class ExperimentSubmission(TimestampMixin, Base):
     record_id: Mapped[int] = mapped_column(ForeignKey("experiment_records.id"), index=True)
     attempt_number: Mapped[int] = mapped_column(Integer, default=1)
     client_request_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
-    # UUID v4，前端提交时传入；同一 key 的重复请求返回已有提交
     cells_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
     submitted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    # ── 教师评分反馈（Task 8） ────────────────────────────────
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     record: Mapped[ExperimentRecord] = relationship(back_populates="submissions")
+    reviewed_by: Mapped["User | None"] = relationship(foreign_keys=[reviewed_by_id])

@@ -459,11 +459,21 @@ class ExperimentSubmissionRead(BaseModel):
     client_request_id: str | None = None
     cells_snapshot: dict = Field(default_factory=dict)
     submitted_at: datetime | None = None
+    score: float | None = None
+    feedback: str | None = None
+    reviewed_by_id: int | None = None
+    reviewed_at: datetime | None = None
 
 
 class ExperimentSubmitRequest(BaseModel):
     """实验提交请求——client_request_id 用于幂等"""
     client_request_id: str  # UUID v4
+
+
+class ExperimentReviewUpdate(BaseModel):
+    """教师评分反馈"""
+    score: float | None = None
+    feedback: str | None = None
 
 
 class ExperimentRecordDetailResponse(BaseModel):
