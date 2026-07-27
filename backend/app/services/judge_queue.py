@@ -258,17 +258,26 @@ def requeue_stale_jobs(db: Session, *, job_type: str | None = None,
             )
         ).all()
         for job in over_max:
+            values = {
+                "grading_status": "system_error",
+                "last_error": f"超过最大重试次数（{MAX_ATTEMPTS}）",
+                "finished_at": now,
+                "score": 0,
+            }
+            # 普通作业：同步更新 status（前端轮询字段）
+            if jt == "assignment":
+                values["status"] = "system_error"
             db.execute(
                 update(model)
                 .where(model.id == job.id)
-                .values(
-                    grading_status="system_error",
-                    last_error=f"超过最大重试次数（{MAX_ATTEMPTS}）",
-                    finished_at=now,
-                    score=0,
-                )
+                .values(**values)
             )
             stats["max_retries_reached"] += 1
+
+            # 考试答案：立即触发最终汇总
+            if jt == "exam":
+                from app.services.exam_grading import finalize_if_ready
+                finalize_if_ready(job.submission_id, db)
         db.commit()
 
         # queued 超时 → 重新推送 Redis（消息可能丢失）
@@ -285,9 +294,16 @@ def requeue_stale_jobs(db: Session, *, job_type: str | None = None,
                 message = _json.dumps({"type": jt, "id": job.id, "attempt": attempt})
                 r = _get_redis()
                 r.rpush(queue_key, message)
+                # 更新 queued_at，防止下次扫描再次推送同一消息
+                db.execute(
+                    update(model)
+                    .where(model.id == job.id)
+                    .values(queued_at=now)
+                )
                 stats["queued_repushed"] += 1
             except Exception:
                 logger.warning("重新推送 queued 任务失败: %s:%s", jt, job.id)
+        db.commit()
 
         # running 超时 → 重置为 pending（Worker 崩溃）
         running_deadline = now - _td(seconds=stale_running_seconds)

@@ -400,3 +400,79 @@ def test_requeue_stale_running_jobs(db_session_factory):
         sub2 = db.get(Submission, sid)
         assert sub2.grading_status == "pending", f"应为pending: {sub2.grading_status}"
         assert "stale running" in (sub2.last_error or "")
+
+
+# ═══════════════════════════════════════════════════════════════
+# P0-2: 最大重试终态完整 + queued 去重
+# ═══════════════════════════════════════════════════════════════
+
+def test_p0_2_max_retries_syncs_submission_status(db_session_factory):
+    """P0-2: 达到 MAX_ATTEMPTS 时 Submission.status 也设为 system_error，前端停止轮询"""
+    sid = _setup_assignment_submission(db_session_factory)
+
+    with db_session_factory() as db:
+        sub = db.get(Submission, sid)
+        sub.attempt_count = MAX_ATTEMPTS
+        db.commit()
+
+        stats = requeue_stale_jobs(db, job_type="assignment", stale_pending_seconds=0)
+        assert stats["max_retries_reached"] >= 1
+
+        sub2 = db.get(Submission, sid)
+        assert sub2.grading_status == "system_error"
+        # P0-2 关键断言：前端读取的 status 字段也必须是 system_error
+        assert sub2.status == "system_error", \
+            f"前端轮询的 status 应为 system_error，实际: {sub2.status}"
+        assert sub2.score == 0
+
+
+def test_p0_2_exam_max_retries_immediate_finalize(db_session_factory):
+    """P0-2: 考试答案超过最大重试须立即调用 finalize_if_ready，不等下一轮扫描"""
+    aid = _setup_exam_answer(db_session_factory)
+
+    with db_session_factory() as db:
+        ans = db.get(ExamAnswer, aid)
+        ans.attempt_count = MAX_ATTEMPTS
+        db.commit()
+
+        stats = requeue_stale_jobs(db, job_type="exam", stale_pending_seconds=0)
+        assert stats["max_retries_reached"] >= 1
+
+        # 关键断言：提交状态应已变为 graded（finalize_if_ready 被立即调用）
+        sub = db.get(ExamSubmission, ans.submission_id)
+        assert sub.status == "graded", \
+            f"考试汇总应立即触发，submission status 应为 graded，实际: {sub.status}"
+
+
+def test_p0_2_queued_repush_updates_queued_at(db_session_factory):
+    """P0-2: queued 重新推送后更新 queued_at，防止每 15 秒无限重复推送"""
+    sid = _setup_assignment_submission(db_session_factory)
+
+    with db_session_factory() as db:
+        enqueue_job(db, job_type="assignment", object_id=sid)
+
+        # 手动设 queued_at 为过去
+        from datetime import datetime as dt, timedelta, timezone as tz
+        sub = db.get(Submission, sid)
+        sub.queued_at = dt.now(tz.utc) - timedelta(seconds=300)
+        old_queued_at = sub.queued_at
+        db.commit()
+
+        # 第一次扫描：因为 queued 超时，应重新推送
+        stats1 = requeue_stale_jobs(db, job_type="assignment", stale_queued_seconds=120)
+        assert stats1["queued_repushed"] >= 1
+
+        # 重新加载——SQLite 可能返回 naive，用 replace 规范化
+        sub2 = db.get(Submission, sid)
+        new_queued = sub2.queued_at
+        if new_queued.tzinfo is None:
+            new_queued = new_queued.replace(tzinfo=tz.utc)
+        # queued_at 应已刷新到接近现在（与 300 秒前有明显差距）
+        assert new_queued > old_queued_at, \
+            f"queued_at 应在重新推送后更新: old={old_queued_at}, new={new_queued}"
+
+    # 第二次扫描：因为 queued_at 刚被刷新为接近当前时间，不应再次推送
+    with db_session_factory() as db:
+        stats2 = requeue_stale_jobs(db, job_type="assignment", stale_queued_seconds=120)
+        assert stats2["queued_repushed"] == 0, \
+            f"queued_at 刷新后不应重复推送: {stats2}"
