@@ -29,6 +29,8 @@ const routes = [
   { path: '/teacher/exams/:id/grades', name: 'TeacherGrades', component: () => import('../views/teacher/GradesView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/exams/:id/edit', name: 'TeacherExamQuestionEdit', component: () => import('../views/teacher/ExamQuestionEditView.vue'), meta: { role: 'teacher' } },
  { path: '/teacher/experiments', name: 'TeacherExperiments', component: () => import('../views/teacher/ExperimentManageView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/submissions', name: 'TeacherExperimentSubmissions', component: () => import('../views/teacher/ExperimentSubmissionsView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/submissions/:id', name: 'TeacherExperimentSubmissionDetail', component: () => import('../views/teacher/ExperimentSubmissionDetailView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/courses/:id/studio/:lid', name: 'TeacherStudio', component: () => import('../views/teacher/StudioView.vue'), meta: { role: 'teacher' } },
 
   // Admin
@@ -37,6 +39,8 @@ const routes = [
   { path: '/admin/users/:id/edit', name: 'AdminUserEdit', component: () => import('../views/admin/UserEditView.vue'), meta: { role: 'admin' } },
   { path: '/admin/courses', name: 'AdminCourses', component: () => import('../views/teacher/CourseManageView.vue'), meta: { role: 'admin' } },
   { path: '/admin/experiments', name: 'AdminExperiments', component: () => import('../views/admin/ExperimentManageView.vue'), meta: { role: 'admin' } },
+  { path: '/admin/submissions', name: 'AdminExperimentSubmissions', component: () => import('../views/teacher/ExperimentSubmissionsView.vue'), meta: { role: 'admin' } },
+  { path: '/admin/submissions/:id', name: 'AdminExperimentSubmissionDetail', component: () => import('../views/teacher/ExperimentSubmissionDetailView.vue'), meta: { role: 'admin' } },
 
   // Developer
   { path: '/developer/templates', name: 'DeveloperTemplates', component: () => import('../views/developer/TemplateManageView.vue'), meta: { role: 'developer' } },

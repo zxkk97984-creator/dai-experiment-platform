@@ -58,4 +58,8 @@ export const experimentsAPI = {
   listSubmissions(params) { return client.get('/experiments/submissions', { params }) },
   /** 查看单次提交详情 */
   getSubmission(id) { return client.get(`/experiments/submissions/${id}`) },
+  /** 教师评分反馈 */
+  updateReview(submissionId, payload) {
+    return client.patch(`/experiments/submissions/${submissionId}/review`, payload)
+  },
 }
