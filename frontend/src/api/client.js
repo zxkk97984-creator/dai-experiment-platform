@@ -6,9 +6,10 @@ const client = axios.create({
   baseURL: '/api/v1',
   headers: { 'Content-Type': 'application/json' },
   timeout: 30000,
+  withCredentials: true,  // 发送 HttpOnly refresh cookie
 })
 
-// Request interceptor: attach token
+// Request interceptor: attach access token from memory
 client.interceptors.request.use((config) => {
   const auth = useAuthStore()
   if (auth.accessToken) {
@@ -17,7 +18,7 @@ client.interceptors.request.use((config) => {
   return config
 })
 
-// Response interceptor: handle 401 → refresh → retry
+// Response interceptor: handle 401 → cookie refresh → retry
 let isRefreshing = false
 let refreshQueue = []
 
@@ -40,7 +41,7 @@ client.interceptors.response.use(
     }
 
     const auth = useAuthStore()
-    if (!auth.refreshToken) {
+    if (!auth.isAuthenticated) {
       auth.logout()
       router.push('/login')
       return Promise.reject(error)
@@ -60,16 +61,16 @@ client.interceptors.response.use(
     config._retry = true
 
     try {
-      const res = await axios.post('/api/v1/auth/refresh', {
-        refresh_token: auth.refreshToken,
-      }, { timeout: 10000 })
+      // Refresh via cookie（不需要手动传 refresh_token）
+      const res = await axios.post('/api/v1/auth/refresh', {},
+        { timeout: 10000, withCredentials: true },
+      )
 
       const newToken = res.data.access_token
-      const newRefresh = res.data.refresh_token
-      auth.setTokens(newToken, newRefresh)
+      // 更新 Pinia 内存中的 token
+      auth.setAccessToken(newToken)
 
       resolveQueue(newToken)
-
       config.headers.Authorization = `Bearer ${newToken}`
       return client(config)
     } catch (refreshError) {

@@ -10,31 +10,31 @@ function safeGetJSON(key, fallback = null) {
 }
 
 function safeSetItem(key, value) {
-  try { localStorage.setItem(key, value) } catch { /* quota exceeded or private browsing */ }
+  try { localStorage.setItem(key, value) } catch { /* quota exceeded */ }
 }
 
 export const useAuthStore = defineStore('auth', () => {
-  const accessToken = ref(localStorage.getItem('access_token') || '')
-  const refreshToken = ref(localStorage.getItem('refresh_token') || '')
+  // Access token 仅存 Pinia 内存（安全：浏览器关闭即清除）
+  const accessToken = ref('')
+  // User 信息可存 localStorage 用于 UI 显示（不含敏感 token）
   const user = ref(safeGetJSON('user'))
+  const isRefreshing = ref(false)
 
-  const isLoggedIn = computed(() => !!accessToken.value)
+  const isAuthenticated = computed(() => !!accessToken.value)
   const role = computed(() => user.value?.role || '')
   const isAdmin = computed(() => role.value === 'admin')
   const isTeacher = computed(() => role.value === 'teacher')
   const isStudent = computed(() => role.value === 'student')
   const isDeveloper = computed(() => role.value === 'developer')
 
-  function setTokens(access, refresh) {
-    accessToken.value = access
-    refreshToken.value = refresh
-    safeSetItem('access_token', access)
-    if (refresh) safeSetItem('refresh_token', refresh)
+  function setAccessToken(token) {
+    accessToken.value = token
   }
 
   function setUser(u) {
     user.value = u
-    safeSetItem('user', JSON.stringify(u))
+    if (u) safeSetItem('user', JSON.stringify(u))
+    else localStorage.removeItem('user')
   }
 
   async function login(username, password) {
@@ -43,9 +43,30 @@ export const useAuthStore = defineStore('auth', () => {
     if (!data.access_token) {
       throw new Error('登录响应缺少 access_token')
     }
-    setTokens(data.access_token, data.refresh_token)
+    // Access token 仅存内存，refresh token 已在 HttpOnly Cookie
+    setAccessToken(data.access_token)
     setUser(data.user || null)
     return data.user
+  }
+
+  /** 页面刷新时通过 cookie 恢复登录 */
+  async function tryRestoreSession() {
+    if (accessToken.value) return true  // 已有有效 token
+    if (isRefreshing.value) return false
+
+    isRefreshing.value = true
+    try {
+      const res = await authAPI.refresh()
+      setAccessToken(res.data.access_token)
+      if (res.data.user) setUser(res.data.user)
+      else await fetchMe()
+      return true
+    } catch {
+      // Cookie 中没有有效 refresh token
+      return false
+    } finally {
+      isRefreshing.value = false
+    }
   }
 
   async function fetchMe() {
@@ -62,20 +83,15 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function logout() {
-    if (refreshToken.value) {
-      authAPI.logout(refreshToken.value).catch(() => {})
-    }
+    authAPI.logout().catch(() => {})
     accessToken.value = ''
-    refreshToken.value = ''
     user.value = null
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
     localStorage.removeItem('user')
   }
 
   return {
-    accessToken, refreshToken, user,
-    isLoggedIn, role, isAdmin, isTeacher, isStudent, isDeveloper,
-    setTokens, setUser, login, fetchMe, logout,
+    accessToken, user, isRefreshing,
+    isAuthenticated, role, isAdmin, isTeacher, isStudent, isDeveloper,
+    setAccessToken, setUser, login, tryRestoreSession, fetchMe, logout,
   }
 })

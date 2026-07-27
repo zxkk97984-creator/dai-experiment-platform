@@ -63,18 +63,21 @@ let fetchMePromise = null
 router.beforeEach(async (to, from, next) => {
   const auth = useAuthStore()
 
-  // Guest-only pages (login)
+  // Guest-only pages (login/welcome)
   if (to.meta.guest) {
-    if (auth.isLoggedIn) return next(roleHome[auth.role] || '/login')
+    if (auth.isAuthenticated) return next(roleHome[auth.role] || '/login')
     return next()
   }
 
-  // Protected pages
-  if (!auth.isLoggedIn) {
-    return next('/login')
+  // Protected pages — 先尝试 cookie 恢复 session
+  if (!auth.isAuthenticated) {
+    const restored = await auth.tryRestoreSession()
+    if (!restored) {
+      return next('/login')
+    }
   }
 
-  // Restore user if page reload (deduplicate concurrent calls)
+  // Restore user if page reload (deduplicate)
   if (!auth.user) {
     if (!fetchMePromise) {
       fetchMePromise = auth.fetchMe().finally(() => {
