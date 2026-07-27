@@ -46,11 +46,14 @@ def login(
 ):
     user = authenticate_user(db, payload.username, payload.password)
     tokens = issue_token_pair(user, redis_client, settings)
-    # Refresh token 放入 HttpOnly Cookie
-    refresh_val = tokens.refresh_token if hasattr(tokens, 'refresh_token') else tokens["refresh_token"]
-    _set_refresh_cookie(response, refresh_val, settings)
-    # 开发环境兼容：仍返回 refresh_token 在 body（生产环境由 Nginx/网关剥离）
-    return tokens  # TokenResponse 已包含 refresh_token 字段
+    # Refresh token 仅存入 HttpOnly Cookie，不在 JSON body 返回
+    _set_refresh_cookie(response, tokens.refresh_token, settings)
+    return {
+        "access_token": tokens.access_token,
+        "token_type": "bearer",
+        "expires_in": tokens.expires_in,
+        "user": tokens.user,
+    }
 
 
 @router.post("/refresh")
@@ -70,9 +73,13 @@ def refresh(
         raise api_error(401, "NO_REFRESH_TOKEN", "缺少刷新令牌")
 
     tokens = refresh_token_pair(db, refresh_token_value, redis_client, settings)
-    refresh_val = tokens.refresh_token if hasattr(tokens, 'refresh_token') else tokens["refresh_token"]
-    _set_refresh_cookie(response, refresh_val, settings)
-    return tokens
+    _set_refresh_cookie(response, tokens.refresh_token, settings)
+    return {
+        "access_token": tokens.access_token,
+        "token_type": "bearer",
+        "expires_in": tokens.expires_in,
+        "user": tokens.user,
+    }
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

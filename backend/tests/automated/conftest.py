@@ -97,7 +97,15 @@ def login(client, username, password="Passw0rd!"):
         json={"username": username, "password": password},
     )
     assert response.status_code == 200, response.text
-    return response.json()["access_token"], response.json()["refresh_token"]
+    data = response.json()
+    # refresh_token 在 HttpOnly Cookie 中，TestClient 不返回 Cookie 的值
+    # 从 Set-Cookie 头中提取（测试需要）
+    refresh_token = ""
+    for cookie_str in response.headers.get_list("set-cookie"):
+        if "dai_refresh_token=" in cookie_str:
+            refresh_token = cookie_str.split("dai_refresh_token=")[1].split(";")[0]
+            break
+    return data["access_token"], refresh_token
 
 
 def auth_header(token):
