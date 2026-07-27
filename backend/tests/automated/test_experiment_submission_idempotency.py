@@ -179,6 +179,34 @@ def test_teacher_cannot_submit(client, db_session_factory):
 
 
 # ═══════════════════════════════════════════════════════════════
+# P1-2: 幂等检查不绕过所有权验证
+# ═══════════════════════════════════════════════════════════════
+
+def test_p1_2_idempotency_requires_ownership(client, db_session_factory):
+    """P1-2: 其他学生即使知道 record_id + client_request_id 也不能获取提交"""
+    ctx = _setup_experiment(client, db_session_factory)
+
+    # 学生 A 先提交
+    req_id = str(uuid.uuid4())
+    r1 = client.post(f"{API}/experiments/records/{ctx['rid']}/submit",
+                     headers=auth_header(ctx["s_tok"]),
+                     json={"client_request_id": req_id})
+    assert r1.status_code == 201, r1.text
+    sub_id = r1.json()["id"]
+
+    # 创建学生 B
+    create_user(db_session_factory, "esub_s3", "student")
+    s3_tok, _ = login(client, "esub_s3")
+
+    # 学生 B 使用学生 A 的 record_id + 相同的 client_request_id → 必须 403
+    r2 = client.post(f"{API}/experiments/records/{ctx['rid']}/submit",
+                     headers=auth_header(s3_tok),
+                     json={"client_request_id": req_id})
+    assert r2.status_code == 403, \
+        f"P1-2: 越权访问应返回 403，实际: {r2.status_code}"
+
+
+# ═══════════════════════════════════════════════════════════════
 # 5. client_request_id 必填
 # ═══════════════════════════════════════════════════════════════
 

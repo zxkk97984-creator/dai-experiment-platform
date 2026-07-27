@@ -467,7 +467,7 @@ class ExperimentSubmissionRead(BaseModel):
 
 class ExperimentSubmitRequest(BaseModel):
     """实验提交请求——client_request_id 用于幂等"""
-    client_request_id: str  # UUID v4
+    client_request_id: str = Field(min_length=32, max_length=36)  # UUID v4
 
 
 class ExperimentReviewUpdate(BaseModel):

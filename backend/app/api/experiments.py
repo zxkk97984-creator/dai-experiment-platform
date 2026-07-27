@@ -554,7 +554,13 @@ def submit_record(
     """
     client_request_id = payload.client_request_id
 
-    # 0. 幂等检查：同一 client_request_id 已存在 → 直接返回
+    # 先加载 record 并验证所有权（幂等检查之前），防止越权
+    record = db.get(ExperimentRecord, record_id)
+    if not record:
+        raise api_error(404, "RECORD_NOT_FOUND", "实验记录不存在")
+    _require_owner(record, current_user)
+
+    # 幂等检查：同一 client_request_id 已存在 → 直接返回
     existing = db.scalar(
         select(ExperimentSubmission).where(
             ExperimentSubmission.record_id == record_id,
@@ -563,16 +569,6 @@ def submit_record(
     )
     if existing:
         return ExperimentSubmissionRead.model_validate(existing)
-
-    # 1. 锁定记录行（MySQL 下防并发）
-    record = db.scalar(
-        select(ExperimentRecord)
-        .where(ExperimentRecord.id == record_id)
-        .with_for_update()
-    )
-    if not record:
-        raise api_error(404, "RECORD_NOT_FOUND", "实验记录不存在")
-    _require_owner(record, current_user)
 
     # 2. 仅终态（graded/completed）禁止重新提交
     if record.status not in ("started", "submitted"):
