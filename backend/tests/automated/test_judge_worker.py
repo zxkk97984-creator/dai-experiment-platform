@@ -295,34 +295,31 @@ def test_p0_2_exam_functions_defined_at_module_level():
 
 
 def test_p0_5_maybe_finalize_blocks_on_running():
-    """P0-5: _maybe_finalize_exam 不应在存在 running 答案时汇总"""
-    from app.worker.judge_worker import _maybe_finalize_exam
+    """P0-5: finalize_if_ready 不应在存在 running 答案时汇总"""
+    from app.services.exam_grading import finalize_if_ready
 
     # 测试1: 存在 running 答案 → 不应汇总
     db = MagicMock()
     mock_sub = MagicMock()
     mock_sub.status = "grading"
-    db.get.return_value = mock_sub
-    # scalar: unfinished check 返回有值（存在 running 答案）
-    db.scalar.return_value = MagicMock()
+    # scalar 调用顺序：1) with_for_update → submission, 2) unfinished check → 有值
+    db.scalar.side_effect = [mock_sub, MagicMock()]
 
-    _maybe_finalize_exam(1, db)
+    finalize_if_ready(1, db)
 
-    # scalar 应该只被调用了1次（unfinished check），没有第二次 total query
-    assert db.scalar.call_count == 1, f"应该在发现未完成答案后立即返回，但调用了 {db.scalar.call_count} 次"
-    # 不应该 commit（因为没有汇总）
+    # scalar 应该只被调用了 2 次（submission + unfinished），没有后续查询
+    assert db.scalar.call_count == 2, f"应该在发现未完成答案后立即返回，但调用了 {db.scalar.call_count} 次"
     assert not db.commit.called, "存在未完成答案时不应提交汇总"
 
     # 测试2: 全部完成 → 应该汇总
     db2 = MagicMock()
     mock_sub2 = MagicMock()
     mock_sub2.status = "grading"
-    db2.get.return_value = mock_sub2
-    # scalar: unfinished check 返回 None（无 pending/running），total 返回 100
-    db2.scalar.side_effect = [None, 100.0]
+    mock_sub2.exam_id = 1
+    mock_sub2.student_id = 1
+    # scalar: submission, unfinished=None, total=100.0, grade=None
+    db2.scalar.side_effect = [mock_sub2, None, 100.0, None]
 
-    with patch("app.services.exam_service._finalize_grade") as mock_fg:
-        _maybe_finalize_exam(1, db2)
-        assert db2.scalar.call_count == 2, "应该在确认无未完成后查询 total"
-        assert db2.commit.called, "应该提交最终成绩"
-        mock_fg.assert_called_once()
+    finalize_if_ready(2, db2)
+    assert db2.scalar.call_count >= 4, "应该在确认无未完成后查询 total + grade"
+    assert db2.commit.called, "应该提交最终成绩"

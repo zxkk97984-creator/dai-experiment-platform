@@ -141,8 +141,9 @@ def submit_exam(exam, student, db):
     for ans, q in code_answers_to_enqueue:
         _enq(db, job_type="exam", object_id=ans.id)
 
-    # 统一汇总：调用 _maybe_finalize 检查所有非 completed 答案
-    _maybe_finalize(sub, db)
+    # 统一汇总：调用 exam_grading.finalize_if_ready 原子化评分
+    from app.services.exam_grading import finalize_if_ready
+    finalize_if_ready(sub.id, db)
     db.refresh(sub)
     return sub
 
@@ -184,35 +185,15 @@ def _auto_submit(sub, db, now):
     for ans, q in code_answers_to_enqueue:
         _enq(db, job_type="exam", object_id=ans.id)
 
-    # 统一汇总：调用 _maybe_finalize 检查所有非 completed 答案
-    _maybe_finalize(sub, db)
-
-def _maybe_finalize(sub, db):
-    """检查所有答案是否均已完成（无 pending/running/queued），是则生成最终成绩。
-
-    与 Worker 中的 _maybe_finalize_exam 逻辑一致，供 submit_exam / _auto_submit 复用。
-    """
-    if sub.status != "grading":
-        return
-    unfinished = db.scalar(
-        select(ExamAnswer).where(
-            ExamAnswer.submission_id == sub.id,
-            ExamAnswer.grading_status.in_(["pending", "running", "queued"]),
-        ).limit(1)
-    )
-    if unfinished:
-        return
-    total = db.scalar(
-        select(func.sum(ExamAnswer.score)).where(
-            ExamAnswer.submission_id == sub.id,
-            ExamAnswer.grading_status.in_(["completed", "system_error"]),
-        )
-    ) or 0.0
-    _finalize_grade(sub, float(total), db)
-    db.commit()
-
+    # 统一汇总：调用 exam_grading.finalize_if_ready 原子化评分
+    from app.services.exam_grading import finalize_if_ready
+    finalize_if_ready(sub.id, db)
 
 def _finalize_grade(sub, score, db):
+    """[已废弃] 直接写入成绩——请改用 exam_grading.finalize_if_ready。
+
+    保留以兼容旧测试，新代码不应直接调用此函数。
+    """
     sub.score = float(score)
     sub.status = "graded"
     sub.graded_at = datetime.now(timezone.utc)
@@ -260,8 +241,9 @@ def scan_expired_exams(db, now):
         ExamSubmission.submitted_at < stuck_deadline,
     )).all()
     for sub in stuck:
-        # 尝试汇总
-        _maybe_finalize(sub, db)
+        # 尝试汇总：使用原子化评分
+        from app.services.exam_grading import finalize_if_ready
+        finalize_if_ready(sub.id, db)
 
     return len(expired) + len(stuck)
 def create_question(db, exam_id, payload, user):

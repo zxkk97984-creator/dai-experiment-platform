@@ -210,31 +210,10 @@ def enqueue_exam_answer(submission_id: int, answer_id: int, question: ExamQuesti
 def _maybe_finalize_exam(submission_id: int, db: Session) -> None:
     """检查是否所有答案均已完成，是则汇总生成最终成绩。
 
-    条件：submission.status == 'grading' 且没有任何答案处于 pending 或 running。
+    委托给 exam_grading.finalize_if_ready——原子化汇总，与 exam_service 共用同一实现。
     """
-    submission = db.get(ExamSubmission, submission_id)
-    if not submission or submission.status != "grading":
-        return
-
-    unfinished = db.scalar(
-        select(ExamAnswer).where(
-            ExamAnswer.submission_id == submission_id,
-            ExamAnswer.grading_status.in_(["pending", "running", "queued"]),
-        ).limit(1)
-    )
-    if unfinished:
-        return
-
-    total = db.scalar(
-        select(func.sum(ExamAnswer.score)).where(
-            ExamAnswer.submission_id == submission_id,
-            ExamAnswer.grading_status.in_(["completed", "system_error"]),
-        )
-    ) or 0.0
-
-    from app.services.exam_service import _finalize_grade as _fg
-    _fg(submission, float(total), db)
-    db.commit()
+    from app.services.exam_grading import finalize_if_ready
+    finalize_if_ready(submission_id, db)
 
 
 def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id: int) -> ExamAnswer:
