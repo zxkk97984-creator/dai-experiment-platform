@@ -82,13 +82,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
     # Request ID 中间件
-    from app.logging_config import RequestIDFilter, setup_logging
+    from app.logging_config import set_request_id, setup_logging
     setup_logging()
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):
         rid = request.headers.get("X-Request-ID", "") or str(uuid.uuid4())[:8]
-        RequestIDFilter.set_request_id(rid)
+        set_request_id(rid)
         response = await call_next(request)
         response.headers["X-Request-ID"] = rid
         return response

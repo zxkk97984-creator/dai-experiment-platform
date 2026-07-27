@@ -43,8 +43,8 @@ Thumbs.db
 # 临时计划文件
 .pt-tmp/
 
-# 手动工具/调试脚本
-backend/tests/manual-tools/
+# 手动工具/调试脚本（非自动化测试，不纳入 pytest 收集）
+backend/manual-tools/
 
 # 判题工作目录
 judge-work/
