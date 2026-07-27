@@ -11,6 +11,8 @@ vi.mock('../../api/experiments.js', () => ({
     executeCell: vi.fn(),
     interrupt: vi.fn(),
     restart: vi.fn(),
+    submitRecord: vi.fn(),
+    listSubmissions: vi.fn(),
   },
 }))
 
@@ -288,5 +290,28 @@ describe('useExperimentStore', () => {
     expect(store.conflict).toBe(false)
     expect(store.dirty).toBe(false)
     expect(store.saved).toBe(true)
+  })
+
+  // P1-7: 实验前端状态串页
+  it('resets submission state on re-load to prevent cross-page pollution', async () => {
+    // 模拟已提交过的状态
+    store.submissions = [{ id: 99, attempt_number: 3 }]
+    store.submitAttemptCount = 3
+    store.lastSubmitTime = '2026-01-01T00:00:00Z'
+    store.currentClientRequestId = 'old-uuid'
+    store.submitting = true
+
+    // 重新打开（模拟切换 lesson）
+    experimentsAPI.ensureForLesson.mockResolvedValue(ensureResponse)
+    experimentsAPI.getRecordDetail.mockResolvedValue(detailResponse)
+    experimentsAPI.listSubmissions.mockResolvedValue({ data: { items: [] } })
+    await store.openLesson(20, 99)
+
+    // 验证所有提交状态已重置
+    expect(store.submissions).toEqual([])
+    expect(store.submitAttemptCount).toBe(0)
+    expect(store.lastSubmitTime).toBeNull()
+    expect(store.currentClientRequestId).toBeNull()
+    expect(store.submitting).toBe(false)
   })
 })

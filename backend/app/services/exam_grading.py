@@ -103,6 +103,27 @@ def finalize_if_ready(submission_id: int, db: Session) -> bool:
                      submission.exam_id, submission.student_id, total)
 
     # 单一事务提交：submission + grade 一起落库
-    db.commit()
+    # 处理并发 INSERT 导致的 UNIQUE 冲突（SQLite 下 FOR UPDATE 不锁行）
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        # 冲突时重新读取已有记录并更新
+        existing_grade = db.scalar(
+            select(ExamGrade).where(
+                ExamGrade.exam_id == submission.exam_id,
+                ExamGrade.student_id == submission.student_id,
+            )
+        )
+        if existing_grade:
+            existing_grade.score = total
+        # 重新更新 submission
+        sub2 = db.get(ExamSubmission, submission_id)
+        if sub2:
+            sub2.score = total
+            sub2.status = "graded"
+            sub2.graded_at = datetime.now(timezone.utc)
+        db.commit()
+
     logger.info("Submission %s 汇总完成：score=%.1f", submission_id, total)
     return True

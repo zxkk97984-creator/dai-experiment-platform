@@ -17,7 +17,7 @@ class LoginRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str | None = None  # 可选：Cookie 模式下由 auth endpoint 读取
 
 
 class LogoutRequest(BaseModel):

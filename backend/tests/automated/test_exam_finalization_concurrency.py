@@ -191,3 +191,50 @@ def test_finalize_skips_non_grading_submission(db_session_factory):
     with db_session_factory() as db:
         ok = finalize_if_ready(ctx["submission_id"], db)
         assert ok is False
+
+
+# ═══════════════════════════════════════════════════════════════
+# P1-5: 真并发测试——同步屏障
+# ═══════════════════════════════════════════════════════════════
+
+def test_p1_5_true_concurrent_finalize_single_grade(db_session_factory):
+    """P1-5: 两个线程通过同步屏障真并发执行 finalize_if_ready，只产生一条成绩"""
+    import threading
+
+    ctx = _setup_two_code_questions(db_session_factory)
+    results = []
+    barrier = threading.Barrier(2, timeout=5)
+    errors = []
+
+    def do_finalize(worker_name):
+        try:
+            with db_session_factory() as db:
+                # 等待双方都准备好
+                barrier.wait()
+                ok = finalize_if_ready(ctx["submission_id"], db)
+                results.append((worker_name, ok))
+        except Exception as e:
+            errors.append((worker_name, str(e)))
+
+    t1 = threading.Thread(target=do_finalize, args=("worker-1",))
+    t2 = threading.Thread(target=do_finalize, args=("worker-2",))
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+
+    assert len(errors) == 0, f"并发汇总出错: {errors}"
+    assert len(results) == 2, f"两个 Worker 都应完成: {results}"
+
+    # 验证：只有一条 ExamGrade
+    with db_session_factory() as db:
+        grades = db.query(ExamGrade).where(
+            ExamGrade.exam_id == ctx["exam_id"],
+            ExamGrade.student_id == ctx["student_id"],
+        ).all()
+        assert len(grades) == 1, f"真并发也只应有一条成绩: {len(grades)}"
+        assert grades[0].score == 30.0
+
+        sub = db.get(ExamSubmission, ctx["submission_id"])
+        assert sub.status == "graded"
+
