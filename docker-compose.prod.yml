@@ -37,6 +37,7 @@ services:
       DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:-http://localhost}
       DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
       DAI_STUDIO_STORAGE_DIR: /app/storage/studio
+      DAI_JUDGE_WORK_DIR: /judge-work
     depends_on:
       mysql:
         condition: service_healthy
@@ -46,6 +47,7 @@ services:
       - internal
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./judge-work:/judge-work
       - studio_data:/app/storage/studio
 
   worker:
@@ -58,6 +60,7 @@ services:
       DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
       DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
       DAI_STUDIO_STORAGE_DIR: /app/storage/studio
+      DAI_JUDGE_WORK_DIR: /judge-work
     depends_on:
       mysql:
         condition: service_healthy
@@ -67,6 +70,7 @@ services:
       - internal
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./judge-work:/judge-work
       - studio_data:/app/storage/studio
 
   frontend:

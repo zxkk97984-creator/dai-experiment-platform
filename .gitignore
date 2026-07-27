@@ -46,6 +46,9 @@ Thumbs.db
 # 手动工具/调试脚本
 backend/tests/manual-tools/
 
+# 判题工作目录
+judge-work/
+
 # 运行时代码样本（不纳入版本控制）
 backend/storage/exec*.json
 

@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     studio_storage_dir: str = str(
         Path(__file__).resolve().parents[1] / "storage" / "studio"
     )
+    # 判题临时文件目录——Docker Compose 下必须与 judge 容器挂载相同路径
+    judge_work_dir: str = ""
 
     @model_validator(mode="after")
     def _validate_production(self):

@@ -31,6 +31,14 @@ EXAM_JUDGE_QUEUE = "judge:exam:queue"
 # 工具函数
 # ═══════════════════════════════════════════════════════════════
 
+def _make_work_dir(root: Path, prefix: str):
+    """在指定根目录下创建带随机后缀的工作目录，返回 (workdir_path, cleanup_fn)"""
+    import secrets as _secrets, shutil as _shutil
+    suffix = _secrets.token_hex(8)
+    workdir = root / f"{prefix}{suffix}"
+    workdir.mkdir(parents=True, exist_ok=True)
+    return workdir, lambda: _shutil.rmtree(workdir, ignore_errors=True)
+
 def _get_timeout(question: JudgeQuestion, settings: Settings) -> int:
     """超时秒数：ceil(time_limit_ms / 1000)，受全局硬上限约束，至少 1 秒"""
     raw = max(question.time_limit_ms, 1)
@@ -131,8 +139,18 @@ def process_submission(db: Session, redis_client, settings: Settings, submission
         submission.status = "running"
         db.commit()
 
-        with tempfile.TemporaryDirectory(prefix="dai-judge-") as temp_dir:
-            workdir = Path(temp_dir)
+        # 优先使用配置的工作目录（Compose 下与宿主机共享），否则系统临时目录
+        _work_root = Path(settings.judge_work_dir) if settings.judge_work_dir else None
+        _cleanup = None
+        try:
+            if _work_root:
+                workdir, _cleanup = _make_work_dir(_work_root, "dai-judge-")
+            else:
+                # 用 tempfile 作为 context manager
+                _temp = tempfile.TemporaryDirectory(prefix="dai-judge-")
+                workdir = Path(_temp.name)
+                _cleanup = lambda: _temp.cleanup()
+
             _write_submission_files(workdir, submission, question)
             timeout_seconds = _get_timeout(question, settings)
             memory_limit_mb = question.memory_limit_mb or settings.judge_memory_limit_mb
@@ -154,6 +172,9 @@ def process_submission(db: Session, redis_client, settings: Settings, submission
                 redis_client.setex(f"judge:result:{submission.id}", 3600, submission.status)
                 logger.warning("Submission %s Docker 执行异常，已退回 pending", submission_id)
                 return submission
+        finally:
+            if _cleanup:
+                _cleanup()
 
         final_status, score = _status_from_pytest(returncode, stdout, stderr)
         submission.status = final_status
@@ -250,9 +271,16 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
             _maybe_finalize_exam(answer.submission_id, db)
             return answer
 
-        import tempfile
-        with tempfile.TemporaryDirectory(prefix="dai-exam-judge-") as temp_dir:
-            workdir = Path(temp_dir)
+        _work_root = Path(settings.judge_work_dir) if settings.judge_work_dir else None
+        _cleanup = None
+        try:
+            if _work_root:
+                workdir, _cleanup = _make_work_dir(_work_root, "dai-exam-judge-")
+            else:
+                _temp = tempfile.TemporaryDirectory(prefix="dai-exam-judge-")
+                workdir = Path(_temp.name)
+                _cleanup = lambda: _temp.cleanup()
+
             user_code = workdir / "user_code.py"
             test_file = workdir / "test_user_code.py"
             user_code.write_text(answer.code_answer or "", encoding="utf-8")
@@ -276,6 +304,9 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
                 logger.warning("ExamAnswer %s Docker 执行异常，已退回 pending", answer_id)
                 _maybe_finalize_exam(answer.submission_id, db)
                 return answer
+        finally:
+            if _cleanup:
+                _cleanup()
 
         final_status, _ = _status_from_pytest(returncode, stdout, stderr)
         score = float(question.points) if final_status == "accepted" else 0.0
