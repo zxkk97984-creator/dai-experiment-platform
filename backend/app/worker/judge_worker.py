@@ -110,66 +110,84 @@ def process_submission(db: Session, redis_client, settings: Settings, submission
     if submission.grading_status == "completed":
         return submission
 
-    # 原子抢占：queued → running
-    if not claim_job(db, job_type="assignment", object_id=submission_id):
-        # 抢占失败：已被其他 Worker 领取或状态不对，跳过
-        logger.debug("抢占 Submission %s 失败，跳过", submission_id)
-        return submission
+    try:
+        # 原子抢占：queued → running
+        if not claim_job(db, job_type="assignment", object_id=submission_id):
+            # 抢占失败：已被其他 Worker 领取或状态不对，跳过
+            logger.debug("抢占 Submission %s 失败，跳过", submission_id)
+            return submission
 
-    question = db.get(JudgeQuestion, submission.question_id)
-    if not question:
-        fail_job(db, job_type="assignment", object_id=submission_id,
-                 error="题目不存在", retryable=False)
-        submission.status = "system_error"
-        submission.score = 0
-        db.commit()
-        db.refresh(submission)
-        redis_client.setex(f"judge:result:{submission.id}", 3600, submission.status)
-        return submission
-
-    submission.status = "running"
-    db.commit()
-
-    with tempfile.TemporaryDirectory(prefix="dai-judge-") as temp_dir:
-        workdir = Path(temp_dir)
-        _write_submission_files(workdir, submission, question)
-        timeout_seconds = _get_timeout(question, settings)
-        memory_limit_mb = question.memory_limit_mb or settings.judge_memory_limit_mb
-
-        try:
-            stdout, stderr, returncode, elapsed_ms = _run_docker_pytest(
-                workdir, settings, timeout_seconds, memory_limit_mb,
-            )
-        except Exception as e:
-            # Docker 执行异常：可重试
+        question = db.get(JudgeQuestion, submission.question_id)
+        if not question:
             fail_job(db, job_type="assignment", object_id=submission_id,
-                     error=f"Docker 判题失败: {e}", retryable=True)
+                     error="题目不存在", retryable=False)
             submission.status = "system_error"
             submission.score = 0
-            submission.stderr = f"Docker 判题失败: {e}"
-            submission.result_details = {"error": str(e)}
             db.commit()
             db.refresh(submission)
             redis_client.setex(f"judge:result:{submission.id}", 3600, submission.status)
-            logger.warning("Submission %s Docker 执行异常，已退回 pending", submission_id)
             return submission
 
-    final_status, score = _status_from_pytest(returncode, stdout, stderr)
-    submission.status = final_status
-    submission.stdout = stdout[-8000:]
-    submission.stderr = stderr[-8000:]
-    submission.score = score
-    submission.execution_time_ms = elapsed_ms
-    submission.result_details = {"returncode": returncode}
-    db.commit()
+        submission.status = "running"
+        db.commit()
 
-    # 标记完成
-    complete_job(db, job_type="assignment", object_id=submission_id,
-                 score=score, result_details={"returncode": returncode})
-    db.refresh(submission)
-    redis_client.setex(f"judge:result:{submission.id}", 3600, submission.status)
-    logger.info("Submission %s 判题完成: %s (%.1f)", submission_id, final_status, score)
-    return submission
+        with tempfile.TemporaryDirectory(prefix="dai-judge-") as temp_dir:
+            workdir = Path(temp_dir)
+            _write_submission_files(workdir, submission, question)
+            timeout_seconds = _get_timeout(question, settings)
+            memory_limit_mb = question.memory_limit_mb or settings.judge_memory_limit_mb
+
+            try:
+                stdout, stderr, returncode, elapsed_ms = _run_docker_pytest(
+                    workdir, settings, timeout_seconds, memory_limit_mb,
+                )
+            except Exception as e:
+                # Docker 执行异常：可重试
+                fail_job(db, job_type="assignment", object_id=submission_id,
+                         error=f"Docker 判题失败: {e}", retryable=True)
+                submission.status = "system_error"
+                submission.score = 0
+                submission.stderr = f"Docker 判题失败: {e}"
+                submission.result_details = {"error": str(e)}
+                db.commit()
+                db.refresh(submission)
+                redis_client.setex(f"judge:result:{submission.id}", 3600, submission.status)
+                logger.warning("Submission %s Docker 执行异常，已退回 pending", submission_id)
+                return submission
+
+        final_status, score = _status_from_pytest(returncode, stdout, stderr)
+        submission.status = final_status
+        submission.stdout = stdout[-8000:]
+        submission.stderr = stderr[-8000:]
+        submission.score = score
+        submission.execution_time_ms = elapsed_ms
+        submission.result_details = {"returncode": returncode}
+        db.commit()
+
+        # 标记完成
+        complete_job(db, job_type="assignment", object_id=submission_id,
+                     score=score, result_details={"returncode": returncode})
+        db.refresh(submission)
+        redis_client.setex(f"judge:result:{submission.id}", 3600, submission.status)
+        logger.info("Submission %s 判题完成: %s (%.1f)", submission_id, final_status, score)
+        return submission
+
+    except Exception:
+        # 未知异常：退回 pending 等待恢复扫描重试
+        logger.exception("Submission %s 未知异常，退回 pending", submission_id)
+        try:
+            fail_job(db, job_type="assignment", object_id=submission_id,
+                     error="Worker 未知异常", retryable=True)
+        except Exception:
+            logger.exception("fail_job 也失败了")
+            # 尽力手动设回 pending
+            try:
+                submission.grading_status = "pending"
+                submission.last_error = "Worker 未知异常（fail_job 失败）"
+                db.commit()
+            except Exception:
+                logger.exception("连手动退回都失败了")
+        return submission
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -233,70 +251,86 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
         _maybe_finalize_exam(answer.submission_id, db)
         return answer
 
-    # 不是 queued 状态（可能是 pending 或 running），检查是否需要处理
-    if answer.grading_status != "queued":
-        # 可能是旧格式直接标 pending 的，尝试抢占
-        pass
+    try:
+        # 原子抢占：queued → running
+        claimed = claim_job(db, job_type="exam", object_id=answer_id)
 
-    # 原子抢占：queued → running
-    claimed = claim_job(db, job_type="exam", object_id=answer_id)
-
-    question = db.get(ExamQuestion, answer.question_id)
-    if not question or not question.hidden_tests:
-        fail_job(db, job_type="exam", object_id=answer_id,
-                 error="题目未配置隐藏测试", retryable=False)
-        answer.system_error = "题目未配置隐藏测试"
-        answer.score = 0
-        db.commit()
-        _maybe_finalize_exam(answer.submission_id, db)
-        return answer
-
-    # 未抢占到也继续执行（兼容直接 pending 状态的旧数据）
-    if not claimed and answer.grading_status != "running":
-        # 手动设 running
-        answer.grading_status = "running"
-        db.commit()
-
-    import tempfile
-    with tempfile.TemporaryDirectory(prefix="dai-exam-judge-") as temp_dir:
-        workdir = Path(temp_dir)
-        user_code = workdir / "user_code.py"
-        test_file = workdir / "test_user_code.py"
-        user_code.write_text(answer.code_answer or "", encoding="utf-8")
-        hidden_tests = question.hidden_tests
-        if "import user_code" not in hidden_tests and "from user_code" not in hidden_tests:
-            hidden_tests = f"import user_code\n\n{hidden_tests}"
-        test_file.write_text(hidden_tests, encoding="utf-8")
-
-        timeout_s = max(min(math.ceil((question.time_limit_ms or 10000) / 1000), settings.judge_timeout_seconds), 1)
-        mem_mb = question.memory_limit_mb or settings.judge_memory_limit_mb
-
-        try:
-            stdout, stderr, returncode, elapsed_ms = _run_docker_pytest(workdir, settings, timeout_s, mem_mb)
-        except Exception as e:
+        question = db.get(ExamQuestion, answer.question_id)
+        if not question or not question.hidden_tests:
             fail_job(db, job_type="exam", object_id=answer_id,
-                     error=f"Docker 判题失败: {e}", retryable=True)
+                     error="题目未配置隐藏测试", retryable=False)
+            answer.system_error = "题目未配置隐藏测试"
             answer.score = 0
-            answer.system_error = f"Docker 判题失败: {e}"
-            answer.result_details = {"error": str(e)}
             db.commit()
-            logger.warning("ExamAnswer %s Docker 执行异常，已退回 pending", answer_id)
             _maybe_finalize_exam(answer.submission_id, db)
             return answer
 
-    final_status, _ = _status_from_pytest(returncode, stdout, stderr)
-    score = float(question.points) if final_status == "accepted" else 0.0
-    answer.score = float(score)
-    answer.grading_status = "completed"
-    answer.result_details = {"returncode": returncode, "stdout": stdout[-2000:], "stderr": stderr[-2000:]}
-    db.commit()
+        # 未抢占到也继续执行（兼容直接 pending 状态的旧数据）
+        if not claimed and answer.grading_status != "running":
+            answer.grading_status = "running"
+            db.commit()
 
-    complete_job(db, job_type="exam", object_id=answer_id,
-                 score=score, result_details=answer.result_details)
-    logger.info("ExamAnswer %s 判题完成: %s (%.1f)", answer_id, final_status, score)
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="dai-exam-judge-") as temp_dir:
+            workdir = Path(temp_dir)
+            user_code = workdir / "user_code.py"
+            test_file = workdir / "test_user_code.py"
+            user_code.write_text(answer.code_answer or "", encoding="utf-8")
+            hidden_tests = question.hidden_tests
+            if "import user_code" not in hidden_tests and "from user_code" not in hidden_tests:
+                hidden_tests = f"import user_code\n\n{hidden_tests}"
+            test_file.write_text(hidden_tests, encoding="utf-8")
 
-    _maybe_finalize_exam(answer.submission_id, db)
-    return answer
+            timeout_s = max(min(math.ceil((question.time_limit_ms or 10000) / 1000), settings.judge_timeout_seconds), 1)
+            mem_mb = question.memory_limit_mb or settings.judge_memory_limit_mb
+
+            try:
+                stdout, stderr, returncode, elapsed_ms = _run_docker_pytest(workdir, settings, timeout_s, mem_mb)
+            except Exception as e:
+                fail_job(db, job_type="exam", object_id=answer_id,
+                         error=f"Docker 判题失败: {e}", retryable=True)
+                answer.score = 0
+                answer.system_error = f"Docker 判题失败: {e}"
+                answer.result_details = {"error": str(e)}
+                db.commit()
+                logger.warning("ExamAnswer %s Docker 执行异常，已退回 pending", answer_id)
+                _maybe_finalize_exam(answer.submission_id, db)
+                return answer
+
+        final_status, _ = _status_from_pytest(returncode, stdout, stderr)
+        score = float(question.points) if final_status == "accepted" else 0.0
+        answer.score = float(score)
+        answer.grading_status = "completed"
+        answer.result_details = {"returncode": returncode, "stdout": stdout[-2000:], "stderr": stderr[-2000:]}
+        db.commit()
+
+        complete_job(db, job_type="exam", object_id=answer_id,
+                     score=score, result_details=answer.result_details)
+        logger.info("ExamAnswer %s 判题完成: %s (%.1f)", answer_id, final_status, score)
+
+        _maybe_finalize_exam(answer.submission_id, db)
+        return answer
+
+    except Exception:
+        # 未知异常：退回 pending 等待恢复扫描重试
+        logger.exception("ExamAnswer %s 未知异常，退回 pending", answer_id)
+        try:
+            fail_job(db, job_type="exam", object_id=answer_id,
+                     error="Worker 未知异常", retryable=True)
+        except Exception:
+            logger.exception("fail_job 也失败了")
+            try:
+                answer.grading_status = "pending"
+                answer.last_error = "Worker 未知异常（fail_job 失败）"
+                db.commit()
+            except Exception:
+                logger.exception("连手动退回都失败了")
+        # 尝试汇总
+        try:
+            _maybe_finalize_exam(answer.submission_id, db)
+        except Exception:
+            logger.exception("_maybe_finalize_exam 失败")
+        return answer
 
 
 # ═══════════════════════════════════════════════════════════════

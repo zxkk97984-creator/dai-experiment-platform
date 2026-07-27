@@ -28,16 +28,28 @@ def _normalize_detail(detail):
 
 
 async def _expiry_scanner():
-    """定期扫描过期考试，自动交卷"""
+    """定期扫描：过期考试自动交卷 + 判题任务恢复"""
     while True:
         try:
             await asyncio.sleep(15)
             with SessionLocal() as db:
+                # 考试过期扫描
                 count = scan_expired_exams(db, datetime.now(timezone.utc))
                 if count > 0:
                     logger.info("过期考试扫描：自动交卷 %d 份", count)
         except Exception:
             logger.exception("过期考试扫描异常")
+
+        try:
+            await asyncio.sleep(15)
+            with SessionLocal() as db:
+                # 判题任务恢复扫描（作业 + 考试）
+                from app.services.judge_queue import requeue_stale_jobs
+                stats = requeue_stale_jobs(db)
+                if any(v > 0 for v in stats.values()):
+                    logger.info("判题任务恢复扫描：%s", stats)
+        except Exception:
+            logger.exception("判题任务恢复扫描异常")
 
 
 async def _kernel_cleanup():
