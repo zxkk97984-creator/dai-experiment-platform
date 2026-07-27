@@ -47,7 +47,9 @@ def upgrade() -> None:
         normalized = []
         for case in (cases if isinstance(cases, list) else []):
             if isinstance(case, dict) and "input" in case and "args" not in case:
-                case = {**case, "args": case.pop("input")}
+                input_val = case["input"]
+                case = {k: v for k, v in case.items() if k != "input"}
+                case["args"] = input_val
                 changed = True
             normalized.append(case)
 
@@ -77,7 +79,9 @@ def upgrade() -> None:
         normalized = []
         for case in (cases if isinstance(cases, list) else []):
             if isinstance(case, dict) and "input" in case and "args" not in case:
-                case = {**case, "args": case.pop("input")}
+                input_val = case["input"]
+                case = {k: v for k, v in case.items() if k != "input"}
+                case["args"] = input_val
                 changed = True
             normalized.append(case)
 

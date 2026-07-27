@@ -171,7 +171,11 @@ class PublicCase(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _migrate_input_to_args(cls, data: Any) -> Any:
-        """迁移旧格式：input → args；拒绝同时传入非空 input 和 args。"""
+        """迁移旧格式：input → args；拒绝同时传入非空 input 和 args。
+
+        修复：先保存 input 的值，再构建不含 input 的新 dict，
+        确保结果中不残留 input 字段，且不修改调用者的原 dict。
+        """
         if not isinstance(data, dict):
             return data
         has_input = "input" in data
@@ -179,7 +183,10 @@ class PublicCase(BaseModel):
         if has_input and has_args:
             raise ValueError("不能同时传入 input 和 args，请统一使用 args")
         if has_input:
-            data = {**data, "args": data.pop("input")}
+            # 保存 input 的值，构建不含 input 字段的新 dict
+            input_val = data["input"]
+            data = {k: v for k, v in data.items() if k != "input"}
+            data["args"] = input_val
         return data
 
     @model_validator(mode="after")
