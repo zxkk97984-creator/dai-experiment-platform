@@ -218,3 +218,59 @@ def test_submit_requires_client_request_id(client, db_session_factory):
                     headers=auth_header(ctx["s_tok"]),
                     json={})
     assert r.status_code == 422, f"缺少 client_request_id 应 422: {r.status_code}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# P0-2: 并发提交不同 client_request_id 产生不同 attempt_number
+# ═══════════════════════════════════════════════════════════════
+
+def test_p0_2_concurrent_different_client_request_id_distinct_attempts(client, db_session_factory):
+    """P0-2: 两个不同 client_request_id 并发提交 → 不同的 attempt_number，不报 500"""
+    import threading
+
+    ctx = _setup_experiment(client, db_session_factory)
+    rid = ctx["rid"]
+    s_tok = ctx["s_tok"]
+
+    results = []
+    barrier = threading.Barrier(2, timeout=5)
+    errors = []
+
+    def do_submit(client_request_id):
+        try:
+            barrier.wait()  # 同步起点——确保两个线程同时到达提交点
+            r = client.post(
+                f"{API}/experiments/records/{rid}/submit",
+                headers=auth_header(s_tok),
+                json={"client_request_id": client_request_id},
+            )
+            results.append((client_request_id, r.status_code, r.json() if r.status_code == 201 else r.text))
+        except Exception as e:
+            errors.append(str(e))
+
+    req_a = str(uuid.uuid4())
+    req_b = str(uuid.uuid4())
+    assert req_a != req_b
+
+    t1 = threading.Thread(target=do_submit, args=(req_a,))
+    t2 = threading.Thread(target=do_submit, args=(req_b,))
+
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+
+    assert len(errors) == 0, f"线程异常: {errors}"
+    assert len(results) == 2, f"应有 2 个结果: {results}"
+
+    # 两个请求都应成功
+    statuses = [s for _, s, _ in results]
+    assert all(s == 201 for s in statuses), f"两个请求都应返回 201: {results}"
+
+    # attempt_number 应不同（1 和 2，顺序不固定）
+    attempts = sorted([r["attempt_number"] for _, _, r in results])
+    assert attempts == [1, 2], f"attempt_number 应为 1 和 2: {results}"
+
+    # id 应不同
+    ids = [r["id"] for _, _, r in results]
+    assert ids[0] != ids[1], f"两个提交应有不同 id: {ids}"
