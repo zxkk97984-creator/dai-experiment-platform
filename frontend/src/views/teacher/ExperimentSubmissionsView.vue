@@ -1,22 +1,29 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { experimentsAPI } from '../../api/experiments.js'
 import { useAppStore } from '../../stores/app.js'
+import { useAuthStore } from '../../stores/auth.js'
 import AppLayout from '../../components/layout/AppLayout.vue'
 
 const route = useRoute()
 const router = useRouter()
 const app = useAppStore()
+const auth = useAuthStore()
 const submissions = ref([])
 const loading = ref(true)
 const page = ref(1)
 const total = ref(0)
+const pageSize = 20
+
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+const hasPrev = computed(() => page.value > 1)
+const hasNext = computed(() => page.value < totalPages.value)
 
 async function load() {
   loading.value = true
   try {
-    const params = { page: page.value, page_size: 20 }
+    const params = { page: page.value, page_size: pageSize }
     if (route.query.record_id) params.record_id = route.query.record_id
     const res = await experimentsAPI.listSubmissions(params)
     submissions.value = res.data?.items || []
@@ -29,7 +36,18 @@ async function load() {
 }
 
 function viewDetail(subId) {
-  router.push(`/teacher/submissions/${subId}`)
+  const prefix = auth.isAdmin ? '/admin' : '/teacher'
+  router.push(`${prefix}/submissions/${subId}`)
+}
+
+function goPage(p) {
+  page.value = p
+  load()
+}
+
+function formatTime(t) {
+  if (!t) return '-'
+  return new Date(t).toLocaleString('zh-CN')
 }
 
 onMounted(load)
@@ -51,11 +69,24 @@ onMounted(load)
         <div class="card-header">
           <span class="attempt-badge">第 {{ sub.attempt_number }} 次提交</span>
           <span v-if="sub.score != null" class="score">评分: {{ sub.score }}</span>
+          <span v-else class="no-score">未评分</span>
         </div>
         <div class="card-meta">
-          <span>提交时间: {{ new Date(sub.submitted_at).toLocaleString('zh-CN') }}</span>
-          <span v-if="sub.feedback" class="feedback-preview">反馈: {{ sub.feedback.substring(0, 100) }}</span>
+          <span v-if="sub.student_name" class="student-name">{{ sub.student_name }}</span>
+          <span v-if="sub.entry_name" class="entry-name">{{ sub.entry_name }}</span>
+          <span>提交时间: {{ formatTime(sub.submitted_at) }}</span>
         </div>
+        <div v-if="sub.feedback" class="feedback">
+          <span class="feedback-label">反馈:</span>
+          {{ sub.feedback.substring(0, 80) }}{{ sub.feedback.length > 80 ? '...' : '' }}
+        </div>
+      </div>
+
+      <!-- 分页 -->
+      <div v-if="totalPages > 1" class="pagination">
+        <button :disabled="!hasPrev" @click="goPage(page - 1)" class="page-btn">上一页</button>
+        <span class="page-info">第 {{ page }} / {{ totalPages }} 页</span>
+        <button :disabled="!hasNext" @click="goPage(page + 1)" class="page-btn">下一页</button>
       </div>
     </div>
   </AppLayout>
@@ -74,6 +105,29 @@ onMounted(load)
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .attempt-badge { font-weight: 600; font-size: var(--text-sm); }
 .score { color: var(--primary); font-weight: 600; }
-.card-meta { display: flex; gap: var(--space-4); font-size: var(--text-xs); color: var(--text-secondary); margin-top: var(--space-2); }
-.feedback-preview { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.no-score { color: var(--text-tertiary); font-size: var(--text-xs); }
+.card-meta {
+  display: flex; gap: var(--space-4); font-size: var(--text-xs);
+  color: var(--text-secondary); margin-top: var(--space-2); flex-wrap: wrap;
+}
+.student-name { font-weight: 500; color: var(--ink); }
+.entry-name { color: var(--text-secondary); }
+.feedback {
+  margin-top: var(--space-2); font-size: var(--text-xs); color: var(--text-secondary);
+  background: var(--surface-raised); padding: 4px 8px; border-radius: var(--radius-sm);
+}
+.feedback-label { font-weight: 500; }
+
+.pagination {
+  display: flex; align-items: center; justify-content: center;
+  gap: var(--space-3); margin-top: var(--space-6); padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+.page-btn {
+  padding: 6px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); cursor: pointer; font-size: var(--text-sm);
+}
+.page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.page-btn:hover:not(:disabled) { background: var(--primary-light); border-color: var(--primary); }
+.page-info { font-size: var(--text-sm); color: var(--text-secondary); }
 </style>

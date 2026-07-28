@@ -471,6 +471,9 @@ class ExperimentSubmissionRead(BaseModel):
     feedback: str | None = None
     reviewed_by_id: int | None = None
     reviewed_at: datetime | None = None
+    # 前端展示辅助字段（列表查询时填充）
+    student_name: str | None = None
+    entry_name: str | None = None
 
 
 class ExperimentSubmitRequest(BaseModel):

@@ -30,6 +30,7 @@ const menuItems = computed(() => {
     { path: '/teacher/assignments', label: '作业',     sub: 'Assignments',  icon: 'assignments', key: 'assignments' },
     { path: '/teacher/exams',       label: '考试',     sub: 'Exams',        icon: 'exams',       key: 'exams' },
     { path: '/teacher/experiments', label: '实验',     sub: 'Experiments',  icon: 'experiments', key: 'experiments' },
+    { path: '/teacher/submissions', label: '提交列表', sub: 'Submissions',  icon: 'assignments', key: 'submissions' },
   ]
   if (auth.isAdmin) return [
     { path: '/admin/users',         label: '用户',     sub: 'Users',       icon: 'users',       key: 'users' },
@@ -50,6 +51,8 @@ const menuItems = computed(() => {
 
 function isActive(path) {
   if (path === '/student/assignments' && route.path.startsWith('/student/submissions')) return true
+  if (path === '/teacher/submissions' && route.path.startsWith('/teacher/submissions')) return true
+  if (path === '/admin/submissions' && route.path.startsWith('/admin/submissions')) return true
   return route.path.startsWith(path)
 }
 

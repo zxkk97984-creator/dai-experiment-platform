@@ -16,9 +16,22 @@ const saving = ref(false)
 
 const cells = computed(() => {
   if (!submission.value?.cells_snapshot) return []
-  return Object.entries(submission.value.cells_snapshot).map(([id, source]) => ({
-    id, source: source || '',
-  }))
+  // 尝试从 record 详情获取 cell 元数据（类型、顺序、输出）
+  const record = submission.value.record || {}
+  const versionCells = record.template_version?.cells || []
+  const cellMap = {}
+  versionCells.forEach(c => { cellMap[c.id] = c })
+
+  return Object.entries(submission.value.cells_snapshot).map(([id, source], idx) => {
+    const meta = cellMap[id] || {}
+    return {
+      id,
+      source: source || '',
+      type: meta.type || 'code',
+      order: meta.order ?? idx,
+      outputs: (record.cells_outputs || {})[id] || null,
+    }
+  }).sort((a, b) => a.order - b.order)
 })
 
 async function load() {
@@ -57,7 +70,10 @@ async function submitReview() {
 }
 
 function goBack() {
-  router.push('/teacher/experiments')
+  // 根据角色返回正确的提交列表页
+  const role = route.meta?.role
+  if (role === 'admin') router.push('/admin/submissions')
+  else router.push('/teacher/submissions')
 }
 
 onMounted(load)
@@ -79,8 +95,19 @@ onMounted(load)
       <div class="snapshot-section">
         <h2>提交快照（只读）</h2>
         <div v-for="cell in cells" :key="cell.id" class="cell-card card">
-          <div class="cell-id">{{ cell.id }}</div>
+          <div class="cell-header">
+            <span class="cell-id">{{ cell.id }}</span>
+            <span class="cell-type">{{ cell.type === 'markdown' ? '📝 Markdown' : '💻 Code' }}</span>
+            <span class="cell-order">#{{ cell.order }}</span>
+          </div>
           <pre class="cell-source">{{ cell.source || '(空)' }}</pre>
+          <!-- 输出展示（如有） -->
+          <div v-if="cell.outputs" class="cell-outputs">
+            <div class="outputs-label">执行输出 (execution_count: {{ cell.outputs.execution_count }})</div>
+            <div v-for="(out, oi) in (cell.outputs.outputs || [])" :key="oi" class="output-item">
+              <pre class="output-text">{{ out.text || out.data || JSON.stringify(out) }}</pre>
+            </div>
+          </div>
         </div>
         <div v-if="cells.length === 0" class="empty">无代码快照</div>
       </div>
@@ -120,8 +147,14 @@ onMounted(load)
 .snapshot-section { margin-bottom: var(--space-8); }
 .snapshot-section h2, .review-section h2 { font-size: 16px; margin: 0 0 var(--space-3); }
 .cell-card { padding: var(--space-3); margin-bottom: var(--space-2); }
-.cell-id { font-size: var(--text-xs); color: var(--text-secondary); margin-bottom: 4px; }
+.cell-header { display: flex; align-items: center; gap: var(--space-2); margin-bottom: 4px; }
+.cell-id { font-size: var(--text-xs); color: var(--text-secondary); }
+.cell-type { font-size: var(--text-xs); padding: 1px 6px; border-radius: 10px; background: var(--primary-light); color: var(--primary); }
+.cell-order { font-size: var(--text-xs); color: var(--text-tertiary); }
 .cell-source { font-family: var(--font-mono); font-size: 13px; margin: 0; white-space: pre-wrap; word-break: break-all; }
+.cell-outputs { margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px dashed var(--border); }
+.outputs-label { font-size: var(--text-xs); color: var(--text-secondary); margin-bottom: 4px; }
+.output-text { font-family: var(--font-mono); font-size: 12px; background: var(--surface-raised); padding: 6px 8px; border-radius: var(--radius-sm); margin: 0; white-space: pre-wrap; word-break: break-all; }
 .review-form { display: flex; flex-direction: column; gap: var(--space-3); }
 .review-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-sm); }
 .input, .textarea { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: var(--text-sm); }

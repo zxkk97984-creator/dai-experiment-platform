@@ -1,11 +1,15 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import { experimentsAPI } from '../../api/experiments.js'
 import { useAppStore } from '../../stores/app.js'
+import { useAuthStore } from '../../stores/auth.js'
 import { statusBadge, PUBLISH_STATUS_MAP } from '../../utils/status.js'
 
+const router = useRouter()
 const app = useAppStore()
+const auth = useAuthStore()
 const modules = ref([])
 const loading = ref(true)
 const showCreate = ref(false)
@@ -47,6 +51,11 @@ async function toggleStatus(m) {
   }
 }
 
+function goToSubmissions() {
+  const prefix = auth.isAdmin ? '/admin' : '/teacher'
+  router.push(`${prefix}/submissions`)
+}
+
 onMounted(fetch)
 </script>
 
@@ -60,6 +69,7 @@ onMounted(fetch)
           <p class="page-sub">创建与维护实验模块，配置 JupyterLab 环境与入口</p>
         </div>
         <div class="page-meta">
+          <button class="btn-ghost" @click="goToSubmissions">查看提交</button>
           <button class="btn-primary" @click="showCreate = !showCreate">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
             {{ showCreate ? '取消' : '创建实验' }}

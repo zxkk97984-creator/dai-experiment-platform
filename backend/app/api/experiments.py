@@ -552,7 +552,7 @@ def submit_record(
 
     幂等：同一 client_request_id 多次请求返回已有提交。
     """
-    client_request_id = payload.client_request_id
+    client_request_id = str(payload.client_request_id)  # UUID → str（兼容 SQLite）
 
     # 1. 加载 record 并验证所有权（幂等检查之前），防止越权
     record = db.get(ExperimentRecord, record_id)
@@ -678,9 +678,55 @@ def list_submissions(
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()
+
+    # 批量填充学生姓名和入口名称
+    record_ids = [s.record_id for s in submissions]
+    records_map = {}
+    if record_ids:
+        records = db.scalars(
+            select(ExperimentRecord).where(ExperimentRecord.id.in_(record_ids))
+        ).all()
+        records_map = {r.id: r for r in records}
+
+    student_ids = list(set(r.student_id for r in records_map.values()))
+    students_map = {}
+    if student_ids:
+        students = db.scalars(
+            select(User).where(User.id.in_(student_ids))
+        ).all()
+        students_map = {u.id: u for u in students}
+
+    lesson_ids = [r.lesson_id for r in records_map.values() if r.lesson_id]
+    module_ids = [r.module_id for r in records_map.values() if r.module_id]
+    lesson_map = {}
+    module_map = {}
+    if lesson_ids:
+        lessons = db.scalars(
+            select(Lesson).where(Lesson.id.in_(lesson_ids))
+        ).all()
+        lesson_map = {l.id: l for l in lessons}
+    if module_ids:
+        modules = db.scalars(
+            select(ExperimentModule).where(ExperimentModule.id.in_(module_ids))
+        ).all()
+        module_map = {m.id: m for m in modules}
+
+    items = []
+    for s in submissions:
+        item = ExperimentSubmissionRead.model_validate(s)
+        record = records_map.get(s.record_id)
+        if record:
+            student = students_map.get(record.student_id)
+            if student:
+                item.student_name = student.real_name or student.username
+            if record.lesson_id and record.lesson_id in lesson_map:
+                item.entry_name = lesson_map[record.lesson_id].title
+            elif record.module_id and record.module_id in module_map:
+                item.entry_name = module_map[record.module_id].name
+        items.append(item)
+
     return PaginatedResponse(
-        items=[ExperimentSubmissionRead.model_validate(s) for s in submissions],
-        page=page, page_size=page_size, total=total,
+        items=items, page=page, page_size=page_size, total=total,
     )
 
 
