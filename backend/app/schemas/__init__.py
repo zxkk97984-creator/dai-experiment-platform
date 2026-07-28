@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -179,7 +180,7 @@ class PublicCase(BaseModel):
         if not isinstance(data, dict):
             return data
         has_input = "input" in data
-        has_args = "args" in data and bool(data.get("args"))
+        has_args = "args" in data  # 仅检查 key 存在性，不检查值是否为空
         if has_input and has_args:
             raise ValueError("不能同时传入 input 和 args，请统一使用 args")
         if has_input:
@@ -474,7 +475,7 @@ class ExperimentSubmissionRead(BaseModel):
 
 class ExperimentSubmitRequest(BaseModel):
     """实验提交请求——client_request_id 用于幂等"""
-    client_request_id: str = Field(min_length=32, max_length=36)  # UUID v4
+    client_request_id: UUID  # UUID v4，Pydantic 自动校验格式
 
 
 class ExperimentReviewUpdate(BaseModel):

@@ -26,6 +26,12 @@ def test_public_case_rejects_both_input_and_args():
         PublicCase.model_validate({"input": [1, 2], "args": [1, 2], "expected": 3})
 
 
+def test_p1_4_public_case_rejects_input_and_empty_args():
+    """P1-4: 同时传入 input 和空的 args=[] 也应报错（key 存在即冲突，不论值是否为空）"""
+    with pytest.raises((PydanticValidationError, ValueError)):
+        PublicCase.model_validate({"input": [1], "args": [], "expected": 1})
+
+
 def test_public_case_expected_required():
     """expected 为必填"""
     with pytest.raises(PydanticValidationError):
