@@ -34,7 +34,7 @@ services:
       DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
       DAI_REDIS_URL: redis://redis:6379/0
       DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
-      DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:-http://localhost}
+      DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
       DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
       DAI_STUDIO_STORAGE_DIR: /app/storage/studio
       DAI_JUDGE_WORK_DIR: /judge-work

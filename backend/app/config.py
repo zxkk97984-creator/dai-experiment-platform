@@ -58,9 +58,12 @@ class Settings(BaseSettings):
 
         # CORS 校验
         origins = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
-        dev_defaults = {"http://localhost:5173", "http://127.0.0.1:5173"}
-        if set(origins) == dev_defaults:
-            errors.append("DAI_CORS_ORIGINS 使用了开发默认值，生产环境必须设置实际域名")
+        if not origins:
+            errors.append("DAI_CORS_ORIGINS 未设置，生产环境必须指定实际域名")
+        # 拒绝任何 localhost/127.0.0.1 起源（生产不应使用开发地址）
+        localhost_origins = [o for o in origins if "localhost" in o or "127.0.0.1" in o or "::1" in o]
+        if localhost_origins:
+            errors.append(f"DAI_CORS_ORIGINS 包含本地开发地址: {', '.join(localhost_origins)}，生产环境必须使用实际域名")
         if "*" in origins:
             errors.append("DAI_CORS_ORIGINS 不允许使用通配符 *")
 

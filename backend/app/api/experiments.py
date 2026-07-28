@@ -616,7 +616,40 @@ def submit_record(
     record.status = "submitted"
     record.submitted_at = now
     record.record_revision += 1
-    db.commit()
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        # 并发冲突（SQLite 无真正行锁）：另一个线程先插入了相同 attempt_number
+        # 重新获取锁并计算 attempt_number 重试
+        db.execute(
+            select(ExperimentRecord)
+            .where(ExperimentRecord.id == record_id)
+            .with_for_update()
+        )
+        # 锁内重新计算
+        max_attempt_retry = db.scalar(
+            select(ExperimentSubmission.attempt_number)
+            .where(ExperimentSubmission.record_id == record_id)
+            .order_by(ExperimentSubmission.attempt_number.desc())
+        )
+        attempt_number = (max_attempt_retry or 0) + 1
+        submission.attempt_number = attempt_number
+        # 重新检查是否已有相同 client_request_id 的提交
+        existing_retry = db.scalar(
+            select(ExperimentSubmission).where(
+                ExperimentSubmission.record_id == record_id,
+                ExperimentSubmission.client_request_id == client_request_id,
+            )
+        )
+        if existing_retry:
+            return ExperimentSubmissionRead.model_validate(existing_retry)
+        db.add(submission)
+        record.status = "submitted"
+        record.submitted_at = now
+        record.record_revision += 1
+        db.commit()
 
     db.refresh(submission)
     return ExperimentSubmissionRead.model_validate(submission)

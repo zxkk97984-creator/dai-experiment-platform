@@ -397,3 +397,79 @@ def test_p1_1_conftest_creates_sqlite_when_no_env(tmp_path, monkeypatch):
         db_url = f"sqlite:///{tmp_path / 'test.db'}"
 
     assert "sqlite" in db_url, "未设置环境变量时应使用 SQLite"
+
+
+# ═══════════════════════════════════════════════════════════════
+# P1-6: 生产环境配置校验拒绝 localhost + ContextVar 重置
+# ═══════════════════════════════════════════════════════════════
+
+def test_p1_6_production_cors_rejects_localhost():
+    """P1-6: 生产环境的 CORS 包含 localhost 时应抛异常"""
+    from app.config import Settings
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError, match="本地开发地址"):
+        Settings(
+            environment="production",
+            secret_key="a-very-secure-key-32chars!",
+            database_url="mysql+pymysql://safe:pass@localhost/db",
+            cors_origins="https://real.example.com,http://localhost",
+        )
+
+
+def test_p1_6_production_cors_accepts_real_domains():
+    """P1-6: 生产环境的 CORS 为真实域名时应通过"""
+    from app.config import Settings
+
+    s = Settings(
+        environment="production",
+        secret_key="a-very-secure-key-32chars!",
+        database_url="mysql+pymysql://safe:pass@localhost/db",
+        cors_origins="https://myapp.example.com",
+    )
+    assert s.cors_origin_list == ["https://myapp.example.com"]
+
+
+def test_p1_6_production_cors_rejects_empty():
+    """P1-6: 生产环境的 CORS 为空时应抛异常"""
+    from app.config import Settings
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError, match="未设置"):
+        Settings(
+            environment="production",
+            secret_key="a-very-secure-key-32chars!",
+            database_url="mysql+pymysql://safe:pass@localhost/db",
+            cors_origins="",
+        )
+
+
+def test_p1_6_contextvar_set_and_reset():
+    """P1-6: ContextVar set 返回 token，reset 后恢复默认值"""
+    from app.logging_config import set_request_id, get_request_id, _request_id_var
+
+    old_default = get_request_id()
+    token = set_request_id("test-rid-123")
+    assert get_request_id() == "test-rid-123"
+
+    _request_id_var.reset(token)
+    assert get_request_id() == old_default, "reset 后应恢复为默认值"
+
+
+def test_p1_6_metrics_requires_admin(client, db_session_factory):
+    """P1-6: /metrics 需要管理员认证，普通用户应返回 403"""
+    from conftest import auth_header, create_user, login
+
+    create_user(db_session_factory, "met_student", "student")
+    s_tok, _ = login(client, "met_student")
+
+    # 学生无法访问
+    r = client.get("/api/v1/metrics", headers=auth_header(s_tok))
+    assert r.status_code == 403, f"学生应返回 403: {r.status_code}"
+
+    # 管理员可以访问
+    create_user(db_session_factory, "met_admin", "admin")
+    a_tok, _ = login(client, "met_admin")
+    r2 = client.get("/api/v1/metrics", headers=auth_header(a_tok))
+    assert r2.status_code == 200, f"管理员应返回 200: {r2.status_code}"
+    assert "metrics" in r2.json()

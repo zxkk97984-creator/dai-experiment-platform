@@ -4,7 +4,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -15,6 +15,7 @@ from sqlalchemy import select
 from app.api import api_router
 from app.config import Settings, get_settings
 from app.database import SessionLocal
+from app.dependencies import require_roles
 from app.services.exam_service import scan_expired_exams
 
 logger = logging.getLogger("dai.main")
@@ -87,11 +88,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):
+        from app.logging_config import _request_id_var
         rid = request.headers.get("X-Request-ID", "") or str(uuid.uuid4())[:8]
-        set_request_id(rid)
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = rid
-        return response
+        token = set_request_id(rid)
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = rid
+            return response
+        finally:
+            _request_id_var.reset(token)  # 请求结束后重置，避免泄漏到下一个请求
 
     app.add_middleware(
         CORSMiddleware,
@@ -165,13 +170,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok", "app": settings.app_name}
 
     @app.get("/api/v1/metrics", tags=["metrics"])
-    def metrics(request: Request):
-        """内部指标——仅内网或鉴权访问"""
-        # 简单的内网检查：仅允许 localhost/内网 IP 或无鉴权时返回 403
-        host = request.client.host if request.client else "unknown"
-        if host not in ("127.0.0.1", "localhost", "::1") and not host.startswith("10.") and not host.startswith("172.") and not host.startswith("192.168."):
-            from fastapi.responses import JSONResponse
-            return JSONResponse(status_code=403, content={"detail": "仅限内网访问"})
+    def metrics(current_user=Depends(require_roles("admin"))):
+        """内部指标——仅管理员可访问（Nginx 代理后 IP 检查不可靠，改用认证）"""
         from app.database import SessionLocal
         from app.models import ExamAnswer, Submission
         stats = {}

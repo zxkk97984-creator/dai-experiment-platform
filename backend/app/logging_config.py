@@ -7,8 +7,9 @@ import sys
 _request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
 
 
-def set_request_id(rid: str) -> None:
-    _request_id_var.set(rid)
+def set_request_id(rid: str):
+    """设置当前请求 ID，返回 ContextVar token 用于请求结束后 reset"""
+    return _request_id_var.set(rid)
 
 
 def get_request_id() -> str:
