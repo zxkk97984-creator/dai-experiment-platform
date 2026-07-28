@@ -65,6 +65,7 @@ services:
       DAI_STUDIO_STORAGE_DIR: /app/storage/studio
       DAI_JUDGE_WORK_DIR: /judge-work
       DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:-}
+      DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
     depends_on:
       mysql:
         condition: service_healthy

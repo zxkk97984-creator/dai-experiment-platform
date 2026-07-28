@@ -1,0 +1,25 @@
+# pytest 临时文件
+.pytest-tmp
+.pt-tmp
+.pytest_cache
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.venv
+*.egg-info
+dist
+build
+
+# IDE
+.vscode
+.idea
+
+# Git
+.git
+.gitignore
+
+# 测试报告
+htmlcov
+.coverage
