@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,6 +38,20 @@ class Settings(BaseSettings):
     # 宿主机侧判题工作目录——DoD 模式下传给 Docker daemon 的宿主机绝对路径
     # 未设置时回退到 judge_work_dir（适用于非 DoD / 开发环境）
     judge_host_work_dir: str = ""
+
+    # ── AI 智能代码评分（DeepSeek） ──
+    ai_enabled: bool = True
+    ai_base_url: str = "https://aihub.codingpython.cn"
+    ai_api_key: SecretStr = SecretStr("")
+    ai_model: str = "deepseek-v4-flash"
+    ai_timeout_seconds: float = Field(default=60.0, gt=0, le=180)
+    ai_max_retries: int = Field(default=3, ge=0, le=8)
+    ai_queue_name: str = "judge:ai:queue"
+
+    @property
+    def ai_ready(self) -> bool:
+        """AI 评分是否就绪：启用且已配置 API Key"""
+        return self.ai_enabled and bool(self.ai_api_key.get_secret_value().strip())
 
     @model_validator(mode="after")
     def _validate_production(self):

@@ -17,3 +17,5 @@ mistune==3.3.3
 bleach==6.4.0
 python-multipart==0.0.32
 jupyter-client==8.9.1
+ruff==0.12.5
+radon==6.0.1
