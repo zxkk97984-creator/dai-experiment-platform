@@ -56,10 +56,13 @@ def refresh_token_pair(db: Session, refresh_token: str, redis_client, settings: 
     if payload.get("type") != "refresh":
         raise api_error(401, "INVALID_TOKEN_TYPE", "Token 类型无效")
     refresh_key = f"refresh:{payload['jti']}"
-    user_id = redis_client.get(refresh_key)
+    # 原子化消费 Refresh Token：GETDEL 同时读取并删除，防止并发重复使用
+    user_id = redis_client.getdel(refresh_key)
     if not user_id:
         raise api_error(401, "REFRESH_TOKEN_REVOKED", "刷新 Token 已失效")
-    redis_client.delete(refresh_key)
+    # user_id 是 bytes，需要解码
+    if isinstance(user_id, bytes):
+        user_id = user_id.decode()
     user = db.get(User, int(user_id))
     if not user or user.status != "active":
         raise api_error(401, "USER_NOT_ACTIVE", "用户不存在或已禁用")

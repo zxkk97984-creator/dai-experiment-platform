@@ -1,4 +1,5 @@
-"""P1-1: Auth Cookie 属性、轮换、旧 token 重放、并发 refresh 测试"""
+"""P1-1: Auth Cookie 属性、轮换、旧 token 重放、并发 refresh、Origin 校验测试"""
+import threading
 import time
 from unittest.mock import patch
 
@@ -119,11 +120,11 @@ def test_logout_clears_cookie(client, db_session_factory):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 并发 refresh 去重
+# 并发 refresh —— 真并发 Barrier
 # ═══════════════════════════════════════════════════════════════
 
 def test_concurrent_refresh_only_one_succeeds(client, db_session_factory):
-    """并发 refresh：旧 token 只用一次，第二次重放失败"""
+    """真并发 refresh：两个线程同时用同一旧 token 刷新，只有第一个成功（GETDEL 原子性）"""
     create_user(db_session_factory, "cr_t", "teacher")
     login_r = client.post(f"{API}/auth/login",
                           json={"username": "cr_t", "password": "Passw0rd!"})
@@ -132,11 +133,72 @@ def test_concurrent_refresh_only_one_succeeds(client, db_session_factory):
     for c in login_r.headers.get_list("set-cookie"):
         if "dai_refresh_token=" in c:
             old_refresh = c.split("dai_refresh_token=")[1].split(";")[0]
+    assert old_refresh, "应能提取 refresh token"
 
-    # 第一次 refresh 成功
-    r1 = client.post(f"{API}/auth/refresh", json={}, cookies={"dai_refresh_token": old_refresh})
-    assert r1.status_code == 200
+    results = []
+    errors = []
+    barrier = threading.Barrier(2, timeout=5)
 
-    # 相同 token 再次 refresh → 被拒绝（已轮换）
-    r2 = client.post(f"{API}/auth/refresh", json={}, cookies={"dai_refresh_token": old_refresh})
-    assert r2.status_code == 401, f"旧 token 二次使用应返回 401: {r2.status_code}"
+    def do_refresh():
+        try:
+            barrier.wait()  # 同步起点——两个线程同时发起 refresh
+            r = client.post(f"{API}/auth/refresh", json={},
+                           cookies={"dai_refresh_token": old_refresh})
+            results.append(r.status_code)
+        except Exception as e:
+            errors.append(str(e))
+
+    t1 = threading.Thread(target=do_refresh)
+    t2 = threading.Thread(target=do_refresh)
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+
+    assert len(errors) == 0, f"线程异常: {errors}"
+    assert len(results) == 2, f"应有 2 个结果: {results}"
+
+    # 只有 1 个能成功（GETDEL 原子删除），另一个应 401
+    success_count = sum(1 for s in results if s == 200)
+    fail_count = sum(1 for s in results if s == 401)
+    assert success_count == 1, f"应有恰好 1 个成功: results={results}"
+    assert fail_count == 1, f"应有恰好 1 个 401: results={results}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# Origin 校验
+# ═══════════════════════════════════════════════════════════════
+
+def test_refresh_rejects_cross_origin(client, db_session_factory):
+    """refresh 拒绝跨域请求（Origin 不在 CORS 白名单）"""
+    create_user(db_session_factory, "orig_t", "teacher")
+    login_r = client.post(f"{API}/auth/login",
+                          json={"username": "orig_t", "password": "Passw0rd!"})
+
+    old_refresh = ""
+    for c in login_r.headers.get_list("set-cookie"):
+        if "dai_refresh_token=" in c:
+            old_refresh = c.split("dai_refresh_token=")[1].split(";")[0]
+
+    # 使用恶意的 Origin 头
+    r = client.post(f"{API}/auth/refresh", json={},
+                    cookies={"dai_refresh_token": old_refresh},
+                    headers={"Origin": "https://evil.com"})
+    assert r.status_code == 403, f"跨域 Origin 应返回 403: {r.status_code} {r.text}"
+
+
+def test_refresh_allows_same_origin(client, db_session_factory):
+    """refresh 放行无 Origin 头的请求（同源请求）"""
+    create_user(db_session_factory, "orig2_t", "teacher")
+    login_r = client.post(f"{API}/auth/login",
+                          json={"username": "orig2_t", "password": "Passw0rd!"})
+
+    old_refresh = ""
+    for c in login_r.headers.get_list("set-cookie"):
+        if "dai_refresh_token=" in c:
+            old_refresh = c.split("dai_refresh_token=")[1].split(";")[0]
+
+    # 无 Origin 头（同源请求）→ 应放行
+    r = client.post(f"{API}/auth/refresh", json={},
+                    cookies={"dai_refresh_token": old_refresh})
+    assert r.status_code == 200, f"同源请求应返回 200: {r.status_code} {r.text}"

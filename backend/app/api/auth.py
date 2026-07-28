@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.dependencies import get_current_payload, get_current_user, get_db, get_redis_client
+from app.errors import api_error
 from app.models import User
 from app.schemas import LoginRequest, LogoutRequest, RefreshRequest, TokenResponse, UserRead
 from app.services.auth_service import authenticate_user, issue_token_pair, refresh_token_pair, revoke_tokens
@@ -12,6 +13,16 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # Cookie 配置
 REFRESH_COOKIE_KEY = "dai_refresh_token"
 REFRESH_COOKIE_PATH = "/api/v1/auth"
+
+
+def _validate_origin(request: Request, settings: Settings) -> None:
+    """校验请求 Origin 在允许列表中。无 Origin 头（同源请求）放行。"""
+    origin = request.headers.get("Origin", "")
+    if not origin:
+        return  # 同源请求没有 Origin 头，放行
+    allowed = settings.cors_origin_list
+    if origin not in allowed:
+        raise api_error(403, "ORIGIN_NOT_ALLOWED", f"来源 {origin} 不被允许")
 
 
 def _set_refresh_cookie(response: Response, refresh_token: str, settings: Settings, max_age_days: int = 7):
@@ -66,10 +77,12 @@ def refresh(
     redis_client=Depends(get_redis_client),
     settings: Settings = Depends(get_settings),
 ):
+    # Origin 校验：防止跨域 refresh 攻击
+    _validate_origin(request, settings)
+
     # 优先从 Cookie 读取，兼容 JSON body
     refresh_token_value = dai_refresh_token or (payload.refresh_token if payload else None)
     if not refresh_token_value:
-        from app.errors import api_error
         raise api_error(401, "NO_REFRESH_TOKEN", "缺少刷新令牌")
 
     tokens = refresh_token_pair(db, refresh_token_value, redis_client, settings)
@@ -84,6 +97,7 @@ def refresh(
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(
+    request: Request,
     response: Response,
     payload: LogoutRequest | None = None,
     dai_refresh_token: str | None = Cookie(None, alias=REFRESH_COOKIE_KEY),
@@ -91,6 +105,8 @@ def logout(
     redis_client=Depends(get_redis_client),
     settings: Settings = Depends(get_settings),
 ):
+    # Origin 校验：防止跨域 logout 攻击
+    _validate_origin(request, settings)
     revoke_tokens(access_payload, dai_refresh_token or (payload.refresh_token if payload else None), redis_client, settings)
     _delete_refresh_cookie(response)
     response.status_code = status.HTTP_204_NO_CONTENT
