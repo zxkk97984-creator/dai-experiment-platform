@@ -33,6 +33,9 @@ def sanitize_ai_error(text: str) -> str:
     text = re.sub(r"Bearer\s+\S+", "Bearer ***", text)
     # 删除 sk- 开头的 key
     text = re.sub(r"sk-[a-zA-Z0-9]+", "sk-***", text)
+    # 截断过长文本
+    if len(text) > 1000:
+        text = text[:1000]
     return text
 
 
