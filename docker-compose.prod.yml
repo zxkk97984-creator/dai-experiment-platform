@@ -30,7 +30,7 @@ services:
     build: ./backend
     command: sh -c "alembic upgrade head && uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000"
     environment:
-      DAI_ENVIRONMENT: production
+      DAI_ENVIRONMENT: ${DAI_ENVIRONMENT:-production}
       DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
       DAI_REDIS_URL: redis://redis:6379/0
       DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
@@ -58,7 +58,7 @@ services:
     build: ./backend
     command: python -m app.worker.judge_worker
     environment:
-      DAI_ENVIRONMENT: production
+      DAI_ENVIRONMENT: ${DAI_ENVIRONMENT:-production}
       DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
       DAI_REDIS_URL: redis://redis:6379/0
       DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
