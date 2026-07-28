@@ -51,6 +51,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./judge-work:/judge-work
+      - ./backend/alembic/versions:/app/alembic/versions:ro
       - studio_data:/app/storage/studio
 
   worker:
@@ -76,6 +77,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./judge-work:/judge-work
+      - ./backend/alembic/versions:/app/alembic/versions:ro
       - studio_data:/app/storage/studio
 
   frontend:

@@ -4,9 +4,9 @@ test.describe('Notebook 实验提交评分流程', () => {
   test('学生运行 cell → 保存 → 提交 → 教师查看评分', async ({ page }) => {
     // 学生登录
     await page.goto('/login')
-    await expect(page.locator('input[name="username"]')).toBeVisible()
-    await page.fill('input[name="username"]', 'student')
-    await page.fill('input[name="password"]', 'Passw0rd!')
+    await expect(page.locator('#login-username')).toBeVisible()
+    await page.fill('#login-username', 'student')
+    await page.fill('#login-password', 'Passw0rd!')
     await page.click('button[type="submit"]')
 
     // 导航到实验列表

@@ -4,9 +4,9 @@ test.describe('考试开始答题交卷流程', () => {
   test('开始考试 → 自动保存 → 交卷 → 等待评分', async ({ page }) => {
     // 学生登录
     await page.goto('/login')
-    await expect(page.locator('input[name="username"]')).toBeVisible()
-    await page.fill('input[name="username"]', 'student')
-    await page.fill('input[name="password"]', 'Passw0rd!')
+    await expect(page.locator('#login-username')).toBeVisible()
+    await page.fill('#login-username', 'student')
+    await page.fill('#login-password', 'Passw0rd!')
     await page.click('button[type="submit"]')
 
     // 导航到考试列表

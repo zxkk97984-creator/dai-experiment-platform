@@ -4,9 +4,9 @@ test.describe('作业提交判题流程', () => {
   test('学生提交代码 → Worker 判题 → 查看结果', async ({ page }) => {
     // 学生登录
     await page.goto('/login')
-    await expect(page.locator('input[name="username"]')).toBeVisible()
-    await page.fill('input[name="username"]', 'student')
-    await page.fill('input[name="password"]', 'Passw0rd!')
+    await expect(page.locator('#login-username')).toBeVisible()
+    await page.fill('#login-username', 'student')
+    await page.fill('#login-password', 'Passw0rd!')
     await page.click('button[type="submit"]')
 
     // 导航到作业列表

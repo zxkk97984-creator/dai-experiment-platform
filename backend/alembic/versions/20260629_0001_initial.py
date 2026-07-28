@@ -92,7 +92,7 @@ def upgrade() -> None:
         sa.Column("function_name", sa.String(120), nullable=False),
         sa.Column("signature", sa.String(255), nullable=True),
         sa.Column("starter_code", sa.Text(), nullable=True),
-        sa.Column("public_cases", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
+        sa.Column("public_cases", sa.JSON(), nullable=False),
         sa.Column("hidden_tests", sa.Text(), nullable=False),
         sa.Column("time_limit_ms", sa.Integer(), nullable=False, server_default="10000"),
         sa.Column("memory_limit_mb", sa.Integer(), nullable=False, server_default="256"),
@@ -167,7 +167,7 @@ def upgrade() -> None:
         sa.Column("module_id", sa.Integer(), sa.ForeignKey("experiment_modules.id"), index=True, nullable=False),
         sa.Column("student_id", sa.Integer(), sa.ForeignKey("users.id"), index=True, nullable=False),
         sa.Column("status", sa.String(30), nullable=False, server_default="started"),
-        sa.Column("metadata", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+        sa.Column("metadata", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
