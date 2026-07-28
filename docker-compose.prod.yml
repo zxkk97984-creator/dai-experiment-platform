@@ -41,6 +41,14 @@ services:
       # 宿主机侧判题工作目录绝对路径——Worker 将此路径传给 Docker daemon 做 bind mount
       # 开发环境无需设置（自动回退到 DAI_JUDGE_WORK_DIR）
       DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须是宿主机判题目录的绝对路径}
+      # ── AI 智能代码评分 ──
+      DAI_AI_ENABLED: ${DAI_AI_ENABLED:-true}
+      DAI_AI_BASE_URL: ${DAI_AI_BASE_URL:-https://aihub.codingpython.cn}
+      DAI_AI_API_KEY: ${DAI_AI_API_KEY:-}
+      DAI_AI_MODEL: ${DAI_AI_MODEL:-deepseek-v4-flash}
+      DAI_AI_TIMEOUT_SECONDS: ${DAI_AI_TIMEOUT_SECONDS:-60}
+      DAI_AI_MAX_RETRIES: ${DAI_AI_MAX_RETRIES:-3}
+      DAI_AI_QUEUE_NAME: ${DAI_AI_QUEUE_NAME:-judge:ai:queue}
     depends_on:
       mysql:
         condition: service_healthy
@@ -67,6 +75,14 @@ services:
       DAI_JUDGE_WORK_DIR: /judge-work
       DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须是宿主机判题目录的绝对路径}
       DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
+      # ── AI 智能代码评分 ──
+      DAI_AI_ENABLED: ${DAI_AI_ENABLED:-true}
+      DAI_AI_BASE_URL: ${DAI_AI_BASE_URL:-https://aihub.codingpython.cn}
+      DAI_AI_API_KEY: ${DAI_AI_API_KEY:-}
+      DAI_AI_MODEL: ${DAI_AI_MODEL:-deepseek-v4-flash}
+      DAI_AI_TIMEOUT_SECONDS: ${DAI_AI_TIMEOUT_SECONDS:-60}
+      DAI_AI_MAX_RETRIES: ${DAI_AI_MAX_RETRIES:-3}
+      DAI_AI_QUEUE_NAME: ${DAI_AI_QUEUE_NAME:-judge:ai:queue}
     depends_on:
       mysql:
         condition: service_healthy
