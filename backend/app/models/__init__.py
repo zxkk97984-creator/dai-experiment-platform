@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, ForeignKeyConstraint, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, ForeignKeyConstraint, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -135,6 +135,12 @@ class JudgeQuestion(TimestampMixin, Base):
     time_limit_ms: Mapped[int] = mapped_column(Integer, default=10000)
     memory_limit_mb: Mapped[int] = mapped_column(Integer, default=256)
     max_attempts: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    # ── AI 评分配置 ──────────────────────────────────────────
+    grading_mode: Mapped[str] = mapped_column(String(20), default="shadow", index=True)
+    teacher_constraints: Mapped[dict] = mapped_column(JSON, default=dict)
+    reference_solution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    test_groups: Mapped[list] = mapped_column(JSON, default=list)
+    score_cap_rules: Mapped[list] = mapped_column(JSON, default=list)
 
     assignment: Mapped[Assignment] = relationship(back_populates="questions")
 
@@ -248,6 +254,12 @@ class ExamQuestion(TimestampMixin, Base):
     hidden_tests: Mapped[str | None] = mapped_column(Text, nullable=True)
     time_limit_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     memory_limit_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # ── AI 评分配置 ──────────────────────────────────────────
+    grading_mode: Mapped[str] = mapped_column(String(20), default="shadow", index=True)
+    teacher_constraints: Mapped[dict] = mapped_column(JSON, default=dict)
+    reference_solution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    test_groups: Mapped[list] = mapped_column(JSON, default=list)
+    score_cap_rules: Mapped[list] = mapped_column(JSON, default=list)
 
     exam: Mapped[Exam] = relationship(back_populates="questions")
 
@@ -429,3 +441,88 @@ class ExperimentSubmission(TimestampMixin, Base):
 
     record: Mapped[ExperimentRecord] = relationship(back_populates="submissions")
     reviewed_by: Mapped["User | None"] = relationship(foreign_keys=[reviewed_by_id])
+
+
+# ── AI 智能代码评分 ────────────────────────────────────────────
+
+
+class QuestionRubric(TimestampMixin, Base):
+    """题目专属 Rubric——版本化管理，关联作业题或考试编程题"""
+    __tablename__ = "question_rubrics"
+    __table_args__ = (
+        CheckConstraint(
+            "(judge_question_id IS NULL) != (exam_question_id IS NULL)",
+            name="ck_rubric_xor_target",
+        ),
+        UniqueConstraint("judge_question_id", "version", name="uq_rubric_judge_version"),
+        UniqueConstraint("exam_question_id", "version", name="uq_rubric_exam_version"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    judge_question_id: Mapped[int | None] = mapped_column(
+        ForeignKey("judge_questions.id"), nullable=True, index=True
+    )
+    exam_question_id: Mapped[int | None] = mapped_column(
+        ForeignKey("exam_questions.id"), nullable=True, index=True
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
+    source_hash: Mapped[str] = mapped_column(String(64))
+    source_snapshot: Mapped[dict] = mapped_column(JSON)
+    rubric_json: Mapped[dict] = mapped_column(JSON)
+    model_name: Mapped[str] = mapped_column(String(120))
+    raw_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CodeGrade(TimestampMixin, Base):
+    """统一 AI 代码评分记录——XOR 外键关联 Submission 或 ExamAnswer"""
+    __tablename__ = "code_grades"
+    __table_args__ = (
+        CheckConstraint(
+            "(submission_id IS NULL) != (exam_answer_id IS NULL)",
+            name="ck_code_grade_xor_target",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    submission_id: Mapped[int | None] = mapped_column(
+        ForeignKey("submissions.id"), nullable=True, unique=True
+    )
+    exam_answer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("exam_answers.id"), nullable=True, unique=True
+    )
+    rubric_id: Mapped[int] = mapped_column(ForeignKey("question_rubrics.id"))
+    mode: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    functional_score: Mapped[float] = mapped_column(Float, default=0)
+    algorithm_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    robustness_score: Mapped[float] = mapped_column(Float, default=0)
+    quality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    raw_total: Mapped[float | None] = mapped_column(Float, nullable=True)
+    score_cap: Mapped[float | None] = mapped_column(Float, nullable=True)
+    final_score_100: Mapped[float | None] = mapped_column(Float, nullable=True)
+    scaled_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    deterministic_details: Mapped[dict] = mapped_column(JSON, default=dict)
+    static_analysis: Mapped[dict] = mapped_column(JSON, default=dict)
+    ai_result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    raw_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    needs_teacher_review: Mapped[bool] = mapped_column(default=False)
+    review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class GradeOverride(TimestampMixin, Base):
+    """教师覆盖审计记录——不可变、不可级联删除"""
+    __tablename__ = "grade_overrides"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code_grade_id: Mapped[int] = mapped_column(ForeignKey("code_grades.id"), index=True)
+    original_snapshot: Mapped[dict] = mapped_column(JSON)
+    replacement_snapshot: Mapped[dict] = mapped_column(JSON)
+    reason: Mapped[str] = mapped_column(Text)
+    reviewer_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
