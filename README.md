@@ -131,11 +131,19 @@ npm run dev
                           全部答案 completed → 生成 ExamGrade
 ```
 
+### 判题队列可靠性
+
+- **原子抢占**：`claim_job()` 条件 UPDATE `queued→running`，多 Worker 不会重复执行同一任务
+- **恢复扫描**：15 秒间隔扫描 `pending`/`running` 超时任务，重新入队为 `queued`
+- **最大重试**：达到 `MAX_ATTEMPTS` 后写入 `system_error` 终态，考试答案立即触发 `finalize_if_ready`
+- **去重**：相同 `queued` 任务重复推送时更新 `queued_at` 而非创建新记录
+
 ### 后台任务（FastAPI lifespan）
 
 | 任务 | 间隔 | 说明 |
 |------|------|------|
 | 过期考试扫描 | 15 秒 | 自动交卷超时考试 |
+| 判题任务恢复 | 15 秒 | `requeue_stale_jobs` 恢复超时 pending/running 任务 |
 | Kernel 清理 | 5 分钟 | 销毁 15 分钟无活动的 Kernel 会话 |
 
 ### 启动方式
@@ -155,6 +163,65 @@ npm run dev
 ```
 
 ---
+## 认证机制
+
+- **Access Token**：JWT，30 分钟过期，存于 Pinia 内存（不写 localStorage）
+- **Refresh Token**：JWT，7 天过期，仅存于 HttpOnly + Secure + SameSite=Lax Cookie（`Path=/api/v1/auth`）
+- **登录响应**：JSON body 仅返回 `access_token`/`expires_in`/`user`，不返回 `refresh_token`
+- **刷新**：`POST /auth/refresh` 优先从 Cookie 读取，备选 JSON body；使用 GETDEL 原子消费旧 token（防并发重放）
+- **登出**：`POST /auth/logout` 撤销 refresh token + access token 加入黑名单
+- **Origin 校验**：refresh/logout 端点校验 Origin 头，跨域请求返回 403
+
+## 实验提交
+
+```text
+学生点击提交 → POST /experiments/records/{id}/submit
+                    ↓
+              加载 record + 所有权校验
+                    ↓
+              client_request_id 幂等检查（已存在 → 直接返回）
+                    ↓
+              SELECT FOR UPDATE 锁定 record 行
+                    ↓
+              锁内二次幂等 + 计算 attempt_number
+                    ↓
+              深复制 cells_sources 为不可变快照 → 写入 experiment_submissions
+```
+
+- **幂等**：同一 `client_request_id`（UUID v4）重复提交返回已有记录（201 而非 409）
+- **并发安全**：行锁 + 冲突 retry（SQLite 兼容）
+- **教师评分**：`PATCH /submissions/{id}/review`，评分 0-100，空 review 拒绝（422）
+- **提交列表**：教师/管理员可按课程查看，返回学生姓名和入口名称，分页
+
+## Docker Compose 生产部署
+
+```bash
+# 环境变量（必填）
+export DAI_SECRET_KEY=<至少16字符的唯一密钥>
+export DAI_CORS_ORIGINS=https://your-domain.com
+export DAI_DB_PASSWORD=<数据库密码>
+
+# 启动全栈
+docker compose -f docker-compose.prod.yml up -d
+
+# 验证
+curl http://localhost:8080/api/v1/health/ready
+# → {"status":"ready","checks":{"mysql":"ok","redis":"ok"}}
+```
+
+### DoD 判题配置
+
+Worker 容器通过宿主机 docker.sock 启动 judge 容器。需配置宿主机工作目录：
+
+```yaml
+# docker-compose.prod.yml
+environment:
+  DAI_JUDGE_WORK_DIR: /judge-work              # 容器内路径（文件操作）
+  DAI_JUDGE_HOST_WORK_DIR: /opt/dai/judge-work # 宿主机绝对路径（传给 Docker -v）
+volumes:
+  - ./judge-work:/judge-work  # bind mount，两边路径对应
+```
+
 ## 技术栈
 
 | 层面 | 技术 |
