@@ -1,0 +1,248 @@
+"""AI 智能代码评分契约——题目配置、Rubric 文档、AI 输出、教师复核"""
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+# ── 测试组配置 ──
+
+
+class TestGroup(BaseModel):
+    """结构化测试组：ID、名称、维度、满分和 pytest 测试"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=40, pattern=r"^[A-Z][A-Z0-9_]*$")
+    name: str = Field(min_length=1, max_length=120)
+    dimension: Literal["F", "R"]
+    max_score: float = Field(gt=0, le=60)
+    tests: str = Field(min_length=1)
+
+
+class ScoreCapRule(BaseModel):
+    """教师配置的总分上限规则"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=40)
+    condition_code: Literal[
+        "off_topic",
+        "hardcoded_public_examples",
+        "required_algorithm_missing",
+        "required_complexity_missing",
+        "dangerous_operation",
+    ]
+    cap: float = Field(ge=0, le=100)
+    description: str = Field(min_length=1, max_length=300)
+
+
+class AIQuestionConfigUpdate(BaseModel):
+    """教师更新题目 AI 评分配置"""
+
+    grading_mode: Literal["legacy", "shadow", "active"]
+    teacher_constraints: dict[str, Any] = Field(default_factory=dict)
+    reference_solution: str | None = None
+    test_groups: list[TestGroup] = Field(default_factory=list)
+    score_cap_rules: list[ScoreCapRule] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_weights(self) -> AIQuestionConfigUpdate:
+        if self.grading_mode == "legacy":
+            return self
+
+        if not self.test_groups:
+            raise ValueError("active/shadow 模式必须至少包含一个测试组")
+
+        f_total = sum(g.max_score for g in self.test_groups if g.dimension == "F")
+        r_total = sum(g.max_score for g in self.test_groups if g.dimension == "R")
+        if abs(f_total - 60) > 1e-6 or abs(r_total - 10) > 1e-6:
+            raise ValueError(
+                f"AI V1 测试组必须满足 F=60、R=10，当前 F={f_total}、R={r_total}"
+            )
+        if len({g.id for g in self.test_groups}) != len(self.test_groups):
+            raise ValueError("测试组 ID 必须唯一")
+        return self
+
+
+# ── Rubric 文档 ──
+
+
+class RubricCriterionItem(BaseModel):
+    """Rubric 中的单个评分项"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=20)
+    name: str = Field(min_length=1, max_length=200)
+    points: float = Field(gt=0, le=20)
+
+
+class RubricDocument(BaseModel):
+    """题目专属 Rubric——AI 生成后经校验保存"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rubric_version: int = Field(ge=1)
+    question_type: str = Field(min_length=1, max_length=200)
+    learning_objective: str = Field(min_length=1, max_length=500)
+    explicit_requirements: list[str] = Field(default_factory=list)
+    teacher_constraints: list[str] = Field(default_factory=list)
+    accepted_strategies: list[str] = Field(default_factory=list)
+    algorithm_criteria: list[RubricCriterionItem] = Field(min_length=1)
+    quality_criteria: list[RubricCriterionItem] = Field(
+        default_factory=lambda: [
+            RubricCriterionItem(id="Q1", name="可读性与命名", points=3),
+            RubricCriterionItem(id="Q2", name="代码结构", points=3),
+            RubricCriterionItem(id="Q3", name="重复与冗余", points=2),
+            RubricCriterionItem(id="Q4", name="接口、规范与安全", points=2),
+        ]
+    )
+    uncertain_items: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_totals(self) -> RubricDocument:
+        a_total = sum(item.points for item in self.algorithm_criteria)
+        if abs(a_total - 20) > 1e-6:
+            raise ValueError(f"算法评分项满分之和必须为 20，当前为 {a_total}")
+
+        q_total = sum(item.points for item in self.quality_criteria)
+        if abs(q_total - 10) > 1e-6:
+            raise ValueError(f"代码质量评分项满分之和必须为 10，当前为 {q_total}")
+
+        # Q 固定为 Q1-Q4
+        expected_q_ids = {"Q1", "Q2", "Q3", "Q4"}
+        actual_q_ids = {item.id for item in self.quality_criteria}
+        if actual_q_ids != expected_q_ids:
+            raise ValueError(f"代码质量评分项必须固定为 {expected_q_ids}")
+
+        return self
+
+
+# ── AI 评分输出 ──
+
+
+class GradeItem(BaseModel):
+    """AI 对单个评分项的输出"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    criterion_id: str = Field(min_length=1)
+    criterion: str = Field(min_length=1, max_length=300)
+    level: Literal["complete", "partial", "missing"]
+    score: float = Field(ge=0)
+    max_score: float = Field(ge=0)
+    code_lines: list[int] = Field(default_factory=list)
+    evidence: str = Field(min_length=1)
+    reason_code: str | None = None
+    deduction_reason: str | None = None
+
+
+class GradeDimension(BaseModel):
+    """AI 对某个维度的评分"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dimension_score: float = Field(ge=0)
+    dimension_max: float = Field(ge=0)
+    items: list[GradeItem] = Field(default_factory=list)
+
+
+class StudentFeedback(BaseModel):
+    """学生可解释反馈"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    strengths: list[str] = Field(default_factory=list)
+    issues: list[str] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
+
+
+class AIGradeResponse(BaseModel):
+    """AI 评分完整返回——后端校验前"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rubric_version: int = Field(ge=1)
+    algorithm: GradeDimension
+    code_quality: GradeDimension
+    triggered_cap_rule_ids: list[str] = Field(default_factory=list)
+    uncertainties: list[str] = Field(default_factory=list)
+    needs_teacher_review: bool = False
+    review_reason: str | None = None
+    student_feedback: StudentFeedback
+
+    @model_validator(mode="after")
+    def validate_dimension_consistency(self) -> AIGradeResponse:
+        # 校验 A 维度和
+        a_sum = sum(item.score for item in self.algorithm.items)
+        if abs(a_sum - self.algorithm.dimension_score) > 1e-4:
+            raise ValueError("算法维度：分项和与 dimension_score 不一致")
+
+        # 校验 Q 维度和
+        q_sum = sum(item.score for item in self.code_quality.items)
+        if abs(q_sum - self.code_quality.dimension_score) > 1e-4:
+            raise ValueError("代码质量维度：分项和与 dimension_score 不一致")
+
+        return self
+
+
+# ── 教师复核 ──
+
+
+class GradeOverrideCreate(BaseModel):
+    """教师覆盖评分请求"""
+
+    algorithm_score: float | None = Field(default=None, ge=0, le=20)
+    quality_score: float | None = Field(default=None, ge=0, le=10)
+    final_score_100: float | None = Field(default=None, ge=0, le=100)
+    reason: str = Field(min_length=3, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_at_least_one(self) -> GradeOverrideCreate:
+        if self.algorithm_score is None and self.quality_score is None and self.final_score_100 is None:
+            raise ValueError("至少需要指定 algorithm_score、quality_score 或 final_score_100 之一")
+        return self
+
+
+# ── 安全导出（学生可见） ──
+
+
+class CodeGradeItemRead(BaseModel):
+    """单条评分项——供学生查看"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    criterion_id: str
+    criterion: str
+    level: str
+    score: float
+    max_score: float
+    code_lines: list[int] = Field(default_factory=list)
+    evidence: str
+    deduction_reason: str | None = None
+
+
+class ActiveCodeGradeRead(BaseModel):
+    """学生可见的评分拆解——仅 active 模式返回"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: str
+    status: str
+    functional_score: float
+    algorithm_score: float | None = None
+    robustness_score: float
+    quality_score: float | None = None
+    raw_total: float | None = None
+    score_cap: float | None = None
+    final_score_100: float | None = None
+    scaled_score: float | None = None
+
+    algorithm_items: list[CodeGradeItemRead] = Field(default_factory=list)
+    quality_items: list[CodeGradeItemRead] = Field(default_factory=list)
+
+    strengths: list[str] = Field(default_factory=list)
+    issues: list[str] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
