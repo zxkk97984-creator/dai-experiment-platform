@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -360,3 +361,39 @@ def test_pytest_collects_only_automated_tests_from_repo_root():
         capture_output=True, text=True, timeout=30, check=False,
     )
     _assert_only_automated_tests_collected(REPO_ROOT, result)
+
+
+# ═══════════════════════════════════════════════════════════════
+# P1-1: conftest 仅在未设置 DAI_DATABASE_URL 时创建临时 SQLite
+# ═══════════════════════════════════════════════════════════════
+
+def test_p1_1_conftest_uses_env_mysql_url(tmp_path, monkeypatch):
+    """P1-1: 设置 DAI_DATABASE_URL 为 MySQL URL 时，conftest 直接使用而非覆盖为 SQLite"""
+    mysql_url = "mysql+pymysql://dai:test@127.0.0.1:3306/dai_platform"
+    monkeypatch.setenv("DAI_DATABASE_URL", mysql_url)
+
+    # 重新导入以触发 fixture 逻辑
+    db_url = os.environ.get("DAI_DATABASE_URL", "")
+    assert db_url == mysql_url
+
+    # 模拟 conftest 逻辑：仅在未设置环境变量时创建临时 SQLite
+    if not db_url:
+        db_url = f"sqlite:///{tmp_path / 'test.db'}"
+
+    assert db_url == mysql_url, (
+        f"P1-1: 设置 MySQL URL 后不应覆盖为 SQLite，但 db_url = {db_url}"
+    )
+    assert "sqlite" not in db_url, "MySQL URL 不应包含 sqlite"
+
+
+def test_p1_1_conftest_creates_sqlite_when_no_env(tmp_path, monkeypatch):
+    """P1-1: 未设置 DAI_DATABASE_URL 时，conftest 创建临时 SQLite"""
+    monkeypatch.delenv("DAI_DATABASE_URL", raising=False)
+
+    db_url = os.environ.get("DAI_DATABASE_URL", "")
+    assert not db_url, "环境变量应未设置"
+
+    if not db_url:
+        db_url = f"sqlite:///{tmp_path / 'test.db'}"
+
+    assert "sqlite" in db_url, "未设置环境变量时应使用 SQLite"

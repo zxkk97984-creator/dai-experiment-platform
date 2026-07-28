@@ -21,8 +21,9 @@ from app.security import hash_password
 @pytest.fixture()
 def test_settings(tmp_path):
     # 可通过 DAI_DATABASE_URL 环境变量切换到 MySQL（CI job 设置此变量）
+    # 仅在未设置环境变量时创建临时 SQLite 数据库
     db_url = os.environ.get("DAI_DATABASE_URL", "")
-    if not db_url or "sqlite" not in db_url:
+    if not db_url:
         db_path = tmp_path / "test.db"
         db_url = f"sqlite:///{db_path}"
     return Settings(

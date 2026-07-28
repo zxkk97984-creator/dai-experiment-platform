@@ -26,7 +26,7 @@ jobs:
           pip install -r requirements.txt
           pip install pytest fakeredis
       - name: 运行测试（跳过 kernel + docker）
-        run: python -m pytest -q --ignore=tests/kernel_connect_test.py --ignore=tests/kernel_ipykernel_test.py --ignore=tests/kernel_test.py --ignore=tests/debug_kernel.py --ignore=tests/diag_execute.py --ignore=tests/test_kernel_prototype.py -k "not test_pytest_collects_only_automated_tests_from_repo_root"
+        run: python -m pytest -q --ignore=tests/kernel_connect_test.py --ignore=tests/kernel_ipykernel_test.py --ignore=tests/kernel_test.py --ignore=tests/debug_kernel.py --ignore=tests/diag_execute.py --ignore=tests/test_kernel_prototype.py
 
   backend-test-mysql:
     name: 后端 pytest (MySQL)
@@ -86,7 +86,7 @@ jobs:
       - name: 运行迁移
         run: alembic upgrade head
       - name: 运行测试（跳过 kernel + docker）
-        run: python -m pytest -q --ignore=tests/kernel_connect_test.py --ignore=tests/kernel_ipykernel_test.py --ignore=tests/kernel_test.py --ignore=tests/debug_kernel.py --ignore=tests/diag_execute.py --ignore=tests/test_kernel_prototype.py -k "not test_pytest_collects_only_automated_tests_from_repo_root"
+        run: python -m pytest -q --ignore=tests/kernel_connect_test.py --ignore=tests/kernel_ipykernel_test.py --ignore=tests/kernel_test.py --ignore=tests/debug_kernel.py --ignore=tests/diag_execute.py --ignore=tests/test_kernel_prototype.py
 
   frontend-test:
     name: 前端 test + build
