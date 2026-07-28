@@ -19,5 +19,10 @@ test.describe('课程学习主流程', () => {
 
     // 应跳转到课程详情页
     await expect(page).toHaveURL(/\/student\/courses\/\d+/)
+
+    // 打开并实际读取课时内容
+    await page.locator('.lesson-item').first().click()
+    await expect(page).toHaveURL(/\/student\/courses\/\d+\/lessons\/\d+/)
+    await expect(page.getByText('测试课时')).toBeVisible()
   })
 })

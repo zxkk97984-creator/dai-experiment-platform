@@ -476,6 +476,18 @@ class ExperimentSubmissionRead(BaseModel):
     entry_name: str | None = None
 
 
+class ExperimentCellMetadata(BaseModel):
+    type: str
+    order: int
+
+
+class ExperimentSubmissionDetailRead(ExperimentSubmissionRead):
+    """不可变提交快照及其展示上下文。"""
+
+    outputs_snapshot: dict = Field(default_factory=dict)
+    cell_metadata: dict[str, ExperimentCellMetadata] = Field(default_factory=dict)
+
+
 class ExperimentSubmitRequest(BaseModel):
     """实验提交请求——client_request_id 用于幂等"""
     client_request_id: UUID  # UUID v4，Pydantic 自动校验格式

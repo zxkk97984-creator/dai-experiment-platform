@@ -22,7 +22,8 @@ test.describe('作业提交判题流程', () => {
     // 提交代码——使用具体按钮文本
     await page.getByRole('button', { name: '提交代码' }).click()
 
-    // 等待判题结果出现
-    await expect(page.getByText(/accepted|wrong_answer|runtime_error|判题/)).toBeVisible({ timeout: 30000 })
+    // 必须等待 Worker 返回最终 accepted，不能只匹配页面上的静态“判题”文字
+    await expect(page.locator('.submit-result-card.result-pass')).toBeVisible({ timeout: 30000 })
+    await expect(page.getByText(/全部通过/)).toBeVisible()
   })
 })

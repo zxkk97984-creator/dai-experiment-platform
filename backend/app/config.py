@@ -67,6 +67,13 @@ class Settings(BaseSettings):
         if "*" in origins:
             errors.append("DAI_CORS_ORIGINS 不允许使用通配符 *")
 
+        # Docker-outside-of-Docker 模式中，容器内目录不能直接交给宿主机
+        # Docker daemon。配置了共享工作目录时，必须同时给出宿主机绝对路径。
+        if self.judge_work_dir and not self.judge_host_work_dir:
+            errors.append(
+                "DAI_JUDGE_HOST_WORK_DIR 未设置，生产环境判题容器无法挂载宿主机工作目录"
+            )
+
         if errors:
             raise ValueError("生产环境配置校验失败:\n  - " + "\n  - ".join(errors))
         return self

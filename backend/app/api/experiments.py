@@ -21,6 +21,7 @@ from app.models import (
 )
 from app.schemas import (
     ExperimentCellExecuteRequest,
+    ExperimentCellMetadata,
     ExperimentCellExecuteResponse,
     ExperimentCellOut,
     ExperimentCellsSaveRequest,
@@ -29,6 +30,7 @@ from app.schemas import (
     ExperimentRecordDetailResponse,
     ExperimentRecordRead,
     ExperimentReviewUpdate,
+    ExperimentSubmissionDetailRead,
     ExperimentSubmissionRead,
     ExperimentSubmitRequest,
     PaginatedResponse,
@@ -599,9 +601,17 @@ def submit_record(
     )
     attempt_number = (max_attempt or 0) + 1
 
-    # 7. 深复制 cells_snapshot（确保后续保存 cells 不改变历史提交）
+    # 7. 深复制源码与输出快照（确保后续运行/保存不改变历史提交）
     import copy
+    version = db.get(NotebookTemplateVersion, record.template_version_id)
     snapshot = copy.deepcopy(record.cells_sources)
+    if version:
+        snapshot = {
+            cell["id"]: record.cells_sources.get(cell["id"], cell.get("source", ""))
+            for cell in version.cells
+            if not cell.get("source_hidden")
+        }
+    outputs_snapshot = copy.deepcopy(record.cells_outputs)
 
     now = datetime.now(timezone.utc)
     submission = ExperimentSubmission(
@@ -609,6 +619,7 @@ def submit_record(
         attempt_number=attempt_number,
         client_request_id=client_request_id,
         cells_snapshot=snapshot,
+        outputs_snapshot=outputs_snapshot,
         submitted_at=now,
     )
 
@@ -763,7 +774,7 @@ def list_submissions(
     )
 
 
-@router.get("/submissions/{submission_id}", response_model=ExperimentSubmissionRead)
+@router.get("/submissions/{submission_id}", response_model=ExperimentSubmissionDetailRead)
 def get_submission(
     submission_id: int,
     db: Session = Depends(get_db),
@@ -801,7 +812,22 @@ def get_submission(
         else:
             raise api_error(403, "FORBIDDEN", "无权查看该提交")
 
-    return submission
+    version = db.get(NotebookTemplateVersion, record.template_version_id)
+    metadata = {}
+    if version:
+        metadata = {
+            cell["id"]: ExperimentCellMetadata(
+                type=cell.get("type", "code"),
+                order=cell.get("order", index),
+            )
+            for index, cell in enumerate(version.cells)
+            if cell["id"] in submission.cells_snapshot
+        }
+
+    detail = ExperimentSubmissionDetailRead.model_validate(submission)
+    detail.outputs_snapshot = submission.outputs_snapshot or {}
+    detail.cell_metadata = metadata
+    return detail
 
 
 @router.patch("/submissions/{submission_id}/review", response_model=ExperimentSubmissionRead)

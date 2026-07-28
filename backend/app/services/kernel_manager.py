@@ -78,10 +78,28 @@ class KernelManager:
     def _make_lock_token(self) -> str:
         return secrets.token_hex(16)
 
+    def _kernel_path(self, *parts: str) -> str:
+        """返回 API/Worker 容器内可写的 Kernel 共享目录路径。"""
+        if self.settings.judge_work_dir:
+            return os.path.join(self.settings.judge_work_dir, *parts)
+        return os.path.join(os.environ.get("TEMP", "/tmp"), *parts)
+
+    def _docker_host_path(self, container_path: str) -> str:
+        """把共享目录中的容器路径转换为 Docker daemon 可见的宿主机路径。"""
+        container_root = self.settings.judge_work_dir.replace("\\", "/").rstrip("/")
+        host_root = self.settings.judge_host_work_dir.replace("\\", "/").rstrip("/")
+        normalized = container_path.replace("\\", "/")
+        if container_root and host_root and (
+            normalized == container_root or normalized.startswith(f"{container_root}/")
+        ):
+            relative = normalized[len(container_root):].lstrip("/")
+            return f"{host_root}/{relative}" if relative else host_root
+        return container_path
+
     def _generate_conn_file(self, record_id: int) -> tuple[str, dict]:
         from jupyter_client import write_connection_file
 
-        tmp_dir = os.path.join(os.environ.get("TEMP", "/tmp"), "dai-kernels")
+        tmp_dir = self._kernel_path("kernels")
         os.makedirs(tmp_dir, exist_ok=True)
         conn_path = os.path.join(tmp_dir, f"kernel-rec-{record_id}.json")
         key = secrets.token_hex(24).encode("ascii")
@@ -91,6 +109,8 @@ class KernelManager:
         conn_info["ip"] = "0.0.0.0"
         with open(conn_path, "w") as f:
             json.dump(conn_info, f)
+        # Kernel sandbox 以 UID 1000 运行；文件仍以 :ro 挂载，但必须可读。
+        os.chmod(conn_path, 0o644)
         return conn_path, conn_info
 
     def _write_session_redis(self, record_id: int, session: KernelSession):
@@ -157,8 +177,10 @@ class KernelManager:
 
         conn_path, conn_info = self._generate_conn_file(record_id)
 
-        work_dir = os.path.join(os.environ.get("TEMP", "/tmp"), "dai-workspaces", f"student_{record_id}")
+        work_dir = self._kernel_path("workspaces", f"student_{record_id}")
         os.makedirs(work_dir, exist_ok=True)
+        host_conn_path = self._docker_host_path(conn_path)
+        host_work_dir = self._docker_host_path(work_dir)
 
         cmd = [
             "docker", "run", "-d", "--name", container_name,
@@ -169,8 +191,8 @@ class KernelManager:
             "--tmpfs", "/tmp:exec,size=64m",
             "--cpus", "1", "--memory", "256m", "--pids-limit", "50",
             "-l", f"dai.record_id={record_id}",
-            "-v", f"{conn_path}:/tmp/conn.json:ro",
-            "-v", f"{work_dir}:/work:rw",
+            "-v", f"{host_conn_path}:/tmp/conn.json:ro",
+            "-v", f"{host_work_dir}:/work:rw",
         ]
         if os.path.isdir(lesson_storage_dir):
             cmd.extend(["-v", f"{lesson_storage_dir}:/course:ro"])

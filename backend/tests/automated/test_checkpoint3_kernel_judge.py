@@ -68,6 +68,59 @@ def test_kernel_docker_argv_has_exact_security_params():
     assert not any(a == '-p' or a.startswith('-p ') for a in argv), f"不应有 -p: {argv_str}"
 
 
+def test_kernel_dod_mounts_use_docker_host_paths():
+    """DoD 模式下 Kernel 的连接文件和工作目录必须使用宿主机路径挂载。"""
+    from app.config import Settings
+    from fakeredis import FakeStrictRedis
+
+    settings = Settings(
+        judge_work_dir="/judge-work",
+        judge_host_work_dir="/host/dai/judge-work",
+    )
+    km = KernelManager(settings)
+    with patch.object(km, "_generate_conn_file") as mock_gen, \
+         patch("redis.from_url", return_value=FakeStrictRedis()), \
+         patch("subprocess.run") as mock_run, \
+         patch("os.makedirs"), \
+         patch("time.sleep"):
+        mock_gen.return_value = (
+            "/judge-work/kernels/kernel-rec-7.json",
+            {
+                "shell_port": 1, "iopub_port": 2, "stdin_port": 3,
+                "control_port": 4, "hb_port": 5, "ip": "0.0.0.0",
+            },
+        )
+        mock_run.side_effect = [
+            MagicMock(returncode=0),
+            MagicMock(returncode=0, stdout="abc\n"),
+            MagicMock(returncode=0, stdout="abc\n"),
+        ]
+
+        km.create_session(7, "")
+
+    run_call = next(
+        call for call in mock_run.call_args_list
+        if len(call[0][0]) > 2 and call[0][0][1] == "run"
+    )
+    argv = run_call[0][0]
+    assert "/host/dai/judge-work/kernels/kernel-rec-7.json:/tmp/conn.json:ro" in argv
+    assert "/host/dai/judge-work/workspaces/student_7:/work:rw" in argv
+
+
+def test_kernel_connection_file_is_readable_by_sandbox_user(tmp_path):
+    """连接文件只读挂载给 UID 1000 前，必须赋予读取权限。"""
+    from app.config import Settings
+
+    km = KernelManager(Settings(judge_work_dir=str(tmp_path)))
+    with patch("os.chmod") as chmod:
+        conn_path, _ = km._generate_conn_file(8)
+
+    assert any(
+        call.args == (conn_path, 0o644)
+        for call in chmod.call_args_list
+    ), "连接文件必须 chmod 0644 后再挂载给非 root Kernel"
+
+
 # ═══════════════════════════════════════════════════════════════
 # Redis 锁 fail closed + token-safe release
 # ═══════════════════════════════════════════════════════════════

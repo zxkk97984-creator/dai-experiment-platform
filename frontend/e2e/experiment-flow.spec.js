@@ -17,15 +17,36 @@ test.describe('Notebook 实验提交评分流程', () => {
     // 实验页面至少显示实验名称
     await expect(page.getByText('E2E 测试实验')).toBeVisible({ timeout: 10000 })
 
-    // 运行 cell——页面应有源码或运行按钮
+    // 运行 cell，按钮必须存在
     const runBtn = page.locator('button').filter({ hasText: /▶|Run|运行/ }).first()
-    const canRun = await runBtn.isVisible({ timeout: 3000 }).catch(() => false)
-    if (canRun) {
-      await runBtn.click()
-      await page.waitForTimeout(3000)
-    }
+    await expect(runBtn).toBeVisible()
+    await runBtn.click()
 
-    // 验证页面有 cell 内容
-    await expect(page.getByText(/print|hello/).first()).toBeVisible({ timeout: 5000 })
+    // 等待 Kernel 完成并把输出保存到 record 后再提交
+    await expect(page.locator('.exec-count')).toHaveText('In [1]', { timeout: 30000 })
+    await expect(page.locator('.output-area')).toContainText('hello e2e')
+
+    // 打开操作菜单并提交，必须出现提交成功状态
+    await page.locator('[aria-haspopup="menu"]').click()
+    await page.locator('.menu-submit').click()
+    await expect(page.locator('.submit-status.submitted')).toBeVisible({ timeout: 10000 })
+
+    // 管理员进入提交详情并完成评分，覆盖教师端同一套评阅界面
+    await page.evaluate(() => localStorage.clear())
+    await page.goto('/login')
+    await page.fill('#login-username', 'admin')
+    await page.fill('#login-password', 'Passw0rd!')
+    await page.click('button[type="submit"]')
+    await expect(page).toHaveURL(/\/admin\//)
+
+    await page.goto('/admin/submissions')
+    await page.locator('.submission-card').first().click()
+    await expect(page).toHaveURL(/\/admin\/submissions\/\d+/)
+    await expect(page.getByText('提交快照（只读）')).toBeVisible()
+    await expect(page.getByText(/execution_count:\s*1/)).toBeVisible()
+    await page.locator('input[type="number"]').fill('95')
+    await page.locator('textarea').fill('E2E 评分通过')
+    await page.getByRole('button', { name: '保存评分' }).click()
+    await expect(page.getByText(/上次评分/)).toBeVisible({ timeout: 10000 })
   })
 })

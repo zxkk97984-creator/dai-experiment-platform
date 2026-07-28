@@ -16,11 +16,8 @@ const saving = ref(false)
 
 const cells = computed(() => {
   if (!submission.value?.cells_snapshot) return []
-  // 尝试从 record 详情获取 cell 元数据（类型、顺序、输出）
-  const record = submission.value.record || {}
-  const versionCells = record.template_version?.cells || []
-  const cellMap = {}
-  versionCells.forEach(c => { cellMap[c.id] = c })
+  const cellMap = submission.value.cell_metadata || {}
+  const outputs = submission.value.outputs_snapshot || {}
 
   return Object.entries(submission.value.cells_snapshot).map(([id, source], idx) => {
     const meta = cellMap[id] || {}
@@ -29,7 +26,7 @@ const cells = computed(() => {
       source: source || '',
       type: meta.type || 'code',
       order: meta.order ?? idx,
-      outputs: (record.cells_outputs || {})[id] || null,
+      outputs: outputs[id] || null,
     }
   }).sort((a, b) => a.order - b.order)
 })

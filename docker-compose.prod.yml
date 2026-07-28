@@ -40,7 +40,7 @@ services:
       DAI_JUDGE_WORK_DIR: /judge-work
       # 宿主机侧判题工作目录绝对路径——Worker 将此路径传给 Docker daemon 做 bind mount
       # 开发环境无需设置（自动回退到 DAI_JUDGE_WORK_DIR）
-      DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:-}
+      DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须是宿主机判题目录的绝对路径}
     depends_on:
       mysql:
         condition: service_healthy
@@ -50,7 +50,7 @@ services:
       - internal
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./judge-work:/judge-work
+      - "${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须设置}:/judge-work"
       - ./backend/alembic/versions:/app/alembic/versions:ro
       - studio_data:/app/storage/studio
 
@@ -65,7 +65,7 @@ services:
       DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
       DAI_STUDIO_STORAGE_DIR: /app/storage/studio
       DAI_JUDGE_WORK_DIR: /judge-work
-      DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:-}
+      DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须是宿主机判题目录的绝对路径}
       DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
     depends_on:
       mysql:
@@ -76,7 +76,7 @@ services:
       - internal
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./judge-work:/judge-work
+      - "${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须设置}:/judge-work"
       - ./backend/alembic/versions:/app/alembic/versions:ro
       - studio_data:/app/storage/studio
 

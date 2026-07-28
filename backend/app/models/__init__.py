@@ -417,6 +417,7 @@ class ExperimentSubmission(TimestampMixin, Base):
     attempt_number: Mapped[int] = mapped_column(Integer, default=1)
     client_request_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     cells_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    outputs_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     submitted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

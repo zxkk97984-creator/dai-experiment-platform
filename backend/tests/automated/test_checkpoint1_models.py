@@ -444,6 +444,35 @@ def test_p1_6_production_cors_rejects_empty():
         )
 
 
+def test_production_requires_docker_host_judge_work_dir():
+    """DoD 生产部署必须显式提供 Docker daemon 可见的宿主机目录。"""
+    from app.config import Settings
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError, match="DAI_JUDGE_HOST_WORK_DIR"):
+        Settings(
+            environment="production",
+            secret_key="production-secret",
+            database_url="mysql+pymysql://dai:password@mysql/dai_platform",
+            redis_url="redis://redis:6379/0",
+            cors_origins="https://myapp.example.com",
+            judge_work_dir="/judge-work",
+            judge_host_work_dir="",
+        )
+
+
+def test_ci_runs_docker_jobs_and_seeds_e2e_data():
+    """Docker 验证必须实际运行，E2E 启动后必须装载固定种子数据。"""
+    from pathlib import Path
+
+    workflow = (
+        Path(__file__).resolve().parents[3] / ".github" / "workflows" / "ci.yml"
+    ).read_text(encoding="utf-8")
+    assert "if: false" not in workflow
+    assert "seed_e2e.py" in workflow
+    assert "http://localhost:8080/api/v1/health/live" in workflow
+
+
 def test_p1_6_contextvar_set_and_reset():
     """P1-6: ContextVar set 返回 token，reset 后恢复默认值"""
     from app.logging_config import set_request_id, get_request_id, _request_id_var
