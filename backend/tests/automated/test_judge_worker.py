@@ -323,3 +323,71 @@ def test_p0_5_maybe_finalize_blocks_on_running():
     finalize_if_ready(2, db2)
     assert db2.scalar.call_count >= 4, "应该在确认无未完成后查询 total + grade"
     assert db2.commit.called, "应该提交最终成绩"
+
+
+# ═══════════════════════════════════════════════════════════════
+# P0-1: DoD 宿主机路径与容器路径分离
+# ═══════════════════════════════════════════════════════════════
+
+def test_p0_1_docker_v_uses_host_workdir_when_configured():
+    """验证 judge_host_work_dir 设置后，Docker -v 参数使用宿主机路径"""
+    from app.config import Settings
+
+    settings = Settings(
+        secret_key="test",
+        judge_work_dir="/container/judge-work",
+        judge_host_work_dir="/host/real/judge-work",
+        judge_image="dai-judge-python:latest",
+    )
+
+    # 模拟 workdir 在容器内路径 /container/judge-work/dai-judge-abc123
+    container_workdir = Path("/container/judge-work/dai-judge-abc123")
+    host_workdir = Path("/host/real/judge-work/dai-judge-abc123")
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(stdout="1 passed", stderr="", returncode=0)
+        _run_docker_pytest(
+            container_workdir, settings, timeout_seconds=5, memory_limit_mb=256,
+            host_workdir=host_workdir,
+        )
+
+    # 验证 -v 参数使用了宿主机路径而非容器内路径
+    call_args = mock_run.call_args[0][0]
+    v_index = call_args.index("-v") if "-v" in call_args else -1
+    assert v_index >= 0, "Docker 命令缺少 -v 参数"
+    mount_arg = call_args[v_index + 1]
+    assert str(host_workdir) in mount_arg, (
+        f"Docker -v 应使用宿主机路径 {host_workdir}，实际为 {mount_arg}"
+    )
+    assert "/container/" not in mount_arg, (
+        f"Docker -v 不应包含容器内路径，实际为 {mount_arg}"
+    )
+
+
+def test_p0_1_docker_v_falls_back_to_workdir_when_host_not_set():
+    """未设置 judge_host_work_dir 时，Docker -v 回退到容器内路径（兼容旧行为）"""
+    from app.config import Settings
+
+    settings = Settings(
+        secret_key="test",
+        judge_work_dir="/judge-work",
+        judge_host_work_dir="",  # 未设置
+        judge_image="dai-judge-python:latest",
+    )
+
+    workdir = Path("/judge-work/dai-judge-xyz789")
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(stdout="1 passed", stderr="", returncode=0)
+        _run_docker_pytest(
+            workdir, settings, timeout_seconds=5, memory_limit_mb=256,
+            host_workdir=None,  # 未指定 host_workdir
+        )
+
+    call_args = mock_run.call_args[0][0]
+    v_index = call_args.index("-v") if "-v" in call_args else -1
+    assert v_index >= 0, "Docker 命令缺少 -v 参数"
+    mount_arg = call_args[v_index + 1]
+    assert str(workdir) in mount_arg, (
+        f"未设置 host_workdir 时应回退到 workdir，预期 {workdir}，实际 {mount_arg}"
+    )

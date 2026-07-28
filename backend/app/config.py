@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     )
     # 判题临时文件目录——Docker Compose 下必须与 judge 容器挂载相同路径
     judge_work_dir: str = ""
+    # 宿主机侧判题工作目录——DoD 模式下传给 Docker daemon 的宿主机绝对路径
+    # 未设置时回退到 judge_work_dir（适用于非 DoD / 开发环境）
+    judge_host_work_dir: str = ""
 
     @model_validator(mode="after")
     def _validate_production(self):

@@ -58,8 +58,15 @@ def _write_submission_files(workdir: Path, submission: Submission, question: Jud
 
 
 def _run_docker_pytest(workdir: Path, settings: Settings, timeout_seconds: int,
-                       memory_limit_mb: int = 256, test_filename: str = "test_user_code.py") -> tuple[str, str, int, int]:
-    """统一 Docker sandbox——唯一入口。正式题用 test_user_code.py，sample 用 test_sample.py"""
+                       memory_limit_mb: int = 256, test_filename: str = "test_user_code.py",
+                       host_workdir: Path | None = None) -> tuple[str, str, int, int]:
+    """统一 Docker sandbox——唯一入口。正式题用 test_user_code.py，sample 用 test_sample.py
+
+    workdir: 容器内的工作目录路径（用于文件操作）
+    host_workdir: 宿主机侧的工作目录路径（传给 Docker daemon 的 -v 参数）。
+                  未指定时回退到 workdir（兼容非 DoD 环境）。
+    """
+    host_path = host_workdir if host_workdir is not None else workdir
     container_name = f"dai-judge-{secrets.token_hex(8)}"
     command = [
         "docker", "run", "--rm", "--name", container_name,
@@ -72,7 +79,7 @@ def _run_docker_pytest(workdir: Path, settings: Settings, timeout_seconds: int,
         "--memory", f"{memory_limit_mb}m",
         "--pids-limit", "50",
         "--user", "1000:1000",
-        "-v", f"{workdir}:/work:ro",
+        "-v", f"{host_path}:/work:ro",
         "-w", "/work",
         settings.judge_image,
         "python", "-m", "pytest", "-q", "-p", "no:cacheprovider", test_filename,
@@ -141,14 +148,22 @@ def process_submission(db: Session, redis_client, settings: Settings, submission
 
         # 优先使用配置的工作目录（Compose 下与宿主机共享），否则系统临时目录
         _work_root = Path(settings.judge_work_dir) if settings.judge_work_dir else None
+        # DoD：宿主机侧工作目录根路径（传给 Docker daemon 的 -v 参数）
+        _host_root = Path(settings.judge_host_work_dir) if settings.judge_host_work_dir else None
         _cleanup = None
         try:
             if _work_root:
                 workdir, _cleanup = _make_work_dir(_work_root, "dai-judge-")
+                # 计算对应的宿主机路径：将容器前缀替换为宿主机前缀
+                if _host_root:
+                    host_workdir = _host_root / workdir.relative_to(_work_root)
+                else:
+                    host_workdir = workdir
             else:
                 # 用 tempfile 作为 context manager
                 _temp = tempfile.TemporaryDirectory(prefix="dai-judge-")
                 workdir = Path(_temp.name)
+                host_workdir = workdir
                 _cleanup = lambda: _temp.cleanup()
 
             _write_submission_files(workdir, submission, question)
@@ -158,6 +173,7 @@ def process_submission(db: Session, redis_client, settings: Settings, submission
             try:
                 stdout, stderr, returncode, elapsed_ms = _run_docker_pytest(
                     workdir, settings, timeout_seconds, memory_limit_mb,
+                    host_workdir=host_workdir,
                 )
             except Exception as e:
                 # Docker 执行异常：可重试
@@ -272,13 +288,19 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
             return answer
 
         _work_root = Path(settings.judge_work_dir) if settings.judge_work_dir else None
+        _host_root = Path(settings.judge_host_work_dir) if settings.judge_host_work_dir else None
         _cleanup = None
         try:
             if _work_root:
                 workdir, _cleanup = _make_work_dir(_work_root, "dai-exam-judge-")
+                if _host_root:
+                    host_workdir = _host_root / workdir.relative_to(_work_root)
+                else:
+                    host_workdir = workdir
             else:
                 _temp = tempfile.TemporaryDirectory(prefix="dai-exam-judge-")
                 workdir = Path(_temp.name)
+                host_workdir = workdir
                 _cleanup = lambda: _temp.cleanup()
 
             user_code = workdir / "user_code.py"
@@ -293,7 +315,8 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
             mem_mb = question.memory_limit_mb or settings.judge_memory_limit_mb
 
             try:
-                stdout, stderr, returncode, elapsed_ms = _run_docker_pytest(workdir, settings, timeout_s, mem_mb)
+                stdout, stderr, returncode, elapsed_ms = _run_docker_pytest(workdir, settings, timeout_s, mem_mb,
+                                                                             host_workdir=host_workdir)
             except Exception as e:
                 fail_job(db, job_type="exam", object_id=answer_id,
                          error=f"Docker 判题失败: {e}", retryable=True)

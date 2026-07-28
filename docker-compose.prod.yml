@@ -38,6 +38,9 @@ services:
       DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
       DAI_STUDIO_STORAGE_DIR: /app/storage/studio
       DAI_JUDGE_WORK_DIR: /judge-work
+      # 宿主机侧判题工作目录绝对路径——Worker 将此路径传给 Docker daemon 做 bind mount
+      # 开发环境无需设置（自动回退到 DAI_JUDGE_WORK_DIR）
+      DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:-}
     depends_on:
       mysql:
         condition: service_healthy
@@ -61,6 +64,7 @@ services:
       DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
       DAI_STUDIO_STORAGE_DIR: /app/storage/studio
       DAI_JUDGE_WORK_DIR: /judge-work
+      DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:-}
     depends_on:
       mysql:
         condition: service_healthy
