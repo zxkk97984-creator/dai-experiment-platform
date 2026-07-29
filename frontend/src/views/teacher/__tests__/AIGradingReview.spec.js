@@ -1,71 +1,144 @@
-/** Task 12: 教师复核列表与详情测试 */
-import { describe, it, expect } from 'vitest'
+/** Task 12: 教师复核列表与详情——真实组件挂载测试 */
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+
+vi.mock('../../../api/aiGrading.js', () => ({
+  aiGradingAPI: {
+    listGrades: vi.fn(),
+    getGrade: vi.fn(),
+    retryGrade: vi.fn(),
+    overrideGrade: vi.fn(),
+  },
+}))
+
+vi.mock('vue-router', () => ({ useRoute: () => ({ params: { id: '1' } }) }))
+
+import { aiGradingAPI } from '../../../api/aiGrading.js'
 
 describe('AI 评分复核列表', () => {
-  it('状态 badge 对应正确文本', () => {
-    const badgeMap = {
-      pending: '等待中',
-      queued: '排队中',
-      running: '评分中',
-      completed: '已完成',
-      review_required: '需复核',
-      system_error: '系统错误',
-    }
-    expect(badgeMap.pending).toBe('等待中')
-    expect(badgeMap.completed).toBe('已完成')
-    expect(badgeMap.review_required).toBe('需复核')
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
   })
 
-  it('分页参数正确传递', () => {
-    const params = { page: 2, page_size: 20, kind: 'assignment', status: 'review_required' }
-    expect(params.page).toBe(2)
-    expect(params.page_size).toBe(20)
-    expect(params.kind).toBe('assignment')
+  it('加载并展示评分列表', async () => {
+    aiGradingAPI.listGrades.mockResolvedValue({
+      data: {
+        items: [
+          { id: 1, submission_id: 5, mode: 'shadow', status: 'completed',
+            functional_score: 54, algorithm_score: 13, robustness_score: 7, quality_score: 5,
+            raw_total: 79, score_cap: null, final_score_100: 79, needs_teacher_review: false,
+            attempt_count: 1, created_at: '2026-01-01T00:00:00' },
+        ],
+        total: 1, page: 1, page_size: 20,
+      },
+    })
+
+    const AIGradingReviewView = (await import('../AIGradingReviewView.vue')).default
+    const wrapper = mount(AIGradingReviewView, {
+      global: {
+        stubs: { 'router-link': { template: '<a><slot /></a>' } },
+      },
+    })
+    await flushPromises()
+
+    expect(aiGradingAPI.listGrades).toHaveBeenCalled()
+    const text = wrapper.text()
+    expect(text).toContain('79')
+    expect(text).toContain('shadow')
   })
 
-  it('覆盖操作必须提供非空理由', () => {
-    const reason = ''
-    const isValid = reason.length >= 3
-    expect(isValid).toBe(false)
-  })
+  it('状态 badge 正确映射', async () => {
+    aiGradingAPI.listGrades.mockResolvedValue({
+      data: {
+        items: [
+          { id: 2, submission_id: 6, mode: 'active', status: 'review_required',
+            functional_score: 60, algorithm_score: null, robustness_score: 10, quality_score: null,
+            raw_total: null, score_cap: null, final_score_100: null, needs_teacher_review: true,
+            attempt_count: 3, created_at: '2026-01-02T00:00:00' },
+        ],
+        total: 1, page: 1, page_size: 20,
+      },
+    })
 
-  it('覆盖操作理由符合长度要求通过', () => {
-    const reason = '学生代码实际正确，AI 误判了算法步骤'
-    const isValid = reason.length >= 3 && reason.length <= 1000
-    expect(isValid).toBe(true)
+    const AIGradingReviewView = (await import('../AIGradingReviewView.vue')).default
+    const wrapper = mount(AIGradingReviewView, {
+      global: {
+        stubs: { 'router-link': { template: '<a><slot /></a>' } },
+      },
+    })
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('需复核')
+    expect(text).toContain('是')
   })
 })
 
-describe('学生分项展示', () => {
-  it('active 模式展示完整分项', () => {
-    const breakdown = {
-      mode: 'active',
-      status: 'completed',
-      functional_score: 54,
-      algorithm_score: 13,
-      robustness_score: 7,
-      quality_score: 5,
-      raw_total: 79,
-      final_score_100: 79,
-      strengths: ['功能正确'],
-      issues: ['算法部分缺失'],
-      suggestions: ['改进边界处理'],
+describe('AI 评分详情', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('展示分项评分详情', async () => {
+    aiGradingAPI.getGrade.mockResolvedValue({
+      data: {
+        id: 1, submission_id: 5, rubric_id: 1, mode: 'active', status: 'completed',
+        functional_score: 54, algorithm_score: 13, robustness_score: 7, quality_score: 5,
+        raw_total: 79, score_cap: null, final_score_100: 79, scaled_score: 79,
+        ai_result: {
+          algorithm: {
+            dimension_score: 13, dimension_max: 20,
+            items: [{ criterion_id: 'A1', criterion: '搜索区间', level: 'complete', score: 10, max_score: 10, code_lines: [1, 2], evidence: '正确' }],
+          },
+          code_quality: { dimension_score: 5, dimension_max: 10, items: [] },
+          student_feedback: { strengths: [], issues: [], suggestions: [] },
+        },
+        overrides: [],
+        raw_response: '{"algorithm":{...}}',
+      },
+    })
+
+    const AIGradingReviewDetailView = (await import('../AIGradingReviewDetailView.vue')).default
+    const wrapper = mount(AIGradingReviewDetailView, {
+      global: {
+        stubs: { 'router-link': { template: '<a><slot /></a>' } },
+      },
+    })
+    await flushPromises()
+
+    expect(aiGradingAPI.getGrade).toHaveBeenCalledWith('1')
+    const text = wrapper.text()
+    expect(text).toContain('79')
+    expect(text).toContain('搜索区间')
+    expect(text).toContain('原始 AI 响应')
+  })
+
+  it('覆盖操作需要理由', async () => {
+    aiGradingAPI.getGrade.mockResolvedValue({
+      data: {
+        id: 3, submission_id: 7, rubric_id: 1, mode: 'active', status: 'review_required',
+        functional_score: 50, algorithm_score: 10, robustness_score: 5, quality_score: 3,
+        raw_total: 68, score_cap: null, final_score_100: 68, scaled_score: 68,
+        ai_result: null, overrides: [],
+      },
+    })
+
+    const AIGradingReviewDetailView = (await import('../AIGradingReviewDetailView.vue')).default
+    const wrapper = mount(AIGradingReviewDetailView, {
+      global: {
+        stubs: { 'router-link': { template: '<a><slot /></a>' } },
+      },
+    })
+    await flushPromises()
+
+    const buttons = wrapper.findAll('button')
+    const submitBtn = buttons.find(b => b.text().includes('提交覆盖'))
+    expect(submitBtn).toBeTruthy()
+    if (submitBtn) {
+      expect(submitBtn.attributes('disabled')).toBeDefined()
     }
-    expect(breakdown.mode).toBe('active')
-    expect(breakdown.functional_score + (breakdown.algorithm_score || 0) + breakdown.robustness_score + (breakdown.quality_score || 0)).toBe(79)
-  })
-
-  it('shadow/legacy 模式不展示 AI 分项', () => {
-    const shadowBreakdown = null
-    expect(shadowBreakdown).toBeNull()
-  })
-
-  it('原始模型响应只对教师展示', () => {
-    const teacherView = { raw_response: '{"algorithm": ...}', ai_result: {} }
-    const studentView = { mode: 'active', functional_score: 54 }
-    // 学生视图不应包含 raw_response
-    expect('raw_response' in studentView).toBe(false)
-    // 教师视图可以包含
-    expect('raw_response' in teacherView).toBe(true)
   })
 })

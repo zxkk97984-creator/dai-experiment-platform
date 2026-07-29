@@ -104,13 +104,13 @@ def test_build_question_snapshot():
 
 def test_generate_rubric_creates_draft(db_session_factory):
     """调用 AI 生成 Rubric 并保存为 draft"""
-    from app.services.rubric_service import generate_rubric_from_snapshot
+    from app.services.rubric_service import generate_rubric
     from app.models import QuestionRubric
 
     fake_client = make_fake_client()
 
     with db_session_factory() as db:
-        rubric = generate_rubric_from_snapshot(
+        rubric = generate_rubric(
             db,
             fake_client,
             kind="assignment",
@@ -127,30 +127,30 @@ def test_generate_rubric_creates_draft(db_session_factory):
 
 def test_lock_rubric_supersedes_old(db_session_factory):
     """锁定 Rubric 后同题旧版本变为 superseded"""
-    from app.services.rubric_service import generate_rubric_from_snapshot, lock_rubric
+    from app.services.rubric_service import generate_rubric, lock_rubric
     from app.models import QuestionRubric
 
     fake_client = make_fake_client()
 
     with db_session_factory() as db:
-        rubric1 = generate_rubric_from_snapshot(db, fake_client, kind="assignment", question_id=1, snapshot=_build_snapshot())
+        rubric1 = generate_rubric(db, fake_client, kind="assignment", question_id=1, snapshot=_build_snapshot())
         locked = lock_rubric(db, rubric1.id)
         assert locked.status == "locked"
         assert locked.locked_at is not None
 
-        rubric2 = generate_rubric_from_snapshot(db, fake_client, kind="assignment", question_id=1, snapshot=_build_snapshot())
+        rubric2 = generate_rubric(db, fake_client, kind="assignment", question_id=1, snapshot=_build_snapshot())
         assert rubric2.version == 2
 
 
 def test_update_draft_rubric(db_session_factory):
     """只允许修改 draft 状态的 Rubric"""
-    from app.services.rubric_service import generate_rubric_from_snapshot, lock_rubric, update_draft_rubric
+    from app.services.rubric_service import generate_rubric, lock_rubric, update_draft_rubric
     from app.schemas.ai_grading import RubricDocument
 
     fake_client = make_fake_client()
 
     with db_session_factory() as db:
-        rubric = generate_rubric_from_snapshot(db, fake_client, kind="assignment", question_id=1, snapshot=_build_snapshot())
+        rubric = generate_rubric(db, fake_client, kind="assignment", question_id=1, snapshot=_build_snapshot())
         assert rubric.status == "draft"
 
         doc = RubricDocument(**rubric.rubric_json)
@@ -167,12 +167,12 @@ def test_update_draft_rubric(db_session_factory):
 
 def test_get_latest_locked_rubric(db_session_factory):
     """获取最新锁定的 Rubric"""
-    from app.services.rubric_service import generate_rubric_from_snapshot, get_latest_locked_rubric, lock_rubric
+    from app.services.rubric_service import generate_rubric, get_latest_locked_rubric, lock_rubric
 
     fake_client = make_fake_client()
 
     with db_session_factory() as db:
-        rubric = generate_rubric_from_snapshot(db, fake_client, kind="assignment", question_id=1, snapshot=_build_snapshot())
+        rubric = generate_rubric(db, fake_client, kind="assignment", question_id=1, snapshot=_build_snapshot())
         lock_rubric(db, rubric.id)
 
         found = get_latest_locked_rubric(db, kind="assignment", question_id=1)

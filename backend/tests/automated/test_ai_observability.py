@@ -1,6 +1,5 @@
 """Task 13: AI 可观测性与安全测试——日志脱敏、恢复、安全检查"""
 from app.services.ai_client import sanitize_ai_error
-from app.services.ai_grading_queue import sanitize_ai_error as queue_sanitize
 
 
 def test_log_sanitize_removes_key():
@@ -27,9 +26,10 @@ def test_log_sanitize_truncates_long_errors():
 
 def test_queue_sanitize_consistent_with_client():
     """队列和客户端的脱敏逻辑一致"""
+    from app.services.ai_grading_queue import _sanitize
     error = "Bearer sk-secret-key-value error"
     client_safe = sanitize_ai_error(error)
-    queue_safe = queue_sanitize(error)
+    queue_safe = _sanitize(error)
     assert "sk-secret-key-value" not in client_safe
     assert "sk-secret-key-value" not in queue_safe
 

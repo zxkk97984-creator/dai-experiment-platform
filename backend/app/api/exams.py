@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.courses import can_view_course, ensure_course_manager, require_course
+from app.config import Settings, get_settings
 from app.dependencies import get_current_user, get_db, require_roles
 from app.errors import api_error
 from app.models import Course, CourseEnrollment, Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission, User
@@ -95,6 +96,7 @@ def update_exam(
     payload: ExamUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
 ):
     exam = require_exam(exam_id, db)
     ensure_course_manager(exam.course, current_user)
@@ -103,6 +105,24 @@ def update_exam(
     # 发布时强制校验
     if exam.status == "published":
         validate_publish(exam, db)
+        # AI 评分门禁：非 legacy 编程题需要锁定 Rubric
+        code_questions = db.scalars(
+            select(ExamQuestion).where(
+                ExamQuestion.exam_id == exam_id,
+                ExamQuestion.question_type == "code",
+                ExamQuestion.grading_mode != "legacy",
+            )
+        ).all()
+        if code_questions:
+            if not settings.ai_ready:
+                raise api_error(503, "AI_NOT_READY", "发布含 AI 评分的考试需要配置 DAI_AI_API_KEY")
+            from app.services.ai_client import DeepSeekClient, AIServiceError
+            from app.services.rubric_service import ensure_locked_rubrics_for_publish
+            try:
+                client = DeepSeekClient(settings)
+                ensure_locked_rubrics_for_publish(db, client, code_questions)
+            except AIServiceError as exc:
+                raise api_error(503, "AI_RUBRIC_UNAVAILABLE", f"Rubric 生成失败: {exc}")
     db.commit()
     db.refresh(exam)
     return exam

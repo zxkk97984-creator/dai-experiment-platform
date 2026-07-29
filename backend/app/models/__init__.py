@@ -136,7 +136,7 @@ class JudgeQuestion(TimestampMixin, Base):
     memory_limit_mb: Mapped[int] = mapped_column(Integer, default=256)
     max_attempts: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     # ── AI 评分配置 ──────────────────────────────────────────
-    grading_mode: Mapped[str] = mapped_column(String(20), default="shadow", index=True)
+    grading_mode: Mapped[str] = mapped_column(String(20), default="legacy", index=True)
     teacher_constraints: Mapped[dict] = mapped_column(JSON, default=dict)
     reference_solution: Mapped[str | None] = mapped_column(Text, nullable=True)
     test_groups: Mapped[list] = mapped_column(JSON, default=list)
@@ -255,7 +255,7 @@ class ExamQuestion(TimestampMixin, Base):
     time_limit_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     memory_limit_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # ── AI 评分配置 ──────────────────────────────────────────
-    grading_mode: Mapped[str] = mapped_column(String(20), default="shadow", index=True)
+    grading_mode: Mapped[str] = mapped_column(String(20), default="legacy", index=True)
     teacher_constraints: Mapped[dict] = mapped_column(JSON, default=dict)
     reference_solution: Mapped[str | None] = mapped_column(Text, nullable=True)
     test_groups: Mapped[list] = mapped_column(JSON, default=list)

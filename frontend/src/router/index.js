@@ -31,6 +31,8 @@ const routes = [
  { path: '/teacher/experiments', name: 'TeacherExperiments', component: () => import('../views/teacher/ExperimentManageView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/submissions', name: 'TeacherExperimentSubmissions', component: () => import('../views/teacher/ExperimentSubmissionsView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/submissions/:id', name: 'TeacherExperimentSubmissionDetail', component: () => import('../views/teacher/ExperimentSubmissionDetailView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/ai-grading', name: 'TeacherAIGrading', component: () => import('../views/teacher/AIGradingReviewView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/ai-grading/:id', name: 'TeacherAIGradingDetail', component: () => import('../views/teacher/AIGradingReviewDetailView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/courses/:id/studio/:lid', name: 'TeacherStudio', component: () => import('../views/teacher/StudioView.vue'), meta: { role: 'teacher' } },
 
   // Admin
@@ -41,6 +43,8 @@ const routes = [
   { path: '/admin/experiments', name: 'AdminExperiments', component: () => import('../views/admin/ExperimentManageView.vue'), meta: { role: 'admin' } },
   { path: '/admin/submissions', name: 'AdminExperimentSubmissions', component: () => import('../views/teacher/ExperimentSubmissionsView.vue'), meta: { role: 'admin' } },
   { path: '/admin/submissions/:id', name: 'AdminExperimentSubmissionDetail', component: () => import('../views/teacher/ExperimentSubmissionDetailView.vue'), meta: { role: 'admin' } },
+  { path: '/admin/ai-grading', name: 'AdminAIGrading', component: () => import('../views/teacher/AIGradingReviewView.vue'), meta: { role: 'admin' } },
+  { path: '/admin/ai-grading/:id', name: 'AdminAIGradingDetail', component: () => import('../views/teacher/AIGradingReviewDetailView.vue'), meta: { role: 'admin' } },
 
   // Developer
   { path: '/developer/templates', name: 'DeveloperTemplates', component: () => import('../views/developer/TemplateManageView.vue'), meta: { role: 'developer' } },

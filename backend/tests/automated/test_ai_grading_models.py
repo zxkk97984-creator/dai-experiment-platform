@@ -20,8 +20,8 @@ def test_historical_questions_default_to_legacy(db_session_factory):
         assert question.grading_mode == "legacy"
 
 
-def test_new_question_defaults_to_shadow(db_session_factory):
-    """新建编程题默认 grading_mode 为 shadow"""
+def test_new_question_defaults_to_legacy(db_session_factory):
+    """新建编程题默认 grading_mode 为 legacy（保持历史兼容）"""
     from app.models import JudgeQuestion
 
     with db_session_factory() as db:
@@ -33,7 +33,7 @@ def test_new_question_defaults_to_shadow(db_session_factory):
         )
         db.add(question)
         db.flush()
-        assert question.grading_mode == "shadow"
+        assert question.grading_mode == "legacy"
 
 
 def test_exam_question_grading_fields(db_session_factory):

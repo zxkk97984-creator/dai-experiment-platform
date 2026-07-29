@@ -110,6 +110,12 @@ class DeepSeekClient:
                 )
                 elapsed = time.monotonic() - start
 
+                # 400 且使用了 response_format：降级重试一次（无 response_format）
+                if response.status_code == 400 and payload.get("response_format") is not None:
+                    logger.warning("AI 不支持 response_format，降级重试")
+                    del payload["response_format"]
+                    continue
+
                 if response.status_code in _NON_RETRYABLE_HTTP_STATUS:
                     body = sanitize_ai_error(response.text[:500])
                     raise AIServiceError(

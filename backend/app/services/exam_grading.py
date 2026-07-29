@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import ExamAnswer, ExamGrade, ExamSubmission
+from app.models import CodeGrade, ExamAnswer, ExamGrade, ExamSubmission
 
 logger = logging.getLogger("dai.exam_grading")
 
@@ -51,7 +51,21 @@ def finalize_if_ready(submission_id: int, db: Session) -> bool:
         return True
 
     if submission.status != "grading":
-        # 不是 grading 状态，不处理
+        return False
+
+    # active 模式 AI 评分门禁：有未完成 AI 评分 → 等待
+    blocking = db.scalar(
+        select(CodeGrade.id)
+        .join(ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id)
+        .where(
+            ExamAnswer.submission_id == submission_id,
+            CodeGrade.mode == "active",
+            CodeGrade.status.in_(["pending", "queued", "running"]),
+        )
+        .limit(1)
+    )
+    if blocking:
+        logger.debug("Submission %s 等待 AI 评分完成", submission_id)
         return False
 
     # 锁内检查：有任何非终态答案 → 不能汇总

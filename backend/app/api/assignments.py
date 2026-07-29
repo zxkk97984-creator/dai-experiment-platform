@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.courses import can_view_course, require_course
+from app.config import Settings, get_settings
 from app.dependencies import get_current_user, get_db, require_roles
 from app.errors import api_error
 from app.models import Assignment, Course, CourseEnrollment, JudgeQuestion, User
@@ -130,9 +131,30 @@ def publish_assignment(
     assignment_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
 ):
     assignment = require_assignment(assignment_id, db)
     ensure_assignment_manager(assignment, current_user, db)
+
+    # AI 评分门禁：非 legacy 题目需要锁定 Rubric
+    questions = db.scalars(
+        select(JudgeQuestion).where(
+            JudgeQuestion.assignment_id == assignment_id,
+            JudgeQuestion.grading_mode != "legacy",
+        )
+    ).all()
+
+    if questions:
+        if not settings.ai_ready:
+            raise api_error(503, "AI_NOT_READY", "发布含 AI 评分的题目需要配置 DAI_AI_API_KEY")
+        from app.services.ai_client import DeepSeekClient, AIServiceError
+        from app.services.rubric_service import ensure_locked_rubrics_for_publish
+        try:
+            client = DeepSeekClient(settings)
+            ensure_locked_rubrics_for_publish(db, client, questions)
+        except AIServiceError as exc:
+            raise api_error(503, "AI_RUBRIC_UNAVAILABLE", f"Rubric 生成失败: {exc}")
+
     assignment.status = "published"
     db.commit()
     db.refresh(assignment)

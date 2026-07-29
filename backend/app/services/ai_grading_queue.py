@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from redis import Redis
 from sqlalchemy import select, update
@@ -13,11 +13,10 @@ from app.models import CodeGrade
 
 logger = logging.getLogger("dai.ai_queue")
 
-_STALE_TIMEOUT_SECONDS = 600  # 10 分钟无心跳视为僵死
+STALE_RUNNING_SECONDS = 600  # 10 分钟无心跳视为僵死
 
 
 def enqueue_ai_grade(db: Session, redis_client: Redis, code_grade_id: int) -> bool:
-    """将 pending CodeGrade 条件更新为 queued 并推 Redis 通知"""
     result = db.execute(
         update(CodeGrade)
         .where(CodeGrade.id == code_grade_id, CodeGrade.status == "pending")
@@ -25,33 +24,29 @@ def enqueue_ai_grade(db: Session, redis_client: Redis, code_grade_id: int) -> bo
     )
     if result.rowcount == 0:
         return False
-
     message = json.dumps({"type": "ai_grade", "id": code_grade_id, "attempt": 0})
     redis_client.rpush("judge:ai:queue", message)
     return True
 
 
 def claim_ai_grade(db: Session, code_grade_id: int) -> bool:
-    """条件更新 queued → running"""
+    now = datetime.now(timezone.utc)
     result = db.execute(
         update(CodeGrade)
         .where(CodeGrade.id == code_grade_id, CodeGrade.status == "queued")
-        .values(
-            status="running",
-            started_at=datetime.now(timezone.utc),
-            attempt_count=CodeGrade.attempt_count + 1,
-        )
+        .values(status="running", started_at=now, attempt_count=CodeGrade.attempt_count + 1)
     )
     return result.rowcount > 0
 
 
 def complete_ai_grade(db: Session, code_grade_id: int) -> None:
-    """标记 AI 评分为完成"""
+    now = datetime.now(timezone.utc)
     db.execute(
         update(CodeGrade)
         .where(CodeGrade.id == code_grade_id)
-        .values(status="completed", finished_at=datetime.now(timezone.utc))
+        .values(status="completed", finished_at=now)
     )
+    db.commit()
 
 
 def fail_ai_grade(
@@ -63,23 +58,21 @@ def fail_ai_grade(
     retryable: bool,
     max_attempts: int = 3,
 ) -> None:
-    """处理 AI 评分失败——可重试则退回 pending，否则进入 review_required"""
     grade = db.get(CodeGrade, code_grade_id)
     if grade is None:
         return
+    safe_error = _sanitize(error)
+    current = grade.attempt_count
 
-    safe_error = sanitize_ai_error(error)
-    current_attempts = grade.attempt_count
-
-    if retryable and current_attempts < max_attempts:
+    if retryable and current < max_attempts:
         db.execute(
             update(CodeGrade)
             .where(CodeGrade.id == code_grade_id)
             .values(status="pending", last_error=safe_error)
         )
-        # 重试消息
-        message = json.dumps({"type": "ai_grade", "id": code_grade_id, "attempt": current_attempts + 1})
-        redis_client.rpush("judge:ai:queue", message)
+        db.commit()
+        msg = json.dumps({"type": "ai_grade", "id": code_grade_id, "attempt": current + 1})
+        redis_client.rpush("judge:ai:queue", msg)
     else:
         db.execute(
             update(CodeGrade)
@@ -87,50 +80,48 @@ def fail_ai_grade(
             .values(
                 status="review_required",
                 needs_teacher_review=True,
-                review_reason=f"AI 评分失败（尝试 {current_attempts} 次）: {safe_error}",
+                review_reason=f"AI 评分失败（尝试 {current} 次）: {safe_error}",
                 last_error=safe_error,
             )
         )
+        db.commit()
 
 
 def recover_stale_ai_grades(db: Session, redis_client: Redis) -> dict[str, int]:
-    """恢复僵死的 AI 评分任务"""
-    recovered = {"pending": 0, "queued": 0, "running": 0}
+    """恢复僵死 AI 评分任务——running 超过 10 分钟重置为 pending"""
+    recovered = {"running": 0}
     now = datetime.now(timezone.utc)
+    threshold = now - timedelta(seconds=STALE_RUNNING_SECONDS)
 
-    # 恢复 pending（长时间未处理）
-    # pending 状态不需要恢复，它们尚未被领取
-
-    # 恢复 stale queued（10 分钟未开始）
-    # 将 stale queued 重置为 pending
-    # 简化实现：不做复杂时间判断，只在 Worker 启动时恢复所有运行中任务
-    stale_running = db.scalars(
+    # 只恢复运行时间超过阈值的 running 任务
+    stale = db.scalars(
         select(CodeGrade).where(
             CodeGrade.status == "running",
-            CodeGrade.started_at < now,
+            CodeGrade.started_at < threshold,
         )
     ).all()
 
-    for grade in stale_running:
-        # 简单策略：重置为 pending 重试
+    for grade in stale:
         db.execute(
             update(CodeGrade)
             .where(CodeGrade.id == grade.id)
-            .values(status="pending")
+            .values(status="pending", last_error="Worker 超时未响应（stale running）")
         )
-        message = json.dumps({"type": "ai_grade", "id": grade.id, "attempt": grade.attempt_count})
-        redis_client.rpush("judge:ai:queue", message)
+        msg = json.dumps({"type": "ai_grade", "id": grade.id, "attempt": grade.attempt_count})
+        redis_client.rpush("judge:ai:queue", msg)
         recovered["running"] += 1
+
+    if recovered["running"] > 0:
+        db.commit()
+        logger.info("stale_ai_recovery", extra=recovered)
 
     return recovered
 
 
-def sanitize_ai_error(error: str) -> str:
-    """删除错误消息中的敏感信息"""
+def _sanitize(error: str) -> str:
     import re
     error = re.sub(r"Bearer\s+\S+", "Bearer ***", error)
     error = re.sub(r"sk-[a-zA-Z0-9]+", "sk-***", error)
-    # 截断
     if len(error) > 1000:
         error = error[:1000]
     return error

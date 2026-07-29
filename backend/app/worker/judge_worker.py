@@ -1,11 +1,4 @@
-"""判题 Worker——消费 Redis 队列，执行 Docker 沙箱判题。
-
-使用统一 judge_queue 协议进行状态管理：
-  - claim_job: 条件 UPDATE queued→running（原子抢占）
-  - complete_job: running→completed
-  - fail_job: 重试退回 pending / 终态 system_error
-"""
-
+"""判题 Worker——消费判题队列 + 考试队列 + AI 评分队列"""
 import json as _json
 import logging
 import math
@@ -13,14 +6,17 @@ import secrets
 import subprocess
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import SessionLocal
-from app.models import ExamAnswer, ExamQuestion, ExamSubmission, JudgeQuestion, Submission
+from app.models import (
+    CodeGrade, ExamAnswer, ExamQuestion, ExamSubmission, JudgeQuestion, Submission,
+)
 
 logger = logging.getLogger("dai.worker")
 
@@ -32,19 +28,22 @@ EXAM_JUDGE_QUEUE = "judge:exam:queue"
 # ═══════════════════════════════════════════════════════════════
 
 def _make_work_dir(root: Path, prefix: str):
-    """在指定根目录下创建带随机后缀的工作目录，返回 (workdir_path, cleanup_fn)"""
-    import secrets as _secrets, shutil as _shutil
-    suffix = _secrets.token_hex(8)
+    import shutil as _shutil
+    suffix = secrets.token_hex(8)
     workdir = root / f"{prefix}{suffix}"
     workdir.mkdir(parents=True, exist_ok=True)
     return workdir, lambda: _shutil.rmtree(workdir, ignore_errors=True)
 
+
 def _get_timeout(question: JudgeQuestion, settings: Settings) -> int:
-    """超时秒数：ceil(time_limit_ms / 1000)，受全局硬上限约束，至少 1 秒"""
     raw = max(question.time_limit_ms, 1)
     per_question = math.ceil(raw / 1000)
     return max(min(per_question, settings.judge_timeout_seconds), 1)
 
+
+# ═══════════════════════════════════════════════════════════════
+# Docker 执行
+# ═══════════════════════════════════════════════════════════════
 
 def _write_submission_files(workdir: Path, submission: Submission, question: JudgeQuestion) -> Path:
     user_code = workdir / "user_code.py"
@@ -57,36 +56,37 @@ def _write_submission_files(workdir: Path, submission: Submission, question: Jud
     return test_file
 
 
+def enqueue_exam_answer(submission_id: int, answer_id: int, question: ExamQuestion):
+    """考试编程题入队——委托给统一 judge_queue 入口。保留此函数以兼容旧调用方。"""
+    from app.services.judge_queue import enqueue_job as _enq
+    from app.database import SessionLocal
+    with SessionLocal() as db:
+        _enq(db, job_type="exam", object_id=answer_id)
+
 def _run_docker_pytest(workdir: Path, settings: Settings, timeout_seconds: int,
                        memory_limit_mb: int = 256, test_filename: str = "test_user_code.py",
-                       host_workdir: Path | None = None) -> tuple[str, str, int, int]:
-    """统一 Docker sandbox——唯一入口。正式题用 test_user_code.py，sample 用 test_sample.py
-
-    workdir: 容器内的工作目录路径（用于文件操作）
-    host_workdir: 宿主机侧的工作目录路径（传给 Docker daemon 的 -v 参数）。
-                  未指定时回退到 workdir（兼容非 DoD 环境）。
-    """
+                       host_workdir: Path | None = None,
+                       extra_args: list[str] | None = None) -> tuple[str, str, int, int]:
     host_path = host_workdir if host_workdir is not None else workdir
     container_name = f"dai-judge-{secrets.token_hex(8)}"
-    command = [
+    cmd = [
         "docker", "run", "--rm", "--name", container_name,
-        "--network", "none",
-        "--cap-drop", "ALL",
-        "--security-opt", "no-new-privileges",
-        "--read-only",
-        "--tmpfs", "/tmp:exec,size=64m",
+        "--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        "--read-only", "--tmpfs", "/tmp:exec,size=64m",
         "--cpus", str(settings.judge_cpu_limit),
         "--memory", f"{memory_limit_mb}m",
-        "--pids-limit", "50",
-        "--user", "1000:1000",
-        "-v", f"{host_path}:/work:ro",
-        "-w", "/work",
+        "--pids-limit", "50", "--user", "1000:1000",
+        "-v", f"{host_path}:/work:ro", "-w", "/work",
         settings.judge_image,
-        "python", "-m", "pytest", "-q", "-p", "no:cacheprovider", test_filename,
+        "python", "-m", "pytest", "-q", "-p", "no:cacheprovider",
     ]
+    if extra_args:
+        cmd.extend(extra_args)
+    cmd.append(test_filename)
+
     started = time.perf_counter()
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         return result.stdout, result.stderr, result.returncode, elapsed_ms
     except subprocess.TimeoutExpired:
@@ -95,7 +95,7 @@ def _run_docker_pytest(workdir: Path, settings: Settings, timeout_seconds: int,
         return "", "Execution timed out", 124, elapsed_ms
 
 
-def _status_from_pytest(returncode: int, stdout: str, stderr: str) -> tuple[str, float]:
+def _status_from_pytest(returncode, stdout, stderr):
     output = f"{stdout}\n{stderr}"
     if returncode == 0:
         return "accepted", 100
@@ -109,121 +109,267 @@ def _status_from_pytest(returncode: int, stdout: str, stderr: str) -> tuple[str,
 
 
 # ═══════════════════════════════════════════════════════════════
-# 判题处理（使用统一 judge_queue 协议）
+# pytest 结果插件
+# ═══════════════════════════════════════════════════════════════
+
+PLUGIN_CODE = """import json
+COUNTS = {"passed": 0, "failed": 0, "errors": 0, "skipped": 0}
+def pytest_runtest_logreport(report):
+    if report.when == "call":
+        if report.passed: COUNTS["passed"] += 1
+        elif report.failed: COUNTS["failed"] += 1
+        elif report.skipped: COUNTS["skipped"] += 1
+    elif report.when in ("setup", "teardown") and report.failed:
+        COUNTS["errors"] += 1
+def pytest_sessionfinish(session, exitstatus):
+    print("DAI_RESULT_JSON=" + json.dumps(COUNTS, separators=(",", ":")))
+"""
+
+
+def _parse_result_json(output: str) -> dict | None:
+    import re
+    match = re.search(r"DAI_RESULT_JSON=(\{.*?\})", output)
+    if match:
+        try:
+            data = _json.loads(match.group(1))
+            for k in ("passed", "failed", "errors", "skipped"):
+                if not isinstance(data.get(k), int) or data[k] < 0:
+                    return None
+            return data
+        except Exception:
+            return None
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# 结构化测试组评分
+# ═══════════════════════════════════════════════════════════════
+
+def run_test_groups(
+    workdir: Path,
+    host_workdir: Path,
+    code: str,
+    test_groups: list[dict],
+    settings: Settings,
+    timeout_seconds: int,
+    memory_limit_mb: int,
+) -> dict:
+    """逐组运行 pytest 测试并返回 F/R 分组结果"""
+    results = {}
+    system_errors = []
+
+    for group in test_groups:
+        gid = group["id"]
+        tests_code = group.get("tests", "")
+        if not tests_code:
+            system_errors.append(f"测试组 {gid} 没有测试代码")
+            results[gid] = {"passed": 0, "failed": 0, "errors": 0, "skipped": 0}
+            continue
+
+        # 写用户代码
+        (workdir / "user_code.py").write_text(code, encoding="utf-8")
+
+        # 写插件
+        (workdir / "dai_result_plugin.py").write_text(PLUGIN_CODE, encoding="utf-8")
+
+        # 写本组测试
+        test_content = tests_code
+        if "import user_code" not in test_content and "from user_code" not in test_content:
+            test_content = f"import user_code\n\n{test_content}"
+        (workdir / "test_group.py").write_text(test_content, encoding="utf-8")
+
+        try:
+            stdout, stderr, returncode, elapsed = _run_docker_pytest(
+                workdir, settings, timeout_seconds, memory_limit_mb,
+                test_filename="test_group.py", host_workdir=host_workdir,
+                extra_args=["-p", "dai_result_plugin"],
+            )
+        except Exception as exc:
+            system_errors.append(f"测试组 {gid} Docker 执行异常: {exc}")
+            results[gid] = {"passed": 0, "failed": 0, "errors": 1, "skipped": 0}
+            continue
+
+        counts = _parse_result_json(stdout)
+        if counts is None:
+            system_errors.append(f"测试组 {gid} 无法解析结果")
+            results[gid] = {"passed": 0, "failed": 0, "errors": 1, "skipped": 0}
+        else:
+            results[gid] = counts
+
+    return {"results": results, "system_errors": system_errors}
+
+
+def _calculate_fr_scores(groups: list[dict], results: dict[str, dict]) -> tuple[float, float, list[dict], list[str]]:
+    """从测试组结果计算 F 和 R 分"""
+    from app.services.deterministic_scoring import calculate_group_score, DeterministicSystemError
+
+    f_total = 0.0
+    r_total = 0.0
+    details = []
+    errors = []
+
+    for group in groups:
+        gid = group["id"]
+        counts = results.get(gid)
+        if counts is None:
+            errors.append(f"测试组 {gid} 缺少结果")
+            continue
+        try:
+            score = calculate_group_score(group.get("max_score", 0), counts)
+        except DeterministicSystemError as exc:
+            errors.append(f"测试组 {gid}: {exc}")
+            continue
+        details.append({"id": gid, "name": group.get("name", ""), "dimension": group.get("dimension"),
+                        "max_score": group.get("max_score", 0), "score": score, "counts": counts})
+        if group.get("dimension") == "F":
+            f_total += score
+        elif group.get("dimension") == "R":
+            r_total += score
+
+    return round(f_total, 4), round(r_total, 4), details, errors
+
+
+# ═══════════════════════════════════════════════════════════════
+# 作业判题
 # ═══════════════════════════════════════════════════════════════
 
 def process_submission(db: Session, redis_client, settings: Settings, submission_id: int) -> Submission:
-    """处理普通作业判题——使用统一 judge_queue 状态机"""
     from app.services.judge_queue import claim_job, complete_job, fail_job
 
     submission = db.get(Submission, submission_id)
     if not submission:
-        logger.error("Submission %s 不存在", submission_id)
-        raise ValueError(f"Submission {submission_id} does not exist")
-
-    # 幂等：已完成的提交不重复判题
+        return None
     if submission.grading_status == "completed":
         return submission
 
     try:
-        # 原子抢占：queued → running
         if not claim_job(db, job_type="assignment", object_id=submission_id):
-            # 抢占失败：已被其他 Worker 领取或状态不对，跳过
-            logger.debug("抢占 Submission %s 失败，跳过", submission_id)
             return submission
 
         question = db.get(JudgeQuestion, submission.question_id)
         if not question:
-            fail_job(db, job_type="assignment", object_id=submission_id,
-                     error="题目不存在", retryable=False)
+            fail_job(db, job_type="assignment", object_id=submission_id, error="题目不存在", retryable=False)
             submission.status = "system_error"
             submission.score = 0
             db.commit()
-            db.refresh(submission)
-            redis_client.setex(f"judge:result:{submission.id}", 3600, submission.status)
             return submission
 
         submission.status = "running"
         db.commit()
 
-        # 优先使用配置的工作目录（Compose 下与宿主机共享），否则系统临时目录
         _work_root = Path(settings.judge_work_dir) if settings.judge_work_dir else None
-        # DoD：宿主机侧工作目录根路径（传给 Docker daemon 的 -v 参数）
         _host_root = Path(settings.judge_host_work_dir) if settings.judge_host_work_dir else None
         _cleanup = None
         try:
             if _work_root:
                 workdir, _cleanup = _make_work_dir(_work_root, "dai-judge-")
-                # 计算对应的宿主机路径：将容器前缀替换为宿主机前缀
-                if _host_root:
-                    host_workdir = _host_root / workdir.relative_to(_work_root)
-                else:
-                    host_workdir = workdir
+                host_workdir = _host_root / workdir.relative_to(_work_root) if _host_root else workdir
             else:
-                # 用 tempfile 作为 context manager
                 _temp = tempfile.TemporaryDirectory(prefix="dai-judge-")
                 workdir = Path(_temp.name)
                 host_workdir = workdir
                 _cleanup = lambda: _temp.cleanup()
 
-            _write_submission_files(workdir, submission, question)
-            timeout_seconds = _get_timeout(question, settings)
-            memory_limit_mb = question.memory_limit_mb or settings.judge_memory_limit_mb
+            timeout_s = _get_timeout(question, settings)
+            mem_mb = question.memory_limit_mb or settings.judge_memory_limit_mb
 
-            try:
-                stdout, stderr, returncode, elapsed_ms = _run_docker_pytest(
-                    workdir, settings, timeout_seconds, memory_limit_mb,
-                    host_workdir=host_workdir,
-                )
-            except Exception as e:
-                # Docker 执行异常：可重试
-                fail_job(db, job_type="assignment", object_id=submission_id,
-                         error=f"Docker 判题失败: {e}", retryable=True)
-                submission.status = "system_error"
-                submission.score = 0
-                submission.stderr = f"Docker 判题失败: {e}"
-                submission.result_details = {"error": str(e)}
+            # 按模式分支
+            if question.grading_mode == "legacy":
+                # 传统模式
+                user_code = workdir / "user_code.py"
+                test_file = workdir / "test_user_code.py"
+                user_code.write_text(submission.code, encoding="utf-8")
+                ht = question.hidden_tests
+                if "import user_code" not in ht and "from user_code" not in ht:
+                    ht = f"import user_code\n\n{ht}"
+                test_file.write_text(ht, encoding="utf-8")
+
+                try:
+                    stdout, stderr, returncode, elapsed = _run_docker_pytest(
+                        workdir, settings, timeout_s, mem_mb, host_workdir=host_workdir)
+                except Exception as e:
+                    fail_job(db, job_type="assignment", object_id=submission_id,
+                             error=f"Docker 判题失败: {e}", retryable=True)
+                    submission.status = "system_error"
+                    submission.score = 0
+                    submission.stderr = f"Docker 判题失败: {e}"
+                    db.commit()
+                    return submission
+
+                final_status, score = _status_from_pytest(returncode, stdout, stderr)
+                submission.status = final_status
+                submission.stdout = stdout[-8000:]
+                submission.stderr = stderr[-8000:]
+                submission.score = score
+                submission.execution_time_ms = elapsed
+                submission.result_details = {"returncode": returncode}
                 db.commit()
-                db.refresh(submission)
-                redis_client.setex(f"judge:result:{submission.id}", 3600, submission.status)
-                logger.warning("Submission %s Docker 执行异常，已退回 pending", submission_id)
-                return submission
+                complete_job(db, job_type="assignment", object_id=submission_id, score=score)
+
+            else:
+                # shadow/active: 运行结构化测试组
+                test_groups = question.test_groups or []
+                if not test_groups:
+                    raise ValueError("shadow/active 模式必须配置测试组")
+
+                result = run_test_groups(
+                    workdir, host_workdir, submission.code, test_groups,
+                    settings, timeout_s, mem_mb,
+                )
+                f_score, r_score, details, sys_errors = _calculate_fr_scores(test_groups, result["results"])
+
+                submission.score = f_score + r_score if question.grading_mode == "active" else None
+                submission.status = "accepted" if sys_errors == [] else "system_error"
+                submission.result_details = {"groups": details, "system_errors": sys_errors}
+                db.commit()
+                complete_job(db, job_type="assignment", object_id=submission_id,
+                             score=float(f_score + r_score), result_details=submission.result_details)
+
+                # 创建 CodeGrade
+                rubric = db.scalar(
+                    select(CodeGrade).where(CodeGrade.submission_id == submission_id)
+                )
+                if rubric is None:
+                    from app.models import QuestionRubric
+                    locked = db.scalar(
+                        select(QuestionRubric).where(
+                            QuestionRubric.judge_question_id == question.id,
+                            QuestionRubric.status == "locked",
+                        ).order_by(QuestionRubric.version.desc()).limit(1)
+                    )
+                    if locked:
+                        cg = CodeGrade(
+                            submission_id=submission_id,
+                            rubric_id=locked.id,
+                            mode=question.grading_mode,
+                            status="pending",
+                            functional_score=f_score,
+                            robustness_score=r_score,
+                            deterministic_details={"groups": details, "system_errors": sys_errors},
+                        )
+                        db.add(cg)
+                        db.commit()
+                        # 入队 AI 评分
+                        from app.services.ai_grading_queue import enqueue_ai_grade
+                        enqueue_ai_grade(db, redis_client, cg.id)
+                        db.commit()
+
+            db.refresh(submission)
+            redis_client.setex(f"judge:result:{submission.id}", 3600, submission.status)
+            logger.info("Submission %s 判题完成: %s", submission_id, submission.status)
+            return submission
+
         finally:
             if _cleanup:
                 _cleanup()
 
-        final_status, score = _status_from_pytest(returncode, stdout, stderr)
-        submission.status = final_status
-        submission.stdout = stdout[-8000:]
-        submission.stderr = stderr[-8000:]
-        submission.score = score
-        submission.execution_time_ms = elapsed_ms
-        submission.result_details = {"returncode": returncode}
-        db.commit()
-
-        # 标记完成
-        complete_job(db, job_type="assignment", object_id=submission_id,
-                     score=score, result_details={"returncode": returncode})
-        db.refresh(submission)
-        redis_client.setex(f"judge:result:{submission.id}", 3600, submission.status)
-        logger.info("Submission %s 判题完成: %s (%.1f)", submission_id, final_status, score)
-        return submission
-
     except Exception:
-        # 未知异常：退回 pending 等待恢复扫描重试
-        logger.exception("Submission %s 未知异常，退回 pending", submission_id)
+        logger.exception("Submission %s 未知异常", submission_id)
         try:
             fail_job(db, job_type="assignment", object_id=submission_id,
                      error="Worker 未知异常", retryable=True)
         except Exception:
-            logger.exception("fail_job 也失败了")
-            # 尽力手动设回 pending
-            try:
-                submission.grading_status = "pending"
-                submission.last_error = "Worker 未知异常（fail_job 失败）"
-                db.commit()
-            except Exception:
-                logger.exception("连手动退回都失败了")
+            pass
         return submission
 
 
@@ -231,50 +377,23 @@ def process_submission(db: Session, redis_client, settings: Settings, submission
 # 考试判题
 # ═══════════════════════════════════════════════════════════════
 
-def enqueue_exam_answer(submission_id: int, answer_id: int, question: ExamQuestion):
-    """考试编程题入队——委托给统一 judge_queue 入口。
-
-    保留此函数以兼容旧调用方。新代码应直接使用 judge_queue.enqueue_job。
-    """
-    from app.services.judge_queue import enqueue_job as _enq
-    from app.database import SessionLocal
-
-    # 需要 DB session 做条件更新
-    with SessionLocal() as db:
-        _enq(db, job_type="exam", object_id=answer_id)
-
-
-def _maybe_finalize_exam(submission_id: int, db: Session) -> None:
-    """检查是否所有答案均已完成，是则汇总生成最终成绩。
-
-    委托给 exam_grading.finalize_if_ready——原子化汇总，与 exam_service 共用同一实现。
-    """
+def _maybe_finalize_exam(submission_id: int, db: Session):
     from app.services.exam_grading import finalize_if_ready
     finalize_if_ready(submission_id, db)
 
 
 def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id: int) -> ExamAnswer:
-    """处理考试编程题判题——使用统一 judge_queue 状态机"""
     from app.services.judge_queue import claim_job, complete_job, fail_job
 
     answer = db.get(ExamAnswer, answer_id)
     if not answer:
-        logger.error("ExamAnswer %s 不存在", answer_id)
-        raise ValueError(f"ExamAnswer {answer_id} does not exist")
-
-    # 幂等：已完成的答案不重复判题
+        return None
     if answer.grading_status == "completed":
         _maybe_finalize_exam(answer.submission_id, db)
         return answer
 
     try:
-        # 原子抢占：queued → running
-        claimed = claim_job(db, job_type="exam", object_id=answer_id)
-
-        # 抢占失败：说明已被其他 Worker 领取或状态不对（非 queued），直接返回
-        # 旧 pending 数据由恢复扫描 requeue_stale_jobs 统一转为 queued，不在此绕过
-        if not claimed:
-            logger.debug("抢占 ExamAnswer %s 失败（已被其他 Worker 领取或状态非 queued），跳过", answer_id)
+        if not claim_job(db, job_type="exam", object_id=answer_id):
             return answer
 
         question = db.get(ExamQuestion, answer.question_id)
@@ -293,78 +412,141 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
         try:
             if _work_root:
                 workdir, _cleanup = _make_work_dir(_work_root, "dai-exam-judge-")
-                if _host_root:
-                    host_workdir = _host_root / workdir.relative_to(_work_root)
-                else:
-                    host_workdir = workdir
+                host_workdir = _host_root / workdir.relative_to(_work_root) if _host_root else workdir
             else:
                 _temp = tempfile.TemporaryDirectory(prefix="dai-exam-judge-")
                 workdir = Path(_temp.name)
                 host_workdir = workdir
                 _cleanup = lambda: _temp.cleanup()
 
-            user_code = workdir / "user_code.py"
-            test_file = workdir / "test_user_code.py"
-            user_code.write_text(answer.code_answer or "", encoding="utf-8")
-            hidden_tests = question.hidden_tests
-            if "import user_code" not in hidden_tests and "from user_code" not in hidden_tests:
-                hidden_tests = f"import user_code\n\n{hidden_tests}"
-            test_file.write_text(hidden_tests, encoding="utf-8")
-
             timeout_s = max(min(math.ceil((question.time_limit_ms or 10000) / 1000), settings.judge_timeout_seconds), 1)
             mem_mb = question.memory_limit_mb or settings.judge_memory_limit_mb
 
-            try:
-                stdout, stderr, returncode, elapsed_ms = _run_docker_pytest(workdir, settings, timeout_s, mem_mb,
-                                                                             host_workdir=host_workdir)
-            except Exception as e:
-                fail_job(db, job_type="exam", object_id=answer_id,
-                         error=f"Docker 判题失败: {e}", retryable=True)
-                answer.score = 0
-                answer.system_error = f"Docker 判题失败: {e}"
-                answer.result_details = {"error": str(e)}
+            if question.grading_mode == "legacy":
+                user_code = workdir / "user_code.py"
+                test_file = workdir / "test_user_code.py"
+                user_code.write_text(answer.code_answer or "", encoding="utf-8")
+                ht = question.hidden_tests
+                if "import user_code" not in ht and "from user_code" not in ht:
+                    ht = f"import user_code\n\n{ht}"
+                test_file.write_text(ht, encoding="utf-8")
+
+                try:
+                    stdout, stderr, returncode, elapsed = _run_docker_pytest(
+                        workdir, settings, timeout_s, mem_mb, host_workdir=host_workdir)
+                except Exception as e:
+                    fail_job(db, job_type="exam", object_id=answer_id,
+                             error=f"Docker 判题失败: {e}", retryable=True)
+                    answer.score = 0
+                    answer.system_error = f"Docker 判题失败: {e}"
+                    db.commit()
+                    _maybe_finalize_exam(answer.submission_id, db)
+                    return answer
+
+                final_status, _ = _status_from_pytest(returncode, stdout, stderr)
+                score = float(question.points) if final_status == "accepted" else 0.0
+                answer.score = score
+                answer.grading_status = "completed"
+                answer.result_details = {"returncode": returncode}
                 db.commit()
-                logger.warning("ExamAnswer %s Docker 执行异常，已退回 pending", answer_id)
+                complete_job(db, job_type="exam", object_id=answer_id, score=score)
                 _maybe_finalize_exam(answer.submission_id, db)
-                return answer
+
+            else:
+                test_groups = question.test_groups or []
+                if not test_groups:
+                    raise ValueError("shadow/active 模式需要测试组")
+
+                result = run_test_groups(
+                    workdir, host_workdir, answer.code_answer or "", test_groups,
+                    settings, timeout_s, mem_mb,
+                )
+                f_score, r_score, details, sys_errors = _calculate_fr_scores(test_groups, result["results"])
+
+                # shadow: 立即给旧二元分; active: 等 AI
+                if question.grading_mode == "shadow":
+                    answer.score = float(question.points) if f_score > 0 else 0.0
+                else:
+                    answer.score = None
+
+                answer.grading_status = "completed"
+                answer.result_details = {"groups": details, "system_errors": sys_errors}
+                db.commit()
+                complete_job(db, job_type="exam", object_id=answer_id,
+                             score=answer.score, result_details=answer.result_details)
+
+                # 创建 CodeGrade 并入队
+                from app.models import QuestionRubric
+                locked = db.scalar(
+                    select(QuestionRubric).where(
+                        QuestionRubric.exam_question_id == question.id,
+                        QuestionRubric.status == "locked",
+                    ).order_by(QuestionRubric.version.desc()).limit(1)
+                )
+                if locked:
+                    cg = CodeGrade(
+                        exam_answer_id=answer_id,
+                        rubric_id=locked.id,
+                        mode=question.grading_mode,
+                        status="pending",
+                        functional_score=f_score,
+                        robustness_score=r_score,
+                        deterministic_details={"groups": details, "system_errors": sys_errors},
+                    )
+                    db.add(cg)
+                    db.commit()
+                    from app.services.ai_grading_queue import enqueue_ai_grade
+                    enqueue_ai_grade(db, redis_client, cg.id)
+                    db.commit()
+
+                # shadow 立即汇总; active 等 AI 完成
+                if question.grading_mode == "shadow":
+                    _maybe_finalize_exam(answer.submission_id, db)
+
+            return answer
         finally:
             if _cleanup:
                 _cleanup()
 
-        final_status, _ = _status_from_pytest(returncode, stdout, stderr)
-        score = float(question.points) if final_status == "accepted" else 0.0
-        answer.score = float(score)
-        answer.grading_status = "completed"
-        answer.result_details = {"returncode": returncode, "stdout": stdout[-2000:], "stderr": stderr[-2000:]}
-        db.commit()
-
-        complete_job(db, job_type="exam", object_id=answer_id,
-                     score=score, result_details=answer.result_details)
-        logger.info("ExamAnswer %s 判题完成: %s (%.1f)", answer_id, final_status, score)
-
-        _maybe_finalize_exam(answer.submission_id, db)
-        return answer
-
     except Exception:
-        # 未知异常：退回 pending 等待恢复扫描重试
-        logger.exception("ExamAnswer %s 未知异常，退回 pending", answer_id)
+        logger.exception("ExamAnswer %s 未知异常", answer_id)
         try:
-            fail_job(db, job_type="exam", object_id=answer_id,
-                     error="Worker 未知异常", retryable=True)
+            fail_job(db, job_type="exam", object_id=answer_id, error="Worker 未知异常", retryable=True)
         except Exception:
-            logger.exception("fail_job 也失败了")
-            try:
-                answer.grading_status = "pending"
-                answer.last_error = "Worker 未知异常（fail_job 失败）"
-                db.commit()
-            except Exception:
-                logger.exception("连手动退回都失败了")
-        # 尝试汇总
+            pass
         try:
             _maybe_finalize_exam(answer.submission_id, db)
         except Exception:
-            logger.exception("_maybe_finalize_exam 失败")
+            pass
         return answer
+
+
+# ═══════════════════════════════════════════════════════════════
+# AI 评分处理
+# ═══════════════════════════════════════════════════════════════
+
+def process_ai_grade(db: Session, redis_client, settings: Settings, code_grade_id: int) -> CodeGrade:
+    from app.services.ai_grading_queue import claim_ai_grade, complete_ai_grade, fail_ai_grade
+    from app.services.ai_grading_service import grade_code_submission
+    from app.services.ai_client import AIServiceError, DeepSeekClient
+
+    if not claim_ai_grade(db, code_grade_id):
+        return None
+
+    try:
+        client = DeepSeekClient(settings)
+        cg = grade_code_submission(db, client, code_grade_id)
+        db.commit()
+        complete_ai_grade(db, code_grade_id)
+        return cg
+    except AIServiceError as exc:
+        db.rollback()
+        fail_ai_grade(db, redis_client, code_grade_id, exc.message, retryable=exc.retryable)
+        return None
+    except Exception as exc:
+        db.rollback()
+        fail_ai_grade(db, redis_client, code_grade_id, str(exc), retryable=True)
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -372,64 +554,72 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
 # ═══════════════════════════════════════════════════════════════
 
 def run_worker_loop():
-    """主循环：同时消费普通判题队列和考试判题队列。
-
-    消息格式（v2 统一协议）：
-      {"type": "assignment" | "exam", "id": 123, "attempt": 1}
-    """
     import redis as _redis
 
     settings = get_settings()
     redis_client = _redis.Redis.from_url(settings.redis_url, decode_responses=True)
+    ai_queue = settings.ai_queue_name
 
-    logger.info("Worker 启动，监听队列: %s, %s", settings.judge_queue_name, EXAM_JUDGE_QUEUE)
+    queues = [settings.judge_queue_name, EXAM_JUDGE_QUEUE, ai_queue]
+    logger.info("Worker 启动，监听队列: %s", queues)
+
+    # 启动时恢复僵死任务
+    last_recovery = time.monotonic()
+    with SessionLocal() as db:
+        from app.services.judge_queue import requeue_stale_jobs
+        from app.services.ai_grading_queue import recover_stale_ai_grades
+        j_stats = requeue_stale_jobs(db)
+        logger.info("Judge 恢复: %s", j_stats)
+        a_stats = recover_stale_ai_grades(db, redis_client)
+        logger.info("AI 恢复: %s", a_stats)
 
     while True:
         try:
-            result = redis_client.brpop(
-                [settings.judge_queue_name, EXAM_JUDGE_QUEUE], timeout=0
-            )
+            result = redis_client.brpop(queues, timeout=5)
             if result is None:
+                # 定期恢复扫描
+                if time.monotonic() - last_recovery > 120:
+                    with SessionLocal() as db:
+                        from app.services.judge_queue import requeue_stale_jobs
+                        from app.services.ai_grading_queue import recover_stale_ai_grades
+                        requeue_stale_jobs(db)
+                        recover_stale_ai_grades(db, redis_client)
+                    last_recovery = time.monotonic()
                 continue
+
             queue_name, raw_data = result
         except Exception:
-            logger.exception("brpop 异常，重试中...")
+            logger.exception("brpop 异常")
             time.sleep(1)
             continue
 
-        # 解析统一 JSON 消息
         try:
             payload = _json.loads(raw_data)
-            job_type = payload.get("type", "assignment" if queue_name != EXAM_JUDGE_QUEUE else "exam")
-            job_id = payload["id"]
-            job_attempt = payload.get("attempt", 0)
-        except (ValueError, KeyError, _json.JSONDecodeError):
-            # 兼容旧格式：普通作业 → 纯数字字符串
-            logger.warning("无法解析消息格式，尝试旧格式兼容: %s", raw_data[:100])
-            if queue_name == EXAM_JUDGE_QUEUE:
-                try:
-                    legacy = _json.loads(raw_data)
-                    job_id = legacy.get("answer_id") or legacy.get("id")
-                except Exception:
-                    logger.exception("旧格式考试消息解析失败，丢弃")
-                    continue
-            else:
-                try:
-                    job_id = int(raw_data)
-                except ValueError:
-                    logger.exception("旧格式作业消息解析失败，丢弃")
-                    continue
-            job_type = "exam" if queue_name == EXAM_JUDGE_QUEUE else "assignment"
-            job_attempt = 0
+        except Exception:
+            logger.warning("无法解析消息: %s", raw_data[:100])
+            continue
 
-        with SessionLocal() as db:
-            try:
-                if job_type == "exam":
+        msg_type = payload.get("type", "")
+        job_id = payload.get("id")
+
+        if msg_type == "ai_grade":
+            with SessionLocal() as db:
+                try:
+                    process_ai_grade(db, redis_client, settings, job_id)
+                except Exception:
+                    logger.exception("AI 评分异常: id=%s", job_id)
+        elif queue_name == EXAM_JUDGE_QUEUE or msg_type == "exam":
+            with SessionLocal() as db:
+                try:
                     process_exam_answer(db, redis_client, settings, job_id)
-                else:
+                except Exception:
+                    logger.exception("考试判题异常: id=%s", job_id)
+        else:
+            with SessionLocal() as db:
+                try:
                     process_submission(db, redis_client, settings, job_id)
-            except Exception:
-                logger.exception("判题异常: type=%s id=%s", job_type, job_id)
+                except Exception:
+                    logger.exception("判题异常: id=%s", job_id)
 
 
 if __name__ == "__main__":
