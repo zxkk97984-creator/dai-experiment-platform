@@ -1,5 +1,9 @@
 import client from './client.js'
-import { trackAuthLogout, waitForAuthTransitions } from './authRefreshCoordinator.js'
+import {
+  trackAuthLogout,
+  trackAuthRefresh,
+  waitForAuthTransitions,
+} from './authRefreshCoordinator.js'
 
 export const authAPI = {
   async login(username, password) {
@@ -13,7 +17,9 @@ export const authAPI = {
   },
   /** Refresh via HttpOnly cookie — no token in body needed */
   refresh() {
-    return client.post('/auth/refresh', {}, { skipAuthRefresh: true })
+    return trackAuthRefresh(
+      client.post('/auth/refresh', {}, { skipAuthRefresh: true }),
+    )
   },
   /** Logout — cookie cleared by server */
   logout(accessToken = '') {

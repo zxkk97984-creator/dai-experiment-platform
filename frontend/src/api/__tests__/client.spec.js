@@ -194,4 +194,30 @@ describe('认证 API', () => {
       { skipAuthRefresh: true },
     )
   })
+
+  it('login 等待直接调用的 session restore refresh 返回', async () => {
+    let resolveRefresh
+    state.client.post
+      .mockImplementationOnce(
+        () => new Promise((resolve) => {
+          resolveRefresh = resolve
+        }),
+      )
+      .mockResolvedValueOnce({})
+
+    const refreshRequest = state.authAPI.refresh()
+    const loginRequest = state.authAPI.login('teacher', 'secret')
+    await Promise.resolve()
+
+    expect(state.client.post).toHaveBeenCalledTimes(1)
+    resolveRefresh({ data: { access_token: 'restored-token' } })
+    await refreshRequest
+    await loginRequest
+    expect(state.client.post).toHaveBeenNthCalledWith(
+      2,
+      '/auth/login',
+      { username: 'teacher', password: 'secret' },
+      { skipAuthRefresh: true },
+    )
+  })
 })

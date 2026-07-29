@@ -14,6 +14,7 @@ vi.mock('../../api/auth.js', () => ({
 }))
 
 import { useAuthStore } from '../auth.js'
+import { waitForAuthTransitions } from '../../api/authRefreshCoordinator.js'
 
 
 describe('useAuthStore logout', () => {
@@ -71,5 +72,51 @@ describe('useAuthStore logout', () => {
     expect(auth.accessToken).toBe('')
     expect(auth.user).toBeNull()
     expect(mocks.logout).toHaveBeenLastCalledWith('late-access-token')
+  })
+
+  it('会话恢复的并发闸门覆盖迟到响应清理的完整过程', async () => {
+    let resolveRefresh
+    let resolveManualLogout
+    let resolveLateCleanup
+    mocks.refresh.mockImplementation(
+      () => new Promise((resolve) => {
+        resolveRefresh = resolve
+      }),
+    )
+    mocks.logout
+      .mockImplementationOnce(
+        () => new Promise((resolve) => {
+          resolveManualLogout = resolve
+        }),
+      )
+      .mockImplementationOnce(
+        () => new Promise((resolve) => {
+          resolveLateCleanup = resolve
+        }),
+      )
+    const auth = useAuthStore()
+
+    const restoring = auth.tryRestoreSession()
+    auth.logout()
+    const transitionsSettled = waitForAuthTransitions()
+    let didSettle = false
+    transitionsSettled.then(() => {
+      didSettle = true
+    })
+
+    resolveRefresh({
+      data: {
+        access_token: 'late-access-token',
+        user: { id: 1, username: 'teacher', role: 'teacher' },
+      },
+    })
+    await vi.waitFor(() => expect(mocks.logout).toHaveBeenCalledTimes(2))
+    await Promise.resolve()
+    expect(didSettle).toBe(false)
+
+    resolveLateCleanup({})
+    resolveManualLogout({})
+    await expect(restoring).resolves.toBe(false)
+    await transitionsSettled
   })
 })

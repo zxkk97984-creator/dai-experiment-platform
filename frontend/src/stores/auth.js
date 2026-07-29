@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authAPI } from '../api/auth.js'
+import { beginAuthRefresh } from '../api/authRefreshCoordinator.js'
 
 function safeGetJSON(key, fallback = null) {
   try {
@@ -67,6 +68,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     isRefreshing.value = true
     const restoreGeneration = sessionGeneration.value
+    const finishSessionRestore = beginAuthRefresh()
     try {
       const res = await authAPI.refresh()
       if (sessionGeneration.value !== restoreGeneration) {
@@ -83,6 +85,7 @@ export const useAuthStore = defineStore('auth', () => {
       return false
     } finally {
       isRefreshing.value = false
+      finishSessionRestore()
     }
   }
 

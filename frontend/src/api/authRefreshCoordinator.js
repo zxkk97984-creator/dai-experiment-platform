@@ -29,6 +29,12 @@ export function trackAuthLogout(request) {
   return promise
 }
 
+export function trackAuthRefresh(request) {
+  const promise = Promise.resolve(request)
+  registerTransition(promise)
+  return promise
+}
+
 export async function waitForAuthTransitions() {
   while (activeAuthTransitions.size > 0) {
     await Promise.all([...activeAuthTransitions])
