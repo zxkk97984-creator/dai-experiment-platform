@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -207,7 +207,7 @@ class JudgeQuestionCreate(BaseModel):
     hidden_tests: str
     time_limit_ms: int = 10000
     memory_limit_mb: int = 256
-    grading_mode: str | None = None  # legacy / shadow / active
+    grading_mode: Literal["legacy", "shadow", "active"] | None = None
 
 
 class JudgeQuestionRead(BaseModel):
@@ -298,7 +298,7 @@ class ExamQuestionCreate(BaseModel):
     hidden_tests: str | None = None
     time_limit_ms: int | None = None
     memory_limit_mb: int | None = None
-    grading_mode: str | None = None  # legacy / shadow / active
+    grading_mode: Literal["legacy", "shadow", "active"] | None = None
 
 
 class ExamQuestionUpdate(BaseModel):

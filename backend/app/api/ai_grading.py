@@ -276,116 +276,98 @@ def _build_grade_base_query(db: Session, user: User, kind: str | None,
                              question_id: int | None, student_id: int | None, status: str | None):
     """构建带权限筛选的 CodeGrade 查询。按 kind 构建单一路径避免重复 JOIN。"""
     course_ids = _teacher_course_ids(db, user)
+    is_admin = user.role == "admin"
 
-    if user.role == "admin":
-        query = select(CodeGrade)
-        count_q = select(func.count()).select_from(CodeGrade)
-    elif kind == "assignment":
+    if kind == "assignment":
         # 单一路径：CodeGrade → Submission → JudgeQuestion → Assignment
-        query = select(CodeGrade).join(
-            Submission, CodeGrade.submission_id == Submission.id
-        ).join(
-            JudgeQuestion, Submission.question_id == JudgeQuestion.id
-        ).join(
-            Assignment, JudgeQuestion.assignment_id == Assignment.id
-        ).where(Assignment.course_id.in_(course_ids))
+        query = select(CodeGrade).join(Submission, CodeGrade.submission_id == Submission.id).join(
+            JudgeQuestion, Submission.question_id == JudgeQuestion.id).join(
+            Assignment, JudgeQuestion.assignment_id == Assignment.id)
         count_q = select(func.count()).select_from(CodeGrade).join(
-            Submission, CodeGrade.submission_id == Submission.id
-        ).join(
-            JudgeQuestion, Submission.question_id == JudgeQuestion.id
-        ).join(
-            Assignment, JudgeQuestion.assignment_id == Assignment.id
-        ).where(Assignment.course_id.in_(course_ids))
+            Submission, CodeGrade.submission_id == Submission.id).join(
+            JudgeQuestion, Submission.question_id == JudgeQuestion.id).join(
+            Assignment, JudgeQuestion.assignment_id == Assignment.id)
+        if not is_admin:
+            query = query.where(Assignment.course_id.in_(course_ids))
+            count_q = count_q.where(Assignment.course_id.in_(course_ids))
     elif kind == "exam":
         # 单一路径：CodeGrade → ExamAnswer → ExamQuestion → Exam
-        query = select(CodeGrade).join(
-            ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id
-        ).join(
-            ExamQuestion, ExamAnswer.question_id == ExamQuestion.id
-        ).join(
-            Exam, ExamQuestion.exam_id == Exam.id
-        ).where(Exam.course_id.in_(course_ids))
+        query = select(CodeGrade).join(ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id).join(
+            ExamQuestion, ExamAnswer.question_id == ExamQuestion.id).join(
+            Exam, ExamQuestion.exam_id == Exam.id)
         count_q = select(func.count()).select_from(CodeGrade).join(
-            ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id
-        ).join(
-            ExamQuestion, ExamAnswer.question_id == ExamQuestion.id
-        ).join(
-            Exam, ExamQuestion.exam_id == Exam.id
-        ).where(Exam.course_id.in_(course_ids))
+            ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id).join(
+            ExamQuestion, ExamAnswer.question_id == ExamQuestion.id).join(
+            Exam, ExamQuestion.exam_id == Exam.id)
+        if not is_admin:
+            query = query.where(Exam.course_id.in_(course_ids))
+            count_q = count_q.where(Exam.course_id.in_(course_ids))
+    elif is_admin:
+        # admin 无 kind 筛选：纯 CodeGrade 不做 JOIN（后续 filter 会按需加 JOIN）
+        query = select(CodeGrade)
+        count_q = select(func.count()).select_from(CodeGrade)
     else:
-        # 无 kind 筛选：需要两条路径的 UNION（使用 distinct outerjoin 保底，但用子查询更干净）
-        # 这里用 OR 条件 + LEFT JOIN 两条路径，确保教师只能看到自己课程的数据
+        # 教师无 kind 筛选：两条路径
         query = select(CodeGrade).distinct().outerjoin(
-            Submission, CodeGrade.submission_id == Submission.id
-        ).outerjoin(
-            JudgeQuestion, Submission.question_id == JudgeQuestion.id
-        ).outerjoin(
-            Assignment, JudgeQuestion.assignment_id == Assignment.id
-        ).outerjoin(
-            ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id
-        ).outerjoin(
-            ExamQuestion, ExamAnswer.question_id == ExamQuestion.id
-        ).outerjoin(
-            Exam, ExamQuestion.exam_id == Exam.id
-        ).where(
-            or_(
+            Submission, CodeGrade.submission_id == Submission.id).outerjoin(
+            JudgeQuestion, Submission.question_id == JudgeQuestion.id).outerjoin(
+            Assignment, JudgeQuestion.assignment_id == Assignment.id).outerjoin(
+            ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id).outerjoin(
+            ExamQuestion, ExamAnswer.question_id == ExamQuestion.id).outerjoin(
+            Exam, ExamQuestion.exam_id == Exam.id).where(or_(
                 Assignment.course_id.in_(course_ids) if course_ids else False,
-                Exam.course_id.in_(course_ids) if course_ids else False,
-            )
-        )
+                Exam.course_id.in_(course_ids) if course_ids else False))
         count_q = select(func.count()).select_from(CodeGrade).distinct().outerjoin(
-            Submission, CodeGrade.submission_id == Submission.id
-        ).outerjoin(
-            JudgeQuestion, Submission.question_id == JudgeQuestion.id
-        ).outerjoin(
-            Assignment, JudgeQuestion.assignment_id == Assignment.id
-        ).outerjoin(
-            ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id
-        ).outerjoin(
-            ExamQuestion, ExamAnswer.question_id == ExamQuestion.id
-        ).outerjoin(
-            Exam, ExamQuestion.exam_id == Exam.id
-        ).where(
-            or_(
+            Submission, CodeGrade.submission_id == Submission.id).outerjoin(
+            JudgeQuestion, Submission.question_id == JudgeQuestion.id).outerjoin(
+            Assignment, JudgeQuestion.assignment_id == Assignment.id).outerjoin(
+            ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id).outerjoin(
+            ExamQuestion, ExamAnswer.question_id == ExamQuestion.id).outerjoin(
+            Exam, ExamQuestion.exam_id == Exam.id).where(or_(
                 Assignment.course_id.in_(course_ids) if course_ids else False,
-                Exam.course_id.in_(course_ids) if course_ids else False,
-            )
-        )
+                Exam.course_id.in_(course_ids) if course_ids else False))
 
-    # kind 筛选：已在 base query 中按路径构建，这里只需过滤 NULL
-    if kind:
-        if kind == "assignment":
-            query = query.where(CodeGrade.submission_id.isnot(None))
-            count_q = count_q.where(CodeGrade.submission_id.isnot(None))
-        elif kind == "exam":
-            query = query.where(CodeGrade.exam_answer_id.isnot(None))
-            count_q = count_q.where(CodeGrade.exam_answer_id.isnot(None))
-
-    # question_id 筛选：使用已 JOIN 的表列，不再重复 JOIN
+    # question_id 筛选：需要时添加 JOIN（admin 可能尚未 JOIN 相关表）
     if question_id is not None:
         if kind == "exam":
             query = query.where(ExamAnswer.question_id == question_id)
             count_q = count_q.where(ExamAnswer.question_id == question_id)
-        else:
-            # assignment 或无 kind：通过 Submission → JudgeQuestion
+        elif kind == "assignment":
             query = query.where(Submission.question_id == question_id)
             count_q = count_q.where(Submission.question_id == question_id)
+        else:
+            # 无 kind 或 admin 无 kind：需要添加两个方向的条件
+            from app.models import ExamAnswer as _EA
+            query = query.outerjoin(_EA, CodeGrade.exam_answer_id == _EA.id).outerjoin(
+                Submission, CodeGrade.submission_id == Submission.id).where(or_(
+                Submission.question_id == question_id,
+                _EA.question_id == question_id))
+            count_q = count_q.outerjoin(_EA, CodeGrade.exam_answer_id == _EA.id).outerjoin(
+                Submission, CodeGrade.submission_id == Submission.id).where(or_(
+                Submission.question_id == question_id,
+                _EA.question_id == question_id))
 
-    # student_id 筛选：使用已 JOIN 的表列
+    # student_id 筛选
     if student_id is not None:
         if kind == "exam":
-            # 需要 ExamSubmission 获取 student_id，只在需要时 JOIN
-            from app.models import ExamSubmission as _ExamSubmission
-            query = query.outerjoin(
-                _ExamSubmission, ExamAnswer.submission_id == _ExamSubmission.id
-            ).where(_ExamSubmission.student_id == student_id)
-            count_q = count_q.outerjoin(
-                _ExamSubmission, ExamAnswer.submission_id == _ExamSubmission.id
-            ).where(_ExamSubmission.student_id == student_id)
-        else:
-            # assignment 或无 kind：Submission 已在 base 中
+            from app.models import ExamSubmission as _ES
+            query = query.outerjoin(_ES, ExamAnswer.submission_id == _ES.id).where(_ES.student_id == student_id)
+            count_q = count_q.outerjoin(_ES, ExamAnswer.submission_id == _ES.id).where(_ES.student_id == student_id)
+        elif kind == "assignment":
             query = query.where(Submission.student_id == student_id)
             count_q = count_q.where(Submission.student_id == student_id)
+        else:
+            from app.models import ExamSubmission as _ES2, ExamAnswer as _EA2
+            query = query.outerjoin(_EA2, CodeGrade.exam_answer_id == _EA2.id).outerjoin(
+                _ES2, _EA2.submission_id == _ES2.id).outerjoin(
+                Submission, CodeGrade.submission_id == Submission.id).where(or_(
+                Submission.student_id == student_id,
+                _ES2.student_id == student_id))
+            count_q = count_q.outerjoin(_EA2, CodeGrade.exam_answer_id == _EA2.id).outerjoin(
+                _ES2, _EA2.submission_id == _ES2.id).outerjoin(
+                Submission, CodeGrade.submission_id == Submission.id).where(or_(
+                Submission.student_id == student_id,
+                _ES2.student_id == student_id))
 
     if status:
         query = query.where(CodeGrade.status == status)
@@ -574,16 +556,18 @@ def override_grade(
         cg.final_score_100 = data.final_score_100
         cg.raw_total = data.final_score_100
     else:
-        # 重算
+        # 教师未指定总分→合并 F+A+R+Q 重算
         merged = merge_scores(f=f_score, a=a_score, r=r_score, q=q_score, cap=cg.score_cap, exam_points=None)
         cg.raw_total = merged.raw_total
         cg.final_score_100 = merged.final_score_100
-        if cg.scaled_score is not None and cg.exam_answer_id:
-            ans = db.get(ExamAnswer, cg.exam_answer_id)
-            if ans:
-                eq = db.get(ExamQuestion, ans.question_id)
-                if eq:
-                    cg.scaled_score = round(merged.final_score_100 / 100 * eq.points, 4)
+
+    # 考试 CodeGrade：始终按题目分值重算 scaled_score（无论教师改 A/Q 还是总分）
+    if cg.exam_answer_id:
+        ans = db.get(ExamAnswer, cg.exam_answer_id)
+        if ans:
+            eq = db.get(ExamQuestion, ans.question_id)
+            if eq:
+                cg.scaled_score = round((cg.final_score_100 or 0) / 100 * eq.points, 4)
 
     if cg.needs_teacher_review:
         cg.needs_teacher_review = False

@@ -181,7 +181,7 @@ def test_max_retries_reaches_system_error(db_session_factory):
 
         sub2 = db.get(Submission, sid)
         assert sub2.grading_status == "system_error"
-        assert sub2.score == 0
+        assert sub2.score is None  # 系统错误不扣分（第六轮修正）
         assert "超过最大重试次数" in (sub2.last_error or "")
 
 
@@ -199,7 +199,7 @@ def test_exam_answer_max_retries_with_finalize(db_session_factory):
 
         ans2 = db.get(ExamAnswer, aid)
         assert ans2.grading_status == "system_error"
-        assert ans2.score == 0
+        assert ans2.score is None  # 系统错误不扣分（第六轮修正）
 
         # 验证提交状态已变为 graded（因为所有答案都是终态）
         sub = db.get(ExamSubmission, ans2.submission_id)

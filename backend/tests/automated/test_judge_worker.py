@@ -237,7 +237,7 @@ def test_formal_docker_fail_system_error():
         with patch('app.services.judge_queue.claim_job', return_value=True):
             result = process_submission(db, redis, settings, 1)
     assert result.status == 'system_error'
-    assert result.score == 0
+    assert result.score is None  # 系统错误不扣分（第六轮修正）
     db.commit.assert_called()
     db.refresh.assert_called()
     redis.setex.assert_called()

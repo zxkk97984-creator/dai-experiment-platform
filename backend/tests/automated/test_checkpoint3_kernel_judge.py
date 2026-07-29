@@ -291,7 +291,7 @@ def test_judge_docker_failure_sets_system_error():
         with patch('app.services.judge_queue.claim_job', return_value=True):
             result = process_submission(db, redis_client, settings, 1)
             assert result.status == 'system_error'
-            assert result.score == 0
+            assert result.score is None  # 系统错误不扣分（第六轮修正）
 
 
 # ═══════════════════════════════════════════════════════════════

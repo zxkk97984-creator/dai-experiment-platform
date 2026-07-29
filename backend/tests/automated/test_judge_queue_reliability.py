@@ -423,7 +423,7 @@ def test_p0_2_max_retries_syncs_submission_status(db_session_factory):
         # P0-2 关键断言：前端读取的 status 字段也必须是 system_error
         assert sub2.status == "system_error", \
             f"前端轮询的 status 应为 system_error，实际: {sub2.status}"
-        assert sub2.score == 0
+        assert sub2.score is None  # 系统错误不扣分（第六轮修正）
 
 
 def test_p0_2_exam_max_retries_immediate_finalize(db_session_factory):

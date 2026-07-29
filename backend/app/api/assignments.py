@@ -186,9 +186,10 @@ def create_question(
 ):
     assignment = require_assignment(assignment_id, db)
     ensure_assignment_manager(assignment, current_user, db)
-    question = JudgeQuestion(assignment_id=assignment_id, **payload.model_dump())
+    data = payload.model_dump(exclude_unset=True)
+    question = JudgeQuestion(assignment_id=assignment_id, **data)
     # 新建编程题默认 shadow 模式（仅当用户未显式指定时生效）
-    if "grading_mode" not in payload.model_dump():
+    if "grading_mode" not in data:
         question.grading_mode = "shadow"
     db.add(question)
     db.commit()

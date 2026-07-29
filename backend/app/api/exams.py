@@ -228,7 +228,7 @@ def get_questions(exam_id: int, db: Session = Depends(get_db), current_user: Use
 
 @router.post("/{exam_id}/questions", response_model=ExamQuestionRead, status_code=status.HTTP_201_CREATED)
 def post_question(exam_id: int, payload: ExamQuestionCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return create_question(db, exam_id, payload.model_dump(), current_user)
+    return create_question(db, exam_id, payload.model_dump(exclude_unset=True), current_user)
 
 @router.patch("/{exam_id}/questions/{question_id}", response_model=ExamQuestionRead)
 def patch_question(exam_id: int, question_id: int, payload: ExamQuestionUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

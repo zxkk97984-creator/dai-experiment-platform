@@ -70,6 +70,7 @@
             <option value="required_complexity_missing">复杂度不达标</option>
             <option value="dangerous_operation">危险操作</option>
           </select>
+          <input v-model="r.description" placeholder="描述（必填）" class="input-sm" @change="dirty = true" style="width:120px" />
           <input v-model.number="r.cap" type="number" placeholder="上限分" class="input-sm input-num" @change="dirty = true" />
           <button class="btn-sm btn-danger-text" @click="removeCapRule(i)">删除</button>
         </div>
@@ -170,7 +171,7 @@ function removeGroup(i) {
 
 function addCapRule() {
   if (!config.value.score_cap_rules) config.value.score_cap_rules = []
-  config.value.score_cap_rules.push({ id: '', condition_code: 'off_topic', cap: 0 })
+  config.value.score_cap_rules.push({ id: '', description: '', condition_code: 'off_topic', cap: 0 })
   dirty.value = true
 }
 
@@ -182,7 +183,17 @@ function removeCapRule(i) {
 async function save() {
   saving.value = true; saveMsg.value = ''
   try {
-    const constraints = (() => { try { return JSON.parse(constraintsStr.value) } catch { return {} } })()
+    // 解析约束 JSON：空字符串→{}，非法 JSON→阻止保存
+    let constraints = {}
+    const raw = (constraintsStr.value || '').trim()
+    if (raw) {
+      try { constraints = JSON.parse(raw) }
+      catch {
+        saveMsg.value = '教师约束 JSON 格式错误，请修正后重试'
+        saveOk.value = false
+        return
+      }
+    }
     await aiGradingAPI.updateConfig(props.kind, props.questionId, {
       grading_mode: config.value.grading_mode,
       teacher_constraints: constraints,
@@ -197,8 +208,17 @@ async function save() {
 }
 
 async function generateRubricAction() {
-  rubricLoading.value = true
+  rubricLoading.value = true; error.value = ''
   try {
+    // 未保存的配置先自动保存，确保 Rubric 按最新配置生成
+    if (dirty.value) {
+      await save()
+      if (!saveOk.value) {
+        error.value = '请先修正配置错误再生成 Rubric'
+        rubricLoading.value = false
+        return
+      }
+    }
     const res = await aiGradingAPI.generateRubric(props.kind, props.questionId)
     rubrics.value.unshift({
       id: res.data.id, version: res.data.version, status: res.data.status,

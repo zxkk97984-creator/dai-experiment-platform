@@ -250,7 +250,7 @@ def requeue_stale_jobs(db: Session, *, job_type: str | None = None,
             _do_enqueue(db, model, job.id, queue_key)
             stats["pending_requeued"] += 1
 
-        # 超过最大重试 → system_error
+        # 超过最大重试 → system_error（不扣分：基础设施问题不应让学生承担）
         over_max = db.scalars(
             select(model).where(
                 model.grading_status == "pending",
@@ -262,7 +262,7 @@ def requeue_stale_jobs(db: Session, *, job_type: str | None = None,
                 "grading_status": "system_error",
                 "last_error": f"超过最大重试次数（{MAX_ATTEMPTS}）",
                 "finished_at": now,
-                "score": 0,
+                "score": None,
             }
             # 普通作业：同步更新 status（前端轮询字段）
             if jt == "assignment":
@@ -274,10 +274,6 @@ def requeue_stale_jobs(db: Session, *, job_type: str | None = None,
             )
             stats["max_retries_reached"] += 1
 
-            # 考试答案：立即触发最终汇总
-            if jt == "exam":
-                from app.services.exam_grading import finalize_if_ready
-                finalize_if_ready(job.submission_id, db)
         db.commit()
 
         # queued 超时 → 重新推送 Redis（消息可能丢失）

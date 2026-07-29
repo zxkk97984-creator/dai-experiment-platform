@@ -232,7 +232,7 @@ def _legacy_judge_submission(db, redis_client, settings, submission, question, w
         fail_job(db, job_type="assignment", object_id=submission.id,
                  error=f"Docker 判题失败: {e}", retryable=True)
         submission.status = "system_error"
-        submission.score = 0
+        submission.score = None  # 基础设施异常不扣分
         submission.stderr = f"Docker 判题失败: {e}"
         db.commit()
         return submission
@@ -551,9 +551,15 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
                     try:
                         stdout, stderr, returncode, _ = _run_docker_pytest(
                             workdir, settings, timeout_s, mem_mb, host_workdir=host_workdir)
-                    except Exception:
-                        returncode = 1
-                    legacy_status, _ = _status_from_pytest(returncode, stdout if 'stdout' in dir() else "", stderr if 'stderr' in dir() else "")
+                    except Exception as exc:
+                        # 基础设施异常→fail_job 可重试，不扣分，不 finalize
+                        fail_job(db, job_type="exam", object_id=answer_id,
+                                 error=f"Docker 判题失败: {exc}", retryable=True)
+                        answer.score = None
+                        answer.system_error = f"Docker 判题失败: {exc}"
+                        db.commit()
+                        return answer
+                    legacy_status, _ = _status_from_pytest(returncode, stdout, stderr)
                     answer.score = float(question.points) if legacy_status == "accepted" else 0.0
                 else:
                     # active: 等 AI 完成后才定分
