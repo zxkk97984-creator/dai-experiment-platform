@@ -27,6 +27,8 @@ export const useAuthStore = defineStore('auth', () => {
   // User 信息可存 localStorage 用于 UI 显示（不含敏感 token）
   const user = ref(safeGetJSON('user'))
   const isRefreshing = ref(false)
+  // 每次登录/退出都会推进代际，用于丢弃旧会话中迟到的刷新响应。
+  const sessionGeneration = ref(0)
 
   const isAuthenticated = computed(() => !!accessToken.value)
   const role = computed(() => user.value?.role || '')
@@ -51,6 +53,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (!data.access_token) {
       throw new Error('登录响应缺少 access_token')
     }
+    sessionGeneration.value += 1
     // Access token 仅存内存，refresh token 已在 HttpOnly Cookie
     setAccessToken(data.access_token)
     setUser(data.user || null)
@@ -63,8 +66,14 @@ export const useAuthStore = defineStore('auth', () => {
     if (isRefreshing.value) return false
 
     isRefreshing.value = true
+    const restoreGeneration = sessionGeneration.value
     try {
       const res = await authAPI.refresh()
+      if (sessionGeneration.value !== restoreGeneration) {
+        // 退出期间服务端可能刚轮换 Cookie；使用迟到响应中的 token 再清理一次。
+        await authAPI.logout(res.data.access_token).catch(() => {})
+        return false
+      }
       setAccessToken(res.data.access_token)
       if (res.data.user) setUser(res.data.user)
       else await fetchMe()
@@ -93,6 +102,7 @@ export const useAuthStore = defineStore('auth', () => {
   function logout() {
     const token = accessToken.value
     const request = authAPI.logout(token).catch(() => {})
+    sessionGeneration.value += 1
     accessToken.value = ''
     user.value = null
     localStorage.removeItem('user')
@@ -100,7 +110,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   return {
-    accessToken, user, isRefreshing,
+    accessToken, user, isRefreshing, sessionGeneration,
     isAuthenticated, role, isAdmin, isTeacher, isStudent, isDeveloper,
     setAccessToken, setUser, login, tryRestoreSession, fetchMe, logout,
   }

@@ -1,9 +1,11 @@
 """P1-1: Auth Cookie 属性、轮换、旧 token 重放、并发 refresh、Origin 校验测试"""
+from datetime import timedelta
 import threading
 import time
 from unittest.mock import patch
 
 from conftest import auth_header, create_user, login
+from app.security import create_token
 
 API = "/api/v1"
 
@@ -117,6 +119,47 @@ def test_logout_clears_cookie(client, db_session_factory):
                'dai_refresh_token="";' in clear_cookies[0] or \
                'dai_refresh_token=;' in clear_cookies[0], \
                f"Cookie 应被清除: {clear_cookies[0]}"
+
+
+def test_logout_with_expired_access_revokes_valid_refresh_cookie(
+    client,
+    db_session_factory,
+    test_settings,
+):
+    """Access 已过期时，logout 仍须撤销有效 refresh cookie，避免刷新后恢复会话。"""
+    user = create_user(db_session_factory, "lo_expired_t", "teacher")
+    login_r = client.post(
+        f"{API}/auth/login",
+        json={"username": "lo_expired_t", "password": "Passw0rd!"},
+    )
+    refresh_token = next(
+        cookie.split("dai_refresh_token=")[1].split(";")[0]
+        for cookie in login_r.headers.get_list("set-cookie")
+        if "dai_refresh_token=" in cookie
+    )
+    expired_access = create_token(
+        subject=user.id,
+        role=user.role,
+        token_type="access",
+        secret_key=test_settings.secret_key,
+        algorithm=test_settings.algorithm,
+        expires_delta=timedelta(seconds=-1),
+    )
+
+    logout_r = client.post(
+        f"{API}/auth/logout",
+        json={},
+        cookies={"dai_refresh_token": refresh_token},
+        headers=auth_header(expired_access),
+    )
+
+    assert logout_r.status_code == 204, logout_r.text
+    replay_r = client.post(
+        f"{API}/auth/refresh",
+        json={},
+        cookies={"dai_refresh_token": refresh_token},
+    )
+    assert replay_r.status_code == 401
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -33,6 +33,7 @@ describe('useAuthStore logout', () => {
     const auth = useAuthStore()
     auth.setAccessToken('access-token')
     auth.setUser({ id: 1, username: 'teacher', role: 'teacher' })
+    const generationBeforeLogout = auth.sessionGeneration
 
     const logoutPromise = auth.logout()
 
@@ -40,9 +41,35 @@ describe('useAuthStore logout', () => {
     expect(mocks.logout).toHaveBeenCalledWith('access-token')
     expect(auth.accessToken).toBe('')
     expect(auth.user).toBeNull()
+    expect(auth.sessionGeneration).toBe(generationBeforeLogout + 1)
     expect(localStorage.getItem('user')).toBeNull()
 
     resolveLogout({})
     await logoutPromise
+  })
+
+  it('页面会话恢复期间发生退出时不接受迟到的刷新结果', async () => {
+    let resolveRefresh
+    mocks.refresh.mockImplementation(
+      () => new Promise((resolve) => {
+        resolveRefresh = resolve
+      }),
+    )
+    mocks.logout.mockResolvedValue({})
+    const auth = useAuthStore()
+
+    const restoring = auth.tryRestoreSession()
+    auth.logout()
+    resolveRefresh({
+      data: {
+        access_token: 'late-access-token',
+        user: { id: 1, username: 'teacher', role: 'teacher' },
+      },
+    })
+
+    await expect(restoring).resolves.toBe(false)
+    expect(auth.accessToken).toBe('')
+    expect(auth.user).toBeNull()
+    expect(mocks.logout).toHaveBeenLastCalledWith('late-access-token')
   })
 })

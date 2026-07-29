@@ -2,10 +2,11 @@ from fastapi import APIRouter, Cookie, Depends, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.dependencies import get_current_payload, get_current_user, get_db, get_redis_client
+from app.dependencies import get_current_user, get_db, get_redis_client
 from app.errors import api_error
 from app.models import User
 from app.schemas import LoginRequest, LogoutRequest, RefreshRequest, TokenResponse, UserRead
+from app.security import decode_token
 from app.services.auth_service import authenticate_user, issue_token_pair, refresh_token_pair, revoke_tokens
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -45,6 +46,19 @@ def _delete_refresh_cookie(response: Response):
         key=REFRESH_COOKIE_KEY,
         path=REFRESH_COOKIE_PATH,
     )
+
+
+def _logout_access_payload(request: Request, settings: Settings) -> dict | None:
+    """尽力解析 access token；退出本身不能依赖一个仍在有效期内的 access token。"""
+    authorization = request.headers.get("Authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    try:
+        payload = decode_token(token, settings.secret_key, settings.algorithm)
+    except ValueError:
+        return None
+    return payload if payload.get("type") == "access" else None
 
 
 @router.post("/login")
@@ -101,13 +115,18 @@ def logout(
     response: Response,
     payload: LogoutRequest | None = None,
     dai_refresh_token: str | None = Cookie(None, alias=REFRESH_COOKIE_KEY),
-    access_payload: dict = Depends(get_current_payload),
     redis_client=Depends(get_redis_client),
     settings: Settings = Depends(get_settings),
 ):
     # Origin 校验：防止跨域 logout 攻击
     _validate_origin(request, settings)
-    revoke_tokens(access_payload, dai_refresh_token or (payload.refresh_token if payload else None), redis_client, settings)
+    access_payload = _logout_access_payload(request, settings)
+    revoke_tokens(
+        access_payload,
+        dai_refresh_token or (payload.refresh_token if payload else None),
+        redis_client,
+        settings,
+    )
     _delete_refresh_cookie(response)
     response.status_code = status.HTTP_204_NO_CONTENT
     return None

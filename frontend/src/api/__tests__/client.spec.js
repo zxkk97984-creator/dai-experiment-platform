@@ -5,6 +5,7 @@ const state = vi.hoisted(() => {
   const auth = {
     isAuthenticated: false,
     accessToken: '',
+    sessionGeneration: 0,
     setAccessToken: vi.fn(),
     logout: vi.fn(),
   }
@@ -53,6 +54,7 @@ describe('认证 401 拦截', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     state.auth.isAuthenticated = false
+    state.auth.sessionGeneration = 0
   })
 
   it('未登录请求收到 401 时不调用 logout 形成递归', async () => {
@@ -77,6 +79,42 @@ describe('认证 401 拦截', () => {
 
     expect(state.auth.logout).not.toHaveBeenCalled()
     expect(state.routerPush).not.toHaveBeenCalled()
+  })
+
+  it('手动退出发生在刷新期间时丢弃刷新结果并清除旋转后的 Cookie', async () => {
+    let resolveRefresh
+    state.auth.isAuthenticated = true
+    state.axiosPost
+      .mockImplementationOnce(
+        () => new Promise((resolve) => {
+          resolveRefresh = resolve
+        }),
+      )
+      .mockResolvedValueOnce({})
+    const error = {
+      config: { url: '/courses', headers: {} },
+      response: { status: 401 },
+    }
+
+    const retry = state.responseRejected(error)
+    await Promise.resolve()
+    state.auth.isAuthenticated = false
+    state.auth.sessionGeneration += 1
+    resolveRefresh({ data: { access_token: 'rotated-access-token' } })
+
+    await expect(retry).rejects.toThrow('会话已改变')
+    expect(state.auth.setAccessToken).not.toHaveBeenCalled()
+    expect(state.client).not.toHaveBeenCalled()
+    expect(state.axiosPost).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/auth/logout',
+      {},
+      {
+        timeout: 10000,
+        withCredentials: true,
+        headers: { Authorization: 'Bearer rotated-access-token' },
+      },
+    )
   })
 })
 

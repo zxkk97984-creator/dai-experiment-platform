@@ -22,13 +22,41 @@ def _json_server_default(value: str):
     return sa.text(literal)
 
 
+def _is_offline_mode() -> bool:
+    """离线 SQL 生成没有可检查的数据库，保持 Alembic 的普通 DDL 输出。"""
+    try:
+        return bool(op.get_context().as_sql)
+    except AttributeError:
+        return False
+
+
 def _add_missing_columns(table_name: str, columns: list[sa.Column]) -> None:
-    existing_columns = {
-        column["name"] for column in sa.inspect(op.get_bind()).get_columns(table_name)
-    }
+    existing_columns = set()
+    if not _is_offline_mode():
+        existing_columns = {
+            column["name"] for column in sa.inspect(op.get_bind()).get_columns(table_name)
+        }
     for column in columns:
         if column.name not in existing_columns:
             op.add_column(table_name, column)
+
+
+def _create_table_if_missing(table_name: str, *columns_and_constraints) -> None:
+    if not _is_offline_mode():
+        existing_tables = set(sa.inspect(op.get_bind()).get_table_names())
+        if table_name in existing_tables:
+            return
+    op.create_table(table_name, *columns_and_constraints)
+
+
+def _create_index_if_missing(index_name: str, table_name: str, columns: list[str]) -> None:
+    if not _is_offline_mode():
+        existing_indexes = {
+            index["name"] for index in sa.inspect(op.get_bind()).get_indexes(table_name)
+        }
+        if index_name in existing_indexes:
+            return
+    op.create_index(index_name, table_name, columns)
 
 
 def upgrade() -> None:
@@ -51,7 +79,7 @@ def upgrade() -> None:
     ])
 
     # ── Rubric 版本表 ──
-    op.create_table(
+    _create_table_if_missing(
         "question_rubrics",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("judge_question_id", sa.Integer(), sa.ForeignKey("judge_questions.id"), nullable=True, index=True),
@@ -76,7 +104,7 @@ def upgrade() -> None:
     )
 
     # ── 统一评分记录表 ──
-    op.create_table(
+    _create_table_if_missing(
         "code_grades",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("submission_id", sa.Integer(), sa.ForeignKey("submissions.id"), nullable=True, unique=True),
@@ -113,7 +141,7 @@ def upgrade() -> None:
     )
 
     # ── 教师覆盖审计表 ──
-    op.create_table(
+    _create_table_if_missing(
         "grade_overrides",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("code_grade_id", sa.Integer(), sa.ForeignKey("code_grades.id"), nullable=False, index=True),
@@ -126,8 +154,8 @@ def upgrade() -> None:
     )
 
     # ── 索引 ──
-    op.create_index("ix_judge_questions_grading_mode", "judge_questions", ["grading_mode"])
-    op.create_index("ix_exam_questions_grading_mode", "exam_questions", ["grading_mode"])
+    _create_index_if_missing("ix_judge_questions_grading_mode", "judge_questions", ["grading_mode"])
+    _create_index_if_missing("ix_exam_questions_grading_mode", "exam_questions", ["grading_mode"])
 
 
 def downgrade() -> None:

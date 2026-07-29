@@ -69,8 +69,8 @@ def refresh_token_pair(db: Session, refresh_token: str, redis_client, settings: 
     return issue_token_pair(user, redis_client, settings)
 
 
-def revoke_tokens(access_payload: dict, refresh_token: str | None, redis_client, settings: Settings) -> None:
-    jti = access_payload.get("jti")
+def revoke_tokens(access_payload: dict | None, refresh_token: str | None, redis_client, settings: Settings) -> None:
+    jti = access_payload.get("jti") if access_payload else None
     if jti:
         redis_client.setex(f"blacklist:{jti}", max(token_ttl_seconds(access_payload), 1), "1")
     if refresh_token:
