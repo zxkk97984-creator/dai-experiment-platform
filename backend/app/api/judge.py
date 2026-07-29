@@ -10,7 +10,7 @@ from app.api.courses import can_view_course
 from app.config import Settings, get_settings
 from app.dependencies import get_current_user, get_db, get_redis_client
 from app.errors import api_error
-from app.models import Assignment, Course, CourseEnrollment, JudgeQuestion, Submission, User
+from app.models import Assignment, CodeGrade, Course, CourseEnrollment, JudgeQuestion, Submission, User
 from app.schemas import PaginatedResponse, SampleRunResponse, SubmissionCreate, SubmissionRead
 from app.worker.judge_worker import _get_timeout, _run_docker_pytest, _status_from_pytest
 
@@ -137,6 +137,32 @@ def get_submission_result(
     submission = require_submission(submission_id, db)
     if not can_view_submission(submission, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限查看该判题结果")
+
+    # 学生可见的 AI 分项：仅 active+completed
+    if current_user.role == "student":
+        cg = db.scalar(
+            select(CodeGrade).where(
+                CodeGrade.submission_id == submission_id,
+                CodeGrade.mode == "active",
+                CodeGrade.status == "completed",
+            )
+        )
+        if cg and cg.ai_result:
+            ai = cg.ai_result
+            feedback = ai.get("student_feedback", {}) if isinstance(ai, dict) else {}
+            submission.grading_breakdown = {
+                "functional_score": cg.functional_score,
+                "algorithm_score": cg.algorithm_score,
+                "robustness_score": cg.robustness_score,
+                "quality_score": cg.quality_score,
+                "raw_total": cg.raw_total,
+                "score_cap": cg.score_cap,
+                "final_score_100": cg.final_score_100,
+                "strengths": feedback.get("strengths", []),
+                "issues": feedback.get("issues", []),
+                "suggestions": feedback.get("suggestions", []),
+            }
+
     return submission
 
 @router.post("/questions/{question_id}/sample-run", response_model=SampleRunResponse)

@@ -1,4 +1,5 @@
 <template>
+  <AppLayout>
   <div class="ai-grading-review">
     <h2>AI 评分复核</h2>
 
@@ -72,10 +73,12 @@
       <button :disabled="page >= Math.ceil(total / pageSize)" @click="page++; load()">下一页</button>
     </div>
   </div>
+  </AppLayout>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import AppLayout from '../../components/layout/AppLayout.vue'
 import { useAuthStore } from '../../stores/auth.js'
 import { aiGradingAPI } from '../../api/aiGrading.js'
 

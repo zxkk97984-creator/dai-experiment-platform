@@ -72,6 +72,35 @@ def _teacher_course_ids(db: Session, user: User) -> list[int]:
     return list(rows)
 
 
+def _check_grade_permission(db: Session, cg: CodeGrade, user: User):
+    """验证教师有权访问该评分记录——fail-closed（关联缺失时拒绝）"""
+    course_ids = _teacher_course_ids(db, user)
+    if not course_ids:
+        raise api_error(403, "FORBIDDEN", "无权操作")
+    if cg.submission_id:
+        sub = db.get(Submission, cg.submission_id)
+        if not sub:
+            raise api_error(403, "FORBIDDEN", "提交记录不存在")
+        q = db.get(JudgeQuestion, sub.question_id)
+        if not q:
+            raise api_error(403, "FORBIDDEN", "题目不存在")
+        a = db.get(Assignment, q.assignment_id)
+        if not a or a.course_id not in course_ids:
+            raise api_error(403, "FORBIDDEN", "无权操作")
+    elif cg.exam_answer_id:
+        ans = db.get(ExamAnswer, cg.exam_answer_id)
+        if not ans:
+            raise api_error(403, "FORBIDDEN", "答案记录不存在")
+        q = db.get(ExamQuestion, ans.question_id)
+        if not q:
+            raise api_error(403, "FORBIDDEN", "题目不存在")
+        e = db.get(Exam, q.exam_id)
+        if not e or e.course_id not in course_ids:
+            raise api_error(403, "FORBIDDEN", "无权操作")
+    else:
+        raise api_error(403, "FORBIDDEN", "无效的评分记录")
+
+
 # ── 题目配置 ──
 
 @router.get("/questions/{kind}/{question_id}/config")
@@ -299,20 +328,40 @@ def _build_grade_base_query(db: Session, user: User, kind: str | None,
             count_q = count_q.where(CodeGrade.exam_answer_id.isnot(None))
 
     if question_id is not None:
-        query = query.outerjoin(
-            Submission, CodeGrade.submission_id == Submission.id, full=False
-        ).where(Submission.question_id == question_id)
-        count_q = count_q.outerjoin(
-            Submission, CodeGrade.submission_id == Submission.id, full=False
-        ).where(Submission.question_id == question_id)
+        if kind == "exam":
+            query = query.outerjoin(
+                ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id, full=False
+            ).where(ExamAnswer.question_id == question_id)
+            count_q = count_q.outerjoin(
+                ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id, full=False
+            ).where(ExamAnswer.question_id == question_id)
+        else:
+            query = query.outerjoin(
+                Submission, CodeGrade.submission_id == Submission.id, full=False
+            ).where(Submission.question_id == question_id)
+            count_q = count_q.outerjoin(
+                Submission, CodeGrade.submission_id == Submission.id, full=False
+            ).where(Submission.question_id == question_id)
 
     if student_id is not None:
-        query = query.outerjoin(
-            Submission, CodeGrade.submission_id == Submission.id, full=False
-        ).where(Submission.student_id == student_id)
-        count_q = count_q.outerjoin(
-            Submission, CodeGrade.submission_id == Submission.id, full=False
-        ).where(Submission.student_id == student_id)
+        if kind == "exam":
+            query = query.outerjoin(
+                ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id, full=False
+            ).outerjoin(
+                ExamSubmission, ExamAnswer.submission_id == ExamSubmission.id, full=False
+            ).where(ExamSubmission.student_id == student_id)
+            count_q = count_q.outerjoin(
+                ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id, full=False
+            ).outerjoin(
+                ExamSubmission, ExamAnswer.submission_id == ExamSubmission.id, full=False
+            ).where(ExamSubmission.student_id == student_id)
+        else:
+            query = query.outerjoin(
+                Submission, CodeGrade.submission_id == Submission.id, full=False
+            ).where(Submission.student_id == student_id)
+            count_q = count_q.outerjoin(
+                Submission, CodeGrade.submission_id == Submission.id, full=False
+            ).where(Submission.student_id == student_id)
 
     if status:
         query = query.where(CodeGrade.status == status)
@@ -424,25 +473,9 @@ def retry_grade(
     if cg is None:
         raise api_error(404, "NOT_FOUND", "评分记录不存在")
 
-    # 权限：教师只能重试自己课程的评分
+    # 权限：教师只能操作自己课程的评分
     if current_user.role != "admin":
-        course_ids = _teacher_course_ids(db, current_user)
-        if cg.submission_id:
-            sub = db.get(Submission, cg.submission_id)
-            if sub:
-                q = db.get(JudgeQuestion, sub.question_id)
-                if q:
-                    a = db.get(Assignment, q.assignment_id)
-                    if a and a.course_id not in course_ids:
-                        raise api_error(403, "FORBIDDEN", "无权操作")
-        elif cg.exam_answer_id:
-            ans = db.get(ExamAnswer, cg.exam_answer_id)
-            if ans:
-                q = db.get(ExamQuestion, ans.question_id)
-                if q:
-                    e = db.get(Exam, q.exam_id)
-                    if e and e.course_id not in course_ids:
-                        raise api_error(403, "FORBIDDEN", "无权操作")
+        _check_grade_permission(db, cg, current_user)
 
     # 条件重置：只重置已终态（completed/review_required/system_error），不碰 running/queued
     if cg.status in ("running", "queued"):
@@ -472,15 +505,7 @@ def override_grade(
 
     # 权限
     if current_user.role != "admin":
-        course_ids = _teacher_course_ids(db, current_user)
-        if cg.submission_id:
-            sub = db.get(Submission, cg.submission_id)
-            if sub:
-                q = db.get(JudgeQuestion, sub.question_id)
-                if q:
-                    a = db.get(Assignment, q.assignment_id)
-                    if a and a.course_id not in course_ids:
-                        raise api_error(403, "FORBIDDEN", "无权操作")
+        _check_grade_permission(db, cg, current_user)
 
     original = {
         "algorithm_score": cg.algorithm_score,

@@ -250,7 +250,7 @@ def _legacy_judge_submission(db, redis_client, settings, submission, question, w
 
 
 def _v1_judge_submission(db, redis_client, settings, submission, question, workdir, host_workdir, timeout_s, mem_mb):
-    """V1 评分路径：运行测试组 → F/R → 创建 CodeGrade → 入队 AI"""
+    """V1 评分路径：运行测试组 → 创建 CodeGrade → 入队 AI。系统错误/缺配置时走 fail_job 可重试。"""
     from app.services.judge_queue import complete_job, fail_job
 
     test_groups = question.test_groups or []
@@ -262,20 +262,50 @@ def _v1_judge_submission(db, redis_client, settings, submission, question, workd
         db.commit()
         return submission
 
+    # 查找锁定 Rubric（缺失则系统错误，不能让学生丢分）
+    locked = db.scalar(
+        select(QuestionRubric).where(
+            QuestionRubric.judge_question_id == question.id,
+            QuestionRubric.status == "locked",
+        ).order_by(QuestionRubric.version.desc()).limit(1)
+    )
+    if locked is None:
+        fail_job(db, job_type="assignment", object_id=submission.id,
+                 error="shadow/active 缺少锁定 Rubric", retryable=True)
+        submission.status = "system_error"
+        submission.score = 0
+        db.commit()
+        return submission
+
     result = run_test_groups(workdir, host_workdir, submission.code, test_groups,
                              settings, timeout_s, mem_mb)
     all_errs = list(result["system_errors"])
     f_score, r_score, details = _calc_fr_scores(test_groups, result["results"], all_errs)
 
-    # shadow: 保留旧规则成绩；active: F+R 作为正式分
+    # 系统错误 → 不创建 CodeGrade，退回重试
+    if all_errs:
+        fail_job(db, job_type="assignment", object_id=submission.id,
+                 error="; ".join(all_errs), retryable=True)
+        submission.status = "system_error"
+        submission.score = 0
+        submission.result_details = {"groups": details, "system_errors": all_errs}
+        db.commit()
+        return submission
+
+    # shadow: 保留旧规则成绩（同时跑 hidden_tests）
     if question.grading_mode == "shadow":
-        # 同时跑旧判题得到 legacy 成绩
         _write_submission_files(workdir, submission, question)
         try:
             stdout, stderr, returncode, elapsed = _run_docker_pytest(
                 workdir, settings, timeout_s, mem_mb, host_workdir=host_workdir)
-        except Exception:
-            stdout, stderr, returncode, elapsed = "", "Docker error", 1, 0
+        except Exception as e:
+            fail_job(db, job_type="assignment", object_id=submission.id,
+                     error=f"Docker 判题失败: {e}", retryable=True)
+            submission.status = "system_error"
+            submission.score = 0
+            submission.stderr = f"Docker 判题失败: {e}"
+            db.commit()
+            return submission
         legacy_status, legacy_score = _status_from_pytest(returncode, stdout, stderr)
         submission.status = legacy_status
         submission.score = legacy_score
@@ -283,45 +313,30 @@ def _v1_judge_submission(db, redis_client, settings, submission, question, workd
         submission.stderr = stderr[-8000:]
         submission.execution_time_ms = elapsed
     else:
-        # active: 基于 F+R 得到部分分
-        raw_score = round(f_score + r_score, 4)
-        submission.score = raw_score if not all_errs else None
-        submission.status = "graded" if not all_errs else "system_error"
+        # active: Docker 完成后不写正式分，等 AI 完成后再合分
+        submission.status = "running"
+        submission.score = None
 
     submission.result_details = {"groups": details, "system_errors": all_errs,
                                  "f_score": f_score, "r_score": r_score}
     db.commit()
+    complete_job(db, job_type="assignment", object_id=submission.id,
+                 score=float(f_score + r_score), result_details=submission.result_details)
 
-    if all_errs:
-        fail_job(db, job_type="assignment", object_id=submission.id,
-                 error="; ".join(all_errs), retryable=True)
-    else:
-        complete_job(db, job_type="assignment", object_id=submission.id,
-                     score=float(f_score + r_score), result_details=submission.result_details)
-
-    # 创建 CodeGrade
-    locked = db.scalar(
-        select(QuestionRubric).where(
-            QuestionRubric.judge_question_id == question.id,
-            QuestionRubric.status == "locked",
-        ).order_by(QuestionRubric.version.desc()).limit(1)
-    )
-    if locked:
-        existing = db.scalar(
-            select(CodeGrade).where(CodeGrade.submission_id == submission.id)
+    # 创建 CodeGrade（幂等：检查是否已存在）
+    existing = db.scalar(select(CodeGrade).where(CodeGrade.submission_id == submission.id))
+    if existing is None:
+        cg = CodeGrade(
+            submission_id=submission.id, rubric_id=locked.id,
+            mode=question.grading_mode, status="pending",
+            functional_score=f_score, robustness_score=r_score,
+            deterministic_details={"groups": details, "system_errors": all_errs},
         )
-        if existing is None:
-            cg = CodeGrade(
-                submission_id=submission.id, rubric_id=locked.id,
-                mode=question.grading_mode, status="pending",
-                functional_score=f_score, robustness_score=r_score,
-                deterministic_details={"groups": details, "system_errors": all_errs},
-            )
-            db.add(cg)
-            db.commit()
-            from app.services.ai_grading_queue import enqueue_ai_grade
-            enqueue_ai_grade(db, redis_client, cg.id)
-            db.commit()
+        db.add(cg)
+        db.commit()
+        from app.services.ai_grading_queue import enqueue_ai_grade
+        enqueue_ai_grade(db, redis_client, cg.id)
+        db.commit()
 
     return submission
 
@@ -368,7 +383,7 @@ def process_submission(db: Session, redis_client, settings: Settings, submission
             mem_mb = question.memory_limit_mb or settings.judge_memory_limit_mb
 
             gmode = getattr(question, 'grading_mode', 'legacy') or 'legacy'
-            if gmode == "legacy" or not getattr(question, 'test_groups', None):
+            if gmode == "legacy":
                 result = _legacy_judge_submission(
                     db, redis_client, settings, submission, question,
                     workdir, host_workdir, timeout_s, mem_mb)
@@ -420,10 +435,10 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
             return answer
 
         question = db.get(ExamQuestion, answer.question_id)
-        if not question or not question.hidden_tests:
+        if not question:
             fail_job(db, job_type="exam", object_id=answer_id,
-                     error="题目未配置隐藏测试", retryable=False)
-            answer.system_error = "题目未配置隐藏测试"
+                     error="题目不存在", retryable=False)
+            answer.system_error = "题目不存在"
             answer.score = 0
             db.commit()
             _maybe_finalize_exam(answer.submission_id, db)
@@ -446,7 +461,7 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
             mem_mb = question.memory_limit_mb or settings.judge_memory_limit_mb
             gmode = getattr(question, 'grading_mode', 'legacy') or 'legacy'
 
-            if gmode == "legacy" or not getattr(question, 'test_groups', None):
+            if gmode == "legacy":
                 # legacy 路径
                 user_code = workdir / "user_code.py"
                 test_file = workdir / "test_user_code.py"
@@ -585,12 +600,17 @@ def process_ai_grade(db: Session, redis_client, settings: Settings, code_grade_i
         client = DeepSeekClient(settings)
         cg = grade_code_submission(db, client, code_grade_id)
         db.commit()
-        # 只有非 review_required 才 complete
         db.refresh(cg)
         if cg.status != "review_required" and not cg.needs_teacher_review:
             cg.status = "completed"
             cg.finished_at = datetime.now(timezone.utc)
             db.commit()
+            # 考试 active: 完成后再次触发汇总
+            if cg.exam_answer_id and cg.mode == "active":
+                ans = db.get(ExamAnswer, cg.exam_answer_id)
+                if ans:
+                    from app.services.exam_grading import finalize_if_ready
+                    finalize_if_ready(ans.submission_id, db)
         return cg
     except AIServiceError as exc:
         db.rollback()

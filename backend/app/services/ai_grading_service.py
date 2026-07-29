@@ -154,9 +154,7 @@ def grade_code_submission(
             ans = db.get(ExamAnswer, grade.exam_answer_id)
             if ans and isinstance(question, ExamQuestion):
                 ans.score = merged.scaled_score
-                # 触发考试汇总
-                from app.services.exam_grading import finalize_if_ready
-                finalize_if_ready(ans.submission_id, db)
+                # 不在此处 finalize——由 process_ai_grade 完成后再触发
 
     db.flush()
 

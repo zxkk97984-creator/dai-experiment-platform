@@ -1,4 +1,5 @@
 <template>
+  <AppLayout>
   <div class="ai-grading-detail">
     <h2>评分详情 #{{ gradeId }}</h2>
     <div v-if="loading">加载中...</div>
@@ -81,11 +82,13 @@
       </details>
     </template>
   </div>
+  </AppLayout>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import AppLayout from '../../components/layout/AppLayout.vue'
 import { aiGradingAPI } from '../../api/aiGrading.js'
 
 const route = useRoute()

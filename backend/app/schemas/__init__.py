@@ -242,6 +242,7 @@ class SubmissionRead(BaseModel):
     score: float | None = None
     result_details: dict | None = None
     execution_time_ms: int | None = None
+    grading_breakdown: dict | None = None  # 仅 active 模式学生可见
 
 
 class SampleRunResponse(BaseModel):

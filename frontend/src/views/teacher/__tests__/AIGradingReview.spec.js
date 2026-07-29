@@ -22,9 +22,12 @@ vi.mock('../../../stores/auth.js', () => ({
 }))
 
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { id: '1' } }),
+  useRoute: () => ({ params: { id: '1' }, path: '/teacher/ai-grading' }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  createRouter: vi.fn(() => ({ beforeResolve: vi.fn(), push: vi.fn(), replace: vi.fn() })),
+  createRouter: vi.fn(() => ({
+    beforeResolve: vi.fn(), push: vi.fn(), replace: vi.fn(),
+    currentRoute: { value: { path: '/teacher/ai-grading' } },
+  })),
   createWebHistory: vi.fn(() => ({})),
 }))
 
