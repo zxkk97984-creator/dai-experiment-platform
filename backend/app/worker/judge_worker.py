@@ -63,7 +63,7 @@ def _write_submission_files(workdir: Path, submission: Submission, question: Jud
     user_code.write_text(submission.code, encoding="utf-8")
     hidden_tests = question.hidden_tests
     if "import user_code" not in hidden_tests and "from user_code" not in hidden_tests:
-        hidden_tests = f"import user_code\n\n{hidden_tests}"
+        hidden_tests = f"from user_code import *\n\n{hidden_tests}"
     test_file.write_text(hidden_tests, encoding="utf-8")
     return test_file
 
@@ -271,12 +271,10 @@ def _v1_judge_submission(db, redis_client, settings, submission, question, workd
 
     test_groups = question.test_groups or []
     if not test_groups:
-        fail_job(db, job_type="assignment", object_id=submission.id,
-                 error="shadow/active 需要测试组", retryable=True)
-        submission.status = "system_error"
-        submission.score = None  # 系统错误不扣分
-        db.commit()
-        return submission
+        # 测试组未配置时回退到 legacy 路径，不让学生因配置缺失受罚
+        return _legacy_judge_submission(
+            db, redis_client, settings, submission, question,
+            workdir, host_workdir, timeout_s, mem_mb)
 
     # 查找锁定 Rubric（缺失则系统错误，不能让学生丢分）
     locked = db.scalar(
@@ -550,12 +548,29 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
                 # V1 路径：测试组 → FR 分 → 校验 → 创建 CodeGrade → 入队 AI
                 test_groups = question.test_groups or []
                 if not test_groups:
-                    fail_job(db, job_type="exam", object_id=answer_id,
-                             error="shadow/active 需要测试组", retryable=True)
-                    answer.score = None  # 系统错误不扣分
-                    answer.system_error = "缺少测试组"
+                    # 测试组未配置时回退到 legacy 路径（手动写文件）
+                    from app.services.judge_queue import complete_job
+                    (workdir / "user_code.py").write_text(answer.code_answer or "", encoding="utf-8")
+                    ht = question.hidden_tests or ""
+                    if "import user_code" not in ht:
+                        ht = f"import user_code\n\n{ht}"
+                    (workdir / "test_user_code.py").write_text(ht, encoding="utf-8")
+                    try:
+                        stdout, stderr, returncode, elapsed = _run_docker_pytest(
+                            workdir, settings, timeout_s, mem_mb, host_workdir=host_workdir)
+                    except Exception as e:
+                        fail_job(db, job_type="exam", object_id=answer_id,
+                                 error=f"Docker 判题失败: {e}", retryable=True)
+                        answer.score = None
+                        answer.system_error = f"Docker 判题失败: {e}"
+                        db.commit()
+                        return answer
+                    final_status, score = _status_from_pytest(returncode, stdout, stderr)
+                    answer.score = score
+                    answer.system_error = None
                     db.commit()
-                    # 系统错误不可 finalize（score=None 会阻塞汇总）
+                    complete_job(db, job_type="exam", object_id=answer_id, score=score)
+                    _maybe_finalize_exam(answer.submission_id, db)
                     return answer
 
                 # 查找锁定 Rubric（缺失则系统错误，禁止继续）

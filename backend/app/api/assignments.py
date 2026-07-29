@@ -13,6 +13,7 @@ from app.schemas import (
     AssignmentUpdate,
     JudgeQuestionCreate,
     JudgeQuestionRead,
+    JudgeQuestionUpdate,
     PaginatedResponse,
 )
 
@@ -192,6 +193,30 @@ def create_question(
         data["grading_mode"] = "shadow"
     question = JudgeQuestion(assignment_id=assignment_id, **data)
     db.add(question)
+    db.commit()
+    db.refresh(question)
+    return question
+
+
+@router.patch("/{assignment_id}/questions/{question_id}", response_model=JudgeQuestionRead)
+def update_question(
+    assignment_id: int,
+    question_id: int,
+    payload: JudgeQuestionUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """更新作业编程题——要求教师所有权且作业处于 draft 状态"""
+    assignment = require_assignment(assignment_id, db)
+    ensure_assignment_manager(assignment, current_user, db)
+    if assignment.status != "draft":
+        raise api_error(409, "ASSIGNMENT_NOT_EDITABLE", "只有草稿状态的作业可以修改题目，请先将作业切回 draft")
+    question = db.get(JudgeQuestion, question_id)
+    if not question or question.assignment_id != assignment_id:
+        raise api_error(404, "QUESTION_NOT_FOUND", "题目不存在或不属于该作业")
+    updates = payload.model_dump(exclude_unset=True)
+    for key, value in updates.items():
+        setattr(question, key, value)
     db.commit()
     db.refresh(question)
     return question

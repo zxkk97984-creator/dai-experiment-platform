@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -332,9 +333,19 @@ ACCEPTANCE_DATA: list[dict] = [
                         ],
                         "hidden_tests": (
                             "def test_hidden():\n"
+                            "    # 正常输入\n"
                             "    assert summarize_scores([100.0]) == {'min': 100.0, 'max': 100.0, 'avg': 100.0, 'count': 1}\n"
                             "    r = summarize_scores([60.0, 60.0, 60.0])\n"
                             "    assert r['min'] == r['max'] == r['avg'] == 60.0\n"
+                            "    # 空列表应返回 None/0.0，不应崩溃\n"
+                            "    empty = summarize_scores([])\n"
+                            "    assert empty['count'] == 0\n"
+                            "    assert empty['min'] is None\n"
+                            "    assert empty['max'] is None\n"
+                            "    assert empty['avg'] == 0.0\n"
+                            "    # 平均值应保留两位小数\n"
+                            "    r2 = summarize_scores([85.0, 92.0, 78.0, 90.0])\n"
+                            "    assert r2['avg'] == 86.25\n"
                         ),
                         "time_limit_ms": 5000,
                         "memory_limit_mb": 128,
@@ -1008,6 +1019,7 @@ def ensure_students(client: ApiClient, admin_username: str, admin_password: str,
     """管理员登录后确保两个验收学生存在且凭据正确"""
     client.login(admin_username, admin_password)
     existing_users = client.paginated_list("/users")
+    student_password = os.environ.get("DAI_SEED_STUDENT_PASSWORD", DEFAULT_PASSWORD)
 
     for stu in DEMO_STUDENTS:
         found = find_exact(existing_users, "username", stu["username"])
@@ -1016,12 +1028,12 @@ def ensure_students(client: ApiClient, admin_username: str, admin_password: str,
             uid = found["id"]
             if found.get("role") != "student" or found.get("status") != "active":
                 client.patch(f"/users/{uid}", {"role": "student", "status": "active"})
-            client.patch(f"/users/{uid}/password", {"password": DEFAULT_PASSWORD})
+            client.patch(f"/users/{uid}/password", {"password": student_password})
             stats.inc_reused()
         else:
             client.post("/users", {
                 "username": stu["username"],
-                "password": DEFAULT_PASSWORD,
+                "password": student_password,
                 "real_name": stu["real_name"],
                 "role": "student",
                 "status": "active",
@@ -1032,7 +1044,7 @@ def ensure_students(client: ApiClient, admin_username: str, admin_password: str,
     for stu in DEMO_STUDENTS:
         sc = ApiClient(client.base_url)
         try:
-            sc.login(stu["username"], DEFAULT_PASSWORD)
+            sc.login(stu["username"], student_password)
         finally:
             sc.close()
 
@@ -1094,16 +1106,16 @@ def ensure_course_structure(
             les = find_exact(existing_lessons, "title", les_data["title"])
             if les:
                 stats.inc_reused()
-                # 如 API 支持更新课时的 content，则补齐（仅限验收脚本拥有的课时）
-                try:
+                # 仅当内容有差异时 PATCH；任何失败立即报错
+                current_content = les.get("content") or ""
+                expected_content = les_data.get("content") or ""
+                if current_content != expected_content:
                     client.patch(f"/lessons/{les['id']}", {
                         "title": les_data["title"],
                         "content_type": les_data.get("content_type", "markdown"),
-                        "content": les_data.get("content", ""),
+                        "content": expected_content,
                         "order_index": 0,
                     })
-                except SeedError:
-                    pass  # 内容不可覆盖时跳过
             else:
                 client.post(f"/chapters/{ch_id}/lessons", {
                     "title": les_data["title"],
@@ -1121,19 +1133,22 @@ def ensure_course_structure(
 
 
 def ensure_enrollments(client: ApiClient, course_id: int, stats: SeedStats):
-    """确保两名验收学生选课"""
+    """确保两名验收学生选课——先检查再行动，已选仅计复用"""
+    student_password = os.environ.get("DAI_SEED_STUDENT_PASSWORD", DEFAULT_PASSWORD)
     for stu in DEMO_STUDENTS:
         sc = ApiClient(client.base_url)
         try:
-            sc.login(stu["username"], DEFAULT_PASSWORD)
+            sc.login(stu["username"], student_password)
+            # 先通过课程详情确认选课状态
             try:
-                sc.post(f"/courses/{course_id}/enroll")
-                stats.inc_created()
+                sc.get(f"/courses/{course_id}")
+                # 能访问即已选课（学生只能看已选 published 课程）
+                stats.inc_reused()
             except SeedError as e:
-                if "409" in str(e) or "已选" in str(e) or "enrolled" in str(e).lower():
-                    # 确认确实已选课
-                    sc.get(f"/courses/{course_id}")
-                    stats.inc_reused()
+                if "403" in str(e) or "FORBIDDEN" in str(e):
+                    # 未选课，执行选课
+                    sc.post(f"/courses/{course_id}/enroll")
+                    stats.inc_created()
                 else:
                     raise
         finally:
@@ -1158,11 +1173,70 @@ def _retry_publish(client: ApiClient, path: str, *, is_post: bool = True, timeou
             last_err = e
             if attempt < max_retries and ("503" in str(e) or "AI_RUBRIC" in str(e) or "Rubric" in str(e)):
                 wait = 2 ** attempt
-                print(f"  发布重试 {attempt}/{max_retries}（{wait}s 后）: {e}")
+                print(f"  发布重试 {attempt}/{max_retries}（{wait}s 后）")
                 time.sleep(wait)
             else:
                 raise
     raise last_err  # type: ignore[misc]
+
+
+def _build_question_payload(q_data: dict) -> dict:
+    """从 ACCEPTANCE_DATA 构建题目创建/更新 payload"""
+    return {
+        "title": q_data["title"],
+        "description": q_data.get("description", ""),
+        "function_name": q_data["function_name"],
+        "signature": q_data.get("signature", ""),
+        "starter_code": q_data.get("starter_code", ""),
+        "public_cases": q_data.get("public_cases", []),
+        "hidden_tests": q_data.get("hidden_tests", ""),
+        "time_limit_ms": q_data.get("time_limit_ms", 5000),
+        "memory_limit_mb": q_data.get("memory_limit_mb", 128),
+        "grading_mode": q_data.get("grading_mode", "legacy"),
+    }
+
+
+def _question_fields_differ(existing: dict, desired: dict) -> bool:
+    """比较作业题关键字段是否有差异（仅比较 API 返回的可见字段）"""
+    compare_keys = [
+        "title", "description", "function_name", "signature", "starter_code",
+        "hidden_tests", "time_limit_ms", "memory_limit_mb", "grading_mode",
+    ]
+    for key in compare_keys:
+        ev = existing.get(key)
+        dv = desired.get(key, "")
+        # 标准化 None → ""
+        if ev is None:
+            ev = ""
+        if dv is None:
+            dv = ""
+        if str(ev) != str(dv):
+            return True
+    return False
+
+
+def _exam_question_differs(existing: dict, desired: dict) -> bool:
+    """比较考试题关键字段是否有差异"""
+    compare_keys = [
+        "question_type", "prompt", "points", "order_index",
+        "starter_code", "hidden_tests", "time_limit_ms", "memory_limit_mb",
+        "grading_mode",
+    ]
+    for key in compare_keys:
+        ev = existing.get(key)
+        dv = desired.get(key)
+        if ev is None and dv is None:
+            continue
+        # options、correct_answer、public_cases 是复杂类型，用 JSON 序列化比较
+        if str(ev) != str(dv):
+            return True
+    # 复杂字段比较
+    for ck in ("options", "correct_answer", "public_cases"):
+        ev = json.dumps(existing.get(ck), sort_keys=True, default=str) if existing.get(ck) else ""
+        dv = json.dumps(desired.get(ck), sort_keys=True, default=str) if desired.get(ck) else ""
+        if ev != dv:
+            return True
+    return False
 
 
 def ensure_assignments(
@@ -1172,7 +1246,7 @@ def ensure_assignments(
     stats: SeedStats,
     publish_timeout: int = 180,
 ) -> list[int]:
-    """确保作业及代码题存在并发布，返回作业 ID 列表"""
+    """确保作业及代码题存在、字段同步并发布，返回作业 ID 列表"""
     assignment_ids: list[int] = []
     existing_assignments = client.paginated_list("/assignments", course_id=course_id)
 
@@ -1191,30 +1265,30 @@ def ensure_assignments(
             asgn_id = created["id"]
             stats.inc_created()
 
-        # 确保题目
+        # 确保题目存在且字段同步
         existing_qs = client.paginated_list(f"/assignments/{asgn_id}/questions")
+        needs_republish = False
         for q_data in asgn_data.get("questions", []):
             q = find_exact(existing_qs, "title", q_data["title"])
+            desired = _build_question_payload(q_data)
             if q:
-                stats.inc_reused()
+                if _question_fields_differ(q, desired):
+                    # 有差异：先切 draft → PATCH → 标记需重新发布
+                    current_status = client.get(f"/assignments/{asgn_id}").get("status", "")
+                    if current_status != "draft":
+                        client.patch(f"/assignments/{asgn_id}", {"status": "draft"})
+                    client.patch(f"/assignments/{asgn_id}/questions/{q['id']}", desired)
+                    needs_republish = True
+                else:
+                    stats.inc_reused()
             else:
-                client.post(f"/assignments/{asgn_id}/questions", {
-                    "title": q_data["title"],
-                    "description": q_data.get("description", ""),
-                    "function_name": q_data["function_name"],
-                    "signature": q_data.get("signature", ""),
-                    "starter_code": q_data.get("starter_code", ""),
-                    "public_cases": q_data.get("public_cases", []),
-                    "hidden_tests": q_data.get("hidden_tests", ""),
-                    "time_limit_ms": q_data.get("time_limit_ms", 5000),
-                    "memory_limit_mb": q_data.get("memory_limit_mb", 128),
-                    "grading_mode": q_data.get("grading_mode", "legacy"),
-                })
+                client.post(f"/assignments/{asgn_id}/questions", desired)
+                needs_republish = True
                 stats.inc_created()
 
-        # 发布（含 AI rubric 生成，可能需要较长超时与重试）
-        current = asgn or client.get(f"/assignments/{asgn_id}")
-        if current.get("status") != "published":
+        # 发布（需要时含 AI rubric 生成）
+        current = client.get(f"/assignments/{asgn_id}")
+        if current.get("status") != "published" or needs_republish:
             if current.get("status") != "draft":
                 client.patch(f"/assignments/{asgn_id}", {"status": "draft"})
             _retry_publish(client, f"/assignments/{asgn_id}/publish", timeout=publish_timeout)
@@ -1229,6 +1303,32 @@ def ensure_assignments(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+def _build_exam_question_payload(q_data: dict) -> dict:
+    """从 ACCEPTANCE_DATA 构建考试题目创建/更新 payload"""
+    payload: dict[str, Any] = {
+        "question_type": q_data["question_type"],
+        "prompt": q_data["prompt"],
+        "points": q_data.get("points", 1),
+        "order_index": q_data.get("order_index", 0),
+        "correct_answer": q_data.get("correct_answer", {}),
+    }
+    if q_data.get("options"):
+        payload["options"] = q_data["options"]
+    if q_data.get("starter_code") is not None:
+        payload["starter_code"] = q_data["starter_code"]
+    if q_data.get("public_cases") is not None:
+        payload["public_cases"] = q_data["public_cases"]
+    if q_data.get("hidden_tests") is not None:
+        payload["hidden_tests"] = q_data["hidden_tests"]
+    if q_data.get("time_limit_ms") is not None:
+        payload["time_limit_ms"] = q_data["time_limit_ms"]
+    if q_data.get("memory_limit_mb") is not None:
+        payload["memory_limit_mb"] = q_data["memory_limit_mb"]
+    if q_data.get("grading_mode") is not None:
+        payload["grading_mode"] = q_data["grading_mode"]
+    return payload
+
+
 def ensure_exams(
     client: ApiClient,
     course_id: int,
@@ -1236,7 +1336,7 @@ def ensure_exams(
     stats: SeedStats,
     publish_timeout: int = 180,
 ) -> list[int]:
-    """确保考试及题目存在并发布，返回考试 ID 列表"""
+    """确保考试及题目存在、字段同步并发布，返回考试 ID 列表"""
     exam_ids: list[int] = []
     existing_exams = client.paginated_list("/exams")
 
@@ -1256,41 +1356,30 @@ def ensure_exams(
             exam_id = created["id"]
             stats.inc_created()
 
-        # 确保题目
+        # 确保题目存在且字段同步
         existing_qs = client.paginated_list(f"/exams/{exam_id}/questions")
+        needs_republish = False
         for q_data in exam_data.get("questions", []):
-            # 用 prompt 做精确查找（题目没有 title 字段的统一概念）
             q = find_exact(existing_qs, "prompt", q_data["prompt"])
+            desired = _build_exam_question_payload(q_data)
             if q:
-                stats.inc_reused()
+                if _exam_question_differs(q, desired):
+                    # 有差异：切 draft → PATCH → 需重新发布
+                    current_status = client.get(f"/exams/{exam_id}").get("status", "")
+                    if current_status != "draft":
+                        client.patch(f"/exams/{exam_id}", {"status": "draft"})
+                    client.patch(f"/exams/{exam_id}/questions/{q['id']}", desired)
+                    needs_republish = True
+                else:
+                    stats.inc_reused()
             else:
-                payload = {
-                    "question_type": q_data["question_type"],
-                    "prompt": q_data["prompt"],
-                    "points": q_data.get("points", 1),
-                    "order_index": q_data.get("order_index", 0),
-                    "correct_answer": q_data.get("correct_answer", {}),
-                }
-                if q_data.get("options"):
-                    payload["options"] = q_data["options"]
-                if q_data.get("starter_code") is not None:
-                    payload["starter_code"] = q_data["starter_code"]
-                if q_data.get("public_cases") is not None:
-                    payload["public_cases"] = q_data["public_cases"]
-                if q_data.get("hidden_tests") is not None:
-                    payload["hidden_tests"] = q_data["hidden_tests"]
-                if q_data.get("time_limit_ms") is not None:
-                    payload["time_limit_ms"] = q_data["time_limit_ms"]
-                if q_data.get("memory_limit_mb") is not None:
-                    payload["memory_limit_mb"] = q_data["memory_limit_mb"]
-                if q_data.get("grading_mode") is not None:
-                    payload["grading_mode"] = q_data["grading_mode"]
-                client.post(f"/exams/{exam_id}/questions", payload)
+                client.post(f"/exams/{exam_id}/questions", desired)
+                needs_republish = True
                 stats.inc_created()
 
-        # 发布（AI rubric 生成需要较长超时与重试）
-        current = exam or client.get(f"/exams/{exam_id}")
-        if current.get("status") != "published":
+        # 发布（需要时含 AI rubric 生成）
+        current = client.get(f"/exams/{exam_id}")
+        if current.get("status") != "published" or needs_republish:
             if current.get("status") != "draft":
                 client.patch(f"/exams/{exam_id}", {"status": "draft"})
             _retry_publish(
@@ -1335,76 +1424,20 @@ def _lookup_question_id(
     return q["id"] if q else None
 
 
-_TERMINAL_STATUSES = {"passed", "wrong_answer", "system_error"}
+_TERMINAL_STATUSES = {"accepted", "wrong_answer", "time_limit_exceeded", "runtime_error", "system_error"}
+_GOOD_STATUSES = {"accepted", "wrong_answer"}
 
 
-def ensure_submissions(
-    client: ApiClient,
-    stats: SeedStats,
-    submission_timeout: int = 180,
-) -> list[dict]:
-    """创建代表性提交并轮询至终态"""
-    results: list[dict] = []
-
-    for sub_data in DEMO_SUBMISSIONS:
-        student_username = sub_data["student"]
-        # 以学生身份查找题目 ID
-        sc = ApiClient(client.base_url)
-        try:
-            sc.login(student_username, DEFAULT_PASSWORD)
-            q_id = _lookup_question_id(
-                sc,
-                sub_data["course_title"],
-                sub_data["assignment_title"],
-                sub_data["question_title"],
-            )
-            if q_id is None:
-                results.append({
-                    "student": student_username,
-                    "question": sub_data["question_title"],
-                    "status": "question_not_found",
-                })
-                continue
-
-            # 检查是否已有提交
-            existing_subs = sc.paginated_list("/judge/submissions")
-            existing = [
-                s for s in existing_subs
-                if s.get("question_id") == q_id
-                and s.get("student_id") == sc._user_id  # type: ignore[attr-defined]
-            ]
-            if existing:
-                # 轮询现有提交到终态
-                sub = existing[0]
-                sub = _poll_submission(sc, sub["id"], submission_timeout)
-                results.append({
-                    "student": student_username,
-                    "question": sub_data["question_title"],
-                    "submission_id": sub["id"],
-                    "status": sub.get("status"),
-                    "reused": True,
-                })
-                stats.inc_reused()
-                continue
-
-            # 创建提交
-            created = sc.post("/judge/submissions", {
-                "question_id": q_id,
-                "code": sub_data["code"],
-            })
-            stats.inc_created()
-            sub = _poll_submission(sc, created["id"], submission_timeout)
-            results.append({
-                "student": student_username,
-                "question": sub_data["question_title"],
-                "submission_id": sub["id"],
-                "status": sub.get("status"),
-                "reused": False,
-            })
-        finally:
-            sc.close()
-
-    return results
+def _create_and_poll(
+    sc: ApiClient, q_id: int, code: str, stats: SeedStats, submission_timeout: int,
+) -> dict:
+    """创建提交并轮询至终态，返回 submission dict"""
+    created = sc.post("/judge/submissions", {
+        "question_id": q_id,
+        "code": code,
+    })
+    stats.inc_created()
+    return _poll_submission(sc, created["id"], submission_timeout)
 
 
 def _poll_submission(client: ApiClient, submission_id: int, timeout: int) -> dict:
@@ -1419,6 +1452,88 @@ def _poll_submission(client: ApiClient, submission_id: int, timeout: int) -> dic
     raise SeedError(
         f"提交 {submission_id} 在 {timeout}s 内未达到终态"
     )
+
+
+def ensure_submissions(
+    client: ApiClient,
+    stats: SeedStats,
+    submission_timeout: int = 180,
+) -> list[dict]:
+    """创建代表性提交并轮询至终态——system_error 时创建一次替代提交"""
+    results: list[dict] = []
+    student_password = os.environ.get("DAI_SEED_STUDENT_PASSWORD", DEFAULT_PASSWORD)
+
+    for sub_data in DEMO_SUBMISSIONS:
+        student_username = sub_data["student"]
+        sc = ApiClient(client.base_url)
+        try:
+            sc.login(student_username, student_password)
+            q_id = _lookup_question_id(
+                sc,
+                sub_data["course_title"],
+                sub_data["assignment_title"],
+                sub_data["question_title"],
+            )
+            if q_id is None:
+                results.append({
+                    "student": student_username,
+                    "question": sub_data["question_title"],
+                    "status": "question_not_found",
+                })
+                continue
+
+            # 检查是否已有可接受的提交
+            existing_subs = sc.paginated_list("/judge/submissions")
+            existing = [
+                s for s in existing_subs
+                if s.get("question_id") == q_id
+                and s.get("student_id") == sc._user_id  # type: ignore[attr-defined]
+            ]
+            if existing:
+                sub = existing[0]
+                # 轮询到终态
+                sub = _poll_submission(sc, sub["id"], submission_timeout)
+                status = sub.get("status")
+                # system_error 不视为可复用：需创建替代提交
+                if status in _GOOD_STATUSES:
+                    results.append({
+                        "student": student_username,
+                        "question": sub_data["question_title"],
+                        "submission_id": sub["id"],
+                        "status": status,
+                        "reused": True,
+                    })
+                    stats.inc_reused()
+                    continue
+                # system_error → 创建替代提交（最多一次）
+                if status == "system_error":
+                    print(f"  既有提交 {sub['id']} 为 system_error，创建替代提交")
+                    sub = _create_and_poll(sc, q_id, sub_data["code"], stats, submission_timeout)
+                    status = sub.get("status")
+                    if status not in _GOOD_STATUSES:
+                        # 替代提交仍然不在好终态——再试一次
+                        print(f"  替代提交 {sub['id']} 仍为 {status}，再试一次")
+                        sub = _create_and_poll(sc, q_id, sub_data["code"], stats, submission_timeout)
+
+            else:
+                sub = _create_and_poll(sc, q_id, sub_data["code"], stats, submission_timeout)
+                status = sub.get("status")
+                # system_error → 再试一次
+                if status == "system_error":
+                    print(f"  新提交 {sub['id']} 为 system_error，创建替代提交")
+                    sub = _create_and_poll(sc, q_id, sub_data["code"], stats, submission_timeout)
+
+            results.append({
+                "student": student_username,
+                "question": sub_data["question_title"],
+                "submission_id": sub["id"],
+                "status": sub.get("status"),
+                "reused": False,
+            })
+        finally:
+            sc.close()
+
+    return results
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1499,16 +1614,16 @@ def main() -> int:
         for r in submission_results:
             tag = "复用" if r.get("reused") else "新建"
             print(f"    [{tag}] {r['student']} / {r['question']} → {r['status']}")
-            if r["status"] not in _TERMINAL_STATUSES:
+            if r["status"] not in _GOOD_STATUSES:
                 fail_count += 1
         if fail_count > 0:
-            print(f"\n  警告: {fail_count} 个提交未达终态")
+            print(f"\n  [ERROR] {fail_count} 个提交未达预期终态（需 passed/wrong_answer）")
     print("=" * 60)
 
-    return 0 if all(
-        r.get("status") in _TERMINAL_STATUSES
-        for r in submission_results
-    ) else 1
+    if submission_results:
+        all_good = all(r.get("status") in _GOOD_STATUSES for r in submission_results)
+        return 0 if all_good else 1
+    return 0
 
 
 if __name__ == "__main__":

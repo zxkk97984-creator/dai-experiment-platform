@@ -221,9 +221,24 @@ class JudgeQuestionRead(BaseModel):
     signature: str | None = None
     starter_code: str | None = None
     public_cases: list[Any] = Field(default_factory=list)
+    hidden_tests: str | None = None
     time_limit_ms: int
     memory_limit_mb: int
     grading_mode: Literal["legacy", "shadow", "active"]
+
+
+class JudgeQuestionUpdate(BaseModel):
+    """作业编程题更新——所有字段可选，仅更新传入字段"""
+    title: str | None = None
+    description: str | None = None
+    function_name: str | None = None
+    signature: str | None = None
+    starter_code: str | None = None
+    public_cases: list[PublicCase] | None = None
+    hidden_tests: str | None = None
+    time_limit_ms: int | None = None
+    memory_limit_mb: int | None = None
+    grading_mode: Literal["legacy", "shadow", "active"] | None = None
 
 
 class SubmissionCreate(BaseModel):
