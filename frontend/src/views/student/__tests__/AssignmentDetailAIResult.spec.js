@@ -69,14 +69,14 @@ function question(gradingMode) {
   }
 }
 
-async function mountPage(gradingMode) {
+async function mountPage(gradingMode, submissions = []) {
   assignmentsAPI.get.mockResolvedValue({
     data: { id: 4, course_id: 1, title: '数据处理综合练习' },
   })
   assignmentsAPI.getQuestions.mockResolvedValue({
     data: { items: [question(gradingMode)] },
   })
-  judgeAPI.list.mockResolvedValue({ data: { items: [] } })
+  judgeAPI.list.mockResolvedValue({ data: { items: submissions } })
   judgeAPI.submit.mockResolvedValue({ data: { id: 101 } })
 
   const mod = await import('../AssignmentDetailView.vue')
@@ -161,5 +161,29 @@ describe('作业页 AI 判题结果', () => {
     expect(text).toContain('影子评分')
     expect(text).toContain('AI 评分结果仅供教师复核')
     expect(text).not.toContain('AI 评分详情')
+  })
+
+  it('重新打开已完成的 active 题会回载最新 AI 评分详情', async () => {
+    const submittedCode = 'def confusion_metrics(tp, fp, fn, tn):\n    return {"accuracy": 1.0}'
+    judgeAPI.getResult.mockResolvedValue({
+      data: {
+        id: 201,
+        question_id: 10,
+        status: 'graded',
+        score: 79,
+        code: submittedCode,
+        grading_breakdown: activeBreakdown,
+      },
+    })
+
+    await mountPage('active', [
+      { id: 201, question_id: 10, status: 'graded' },
+    ])
+    await flushPromises()
+
+    expect(judgeAPI.getResult).toHaveBeenCalledWith(201)
+    expect(wrapper.text()).toContain('AI 评分详情')
+    expect(wrapper.text()).toContain('最终得分 79')
+    expect(wrapper.get('#code-editor').element.value).toBe(submittedCode)
   })
 })

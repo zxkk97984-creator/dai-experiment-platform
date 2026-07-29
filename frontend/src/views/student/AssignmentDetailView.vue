@@ -61,6 +61,7 @@ const SUBMIT_STATUS_LABEL = { queued: '⏳ 排队等待判题...', running: '�
 const submitResult = ref(null)
 const submitPolling = ref(false)
 const completedQuestions = ref(new Set())
+const latestSubmissionByQuestion = new Map()
 const currentGradingMode = computed(() => questions.value[activeQ.value]?.grading_mode || 'legacy')
 const submitSucceeded = computed(() => ['accepted', 'graded'].includes(submitResult.value?.status))
 
@@ -71,7 +72,7 @@ onMounted(async () => {
   const results = await Promise.allSettled([
     assignmentsAPI.get(route.params.id),
     assignmentsAPI.getQuestions(route.params.id),
-    judgeAPI.list(),
+    judgeAPI.list({ page_size: 100 }),
   ])
   if (results[0].status === 'fulfilled') {
     assignment.value = results[0].value.data
@@ -85,6 +86,9 @@ onMounted(async () => {
   if (results[2].status === 'fulfilled') {
     const subs = results[2].value.data.items || results[2].value.data || []
     for (const s of subs) {
+      if (!latestSubmissionByQuestion.has(s.question_id)) {
+        latestSubmissionByQuestion.set(s.question_id, s)
+      }
       if (['accepted', 'graded'].includes(s.status)) completedQuestions.value.add(s.question_id)
     }
   }
@@ -93,6 +97,7 @@ onMounted(async () => {
   }
   if (questions.value.length > 0) {
     code.value = questions.value[0].starter_code || ''
+    await restoreLatestSubmission(questions.value[0])
   }
 })
 
@@ -103,14 +108,37 @@ const currentCompleted = computed(() => {
 
 onUnmounted(() => { stopSubmitPolling() })
 
-function selectQuestion(idx) {
+async function selectQuestion(idx) {
   stopSubmitPolling()
   activeQ.value = idx
   code.value = questions.value[idx]?.starter_code || ''
   testResult.value = null
   submitResult.value = null
+  submitting.value = false
   submitPolling.value = false
   bottomTab.value = 'self-test'
+  await restoreLatestSubmission(questions.value[idx])
+}
+
+async function restoreLatestSubmission(question) {
+  if (!question) return
+  const latest = latestSubmissionByQuestion.get(question.id)
+  if (!latest) return
+
+  bottomTab.value = 'submit'
+  try {
+    const res = await judgeAPI.getResult(latest.id)
+    submitResult.value = res.data
+    if (typeof res.data.code === 'string') {
+      code.value = res.data.code
+    }
+    if (!isSubmissionComplete(res.data, question.grading_mode || 'legacy')) {
+      submitting.value = true
+      pollSubmitResult(latest.id, question.id, question.grading_mode || 'legacy')
+    }
+  } catch {
+    // 历史结果回载失败不阻塞做题；用户仍可从提交记录页查看。
+  }
 }
 
 function syncScroll() {
