@@ -172,7 +172,7 @@ class TestAcceptanceDataStructure:
         assert "accept_student_b" in by_student
 
     def test_all_non_legacy_have_test_groups(self):
-        """所有 shadow/active 作业题必须有合法 test_groups"""
+        """所有 shadow/active 作业题必须有合法 test_groups——真实测试，无 pass 占位"""
         from seed_acceptance_data import _build_ai_config
         for course in self.data:
             for a in course.get("assignments", []):
@@ -188,7 +188,30 @@ class TestAcceptanceDataStructure:
                     assert abs(f_sum - 60) < 1e-6, f"{q['title']} F 总分={f_sum}，应为60"
                     assert abs(r_sum - 10) < 1e-6, f"{q['title']} R 总分={r_sum}，应为10"
                     for g in cfg["test_groups"]:
-                        assert g["tests"].strip(), f"{q['title']} test_group {g['id']} tests 为空"
+                        tests = g["tests"].strip()
+                        assert tests, f"{q['title']} test_group {g['id']} tests 为空"
+                        assert "assert " in tests or "pytest" in tests or "raise " in tests.lower(), (
+                            f"{q['title']} test_group {g['id']} tests 无实际断言: {tests[:80]}")
+                        assert not tests.endswith("pass\n") or "def test" not in tests.rsplit("def test", 1)[-1][:50], (
+                            f"{q['title']} test_group {g['id']} 测试函数体仅为 pass")
+
+    def test_reference_solutions_not_placeholder(self):
+        """所有函数的 reference_solution 不含占位 pass"""
+        from seed_acceptance_data import _REFERENCE_SOLUTIONS, _build_ai_config
+        for course in self.data:
+            for a in course.get("assignments", []):
+                for q in a.get("questions", []):
+                    fn = q.get("function_name", "")
+                    if fn in _REFERENCE_SOLUTIONS:
+                        ref = _REFERENCE_SOLUTIONS[fn]
+                        # reference 必须是完整实现，不能只是函数签名
+                        assert "return " in ref or "raise " in ref or "yield " in ref, (
+                            f"{fn} reference 无 return/raise/yield，疑似占位")
+                        # 不能只有 pass
+                        lines = [l.strip() for l in ref.split("\n") if l.strip() and not l.strip().startswith("#")]
+                        non_empty = [l for l in lines if l and not l.startswith('"""') and not l.startswith("def ")]
+                        assert any("pass" not in l for l in non_empty), (
+                            f"{fn} reference 体疑似仅有 pass")
 
     def test_judge_question_read_no_hidden_tests(self):
         """JudgeQuestionRead 不应包含 hidden_tests（防泄题）"""
@@ -197,6 +220,29 @@ class TestAcceptanceDataStructure:
         assert "hidden_tests" not in fields, (
             "JudgeQuestionRead 包含 hidden_tests 字段——这是泄题漏洞"
         )
+
+    def test_run_test_groups_adds_from_user_code_import(self):
+        """run_test_groups 对未写 import 的 tests 自动添加 from user_code import *"""
+        from app.worker.judge_worker import run_test_groups
+        import tempfile, shutil
+        from pathlib import Path
+        from app.config import Settings
+        td = tempfile.mkdtemp(prefix="dai-test-import-")
+        try:
+            wd = Path(td)
+            (wd / "user_code.py").write_text("def f(): return 42\n", encoding="utf-8")
+            (wd / "dai_result_plugin.py").write_text("", encoding="utf-8")
+            # tests 未写 import，依赖自动添加
+            tests_code = "def test_f():\n    assert f() == 42\n"
+            s = Settings(judge_use_docker=False, judge_timeout_seconds=2, judge_work_dir=td, judge_host_work_dir=td)
+            result = run_test_groups(
+                wd, wd, "def f(): return 42\n",
+                [{"id": "T1", "tests": tests_code}],
+                s, 5, 128,
+            )
+            assert "T1" in result["results"], f"结果应包含 T1: {result}"
+        finally:
+            shutil.rmtree(td, ignore_errors=True)
 
 
 class TestFakeApiIdempotency:

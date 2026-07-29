@@ -846,6 +846,8 @@ ACCEPTANCE_DATA: list[dict] = [
 # 代表性提交数据
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_DATA_VERSION = 2  # 每次修改数据契约时递增，驱动提交重建
+
 DEMO_SUBMISSIONS: list[dict[str, Any]] = [
     {
         "student": "accept_student_a",
@@ -1222,28 +1224,257 @@ def _question_fields_differ(existing: dict, desired: dict) -> bool:
     return False
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# 真实参考解答与测试组（按 function_name 索引）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_REFERENCE_SOLUTIONS: dict[str, str] = {
+    "normalize_name": (
+        "def normalize_name(name: str) -> str:\n"
+        '    """规范化姓名：去除首尾空白，将每个单词首字母大写"""\n'
+        "    name = name.strip()\n"
+        '    if not name:\n        return ""\n'
+        "    return ' '.join(word.capitalize() for word in name.split())\n"
+    ),
+    "safe_divide": (
+        "def safe_divide(a: float, b: float) -> float:\n"
+        '    """安全除法：验证参数并处理除零"""\n'
+        "    if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):\n"
+        "        raise TypeError('参数必须是数字')\n"
+        "    if b == 0:\n"
+        "        raise ValueError('分母不能为零')\n"
+        "    return a / b\n"
+    ),
+    "summarize_scores": (
+        "def summarize_scores(scores: list[float]) -> dict:\n"
+        '    """统计成绩摘要信息"""\n'
+        "    if not scores:\n"
+        "        return {'min': None, 'max': None, 'avg': 0.0, 'count': 0}\n"
+        "    return {\n"
+        "        'min': min(scores),\n"
+        "        'max': max(scores),\n"
+        "        'avg': round(sum(scores) / len(scores), 2),\n"
+        "        'count': len(scores),\n"
+        "    }\n"
+    ),
+    "deduplicate_ordered": (
+        "def deduplicate_ordered(items: list) -> list:\n"
+        '    """保持原始顺序的去重，O(n) 实现"""\n'
+        "    seen = set()\n"
+        "    result = []\n"
+        "    for item in items:\n"
+        "        if item not in seen:\n"
+        "            seen.add(item)\n"
+        "            result.append(item)\n"
+        "    return result\n"
+    ),
+    "word_frequency": (
+        "def word_frequency(text: str) -> dict[str, int]:\n"
+        '    """统计英文文本中的词频，忽略大小写，去除标点"""\n'
+        "    import re\n"
+        "    words = re.findall(r'[a-zA-Z]+', text.lower())\n"
+        "    freq: dict[str, int] = {}\n"
+        "    for w in words:\n"
+        "        freq[w] = freq.get(w, 0) + 1\n"
+        "    return freq\n"
+    ),
+    "binary_search": (
+        "def binary_search(arr: list[int], target: int) -> int:\n"
+        '    """二分查找，返回索引或 -1"""\n'
+        "    left, right = 0, len(arr) - 1\n"
+        "    while left <= right:\n"
+        "        mid = left + (right - left) // 2\n"
+        "        if arr[mid] == target:\n"
+        "            return mid\n"
+        "        elif arr[mid] < target:\n"
+        "            left = mid + 1\n"
+        "        else:\n"
+        "            right = mid - 1\n"
+        "    return -1\n"
+    ),
+    "clean_numbers": (
+        "def clean_numbers(values: list) -> list[float]:\n"
+        '    """清洗数值序列：跳过异常值，填充缺失值"""\n'
+        "    result = []\n"
+        "    for v in values:\n"
+        "        if v is None:\n"
+        "            result.append(0.0)\n"
+        "        elif isinstance(v, (int, float)):\n"
+        "            result.append(float(v))\n"
+        "        elif isinstance(v, str):\n"
+        "            try:\n"
+        "                result.append(float(v))\n"
+        "            except ValueError:\n"
+        "                continue\n"
+        "    return result\n"
+    ),
+    "group_average": (
+        "def group_average(data: list[dict], group_key: str, value_key: str) -> dict:\n"
+        '    """按指定键分组计算平均值，结果保留两位小数"""\n'
+        "    groups: dict = {}\n"
+        "    for row in data:\n"
+        "        k = row.get(group_key)\n"
+        "        v = row.get(value_key, 0)\n"
+        "        if k not in groups:\n"
+        "            groups[k] = {'sum': 0.0, 'count': 0}\n"
+        "        groups[k]['sum'] += v\n"
+        "        groups[k]['count'] += 1\n"
+        "    return {k: round(g['sum'] / g['count'], 2) for k, g in groups.items()}\n"
+    ),
+    "confusion_metrics": (
+        "def confusion_metrics(tp: int, fp: int, fn: int, tn: int) -> dict:\n"
+        '    """计算分类评估指标，保留四位小数，分母为零时对应指标为 0.0"""\n'
+        "    total = tp + fp + fn + tn\n"
+        "    accuracy = (tp + tn) / total if total > 0 else 0.0\n"
+        "    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0\n"
+        "    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0\n"
+        "    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0\n"
+        "    return {\n"
+        "        'accuracy': round(accuracy, 4),\n"
+        "        'precision': round(precision, 4),\n"
+        "        'recall': round(recall, 4),\n"
+        "        'f1': round(f1, 4),\n"
+        "    }\n"
+    ),
+    "balanced_brackets": (
+        "def balanced_brackets(s: str) -> bool:\n"
+        '    """判断括号是否平衡，支持 ()、[]、{}"""\n'
+        "    pairs = {')': '(', ']': '[', '}': '{'}\n"
+        "    stack = []\n"
+        "    for ch in s:\n"
+        "        if ch in '([{':\n"
+        "            stack.append(ch)\n"
+        "        elif ch in ')]}':\n"
+        "            if not stack or stack[-1] != pairs[ch]:\n"
+        "                return False\n"
+        "            stack.pop()\n"
+        "    return len(stack) == 0\n"
+    ),
+    "train_test_split_indices": (
+        "def train_test_split_indices(n: int, test_ratio: float, seed: int = 42) -> tuple[list[int], list[int]]:\n"
+        '    """随机划分训练/测试集索引，使用 seed 保证可复现"""\n'
+        "    import random\n"
+        "    rng = random.Random(seed)\n"
+        "    indices = list(range(n))\n"
+        "    rng.shuffle(indices)\n"
+        "    test_size = max(0, min(n, round(n * test_ratio)))\n"
+        "    return indices[test_size:], indices[:test_size]\n"
+    ),
+}
+
+_R1_TESTS: dict[str, str] = {
+    "normalize_name": (
+        "def test_robust():\n"
+        "    assert normalize_name('') == ''\n"
+        "    assert normalize_name('   ') == ''\n"
+        "    assert normalize_name('a') == 'A'\n"
+        "    assert normalize_name('A') == 'A'\n"
+    ),
+    "safe_divide": (
+        "import pytest\n"
+        "def test_robust():\n"
+        "    with pytest.raises(TypeError):\n"
+        "        safe_divide('a', 1)\n"
+        "    with pytest.raises(ValueError):\n"
+        "        safe_divide(1, 0)\n"
+        "    assert safe_divide(-6, 3) == -2.0\n"
+    ),
+    "summarize_scores": (
+        "def test_robust():\n"
+        "    r = summarize_scores([])\n"
+        "    assert r['min'] is None\n"
+        "    assert r['max'] is None\n"
+        "    assert r['count'] == 0\n"
+        "    r2 = summarize_scores([85.0, 92.0, 78.0, 90.0])\n"
+        "    assert r2['avg'] == 86.25\n"
+    ),
+    "deduplicate_ordered": (
+        "def test_robust():\n"
+        "    assert deduplicate_ordered([]) == []\n"
+        "    assert deduplicate_ordered([1]) == [1]\n"
+        "    assert deduplicate_ordered([None, 0, None]) == [None, 0]\n"
+    ),
+    "word_frequency": (
+        "def test_robust():\n"
+        "    assert word_frequency('') == {}\n"
+        "    assert word_frequency('Hi! Hi?') == {'hi': 2}\n"
+    ),
+    "binary_search": (
+        "def test_robust():\n"
+        "    assert binary_search([], 1) == -1\n"
+        "    assert binary_search([10], 10) == 0\n"
+        "    assert binary_search([10], 5) == -1\n"
+        "    assert binary_search([1, 2, 3], 2) == 1\n"
+    ),
+    "clean_numbers": (
+        "def test_robust():\n"
+        "    assert clean_numbers([]) == []\n"
+        "    assert clean_numbers([None]) == [0.0]\n"
+        "    assert clean_numbers(['abc', 1]) == [1.0]\n"
+        "    assert clean_numbers(['1.5', None, 2]) == [1.5, 0.0, 2.0]\n"
+    ),
+    "group_average": (
+        "def test_robust():\n"
+        "    assert group_average([], 'x', 'y') == {}\n"
+        "    r = group_average([{'k': 'a', 'v': 10}], 'k', 'v')\n"
+        "    assert r == {'a': 10.0}\n"
+    ),
+    "confusion_metrics": (
+        "def test_robust():\n"
+        "    r = confusion_metrics(0, 0, 0, 100)\n"
+        "    assert r['accuracy'] == 1.0\n"
+        "    assert r['precision'] == 0.0\n"
+        "    assert r['recall'] == 0.0\n"
+        "    assert r['f1'] == 0.0\n"
+    ),
+    "balanced_brackets": (
+        "def test_robust():\n"
+        "    assert balanced_brackets('') == True\n"
+        "    assert balanced_brackets('(') == False\n"
+        "    assert balanced_brackets('(]') == False\n"
+        "    assert balanced_brackets('([{}])') == True\n"
+    ),
+    "train_test_split_indices": (
+        "def test_robust():\n"
+        "    train, test = train_test_split_indices(10, 0.2, 42)\n"
+        "    assert len(test) == 2 and len(train) == 8\n"
+        "    assert set(train) | set(test) == set(range(10))\n"
+        "    assert not set(train) & set(test)\n"
+    ),
+    "merge_intervals": (
+        "def test_robust():\n"
+        "    assert merge_intervals([]) == []\n"
+        "    assert merge_intervals([[1, 2]]) == [[1, 2]]\n"
+        "    assert merge_intervals([[1, 5], [2, 3], [4, 6]]) == [[1, 6]]\n"
+    ),
+    "min_max_scale": (
+        "def test_robust():\n"
+        "    assert min_max_scale([]) == []\n"
+        "    assert min_max_scale([5.0, 5.0]) == [0.5, 0.5]\n"
+        "    assert min_max_scale([0.0, 10.0]) == [0.0, 1.0]\n"
+    ),
+}
+
+
 def _build_ai_config(q_data: dict) -> dict | None:
-    """为非 legacy 题目构建 AI 评分配置 payload，无配置返回 None"""
+    """为非 legacy 题目构建 AI 评分配置——使用真实参考解答和测试组"""
     gmode = q_data.get("grading_mode", "legacy")
     if gmode == "legacy":
         return None
     fn = q_data["function_name"]
+    ref = _REFERENCE_SOLUTIONS.get(fn, q_data.get("starter_code", ""))
+    r1 = _R1_TESTS.get(fn, "def test_robust():\n    pass\n")
     return {
         "grading_mode": gmode,
-        "teacher_constraints": {
-            "require_function": fn,
-        },
-        "reference_solution": q_data.get("starter_code", ""),
+        "teacher_constraints": {"require_function": fn},
+        "reference_solution": ref,
         "test_groups": [
-            {"id": "F1", "name": "功能正确性-基本用例", "dimension": "F",
-             "max_score": 30,
-             "tests": q_data.get("hidden_tests", "def test(): pass")},
-            {"id": "F2", "name": "功能正确性-边界用例", "dimension": "F",
-             "max_score": 30,
-             "tests": "def test_edge():\n    pass\n"},
-            {"id": "R1", "name": "鲁棒性检查", "dimension": "R",
+            {"id": "F1", "name": "功能正确性", "dimension": "F",
+             "max_score": 60,
+             "tests": q_data.get("hidden_tests", "def test(): assert True\n")},
+            {"id": "R1", "name": "鲁棒性与边界", "dimension": "R",
              "max_score": 10,
-             "tests": "def test_robust():\n    pass\n"},
+             "tests": r1},
         ],
         "score_cap_rules": [
             {"id": "CAP1", "condition_code": "off_topic", "cap": 0,
@@ -1278,6 +1509,32 @@ def _exam_question_differs(existing: dict, desired: dict) -> bool:
     return False
 
 
+def _ai_config_differs(existing_cfg: dict, desired_cfg: dict) -> bool:
+    """比较 AI 配置是否有差异（深度比较 test_groups tests）"""
+    for key in ("grading_mode", "reference_solution", "hidden_tests"):
+        if str(existing_cfg.get(key, "")) != str(desired_cfg.get(key, "")):
+            return True
+    # 比较 test_groups（含 tests 内容）
+    eg = existing_cfg.get("test_groups") or []
+    dg = desired_cfg.get("test_groups") or []
+    if len(eg) != len(dg):
+        return True
+    for i in range(len(eg)):
+        for k in ("id", "name", "dimension", "max_score", "tests"):
+            if str(eg[i].get(k, "")) != str(dg[i].get(k, "")):
+                return True
+    # 比较 score_cap_rules
+    esc = existing_cfg.get("score_cap_rules") or []
+    dsc = desired_cfg.get("score_cap_rules") or []
+    if len(esc) != len(dsc):
+        return True
+    for i in range(len(esc)):
+        for k in ("id", "condition_code", "cap", "description"):
+            if str(esc[i].get(k, "")) != str(dsc[i].get(k, "")):
+                return True
+    return False
+
+
 def _sync_question_and_ai_config(
     client: ApiClient,
     asgn_id: int,
@@ -1287,22 +1544,27 @@ def _sync_question_and_ai_config(
     stats: SeedStats,
     needs_republish: list[bool],
 ):
-    """同步作业题字段和 AI 配置，更新 needs_republish[0]"""
+    """同步作业题字段和 AI 配置——先比较再决定是否操作"""
     qid = q["id"] if q else None
     ai_cfg = _build_ai_config(q_data)
 
     if q:
-        # 比较公开字段
         fields_changed = _question_fields_differ(q, desired)
-        # 比较 hidden_tests（通过教师 AI config API）
         ht_changed = False
+        ai_changed = False
+
+        # 通过教师 AI config API 获取 hidden_tests 和完整配置
         try:
-            cfg = client.get(f"/ai-grading/questions/assignment/{qid}/config")
-            existing_ht = cfg.get("hidden_tests") or ""
+            existing_cfg = client.get(f"/ai-grading/questions/assignment/{qid}/config")
+            existing_ht = existing_cfg.get("hidden_tests") or ""
             if existing_ht != (q_data.get("hidden_tests") or ""):
                 ht_changed = True
+            if ai_cfg and _ai_config_differs(existing_cfg, ai_cfg):
+                ai_changed = True
         except SeedError:
-            pass  # 无 config 时视为需更新
+            # 配置不存在或不可读——创建之
+            ht_changed = True
+            ai_changed = ai_cfg is not None
 
         if fields_changed or ht_changed:
             current_status = client.get(f"/assignments/{asgn_id}").get("status", "")
@@ -1311,18 +1573,19 @@ def _sync_question_and_ai_config(
             client.patch(f"/assignments/{asgn_id}/questions/{qid}", desired)
             needs_republish[0] = True
 
-        # 同步 AI 配置（非 legacy 题目）
-        if ai_cfg:
+        if ai_changed and ai_cfg:
+            current_status = client.get(f"/assignments/{asgn_id}").get("status", "")
+            if current_status != "draft":
+                client.patch(f"/assignments/{asgn_id}", {"status": "draft"})
             client.put(f"/ai-grading/questions/assignment/{qid}/config", ai_cfg)
             needs_republish[0] = True
-        else:
+        elif not fields_changed and not ht_changed:
             stats.inc_reused()
     else:
         created_q = client.post(f"/assignments/{asgn_id}/questions", desired)
         qid = created_q["id"]
         stats.inc_created()
         needs_republish[0] = True
-        # 新建题目后立即设置 AI 配置
         if ai_cfg:
             client.put(f"/ai-grading/questions/assignment/{qid}/config", ai_cfg)
 
@@ -1336,49 +1599,59 @@ def _sync_exam_question_and_ai_config(
     stats: SeedStats,
     needs_republish: list[bool],
 ):
-    """同步考试题字段和 AI 配置"""
+    """同步考试题字段和 AI 配置——先比较再决定是否操作"""
     qid = q["id"] if q else None
     gmode = q_data.get("grading_mode", "legacy")
 
-    # 为考试代码题构建 AI config
     ai_cfg = None
     if q_data.get("question_type") == "code" and gmode != "legacy":
+        fn = q_data.get("function_name") if q_data.get("function_name") else ""
+        ref = _REFERENCE_SOLUTIONS.get(fn, q_data.get("starter_code", ""))
+        r1 = _R1_TESTS.get(fn, "def test_robust():\n    pass\n")
         ai_cfg = {
             "grading_mode": gmode,
             "teacher_constraints": {},
-            "reference_solution": q_data.get("starter_code", ""),
+            "reference_solution": ref,
             "test_groups": [
-                {"id": "F1", "name": "功能正确性-基本用例", "dimension": "F",
-                 "max_score": 30,
-                 "tests": q_data.get("hidden_tests", "def test(): pass")},
-                {"id": "F2", "name": "功能正确性-边界用例", "dimension": "F",
-                 "max_score": 30,
-                 "tests": "def test_edge():\n    pass\n"},
-                {"id": "R1", "name": "鲁棒性检查", "dimension": "R",
+                {"id": "F1", "name": "功能正确性", "dimension": "F",
+                 "max_score": 60,
+                 "tests": q_data.get("hidden_tests", "def test(): assert True\n")},
+                {"id": "R1", "name": "鲁棒性与边界", "dimension": "R",
                  "max_score": 10,
-                 "tests": "def test_robust():\n    pass\n"},
+                 "tests": r1},
             ],
             "score_cap_rules": [],
         }
 
     if q:
+        ai_changed = False
+        if ai_cfg:
+            try:
+                existing_cfg = client.get(f"/ai-grading/questions/exam/{qid}/config")
+                if _ai_config_differs(existing_cfg, ai_cfg):
+                    ai_changed = True
+            except SeedError:
+                ai_changed = True
+
         if _exam_question_differs(q, desired):
             current_status = client.get(f"/exams/{exam_id}").get("status", "")
             if current_status != "draft":
                 client.patch(f"/exams/{exam_id}", {"status": "draft"})
             client.patch(f"/exams/{exam_id}/questions/{qid}", desired)
             needs_republish[0] = True
-        else:
-            stats.inc_reused()
 
-        if ai_cfg:
+        if ai_changed and ai_cfg:
+            current_status = client.get(f"/exams/{exam_id}").get("status", "")
+            if current_status != "draft":
+                client.patch(f"/exams/{exam_id}", {"status": "draft"})
             client.put(f"/ai-grading/questions/exam/{qid}/config", ai_cfg)
             needs_republish[0] = True
+        elif not _exam_question_differs(q, desired):
+            stats.inc_reused()
     else:
         client.post(f"/exams/{exam_id}/questions", desired)
         stats.inc_created()
         needs_republish[0] = True
-        # 新建后获取 ID 并设置 AI 配置
         eqs = client.paginated_list(f"/exams/{exam_id}/questions")
         new_q = find_exact(eqs, "prompt", q_data["prompt"])
         if new_q and ai_cfg:

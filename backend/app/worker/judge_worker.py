@@ -166,7 +166,7 @@ def run_test_groups(
         (workdir / "dai_result_plugin.py").write_text(PLUGIN_CODE, encoding="utf-8")
         test_content = tests_code
         if "import user_code" not in test_content and "from user_code" not in test_content:
-            test_content = f"import user_code\n\n{test_content}"
+            test_content = f"from user_code import *\n\n{test_content}"
         (workdir / "test_group.py").write_text(test_content, encoding="utf-8")
         try:
             stdout, stderr, returncode, elapsed = _run_docker_pytest(
