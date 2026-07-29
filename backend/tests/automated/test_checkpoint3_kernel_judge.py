@@ -275,6 +275,8 @@ def test_judge_docker_failure_sets_system_error():
     question.time_limit_ms = 5000
     question.memory_limit_mb = 128
     question.hidden_tests = 'def test(): pass'
+    question.grading_mode = 'legacy'
+    question.test_groups = []
     submission = MagicMock()
     submission.id = 1
     submission.code = 'pass'

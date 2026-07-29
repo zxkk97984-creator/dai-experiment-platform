@@ -141,6 +141,7 @@ def grade_code_submission(
     grade.needs_teacher_review = ai_result.needs_teacher_review or len(validation_errors) > 0
     if grade.needs_teacher_review:
         grade.review_reason = "; ".join(validation_errors) if validation_errors else ai_result.review_reason
+        grade.status = "review_required"
 
     # active 模式更新正式分，shadow 保持旧分
     if grade.mode == "active" and not grade.needs_teacher_review:

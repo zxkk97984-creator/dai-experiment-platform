@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, func
+from sqlalchemy import func, select, or_
 from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
@@ -10,20 +10,18 @@ from app.config import Settings, get_settings
 from app.dependencies import get_db, get_redis_client
 from app.errors import api_error
 from app.models import (
-    Assignment, CodeGrade, Course, Exam, ExamAnswer, ExamQuestion, ExamSubmission,
+    Assignment, CodeGrade, Course, Exam, ExamAnswer, ExamQuestion,
     GradeOverride, JudgeQuestion, QuestionRubric, Submission, User,
 )
 from app.schemas import PaginatedResponse
-from app.schemas.ai_grading import (
-    AIQuestionConfigUpdate, GradeOverrideCreate, RubricDocument,
-)
+from app.schemas.ai_grading import AIQuestionConfigUpdate, GradeOverrideCreate, RubricDocument
 from app.services.ai_client import DeepSeekClient
 from app.services.rubric_service import (
     build_question_snapshot, generate_rubric, get_latest_locked_rubric,
     lock_rubric, update_draft_rubric,
 )
 from app.services.ai_grading_queue import enqueue_ai_grade
-from app.services.ai_grading_queue import enqueue_ai_grade
+from app.services.score_merger import merge_scores
 
 router = APIRouter(prefix="/ai-grading", tags=["AI 评分"])
 
@@ -33,27 +31,45 @@ def _teacher_or_admin(user: User):
         raise api_error(403, "FORBIDDEN", "仅教师和管理员可访问")
 
 
-def _get_course_for_question(db: Session, kind: str, question_id: int) -> Course:
+def _ensure_course_teacher(db: Session, course_id: int, user: User):
+    """验证用户是该课程的教师或 admin"""
+    if user.role == "admin":
+        return
+    course = db.get(Course, course_id)
+    if not course:
+        raise api_error(404, "NOT_FOUND", "课程不存在")
+    if course.teacher_id != user.id:
+        raise api_error(403, "FORBIDDEN", "仅课程教师可操作")
+
+
+def _get_course_id_for_question(db: Session, kind: str, question_id: int) -> int:
     if kind == "assignment":
         q = db.get(JudgeQuestion, question_id)
         if q is None:
             raise api_error(404, "NOT_FOUND", "题目不存在")
-        assignment = db.get(Assignment, q.assignment_id)
-        return db.get(Course, assignment.course_id) if assignment else None
+        a = db.get(Assignment, q.assignment_id)
+        if a is None:
+            raise api_error(404, "NOT_FOUND", "作业不存在")
+        return a.course_id
     elif kind == "exam":
         q = db.get(ExamQuestion, question_id)
         if q is None:
             raise api_error(404, "NOT_FOUND", "题目不存在")
-        exam = db.get(Exam, q.exam_id)
-        return db.get(Course, exam.course_id) if exam else None
+        e = db.get(Exam, q.exam_id)
+        if e is None:
+            raise api_error(404, "NOT_FOUND", "考试不存在")
+        return e.course_id
     raise api_error(400, "INVALID_KIND", "kind 必须为 assignment 或 exam")
 
 
-def _ensure_course_teacher(db: Session, course: Course | None, user: User):
-    if course is None:
-        raise api_error(404, "NOT_FOUND", "课程不存在")
-    if user.role != "admin" and course.teacher_id != user.id:
-        raise api_error(403, "FORBIDDEN", "仅课程教师可操作")
+def _teacher_course_ids(db: Session, user: User) -> list[int]:
+    """返回教师所教的所有课程 ID（admin 返回空列表表示不限制）"""
+    if user.role == "admin":
+        return []
+    rows = db.scalars(
+        select(Course.id).where(Course.teacher_id == user.id)
+    ).all()
+    return list(rows)
 
 
 # ── 题目配置 ──
@@ -65,14 +81,16 @@ def get_question_ai_config(
     current_user: User = Depends(get_current_user),
 ):
     _teacher_or_admin(current_user)
+    course_id = _get_course_id_for_question(db, kind, question_id)
+    _ensure_course_teacher(db, course_id, current_user)
+
     if kind == "assignment":
         q = db.get(JudgeQuestion, question_id)
-    elif kind == "exam":
-        q = db.get(ExamQuestion, question_id)
     else:
-        raise api_error(400, "INVALID_KIND", "kind 必须为 assignment 或 exam")
+        q = db.get(ExamQuestion, question_id)
     if q is None:
         raise api_error(404, "NOT_FOUND", "题目不存在")
+
     return {
         "grading_mode": q.grading_mode,
         "teacher_constraints": q.teacher_constraints,
@@ -90,19 +108,18 @@ def update_question_ai_config(
     current_user: User = Depends(get_current_user),
 ):
     _teacher_or_admin(current_user)
+    course_id = _get_course_id_for_question(db, kind, question_id)
+    _ensure_course_teacher(db, course_id, current_user)
+
     if kind == "assignment":
         q = db.get(JudgeQuestion, question_id)
-    elif kind == "exam":
+    else:
         q = db.get(ExamQuestion, question_id)
         if q and q.question_type != "code" and data.grading_mode != "legacy":
             raise api_error(400, "CHOICE_LEGACY_ONLY", "选择题只支持 legacy 模式")
-    else:
-        raise api_error(400, "INVALID_KIND", "kind 必须为 assignment 或 exam")
+
     if q is None:
         raise api_error(404, "NOT_FOUND", "题目不存在")
-
-    course = _get_course_for_question(db, kind, question_id)
-    _ensure_course_teacher(db, course, current_user)
 
     q.grading_mode = data.grading_mode
     q.teacher_constraints = data.teacher_constraints
@@ -122,18 +139,19 @@ def list_rubrics(
     current_user: User = Depends(get_current_user),
 ):
     _teacher_or_admin(current_user)
+    course_id = _get_course_id_for_question(db, kind, question_id)
+    _ensure_course_teacher(db, course_id, current_user)
+
     col = QuestionRubric.judge_question_id if kind == "assignment" else QuestionRubric.exam_question_id
     rubrics = db.scalars(
         select(QuestionRubric).where(col == question_id).order_by(QuestionRubric.version.desc())
     ).all()
-    return {
-        "items": [{
-            "id": r.id, "version": r.version, "status": r.status,
-            "source_hash": r.source_hash, "model_name": r.model_name,
-            "locked_at": r.locked_at.isoformat() if r.locked_at else None,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        } for r in rubrics]
-    }
+    return {"items": [{
+        "id": r.id, "version": r.version, "status": r.status,
+        "source_hash": r.source_hash, "model_name": r.model_name,
+        "locked_at": r.locked_at.isoformat() if r.locked_at else None,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    } for r in rubrics]}
 
 
 @router.post("/questions/{kind}/{question_id}/rubrics/generate")
@@ -144,11 +162,11 @@ def generate_rubric_endpoint(
     settings: Settings = Depends(get_settings),
 ):
     _teacher_or_admin(current_user)
+    course_id = _get_course_id_for_question(db, kind, question_id)
+    _ensure_course_teacher(db, course_id, current_user)
+
     if not settings.ai_ready:
         raise api_error(503, "AI_NOT_READY", "AI 服务未配置 API Key")
-
-    course = _get_course_for_question(db, kind, question_id)
-    _ensure_course_teacher(db, course, current_user)
 
     if kind == "assignment":
         q = db.get(JudgeQuestion, question_id)
@@ -157,10 +175,12 @@ def generate_rubric_endpoint(
     if q is None:
         raise api_error(404, "NOT_FOUND", "题目不存在")
 
+    title = getattr(q, 'title', None) or getattr(q, 'prompt', '')
+    desc = getattr(q, 'description', None) if hasattr(q, 'description') else getattr(q, 'prompt', None)
+    fn = getattr(q, 'function_name', None) if hasattr(q, 'function_name') else getattr(q, 'prompt', None)
+
     snapshot = build_question_snapshot(
-        title=q.title,
-        description=getattr(q, "description", getattr(q, "prompt", None)),
-        function_name=getattr(q, "function_name", getattr(q, "prompt", None)),
+        title=title, description=desc, function_name=fn,
         teacher_constraints=q.teacher_constraints,
         test_groups=q.test_groups,
         reference_solution=q.reference_solution,
@@ -175,8 +195,7 @@ def generate_rubric_endpoint(
 
 @router.patch("/rubrics/{rubric_id}")
 def patch_rubric(
-    rubric_id: int,
-    document: RubricDocument,
+    rubric_id: int, document: RubricDocument,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -185,10 +204,10 @@ def patch_rubric(
     if rubric is None:
         raise api_error(404, "NOT_FOUND", "Rubric 不存在")
 
-    k = "assignment" if rubric.judge_question_id else "exam"
     qid = rubric.judge_question_id or rubric.exam_question_id
-    course = _get_course_for_question(db, k, qid)
-    _ensure_course_teacher(db, course, current_user)
+    k = "assignment" if rubric.judge_question_id else "exam"
+    course_id = _get_course_id_for_question(db, k, qid)
+    _ensure_course_teacher(db, course_id, current_user)
 
     try:
         updated = update_draft_rubric(db, rubric_id, document)
@@ -208,10 +227,10 @@ def lock_rubric_endpoint(
     if rubric is None:
         raise api_error(404, "NOT_FOUND", "Rubric 不存在")
 
-    k = "assignment" if rubric.judge_question_id else "exam"
     qid = rubric.judge_question_id or rubric.exam_question_id
-    course = _get_course_for_question(db, k, qid)
-    _ensure_course_teacher(db, course, current_user)
+    k = "assignment" if rubric.judge_question_id else "exam"
+    course_id = _get_course_id_for_question(db, k, qid)
+    _ensure_course_teacher(db, course_id, current_user)
 
     try:
         locked = lock_rubric(db, rubric_id)
@@ -221,6 +240,86 @@ def lock_rubric_endpoint(
 
 
 # ── 评分列表与详情 ──
+
+def _build_grade_base_query(db: Session, user: User, kind: str | None,
+                             question_id: int | None, student_id: int | None, status: str | None):
+    """构建带权限筛选的 CodeGrade 基础查询"""
+    course_ids = _teacher_course_ids(db, user)
+
+    if user.role == "admin":
+        query = select(CodeGrade)
+        count_q = select(func.count()).select_from(CodeGrade)
+    else:
+        # 教师：只查自己课程的评分
+        # 通过 submission → JudgeQuestion → Assignment → Course
+        # 或 exam_answer → ExamQuestion → Exam → Course
+        query = select(CodeGrade).distinct().outerjoin(
+            Submission, CodeGrade.submission_id == Submission.id
+        ).outerjoin(
+            JudgeQuestion, Submission.question_id == JudgeQuestion.id
+        ).outerjoin(
+            Assignment, JudgeQuestion.assignment_id == Assignment.id
+        ).outerjoin(
+            ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id
+        ).outerjoin(
+            ExamQuestion, ExamAnswer.question_id == ExamQuestion.id
+        ).outerjoin(
+            Exam, ExamQuestion.exam_id == Exam.id
+        ).where(
+            or_(
+                Assignment.course_id.in_(course_ids) if course_ids else False,
+                Exam.course_id.in_(course_ids) if course_ids else False,
+            )
+        )
+        count_q = select(func.count()).select_from(CodeGrade).distinct().outerjoin(
+            Submission, CodeGrade.submission_id == Submission.id
+        ).outerjoin(
+            JudgeQuestion, Submission.question_id == JudgeQuestion.id
+        ).outerjoin(
+            Assignment, JudgeQuestion.assignment_id == Assignment.id
+        ).outerjoin(
+            ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id
+        ).outerjoin(
+            ExamQuestion, ExamAnswer.question_id == ExamQuestion.id
+        ).outerjoin(
+            Exam, ExamQuestion.exam_id == Exam.id
+        ).where(
+            or_(
+                Assignment.course_id.in_(course_ids) if course_ids else False,
+                Exam.course_id.in_(course_ids) if course_ids else False,
+            )
+        )
+
+    if kind:
+        if kind == "assignment":
+            query = query.where(CodeGrade.submission_id.isnot(None))
+            count_q = count_q.where(CodeGrade.submission_id.isnot(None))
+        elif kind == "exam":
+            query = query.where(CodeGrade.exam_answer_id.isnot(None))
+            count_q = count_q.where(CodeGrade.exam_answer_id.isnot(None))
+
+    if question_id is not None:
+        query = query.outerjoin(
+            Submission, CodeGrade.submission_id == Submission.id, full=False
+        ).where(Submission.question_id == question_id)
+        count_q = count_q.outerjoin(
+            Submission, CodeGrade.submission_id == Submission.id, full=False
+        ).where(Submission.question_id == question_id)
+
+    if student_id is not None:
+        query = query.outerjoin(
+            Submission, CodeGrade.submission_id == Submission.id, full=False
+        ).where(Submission.student_id == student_id)
+        count_q = count_q.outerjoin(
+            Submission, CodeGrade.submission_id == Submission.id, full=False
+        ).where(Submission.student_id == student_id)
+
+    if status:
+        query = query.where(CodeGrade.status == status)
+        count_q = count_q.where(CodeGrade.status == status)
+
+    return query, count_q
+
 
 @router.get("/grades", response_model=PaginatedResponse)
 def list_grades(
@@ -235,66 +334,24 @@ def list_grades(
 ):
     _teacher_or_admin(current_user)
 
-    query = select(CodeGrade)
-    count_q = select(func.count()).select_from(CodeGrade)
-
-    # 教师只能看自己课程的
-    if current_user.role == "teacher":
-        query = (
-            query.outerjoin(Submission, CodeGrade.submission_id == Submission.id)
-            .outerjoin(ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id)
-            .outerjoin(JudgeQuestion, Submission.question_id == JudgeQuestion.id)
-            .outerjoin(ExamQuestion, ExamAnswer.question_id == ExamQuestion.id)
-            .outerjoin(Assignment, JudgeQuestion.assignment_id == Assignment.id)
-            .outerjoin(Exam, ExamQuestion.exam_id == Exam.id)
-            .outerjoin(Course, (Assignment.course_id == Course.id) | (Exam.course_id == Course.id))
-            .where(Course.teacher_id == current_user.id)
-        )
-
-    if kind:
-        if kind == "assignment":
-            query = query.where(CodeGrade.submission_id.isnot(None))
-            count_q = count_q.where(CodeGrade.submission_id.isnot(None))
-        elif kind == "exam":
-            query = query.where(CodeGrade.exam_answer_id.isnot(None))
-            count_q = count_q.where(CodeGrade.exam_answer_id.isnot(None))
-
-    if question_id is not None:
-        query = query.outerjoin(Submission, CodeGrade.submission_id == Submission.id).where(
-            Submission.question_id == question_id
-        )
-    if student_id is not None:
-        query = query.outerjoin(Submission, CodeGrade.submission_id == Submission.id).where(
-            Submission.student_id == student_id
-        )
-    if status:
-        query = query.where(CodeGrade.status == status)
-        count_q = count_q.where(CodeGrade.status == status)
+    query, count_q = _build_grade_base_query(db, current_user, kind, question_id, student_id, status)
 
     total = db.scalar(count_q) or 0
     grades = db.scalars(
         query.order_by(CodeGrade.id.desc()).offset((page - 1) * page_size).limit(page_size)
     ).all()
 
-    items = []
-    for cg in grades:
-        items.append({
-            "id": cg.id,
-            "submission_id": cg.submission_id,
-            "exam_answer_id": cg.exam_answer_id,
-            "mode": cg.mode,
-            "status": cg.status,
-            "functional_score": cg.functional_score,
-            "algorithm_score": cg.algorithm_score,
-            "robustness_score": cg.robustness_score,
-            "quality_score": cg.quality_score,
-            "raw_total": cg.raw_total,
-            "score_cap": cg.score_cap,
-            "final_score_100": cg.final_score_100,
-            "needs_teacher_review": cg.needs_teacher_review,
-            "attempt_count": cg.attempt_count,
-            "created_at": cg.created_at.isoformat() if cg.created_at else None,
-        })
+    items = [{
+        "id": cg.id, "submission_id": cg.submission_id, "exam_answer_id": cg.exam_answer_id,
+        "mode": cg.mode, "status": cg.status,
+        "functional_score": cg.functional_score, "algorithm_score": cg.algorithm_score,
+        "robustness_score": cg.robustness_score, "quality_score": cg.quality_score,
+        "raw_total": cg.raw_total, "score_cap": cg.score_cap,
+        "final_score_100": cg.final_score_100,
+        "needs_teacher_review": cg.needs_teacher_review,
+        "attempt_count": cg.attempt_count,
+        "created_at": cg.created_at.isoformat() if cg.created_at else None,
+    } for cg in grades]
     return PaginatedResponse(items=items, page=page, page_size=page_size, total=total)
 
 
@@ -309,53 +366,47 @@ def get_grade_detail(
     if cg is None:
         raise api_error(404, "NOT_FOUND", "评分记录不存在")
 
-    # 教师权限校验
-    if current_user.role == "teacher":
+    # 权限：确认属于教师自己的课程
+    if current_user.role != "admin":
+        course_ids = _teacher_course_ids(db, current_user)
         if cg.submission_id:
             sub = db.get(Submission, cg.submission_id)
             if sub:
                 q = db.get(JudgeQuestion, sub.question_id)
                 if q:
                     a = db.get(Assignment, q.assignment_id)
-                    if a:
-                        course = db.get(Course, a.course_id)
-                        if course and course.teacher_id != current_user.id:
-                            raise api_error(403, "FORBIDDEN", "无权访问")
+                    if a and a.course_id not in course_ids:
+                        raise api_error(403, "FORBIDDEN", "无权访问")
+        elif cg.exam_answer_id:
+            ans = db.get(ExamAnswer, cg.exam_answer_id)
+            if ans:
+                q = db.get(ExamQuestion, ans.question_id)
+                if q:
+                    e = db.get(Exam, q.exam_id)
+                    if e and e.course_id not in course_ids:
+                        raise api_error(403, "FORBIDDEN", "无权访问")
 
-    # 获取覆盖历史
     overrides = db.scalars(
         select(GradeOverride).where(GradeOverride.code_grade_id == grade_id).order_by(GradeOverride.id.desc())
     ).all()
 
     return {
-        "id": cg.id,
-        "submission_id": cg.submission_id,
-        "exam_answer_id": cg.exam_answer_id,
-        "rubric_id": cg.rubric_id,
-        "mode": cg.mode,
-        "status": cg.status,
-        "functional_score": cg.functional_score,
-        "algorithm_score": cg.algorithm_score,
-        "robustness_score": cg.robustness_score,
-        "quality_score": cg.quality_score,
-        "raw_total": cg.raw_total,
-        "score_cap": cg.score_cap,
-        "final_score_100": cg.final_score_100,
-        "scaled_score": cg.scaled_score,
+        "id": cg.id, "submission_id": cg.submission_id, "exam_answer_id": cg.exam_answer_id,
+        "rubric_id": cg.rubric_id, "mode": cg.mode, "status": cg.status,
+        "functional_score": cg.functional_score, "algorithm_score": cg.algorithm_score,
+        "robustness_score": cg.robustness_score, "quality_score": cg.quality_score,
+        "raw_total": cg.raw_total, "score_cap": cg.score_cap,
+        "final_score_100": cg.final_score_100, "scaled_score": cg.scaled_score,
         "deterministic_details": cg.deterministic_details,
         "static_analysis": cg.static_analysis,
-        "ai_result": cg.ai_result,
-        "raw_response": cg.raw_response,
+        "ai_result": cg.ai_result, "raw_response": cg.raw_response,
         "needs_teacher_review": cg.needs_teacher_review,
         "review_reason": cg.review_reason,
-        "attempt_count": cg.attempt_count,
-        "last_error": cg.last_error,
+        "attempt_count": cg.attempt_count, "last_error": cg.last_error,
         "overrides": [{
-            "id": o.id,
-            "original_snapshot": o.original_snapshot,
+            "id": o.id, "original_snapshot": o.original_snapshot,
             "replacement_snapshot": o.replacement_snapshot,
-            "reason": o.reason,
-            "reviewer_id": o.reviewer_id,
+            "reason": o.reason, "reviewer_id": o.reviewer_id,
             "created_at": o.created_at.isoformat() if o.created_at else None,
         } for o in overrides],
     }
@@ -373,14 +424,38 @@ def retry_grade(
     if cg is None:
         raise api_error(404, "NOT_FOUND", "评分记录不存在")
 
-    # 允许重试 pending/queued/running/completed/review_required/system_error
+    # 权限：教师只能重试自己课程的评分
+    if current_user.role != "admin":
+        course_ids = _teacher_course_ids(db, current_user)
+        if cg.submission_id:
+            sub = db.get(Submission, cg.submission_id)
+            if sub:
+                q = db.get(JudgeQuestion, sub.question_id)
+                if q:
+                    a = db.get(Assignment, q.assignment_id)
+                    if a and a.course_id not in course_ids:
+                        raise api_error(403, "FORBIDDEN", "无权操作")
+        elif cg.exam_answer_id:
+            ans = db.get(ExamAnswer, cg.exam_answer_id)
+            if ans:
+                q = db.get(ExamQuestion, ans.question_id)
+                if q:
+                    e = db.get(Exam, q.exam_id)
+                    if e and e.course_id not in course_ids:
+                        raise api_error(403, "FORBIDDEN", "无权操作")
+
+    # 条件重置：只重置已终态（completed/review_required/system_error），不碰 running/queued
+    if cg.status in ("running", "queued"):
+        return {"ok": True, "grade_id": grade_id, "status": cg.status, "message": "评分正在进行中，不重复入队"}
+
     cg.status = "pending"
     cg.last_error = None
+    cg.attempt_count = 0
     db.commit()
 
-    enqueue_ai_grade(db, redis_client, grade_id)
+    ok = enqueue_ai_grade(db, redis_client, grade_id)
     db.commit()
-    return {"ok": True, "grade_id": grade_id, "status": "pending"}
+    return {"ok": ok, "grade_id": grade_id, "status": "queued" if ok else "pending"}
 
 
 @router.post("/grades/{grade_id}/override")
@@ -395,7 +470,18 @@ def override_grade(
     if cg is None:
         raise api_error(404, "NOT_FOUND", "评分记录不存在")
 
-    # 保存原始快照
+    # 权限
+    if current_user.role != "admin":
+        course_ids = _teacher_course_ids(db, current_user)
+        if cg.submission_id:
+            sub = db.get(Submission, cg.submission_id)
+            if sub:
+                q = db.get(JudgeQuestion, sub.question_id)
+                if q:
+                    a = db.get(Assignment, q.assignment_id)
+                    if a and a.course_id not in course_ids:
+                        raise api_error(403, "FORBIDDEN", "无权操作")
+
     original = {
         "algorithm_score": cg.algorithm_score,
         "quality_score": cg.quality_score,
@@ -403,19 +489,35 @@ def override_grade(
         "needs_teacher_review": cg.needs_teacher_review,
     }
 
+    a_score = data.algorithm_score if data.algorithm_score is not None else cg.algorithm_score or 0
+    q_score = data.quality_score if data.quality_score is not None else cg.quality_score or 0
+    f_score = cg.functional_score or 0
+    r_score = cg.robustness_score or 0
+
     if data.algorithm_score is not None:
         cg.algorithm_score = data.algorithm_score
     if data.quality_score is not None:
         cg.quality_score = data.quality_score
+
     if data.final_score_100 is not None:
         cg.final_score_100 = data.final_score_100
+        cg.raw_total = data.final_score_100
+    else:
+        # 重算
+        merged = merge_scores(f=f_score, a=a_score, r=r_score, q=q_score, cap=cg.score_cap, exam_points=None)
+        cg.raw_total = merged.raw_total
+        cg.final_score_100 = merged.final_score_100
+        if cg.scaled_score is not None and cg.exam_answer_id:
+            ans = db.get(ExamAnswer, cg.exam_answer_id)
+            if ans:
+                eq = db.get(ExamQuestion, ans.question_id)
+                if eq:
+                    cg.scaled_score = round(merged.final_score_100 / 100 * eq.points, 4)
 
-    # 如果之前有复核标记，覆盖后清除
     if cg.needs_teacher_review:
         cg.needs_teacher_review = False
         cg.review_reason = None
 
-    # 重建 replacement 快照
     replacement = {
         "algorithm_score": cg.algorithm_score,
         "quality_score": cg.quality_score,
@@ -423,22 +525,25 @@ def override_grade(
         "needs_teacher_review": cg.needs_teacher_review,
     }
 
-    # 写入审计记录
     override_record = GradeOverride(
-        code_grade_id=grade_id,
-        original_snapshot=original,
-        replacement_snapshot=replacement,
-        reason=data.reason,
-        reviewer_id=current_user.id,
+        code_grade_id=grade_id, original_snapshot=original,
+        replacement_snapshot=replacement, reason=data.reason, reviewer_id=current_user.id,
     )
     db.add(override_record)
 
-    # 更新正式成绩（active 模式）
-    if cg.mode == "active" and cg.submission_id:
-        sub = db.get(Submission, cg.submission_id)
-        if sub:
-            sub.score = cg.final_score_100
-            sub.status = "graded"
+    # 同步正式分
+    if cg.mode == "active":
+        if cg.submission_id:
+            sub = db.get(Submission, cg.submission_id)
+            if sub:
+                sub.score = cg.final_score_100
+                sub.status = "graded"
+        elif cg.exam_answer_id:
+            ans = db.get(ExamAnswer, cg.exam_answer_id)
+            if ans and cg.scaled_score is not None:
+                ans.score = cg.scaled_score
+                from app.services.exam_grading import finalize_if_ready
+                finalize_if_ready(ans.submission_id, db)
 
     db.commit()
     return {"ok": True, "grade_id": grade_id, "original": original, "replacement": replacement}
@@ -453,20 +558,28 @@ def regrade_question(
     redis_client=Depends(get_redis_client),
 ):
     _teacher_or_admin(current_user)
-    course = _get_course_for_question(db, kind, question_id)
-    _ensure_course_teacher(db, course, current_user)
+    course_id = _get_course_id_for_question(db, kind, question_id)
+    _ensure_course_teacher(db, course_id, current_user)
 
-    # 获取当前锁定 Rubric
     rubric = get_latest_locked_rubric(db, kind=kind, question_id=question_id)
     if rubric is None:
         raise api_error(400, "NO_RUBRIC", "该题目尚无锁定 Rubric")
 
-    # 查找该题所有历史提交
+    if kind == "assignment":
+        q = db.get(JudgeQuestion, question_id)
+    else:
+        q = db.get(ExamQuestion, question_id)
+    if q is None:
+        raise api_error(404, "NOT_FOUND", "题目不存在")
+
+    gmode = getattr(q, 'grading_mode', 'legacy') or 'legacy'
+    count = 0
+    queued = 0
+
     if kind == "assignment":
         subs = db.scalars(
             select(Submission).where(Submission.question_id == question_id)
         ).all()
-        count = 0
         for sub in subs:
             existing = db.scalar(
                 select(CodeGrade).where(CodeGrade.submission_id == sub.id)
@@ -475,17 +588,22 @@ def regrade_question(
                 existing.status = "pending"
                 existing.rubric_id = rubric.id
                 existing.last_error = None
+                existing.attempt_count = 0
             else:
-                cg = CodeGrade(
-                    submission_id=sub.id, rubric_id=rubric.id, mode="shadow", status="pending",
+                f_score = (sub.result_details or {}).get("f_score", 0) if sub.result_details else 0
+                r_score = (sub.result_details or {}).get("r_score", 0) if sub.result_details else 0
+                det = (sub.result_details or {}).get("groups", []) if sub.result_details else []
+                existing = CodeGrade(
+                    submission_id=sub.id, rubric_id=rubric.id, mode=gmode, status="pending",
+                    functional_score=f_score, robustness_score=r_score,
+                    deterministic_details=det,
                 )
-                db.add(cg)
+                db.add(existing)
             count += 1
     else:
         answers = db.scalars(
             select(ExamAnswer).where(ExamAnswer.question_id == question_id)
         ).all()
-        count = 0
         for ans in answers:
             existing = db.scalar(
                 select(CodeGrade).where(CodeGrade.exam_answer_id == ans.id)
@@ -494,23 +612,41 @@ def regrade_question(
                 existing.status = "pending"
                 existing.rubric_id = rubric.id
                 existing.last_error = None
+                existing.attempt_count = 0
             else:
-                q = db.get(ExamQuestion, question_id)
-                cg = CodeGrade(
-                    exam_answer_id=ans.id, rubric_id=rubric.id,
-                    mode=q.grading_mode if q else "shadow", status="pending",
+                f_score = (ans.result_details or {}).get("f_score", 0) if ans.result_details else 0
+                r_score = (ans.result_details or {}).get("r_score", 0) if ans.result_details else 0
+                det = (ans.result_details or {}).get("groups", []) if ans.result_details else []
+                existing = CodeGrade(
+                    exam_answer_id=ans.id, rubric_id=rubric.id, mode=gmode, status="pending",
+                    functional_score=f_score, robustness_score=r_score,
+                    deterministic_details=det,
                 )
-                db.add(cg)
+                db.add(existing)
             count += 1
 
     db.commit()
 
-    # 查询所有 pendings 并逐个入队
-    col = CodeGrade.submission_id if kind == "assignment" else CodeGrade.exam_answer_id
-    pends = db.scalars(
-        select(CodeGrade).where(col.isnot(None), CodeGrade.status == "pending")
-    )
-    queued = 0
+    # 仅入队目标题目的 pendings
+    if kind == "assignment":
+        pends = db.scalars(
+            select(CodeGrade).where(
+                CodeGrade.submission_id.in_(
+                    select(Submission.id).where(Submission.question_id == question_id)
+                ),
+                CodeGrade.status == "pending"
+            )
+        ).all()
+    else:
+        pends = db.scalars(
+            select(CodeGrade).where(
+                CodeGrade.exam_answer_id.in_(
+                    select(ExamAnswer.id).where(ExamAnswer.question_id == question_id)
+                ),
+                CodeGrade.status == "pending"
+            )
+        ).all()
+
     for cg in pends:
         if enqueue_ai_grade(db, redis_client, cg.id):
             queued += 1

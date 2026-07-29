@@ -13,62 +13,66 @@ from app.models import CodeGrade
 
 logger = logging.getLogger("dai.ai_queue")
 
-STALE_RUNNING_SECONDS = 600  # 10 分钟无心跳视为僵死
+STALE_RUNNING_SECONDS = 600  # 10 分钟
 
 
 def enqueue_ai_grade(db: Session, redis_client: Redis, code_grade_id: int) -> bool:
+    """将 pending CodeGrade 条件更新为 queued 并推送 Redis。幂等：非 pending 返回 False。"""
+    now = datetime.now(timezone.utc)
     result = db.execute(
         update(CodeGrade)
         .where(CodeGrade.id == code_grade_id, CodeGrade.status == "pending")
-        .values(status="queued", queued_at=datetime.now(timezone.utc))
+        .values(status="queued", queued_at=now)
     )
     if result.rowcount == 0:
         return False
-    message = json.dumps({"type": "ai_grade", "id": code_grade_id, "attempt": 0})
-    redis_client.rpush("judge:ai:queue", message)
+    msg = json.dumps({"type": "ai_grade", "id": code_grade_id, "attempt": 0})
+    db.commit()
+    redis_client.rpush("judge:ai:queue", msg)
     return True
 
 
 def claim_ai_grade(db: Session, code_grade_id: int) -> bool:
+    """条件更新 queued → running。非 queued（如 pending）返回 False。"""
     now = datetime.now(timezone.utc)
     result = db.execute(
         update(CodeGrade)
         .where(CodeGrade.id == code_grade_id, CodeGrade.status == "queued")
         .values(status="running", started_at=now, attempt_count=CodeGrade.attempt_count + 1)
     )
+    db.commit()
     return result.rowcount > 0
 
 
 def complete_ai_grade(db: Session, code_grade_id: int) -> None:
+    """标记完成（仅 running → completed，不覆盖 review_required）"""
     now = datetime.now(timezone.utc)
     db.execute(
         update(CodeGrade)
-        .where(CodeGrade.id == code_grade_id)
+        .where(CodeGrade.id == code_grade_id, CodeGrade.status == "running")
         .values(status="completed", finished_at=now)
     )
     db.commit()
 
 
 def fail_ai_grade(
-    db: Session,
-    redis_client: Redis,
-    code_grade_id: int,
-    error: str,
-    *,
-    retryable: bool,
-    max_attempts: int = 3,
+    db: Session, redis_client: Redis, code_grade_id: int,
+    error: str, *, retryable: bool, max_attempts: int = 3,
 ) -> None:
+    """处理失败：可重试→queued(重新入队)，否则→review_required。"""
     grade = db.get(CodeGrade, code_grade_id)
     if grade is None:
         return
-    safe_error = _sanitize(error)
+    safe = _sanitize(error)
     current = grade.attempt_count
+    now = datetime.now(timezone.utc)
 
     if retryable and current < max_attempts:
+        # 退回 queued 并推送 Redis（claim 要求 queued 状态）
         db.execute(
             update(CodeGrade)
             .where(CodeGrade.id == code_grade_id)
-            .values(status="pending", last_error=safe_error)
+            .values(status="queued", last_error=safe, queued_at=now)
         )
         db.commit()
         msg = json.dumps({"type": "ai_grade", "id": code_grade_id, "attempt": current + 1})
@@ -78,22 +82,20 @@ def fail_ai_grade(
             update(CodeGrade)
             .where(CodeGrade.id == code_grade_id)
             .values(
-                status="review_required",
-                needs_teacher_review=True,
-                review_reason=f"AI 评分失败（尝试 {current} 次）: {safe_error}",
-                last_error=safe_error,
+                status="review_required", needs_teacher_review=True,
+                review_reason=f"AI 评分失败（尝试 {current} 次）: {safe}",
+                last_error=safe,
             )
         )
         db.commit()
 
 
 def recover_stale_ai_grades(db: Session, redis_client: Redis) -> dict[str, int]:
-    """恢复僵死 AI 评分任务——running 超过 10 分钟重置为 pending"""
+    """恢复僵死任务：running 超过 10 分钟→重置为 queued 并重新入队。"""
     recovered = {"running": 0}
     now = datetime.now(timezone.utc)
     threshold = now - timedelta(seconds=STALE_RUNNING_SECONDS)
 
-    # 只恢复运行时间超过阈值的 running 任务
     stale = db.scalars(
         select(CodeGrade).where(
             CodeGrade.status == "running",
@@ -105,7 +107,8 @@ def recover_stale_ai_grades(db: Session, redis_client: Redis) -> dict[str, int]:
         db.execute(
             update(CodeGrade)
             .where(CodeGrade.id == grade.id)
-            .values(status="pending", last_error="Worker 超时未响应（stale running）")
+            .values(status="queued", last_error="Worker 超时未响应（stale running）",
+                    queued_at=now, attempt_count=CodeGrade.attempt_count + 1)
         )
         msg = json.dumps({"type": "ai_grade", "id": grade.id, "attempt": grade.attempt_count})
         redis_client.rpush("judge:ai:queue", msg)

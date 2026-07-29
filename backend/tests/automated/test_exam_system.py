@@ -67,12 +67,12 @@ def test_p0_maybe_finalize_checks_running_not_just_pending(client, db_session_fa
     # scalar 调用顺序：1) with_for_update 返回 submission, 2) unfinished check → 有值
     mock_sub = MagicMock()
     mock_sub.status = "grading"
-    db.scalar.side_effect = [mock_sub, MagicMock()]
+    # scalar 调用顺序：submission, CodeGrade blocking, unfinished
+    db.scalar.side_effect = [mock_sub, None, MagicMock()]
 
     finalize_if_ready(1, db)
 
-    # scalar 应该只调用了 2 次（submission + unfinished），没有第 3 次 total 查询
-    assert db.scalar.call_count == 2, f"应在发现未完成后立即返回，调用了 {db.scalar.call_count} 次"
+    assert db.scalar.call_count == 3, f"应在发现未完成后立即返回，调用了 {db.scalar.call_count} 次"
     assert not db.commit.called
 
     # 第二次测试：全部 completed → 应汇总
@@ -81,11 +81,11 @@ def test_p0_maybe_finalize_checks_running_not_just_pending(client, db_session_fa
     mock_sub2.status = "grading"
     mock_sub2.exam_id = 1
     mock_sub2.student_id = 1
-    # scalar 调用：1) submission, 2) unfinished=None, 3) total=100.0, 4) grade check=None
-    db2.scalar.side_effect = [mock_sub2, None, 100.0, None]
+    # scalar: submission, CodeGrade blocking=None, unfinished=None, total=100.0, grade=None
+    db2.scalar.side_effect = [mock_sub2, None, None, 100.0, None]
 
     finalize_if_ready(2, db2)
-    assert db2.scalar.call_count >= 4, "确认无未完成后应查询 total + grade + 汇总"
+    assert db2.scalar.call_count >= 5, "确认无未完成后应查询 total + grade + 汇总"
     assert db2.commit.called, "应提交最终成绩"
 
 

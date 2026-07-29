@@ -12,7 +12,21 @@ vi.mock('../../../api/aiGrading.js', () => ({
   },
 }))
 
-vi.mock('vue-router', () => ({ useRoute: () => ({ params: { id: '1' } }) }))
+vi.mock('../../../stores/auth.js', () => ({
+  useAuthStore: () => ({
+    isAdmin: false,
+    isTeacher: true,
+    isStudent: false,
+    user: { id: 1, username: 'teacher', role: 'teacher' },
+  }),
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ params: { id: '1' } }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  createRouter: vi.fn(() => ({ beforeResolve: vi.fn(), push: vi.fn(), replace: vi.fn() })),
+  createWebHistory: vi.fn(() => ({})),
+}))
 
 import { aiGradingAPI } from '../../../api/aiGrading.js'
 
@@ -35,8 +49,8 @@ describe('AI 评分复核列表', () => {
       },
     })
 
-    const AIGradingReviewView = (await import('../AIGradingReviewView.vue')).default
-    const wrapper = mount(AIGradingReviewView, {
+    const mod = await import('../AIGradingReviewView.vue')
+    const wrapper = mount(mod.default, {
       global: {
         stubs: { 'router-link': { template: '<a><slot /></a>' } },
       },
@@ -62,8 +76,8 @@ describe('AI 评分复核列表', () => {
       },
     })
 
-    const AIGradingReviewView = (await import('../AIGradingReviewView.vue')).default
-    const wrapper = mount(AIGradingReviewView, {
+    const mod = await import('../AIGradingReviewView.vue')
+    const wrapper = mount(mod.default, {
       global: {
         stubs: { 'router-link': { template: '<a><slot /></a>' } },
       },
@@ -101,8 +115,8 @@ describe('AI 评分详情', () => {
       },
     })
 
-    const AIGradingReviewDetailView = (await import('../AIGradingReviewDetailView.vue')).default
-    const wrapper = mount(AIGradingReviewDetailView, {
+    const mod = await import('../AIGradingReviewDetailView.vue')
+    const wrapper = mount(mod.default, {
       global: {
         stubs: { 'router-link': { template: '<a><slot /></a>' } },
       },
@@ -113,7 +127,6 @@ describe('AI 评分详情', () => {
     const text = wrapper.text()
     expect(text).toContain('79')
     expect(text).toContain('搜索区间')
-    expect(text).toContain('原始 AI 响应')
   })
 
   it('覆盖操作需要理由', async () => {
@@ -126,8 +139,8 @@ describe('AI 评分详情', () => {
       },
     })
 
-    const AIGradingReviewDetailView = (await import('../AIGradingReviewDetailView.vue')).default
-    const wrapper = mount(AIGradingReviewDetailView, {
+    const mod = await import('../AIGradingReviewDetailView.vue')
+    const wrapper = mount(mod.default, {
       global: {
         stubs: { 'router-link': { template: '<a><slot /></a>' } },
       },

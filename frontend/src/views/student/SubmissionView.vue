@@ -13,7 +13,7 @@ const submission = ref(null)
 const polling = ref(true)
 let timer = null
 
-const TERMINAL_STATUSES = ['accepted', 'wrong_answer', 'runtime_error', 'time_limit_exceeded', 'system_error']
+const TERMINAL_STATUSES = ['accepted', 'wrong_answer', 'runtime_error', 'time_limit_exceeded', 'system_error', 'graded']
 
 async function fetchResult() {
   try {
@@ -68,6 +68,31 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
         <div v-if="polling" class="polling-hint">
           <span class="spinner-sm"></span>
           <span>判题进行中，自动刷新中...</span>
+        </div>
+
+        <!-- ── AI 评分分解（仅 active 模式学生可见） ─────────────────────── -->
+        <div v-if="submission.grading_breakdown" class="card breakdown-card">
+          <div class="output-label">AI 评分详情</div>
+          <div class="breakdown-grid">
+            <div class="breakdown-item"><span>功能正确性 F</span><strong>{{ submission.grading_breakdown.functional_score }}/60</strong></div>
+            <div class="breakdown-item"><span>算法关键步骤 A</span><strong>{{ submission.grading_breakdown.algorithm_score ?? '-' }}/20</strong></div>
+            <div class="breakdown-item"><span>鲁棒性与性能 R</span><strong>{{ submission.grading_breakdown.robustness_score }}/10</strong></div>
+            <div class="breakdown-item"><span>代码质量 Q</span><strong>{{ submission.grading_breakdown.quality_score ?? '-' }}/10</strong></div>
+          </div>
+          <div v-if="submission.grading_breakdown.raw_total != null" class="breakdown-total">
+            原始分 {{ submission.grading_breakdown.raw_total }}
+            <template v-if="submission.grading_breakdown.score_cap"> → 上限 {{ submission.grading_breakdown.score_cap }}</template>
+            → 最终 {{ submission.grading_breakdown.final_score_100 }}
+          </div>
+          <div v-if="submission.grading_breakdown.strengths?.length" class="feedback-box">
+            <strong>优点：</strong>{{ submission.grading_breakdown.strengths.join('；') }}
+          </div>
+          <div v-if="submission.grading_breakdown.issues?.length" class="feedback-box">
+            <strong>问题：</strong>{{ submission.grading_breakdown.issues.join('；') }}
+          </div>
+          <div v-if="submission.grading_breakdown.suggestions?.length" class="feedback-box">
+            <strong>建议：</strong>{{ submission.grading_breakdown.suggestions.join('；') }}
+          </div>
         </div>
 
         <!-- ── stdout / stderr ──────────────────────────────────────────── -->
@@ -126,6 +151,13 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
   margin: 0;
 }
 .output-error { color: #F5A3AB; }
+
+/* ── AI Breakdown ───────────────────────────────────────────────────── */
+.breakdown-card { padding: 20px; }
+.breakdown-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+.breakdown-item { display: flex; justify-content: space-between; padding: 8px 12px; background: #f8f9fa; border-radius: 6px; }
+.breakdown-total { padding: 10px 0; font-weight: 600; text-align: center; color: #333; }
+.feedback-box { padding: 6px 0; font-size: 13px; color: #555; }
 
 /* ── Polling ────────────────────────────────────────────────────────── */
 .polling-hint {

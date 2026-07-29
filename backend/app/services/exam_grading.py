@@ -53,19 +53,19 @@ def finalize_if_ready(submission_id: int, db: Session) -> bool:
     if submission.status != "grading":
         return False
 
-    # active 模式 AI 评分门禁：有未完成 AI 评分 → 等待
+    # active 模式 AI 评分门禁：任何非 completed 状态都阻塞汇总
     blocking = db.scalar(
         select(CodeGrade.id)
         .join(ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id)
         .where(
             ExamAnswer.submission_id == submission_id,
             CodeGrade.mode == "active",
-            CodeGrade.status.in_(["pending", "queued", "running"]),
+            CodeGrade.status != "completed",
         )
         .limit(1)
     )
     if blocking:
-        logger.debug("Submission %s 等待 AI 评分完成", submission_id)
+        logger.debug("Submission %s 等待 AI 评分完成（存在非 completed CodeGrade）", submission_id)
         return False
 
     # 锁内检查：有任何非终态答案 → 不能汇总

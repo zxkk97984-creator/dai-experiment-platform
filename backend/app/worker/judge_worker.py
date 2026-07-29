@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.database import SessionLocal
 from app.models import (
-    CodeGrade, ExamAnswer, ExamQuestion, ExamSubmission, JudgeQuestion, Submission,
+    CodeGrade, ExamAnswer, ExamQuestion, ExamSubmission, JudgeQuestion, QuestionRubric, Submission,
 )
 
 logger = logging.getLogger("dai.worker")
@@ -24,7 +24,7 @@ EXAM_JUDGE_QUEUE = "judge:exam:queue"
 
 
 # ═══════════════════════════════════════════════════════════════
-# 工具函数
+# 工具
 # ═══════════════════════════════════════════════════════════════
 
 def _make_work_dir(root: Path, prefix: str):
@@ -37,12 +37,24 @@ def _make_work_dir(root: Path, prefix: str):
 
 def _get_timeout(question: JudgeQuestion, settings: Settings) -> int:
     raw = max(question.time_limit_ms, 1)
-    per_question = math.ceil(raw / 1000)
-    return max(min(per_question, settings.judge_timeout_seconds), 1)
+    return max(min(math.ceil(raw / 1000), settings.judge_timeout_seconds), 1)
+
+
+def _status_from_pytest(returncode, stdout, stderr):
+    output = f"{stdout}\n{stderr}"
+    if returncode == 0:
+        return "accepted", 100
+    if returncode == 124:
+        return "time_limit_exceeded", 0
+    if "AssertionError" in output or "assert " in output:
+        return "wrong_answer", 0
+    if returncode == 1:
+        return "runtime_error", 0
+    return "system_error", 0
 
 
 # ═══════════════════════════════════════════════════════════════
-# Docker 执行
+# 传统文件写入（兼容旧判题路径）
 # ═══════════════════════════════════════════════════════════════
 
 def _write_submission_files(workdir: Path, submission: Submission, question: JudgeQuestion) -> Path:
@@ -57,11 +69,15 @@ def _write_submission_files(workdir: Path, submission: Submission, question: Jud
 
 
 def enqueue_exam_answer(submission_id: int, answer_id: int, question: ExamQuestion):
-    """考试编程题入队——委托给统一 judge_queue 入口。保留此函数以兼容旧调用方。"""
     from app.services.judge_queue import enqueue_job as _enq
     from app.database import SessionLocal
     with SessionLocal() as db:
         _enq(db, job_type="exam", object_id=answer_id)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Docker 沙箱
+# ═══════════════════════════════════════════════════════════════
 
 def _run_docker_pytest(workdir: Path, settings: Settings, timeout_seconds: int,
                        memory_limit_mb: int = 256, test_filename: str = "test_user_code.py",
@@ -95,21 +111,8 @@ def _run_docker_pytest(workdir: Path, settings: Settings, timeout_seconds: int,
         return "", "Execution timed out", 124, elapsed_ms
 
 
-def _status_from_pytest(returncode, stdout, stderr):
-    output = f"{stdout}\n{stderr}"
-    if returncode == 0:
-        return "accepted", 100
-    if returncode == 124:
-        return "time_limit_exceeded", 0
-    if "AssertionError" in output or "assert " in output:
-        return "wrong_answer", 0
-    if returncode == 1:
-        return "runtime_error", 0
-    return "system_error", 0
-
-
 # ═══════════════════════════════════════════════════════════════
-# pytest 结果插件
+# pytest 结果插件 + 解析
 # ═══════════════════════════════════════════════════════════════
 
 PLUGIN_CODE = """import json
@@ -146,18 +149,12 @@ def _parse_result_json(output: str) -> dict | None:
 # ═══════════════════════════════════════════════════════════════
 
 def run_test_groups(
-    workdir: Path,
-    host_workdir: Path,
-    code: str,
-    test_groups: list[dict],
-    settings: Settings,
-    timeout_seconds: int,
-    memory_limit_mb: int,
+    workdir: Path, host_workdir: Path, code: str,
+    test_groups: list[dict], settings: Settings,
+    timeout_seconds: int, memory_limit_mb: int,
 ) -> dict:
-    """逐组运行 pytest 测试并返回 F/R 分组结果"""
     results = {}
     system_errors = []
-
     for group in test_groups:
         gid = group["id"]
         tests_code = group.get("tests", "")
@@ -165,19 +162,12 @@ def run_test_groups(
             system_errors.append(f"测试组 {gid} 没有测试代码")
             results[gid] = {"passed": 0, "failed": 0, "errors": 0, "skipped": 0}
             continue
-
-        # 写用户代码
         (workdir / "user_code.py").write_text(code, encoding="utf-8")
-
-        # 写插件
         (workdir / "dai_result_plugin.py").write_text(PLUGIN_CODE, encoding="utf-8")
-
-        # 写本组测试
         test_content = tests_code
         if "import user_code" not in test_content and "from user_code" not in test_content:
             test_content = f"import user_code\n\n{test_content}"
         (workdir / "test_group.py").write_text(test_content, encoding="utf-8")
-
         try:
             stdout, stderr, returncode, elapsed = _run_docker_pytest(
                 workdir, settings, timeout_seconds, memory_limit_mb,
@@ -188,53 +178,156 @@ def run_test_groups(
             system_errors.append(f"测试组 {gid} Docker 执行异常: {exc}")
             results[gid] = {"passed": 0, "failed": 0, "errors": 1, "skipped": 0}
             continue
-
         counts = _parse_result_json(stdout)
         if counts is None:
             system_errors.append(f"测试组 {gid} 无法解析结果")
             results[gid] = {"passed": 0, "failed": 0, "errors": 1, "skipped": 0}
         else:
             results[gid] = counts
-
     return {"results": results, "system_errors": system_errors}
 
 
-def _calculate_fr_scores(groups: list[dict], results: dict[str, dict]) -> tuple[float, float, list[dict], list[str]]:
-    """从测试组结果计算 F 和 R 分"""
+def _calculate_fr(group: dict, counts: dict, sys_errs: list[str]) -> tuple[float, dict]:
     from app.services.deterministic_scoring import calculate_group_score, DeterministicSystemError
+    try:
+        score = calculate_group_score(group.get("max_score", 0), counts)
+    except DeterministicSystemError as exc:
+        sys_errs.append(f"测试组 {group['id']}: {exc}")
+        return 0.0, {"id": group["id"], "name": group.get("name", ""),
+                      "dimension": group.get("dimension"), "max_score": group.get("max_score", 0),
+                      "score": 0, "counts": counts, "error": str(exc)}
+    return score, {"id": group["id"], "name": group.get("name", ""),
+                   "dimension": group.get("dimension"), "max_score": group.get("max_score", 0),
+                   "score": score, "counts": counts}
 
-    f_total = 0.0
-    r_total = 0.0
-    details = []
-    errors = []
 
-    for group in groups:
-        gid = group["id"]
-        counts = results.get(gid)
+def _calc_fr_scores(groups, results, sys_errs):
+    f_total, r_total, details = 0.0, 0.0, []
+    for g in groups:
+        counts = results.get(g["id"])
         if counts is None:
-            errors.append(f"测试组 {gid} 缺少结果")
+            sys_errs.append(f"测试组 {g['id']} 缺少结果")
             continue
-        try:
-            score = calculate_group_score(group.get("max_score", 0), counts)
-        except DeterministicSystemError as exc:
-            errors.append(f"测试组 {gid}: {exc}")
-            continue
-        details.append({"id": gid, "name": group.get("name", ""), "dimension": group.get("dimension"),
-                        "max_score": group.get("max_score", 0), "score": score, "counts": counts})
-        if group.get("dimension") == "F":
-            f_total += score
-        elif group.get("dimension") == "R":
-            r_total += score
-
-    return round(f_total, 4), round(r_total, 4), details, errors
+        s, d = _calculate_fr(g, counts, sys_errs)
+        details.append(d)
+        if g.get("dimension") == "F":
+            f_total += s
+        elif g.get("dimension") == "R":
+            r_total += s
+    return round(f_total, 4), round(r_total, 4), details
 
 
 # ═══════════════════════════════════════════════════════════════
 # 作业判题
 # ═══════════════════════════════════════════════════════════════
 
+def _legacy_judge_submission(db, redis_client, settings, submission, question, workdir, host_workdir, timeout_s, mem_mb):
+    """传统判题路径：隐藏测试全过/不过 → accepted/0"""
+    from app.services.judge_queue import complete_job, fail_job
+    _write_submission_files(workdir, submission, question)
+    try:
+        stdout, stderr, returncode, elapsed = _run_docker_pytest(
+            workdir, settings, timeout_s, mem_mb, host_workdir=host_workdir)
+    except Exception as e:
+        fail_job(db, job_type="assignment", object_id=submission.id,
+                 error=f"Docker 判题失败: {e}", retryable=True)
+        submission.status = "system_error"
+        submission.score = 0
+        submission.stderr = f"Docker 判题失败: {e}"
+        db.commit()
+        return submission
+
+    final_status, score = _status_from_pytest(returncode, stdout, stderr)
+    submission.status = final_status
+    submission.stdout = stdout[-8000:]
+    submission.stderr = stderr[-8000:]
+    submission.score = score
+    submission.execution_time_ms = elapsed
+    submission.result_details = {"returncode": returncode}
+    db.commit()
+    complete_job(db, job_type="assignment", object_id=submission.id, score=score)
+    return submission
+
+
+def _v1_judge_submission(db, redis_client, settings, submission, question, workdir, host_workdir, timeout_s, mem_mb):
+    """V1 评分路径：运行测试组 → F/R → 创建 CodeGrade → 入队 AI"""
+    from app.services.judge_queue import complete_job, fail_job
+
+    test_groups = question.test_groups or []
+    if not test_groups:
+        fail_job(db, job_type="assignment", object_id=submission.id,
+                 error="shadow/active 需要测试组", retryable=True)
+        submission.status = "system_error"
+        submission.score = 0
+        db.commit()
+        return submission
+
+    result = run_test_groups(workdir, host_workdir, submission.code, test_groups,
+                             settings, timeout_s, mem_mb)
+    all_errs = list(result["system_errors"])
+    f_score, r_score, details = _calc_fr_scores(test_groups, result["results"], all_errs)
+
+    # shadow: 保留旧规则成绩；active: F+R 作为正式分
+    if question.grading_mode == "shadow":
+        # 同时跑旧判题得到 legacy 成绩
+        _write_submission_files(workdir, submission, question)
+        try:
+            stdout, stderr, returncode, elapsed = _run_docker_pytest(
+                workdir, settings, timeout_s, mem_mb, host_workdir=host_workdir)
+        except Exception:
+            stdout, stderr, returncode, elapsed = "", "Docker error", 1, 0
+        legacy_status, legacy_score = _status_from_pytest(returncode, stdout, stderr)
+        submission.status = legacy_status
+        submission.score = legacy_score
+        submission.stdout = stdout[-8000:]
+        submission.stderr = stderr[-8000:]
+        submission.execution_time_ms = elapsed
+    else:
+        # active: 基于 F+R 得到部分分
+        raw_score = round(f_score + r_score, 4)
+        submission.score = raw_score if not all_errs else None
+        submission.status = "graded" if not all_errs else "system_error"
+
+    submission.result_details = {"groups": details, "system_errors": all_errs,
+                                 "f_score": f_score, "r_score": r_score}
+    db.commit()
+
+    if all_errs:
+        fail_job(db, job_type="assignment", object_id=submission.id,
+                 error="; ".join(all_errs), retryable=True)
+    else:
+        complete_job(db, job_type="assignment", object_id=submission.id,
+                     score=float(f_score + r_score), result_details=submission.result_details)
+
+    # 创建 CodeGrade
+    locked = db.scalar(
+        select(QuestionRubric).where(
+            QuestionRubric.judge_question_id == question.id,
+            QuestionRubric.status == "locked",
+        ).order_by(QuestionRubric.version.desc()).limit(1)
+    )
+    if locked:
+        existing = db.scalar(
+            select(CodeGrade).where(CodeGrade.submission_id == submission.id)
+        )
+        if existing is None:
+            cg = CodeGrade(
+                submission_id=submission.id, rubric_id=locked.id,
+                mode=question.grading_mode, status="pending",
+                functional_score=f_score, robustness_score=r_score,
+                deterministic_details={"groups": details, "system_errors": all_errs},
+            )
+            db.add(cg)
+            db.commit()
+            from app.services.ai_grading_queue import enqueue_ai_grade
+            enqueue_ai_grade(db, redis_client, cg.id)
+            db.commit()
+
+    return submission
+
+
 def process_submission(db: Session, redis_client, settings: Settings, submission_id: int) -> Submission:
-    from app.services.judge_queue import claim_job, complete_job, fail_job
+    from app.services.judge_queue import claim_job, fail_job
 
     submission = db.get(Submission, submission_id)
     if not submission:
@@ -248,7 +341,8 @@ def process_submission(db: Session, redis_client, settings: Settings, submission
 
         question = db.get(JudgeQuestion, submission.question_id)
         if not question:
-            fail_job(db, job_type="assignment", object_id=submission_id, error="题目不存在", retryable=False)
+            fail_job(db, job_type="assignment", object_id=submission_id,
+                     error="题目不存在", retryable=False)
             submission.status = "system_error"
             submission.score = 0
             db.commit()
@@ -273,91 +367,20 @@ def process_submission(db: Session, redis_client, settings: Settings, submission
             timeout_s = _get_timeout(question, settings)
             mem_mb = question.memory_limit_mb or settings.judge_memory_limit_mb
 
-            # 按模式分支
-            if question.grading_mode == "legacy":
-                # 传统模式
-                user_code = workdir / "user_code.py"
-                test_file = workdir / "test_user_code.py"
-                user_code.write_text(submission.code, encoding="utf-8")
-                ht = question.hidden_tests
-                if "import user_code" not in ht and "from user_code" not in ht:
-                    ht = f"import user_code\n\n{ht}"
-                test_file.write_text(ht, encoding="utf-8")
-
-                try:
-                    stdout, stderr, returncode, elapsed = _run_docker_pytest(
-                        workdir, settings, timeout_s, mem_mb, host_workdir=host_workdir)
-                except Exception as e:
-                    fail_job(db, job_type="assignment", object_id=submission_id,
-                             error=f"Docker 判题失败: {e}", retryable=True)
-                    submission.status = "system_error"
-                    submission.score = 0
-                    submission.stderr = f"Docker 判题失败: {e}"
-                    db.commit()
-                    return submission
-
-                final_status, score = _status_from_pytest(returncode, stdout, stderr)
-                submission.status = final_status
-                submission.stdout = stdout[-8000:]
-                submission.stderr = stderr[-8000:]
-                submission.score = score
-                submission.execution_time_ms = elapsed
-                submission.result_details = {"returncode": returncode}
-                db.commit()
-                complete_job(db, job_type="assignment", object_id=submission_id, score=score)
-
+            gmode = getattr(question, 'grading_mode', 'legacy') or 'legacy'
+            if gmode == "legacy" or not getattr(question, 'test_groups', None):
+                result = _legacy_judge_submission(
+                    db, redis_client, settings, submission, question,
+                    workdir, host_workdir, timeout_s, mem_mb)
             else:
-                # shadow/active: 运行结构化测试组
-                test_groups = question.test_groups or []
-                if not test_groups:
-                    raise ValueError("shadow/active 模式必须配置测试组")
+                result = _v1_judge_submission(
+                    db, redis_client, settings, submission, question,
+                    workdir, host_workdir, timeout_s, mem_mb)
 
-                result = run_test_groups(
-                    workdir, host_workdir, submission.code, test_groups,
-                    settings, timeout_s, mem_mb,
-                )
-                f_score, r_score, details, sys_errors = _calculate_fr_scores(test_groups, result["results"])
-
-                submission.score = f_score + r_score if question.grading_mode == "active" else None
-                submission.status = "accepted" if sys_errors == [] else "system_error"
-                submission.result_details = {"groups": details, "system_errors": sys_errors}
-                db.commit()
-                complete_job(db, job_type="assignment", object_id=submission_id,
-                             score=float(f_score + r_score), result_details=submission.result_details)
-
-                # 创建 CodeGrade
-                rubric = db.scalar(
-                    select(CodeGrade).where(CodeGrade.submission_id == submission_id)
-                )
-                if rubric is None:
-                    from app.models import QuestionRubric
-                    locked = db.scalar(
-                        select(QuestionRubric).where(
-                            QuestionRubric.judge_question_id == question.id,
-                            QuestionRubric.status == "locked",
-                        ).order_by(QuestionRubric.version.desc()).limit(1)
-                    )
-                    if locked:
-                        cg = CodeGrade(
-                            submission_id=submission_id,
-                            rubric_id=locked.id,
-                            mode=question.grading_mode,
-                            status="pending",
-                            functional_score=f_score,
-                            robustness_score=r_score,
-                            deterministic_details={"groups": details, "system_errors": sys_errors},
-                        )
-                        db.add(cg)
-                        db.commit()
-                        # 入队 AI 评分
-                        from app.services.ai_grading_queue import enqueue_ai_grade
-                        enqueue_ai_grade(db, redis_client, cg.id)
-                        db.commit()
-
-            db.refresh(submission)
-            redis_client.setex(f"judge:result:{submission.id}", 3600, submission.status)
-            logger.info("Submission %s 判题完成: %s", submission_id, submission.status)
-            return submission
+            db.refresh(submission) if result else None
+            redis_client.setex(f"judge:result:{submission.id}", 3600, getattr(submission, 'status', 'unknown'))
+            logger.info("Submission %s 判题完成: %s", submission_id, getattr(submission, 'status', '?'))
+            return result
 
         finally:
             if _cleanup:
@@ -421,8 +444,10 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
 
             timeout_s = max(min(math.ceil((question.time_limit_ms or 10000) / 1000), settings.judge_timeout_seconds), 1)
             mem_mb = question.memory_limit_mb or settings.judge_memory_limit_mb
+            gmode = getattr(question, 'grading_mode', 'legacy') or 'legacy'
 
-            if question.grading_mode == "legacy":
+            if gmode == "legacy" or not getattr(question, 'test_groups', None):
+                # legacy 路径
                 user_code = workdir / "user_code.py"
                 test_file = workdir / "test_user_code.py"
                 user_code.write_text(answer.code_answer or "", encoding="utf-8")
@@ -430,7 +455,6 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
                 if "import user_code" not in ht and "from user_code" not in ht:
                     ht = f"import user_code\n\n{ht}"
                 test_file.write_text(ht, encoding="utf-8")
-
                 try:
                     stdout, stderr, returncode, elapsed = _run_docker_pytest(
                         workdir, settings, timeout_s, mem_mb, host_workdir=host_workdir)
@@ -444,39 +468,62 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
                     return answer
 
                 final_status, _ = _status_from_pytest(returncode, stdout, stderr)
-                score = float(question.points) if final_status == "accepted" else 0.0
-                answer.score = score
+                answer.score = float(question.points) if final_status == "accepted" else 0.0
                 answer.grading_status = "completed"
                 answer.result_details = {"returncode": returncode}
                 db.commit()
-                complete_job(db, job_type="exam", object_id=answer_id, score=score)
+                complete_job(db, job_type="exam", object_id=answer_id, score=answer.score)
                 _maybe_finalize_exam(answer.submission_id, db)
-
             else:
+                # V1 路径
                 test_groups = question.test_groups or []
                 if not test_groups:
-                    raise ValueError("shadow/active 模式需要测试组")
+                    fail_job(db, job_type="exam", object_id=answer_id,
+                             error="shadow/active 需要测试组", retryable=True)
+                    answer.score = 0
+                    answer.system_error = "缺少测试组"
+                    db.commit()
+                    _maybe_finalize_exam(answer.submission_id, db)
+                    return answer
 
-                result = run_test_groups(
-                    workdir, host_workdir, answer.code_answer or "", test_groups,
-                    settings, timeout_s, mem_mb,
-                )
-                f_score, r_score, details, sys_errors = _calculate_fr_scores(test_groups, result["results"])
+                result = run_test_groups(workdir, host_workdir, answer.code_answer or "",
+                                         test_groups, settings, timeout_s, mem_mb)
+                all_errs = list(result["system_errors"])
+                f_score, r_score, details = _calc_fr_scores(test_groups, result["results"], all_errs)
 
-                # shadow: 立即给旧二元分; active: 等 AI
-                if question.grading_mode == "shadow":
-                    answer.score = float(question.points) if f_score > 0 else 0.0
+                if gmode == "shadow":
+                    # 保留旧二元评分：全通过才满分
+                    user_code = workdir / "user_code.py"
+                    test_file = workdir / "test_user_code.py"
+                    user_code.write_text(answer.code_answer or "", encoding="utf-8")
+                    ht = question.hidden_tests
+                    if "import user_code" not in ht and "from user_code" not in ht:
+                        ht = f"import user_code\n\n{ht}"
+                    test_file.write_text(ht, encoding="utf-8")
+                    try:
+                        stdout, stderr, returncode, _ = _run_docker_pytest(
+                            workdir, settings, timeout_s, mem_mb, host_workdir=host_workdir)
+                    except Exception:
+                        returncode = 1
+                    legacy_status, _ = _status_from_pytest(returncode, stdout if 'stdout' in dir() else "", stderr if 'stderr' in dir() else "")
+                    answer.score = float(question.points) if legacy_status == "accepted" else 0.0
                 else:
+                    # active: 等 AI 完成后才定分
                     answer.score = None
 
                 answer.grading_status = "completed"
-                answer.result_details = {"groups": details, "system_errors": sys_errors}
+                answer.result_details = {"groups": details, "system_errors": all_errs,
+                                         "f_score": f_score, "r_score": r_score}
                 db.commit()
-                complete_job(db, job_type="exam", object_id=answer_id,
-                             score=answer.score, result_details=answer.result_details)
 
-                # 创建 CodeGrade 并入队
-                from app.models import QuestionRubric
+                if all_errs:
+                    fail_job(db, job_type="exam", object_id=answer_id,
+                             error="; ".join(all_errs), retryable=True)
+                else:
+                    complete_job(db, job_type="exam", object_id=answer_id,
+                                 score=answer.score, result_details=answer.result_details)
+
+                # 创建 CodeGrade
                 locked = db.scalar(
                     select(QuestionRubric).where(
                         QuestionRubric.exam_question_id == question.id,
@@ -484,23 +531,24 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
                     ).order_by(QuestionRubric.version.desc()).limit(1)
                 )
                 if locked:
-                    cg = CodeGrade(
-                        exam_answer_id=answer_id,
-                        rubric_id=locked.id,
-                        mode=question.grading_mode,
-                        status="pending",
-                        functional_score=f_score,
-                        robustness_score=r_score,
-                        deterministic_details={"groups": details, "system_errors": sys_errors},
+                    existing = db.scalar(
+                        select(CodeGrade).where(CodeGrade.exam_answer_id == answer_id)
                     )
-                    db.add(cg)
-                    db.commit()
-                    from app.services.ai_grading_queue import enqueue_ai_grade
-                    enqueue_ai_grade(db, redis_client, cg.id)
-                    db.commit()
+                    if existing is None:
+                        cg = CodeGrade(
+                            exam_answer_id=answer_id, rubric_id=locked.id,
+                            mode=gmode, status="pending",
+                            functional_score=f_score, robustness_score=r_score,
+                            deterministic_details={"groups": details, "system_errors": all_errs},
+                        )
+                        db.add(cg)
+                        db.commit()
+                        from app.services.ai_grading_queue import enqueue_ai_grade
+                        enqueue_ai_grade(db, redis_client, cg.id)
+                        db.commit()
 
-                # shadow 立即汇总; active 等 AI 完成
-                if question.grading_mode == "shadow":
+                # shadow 立即汇总; active 等 AI
+                if gmode == "shadow":
                     _maybe_finalize_exam(answer.submission_id, db)
 
             return answer
@@ -537,11 +585,16 @@ def process_ai_grade(db: Session, redis_client, settings: Settings, code_grade_i
         client = DeepSeekClient(settings)
         cg = grade_code_submission(db, client, code_grade_id)
         db.commit()
-        complete_ai_grade(db, code_grade_id)
+        # 只有非 review_required 才 complete
+        db.refresh(cg)
+        if cg.status != "review_required" and not cg.needs_teacher_review:
+            cg.status = "completed"
+            cg.finished_at = datetime.now(timezone.utc)
+            db.commit()
         return cg
     except AIServiceError as exc:
         db.rollback()
-        fail_ai_grade(db, redis_client, code_grade_id, exc.message, retryable=exc.retryable)
+        fail_ai_grade(db, redis_client, code_grade_id, str(exc), retryable=exc.retryable)
         return None
     except Exception as exc:
         db.rollback()
@@ -563,7 +616,6 @@ def run_worker_loop():
     queues = [settings.judge_queue_name, EXAM_JUDGE_QUEUE, ai_queue]
     logger.info("Worker 启动，监听队列: %s", queues)
 
-    # 启动时恢复僵死任务
     last_recovery = time.monotonic()
     with SessionLocal() as db:
         from app.services.judge_queue import requeue_stale_jobs
@@ -577,7 +629,6 @@ def run_worker_loop():
         try:
             result = redis_client.brpop(queues, timeout=5)
             if result is None:
-                # 定期恢复扫描
                 if time.monotonic() - last_recovery > 120:
                     with SessionLocal() as db:
                         from app.services.judge_queue import requeue_stale_jobs

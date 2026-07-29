@@ -31,11 +31,13 @@ const menuItems = computed(() => {
     { path: '/teacher/exams',       label: '考试',     sub: 'Exams',        icon: 'exams',       key: 'exams' },
     { path: '/teacher/experiments', label: '实验',     sub: 'Experiments',  icon: 'experiments', key: 'experiments' },
     { path: '/teacher/submissions', label: '提交列表', sub: 'Submissions',  icon: 'assignments', key: 'submissions' },
+    { path: '/teacher/ai-grading',  label: 'AI 评分',   sub: 'AI Grading',    icon: 'assignments', key: 'ai-grading' },
   ]
   if (auth.isAdmin) return [
     { path: '/admin/users',         label: '用户',     sub: 'Users',       icon: 'users',       key: 'users' },
     { path: '/admin/courses',       label: '课程',     sub: 'Courses',     icon: 'courses',     key: 'courses' },
     { path: '/admin/experiments',   label: '实验',     sub: 'Experiments', icon: 'experiments', key: 'experiments' },
+    { path: '/admin/ai-grading',    label: 'AI 评分',   sub: 'AI Grading',    icon: 'assignments', key: 'ai-grading' },
   ]
   if (auth.isDeveloper) return [
     {

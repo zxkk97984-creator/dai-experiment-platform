@@ -114,8 +114,8 @@ def test_claim_queued_to_running(db_session_factory, redis_client):
         assert grade.attempt_count == 1
 
 
-def test_fail_retryable_returns_to_pending(db_session_factory, redis_client):
-    """可重试失败退回 pending"""
+def test_fail_retryable_returns_to_queued(db_session_factory, redis_client):
+    """可重试失败退回 queued（确保 claim_ai_grade 可领取）"""
     from app.models import CodeGrade
     from app.services.ai_grading_queue import fail_ai_grade
 
@@ -130,7 +130,7 @@ def test_fail_retryable_returns_to_pending(db_session_factory, redis_client):
         fail_ai_grade(db, redis_client, grade.id, "timeout", retryable=True, max_attempts=3)
 
         db.refresh(grade)
-        assert grade.status == "pending"
+        assert grade.status == "queued"
 
 
 def test_fail_non_retryable_goes_to_review(db_session_factory, redis_client):

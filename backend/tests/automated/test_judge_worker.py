@@ -222,6 +222,8 @@ def test_formal_docker_fail_system_error():
     q.time_limit_ms = 5000
     q.memory_limit_mb = 128
     q.hidden_tests = 'def test(): pass'
+    q.grading_mode = 'legacy'
+    q.test_groups = []
     sub = MagicMock()
     sub.id = 1
     sub.code = 'pass'
@@ -302,13 +304,12 @@ def test_p0_5_maybe_finalize_blocks_on_running():
     db = MagicMock()
     mock_sub = MagicMock()
     mock_sub.status = "grading"
-    # scalar 调用顺序：1) with_for_update → submission, 2) unfinished check → 有值
-    db.scalar.side_effect = [mock_sub, MagicMock()]
+    # scalar: submission, CodeGrade blocking, unfinished
+    db.scalar.side_effect = [mock_sub, None, MagicMock()]
 
     finalize_if_ready(1, db)
 
-    # scalar 应该只被调用了 2 次（submission + unfinished），没有后续查询
-    assert db.scalar.call_count == 2, f"应该在发现未完成答案后立即返回，但调用了 {db.scalar.call_count} 次"
+    assert db.scalar.call_count == 3, f"应该在发现未完成答案后立即返回，但调用了 {db.scalar.call_count} 次"
     assert not db.commit.called, "存在未完成答案时不应提交汇总"
 
     # 测试2: 全部完成 → 应该汇总
@@ -318,10 +319,10 @@ def test_p0_5_maybe_finalize_blocks_on_running():
     mock_sub2.exam_id = 1
     mock_sub2.student_id = 1
     # scalar: submission, unfinished=None, total=100.0, grade=None
-    db2.scalar.side_effect = [mock_sub2, None, 100.0, None]
+    db2.scalar.side_effect = [mock_sub2, None, None, 100.0, None]
 
     finalize_if_ready(2, db2)
-    assert db2.scalar.call_count >= 4, "应该在确认无未完成后查询 total + grade"
+    assert db2.scalar.call_count >= 5, "应该在确认无未完成后查询 total + grade"
     assert db2.commit.called, "应该提交最终成绩"
 
 

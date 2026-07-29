@@ -59,7 +59,7 @@
           <td>{{ item.final_score_100 ?? '-' }}</td>
           <td>{{ item.needs_teacher_review ? '是' : '否' }}</td>
           <td>
-            <router-link :to="'/teacher/ai-grading/' + item.id">详情</router-link>
+            <router-link :to="basePath + '/' + item.id">详情</router-link>
           </td>
         </tr>
       </tbody>
@@ -75,8 +75,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useAuthStore } from '../../stores/auth.js'
 import { aiGradingAPI } from '../../api/aiGrading.js'
+
+const auth = useAuthStore()
+const basePath = computed(() => auth.isAdmin ? '/admin/ai-grading' : '/teacher/ai-grading')
 
 const items = ref([])
 const loading = ref(false)
