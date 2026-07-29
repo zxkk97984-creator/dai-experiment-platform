@@ -13,8 +13,12 @@ export const authAPI = {
     return client.post('/auth/refresh', {}, { skipAuthRefresh: true })
   },
   /** Logout — cookie cleared by server */
-  logout() {
-    return client.post('/auth/logout', {}, { skipAuthRefresh: true })
+  logout(accessToken = '') {
+    const config = { skipAuthRefresh: true }
+    if (accessToken) {
+      config.headers = { Authorization: `Bearer ${accessToken}` }
+    }
+    return client.post('/auth/logout', {}, config)
   },
   me() { return client.get('/auth/me') },
 }

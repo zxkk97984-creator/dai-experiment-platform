@@ -91,10 +91,12 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function logout() {
-    authAPI.logout().catch(() => {})
+    const token = accessToken.value
+    const request = authAPI.logout(token).catch(() => {})
     accessToken.value = ''
     user.value = null
     localStorage.removeItem('user')
+    return request
   }
 
   return {

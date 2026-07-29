@@ -94,7 +94,6 @@ describe('认证 API', () => {
   it.each([
     ['login', ['teacher', 'secret']],
     ['refresh', []],
-    ['logout', []],
   ])('%s 请求跳过通用 401 刷新拦截器', async (method, args) => {
     state.authAPI[method](...args)
 
@@ -102,6 +101,19 @@ describe('认证 API', () => {
       expect.any(String),
       expect.any(Object),
       { skipAuthRefresh: true },
+    )
+  })
+
+  it('logout 使用调用方快照的 access token 清除服务端会话', () => {
+    state.authAPI.logout('access-token')
+
+    expect(state.client.post).toHaveBeenCalledWith(
+      '/auth/logout',
+      {},
+      {
+        skipAuthRefresh: true,
+        headers: { Authorization: 'Bearer access-token' },
+      },
     )
   })
 })
