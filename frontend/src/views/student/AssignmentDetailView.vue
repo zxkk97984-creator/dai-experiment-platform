@@ -50,17 +50,19 @@ const publicCasesPretty = computed(() => {
   return JSON.stringify(cases, null, 2)
 })
 
-const TERMINAL_STATUSES = ['accepted', 'wrong_answer', 'runtime_error', 'time_limit_exceeded', 'system_error']
+const TERMINAL_ERROR_STATUSES = ['wrong_answer', 'runtime_error', 'time_limit_exceeded', 'system_error']
 
 const TEST_STATUS_ICON = { queued: '⏳', running: '🔄', accepted: '✓', wrong_answer: '✗', runtime_error: '✗', time_limit_exceeded: '⏱', system_error: '✗', no_public_cases: '—' }
 const TEST_STATUS_LABEL = { queued: '排队等待判题...', running: '正在判题中...', accepted: '全部测试通过', wrong_answer: '答案错误', runtime_error: '运行错误', time_limit_exceeded: '执行超时', system_error: '系统错误', no_public_cases: '无公开样例' }
 const TEST_STATUS_CLASS = { queued: 'muted', running: 'muted', accepted: 'success', wrong_answer: 'error', runtime_error: 'error', time_limit_exceeded: 'warning', system_error: 'error', no_public_cases: 'muted' }
 
-const SUBMIT_STATUS_LABEL = { queued: '⏳ 排队等待判题...', running: '🔄 正在判题中...', accepted: '✓ 全部通过', wrong_answer: '✗ 答案错误', runtime_error: '✗ 运行错误', time_limit_exceeded: '⏱ 执行超时', system_error: '⚠ 系统错误' }
+const SUBMIT_STATUS_LABEL = { queued: '⏳ 排队等待判题...', running: '🔄 正在判题中...', accepted: '✓ 全部通过', graded: '✓ AI 评分完成', wrong_answer: '✗ 答案错误', runtime_error: '✗ 运行错误', time_limit_exceeded: '⏱ 执行超时', system_error: '⚠ 系统错误' }
 
 const submitResult = ref(null)
 const submitPolling = ref(false)
 const completedQuestions = ref(new Set())
+const currentGradingMode = computed(() => questions.value[activeQ.value]?.grading_mode || 'legacy')
+const submitSucceeded = computed(() => ['accepted', 'graded'].includes(submitResult.value?.status))
 
 let pollTimer = null
 let pollCount = 0
@@ -83,7 +85,7 @@ onMounted(async () => {
   if (results[2].status === 'fulfilled') {
     const subs = results[2].value.data.items || results[2].value.data || []
     for (const s of subs) {
-      if (s.status === 'accepted') completedQuestions.value.add(s.question_id)
+      if (['accepted', 'graded'].includes(s.status)) completedQuestions.value.add(s.question_id)
     }
   }
   if (!assignment.value && questions.value.length === 0) {
@@ -150,7 +152,7 @@ async function handleSubmit() {
   try {
     const res = await judgeAPI.submit({ question_id: q.id, code: code.value })
     if (res.data.id != null) {
-      pollSubmitResult(res.data.id, submittingQId)
+      pollSubmitResult(res.data.id, submittingQId, q.grading_mode || 'legacy')
     } else {
       app.showToast('提交未返回有效ID', 'error')
       submitting.value = false
@@ -199,7 +201,18 @@ function onEditorDragEnd() {
   document.removeEventListener('mouseup', onEditorDragEnd)
 }
 
-function pollSubmitResult(submissionId, questionId) {
+function isSubmissionComplete(result, gradingMode) {
+  if (!result) return false
+  if (TERMINAL_ERROR_STATUSES.includes(result.status)) return true
+  if (gradingMode === 'active') {
+    // CodeGrade 与 Submission 分两次落库时可能短暂出现 graded 但尚无明细；
+    // 此时继续轮询，避免学生永远错过 AI 评分结果。
+    return result.status === 'graded' && Boolean(result.grading_breakdown)
+  }
+  return ['accepted', 'graded'].includes(result.status)
+}
+
+function pollSubmitResult(submissionId, questionId, gradingMode) {
   stopSubmitPolling()
   submitPolling.value = true
   submitPollCount = 0
@@ -208,11 +221,11 @@ function pollSubmitResult(submissionId, questionId) {
     try {
       const res = await judgeAPI.getResult(submissionId)
       submitResult.value = res.data
-      if (TERMINAL_STATUSES.includes(res.data.status)) {
+      if (isSubmissionComplete(res.data, gradingMode)) {
         stopSubmitPolling()
         submitting.value = false
         submitPolling.value = false
-        if (res.data.status === 'accepted' && questionId != null) {
+        if (['accepted', 'graded'].includes(res.data.status) && questionId != null) {
           completedQuestions.value.add(questionId)
         }
       }
@@ -412,11 +425,13 @@ function stopSubmitPolling() {
               </div>
               <!-- Submit result -->
               <div v-if="submitPolling || submitResult" class="submit-result-card" :class="{
-                'result-pass': submitResult?.status === 'accepted',
-                'result-fail': submitResult && submitResult.status !== 'accepted'
+                'result-pass': submitSucceeded,
+                'result-fail': !submitPolling && submitResult && !submitSucceeded,
+                'result-pending': submitPolling
               }">
                 <div v-if="submitPolling" class="result-status">
-                  <span class="spinner-sm"></span> 判题中...
+                  <span class="spinner-sm"></span>
+                  {{ currentGradingMode === 'active' ? 'AI 评分中...' : '判题中...' }}
                 </div>
                 <template v-else>
                   <div class="result-status">
@@ -424,6 +439,51 @@ function stopSubmitPolling() {
                   </div>
                   <div class="result-meta">
                     <span v-if="submitResult?.execution_time_ms != null">{{ submitResult.execution_time_ms }}ms</span>
+                  </div>
+
+                  <div v-if="submitResult?.grading_breakdown" class="ai-breakdown">
+                    <div class="ai-breakdown-title">AI 评分详情</div>
+                    <div class="ai-breakdown-grid">
+                      <div class="ai-breakdown-item">
+                        <span>功能正确性 F</span>
+                        <strong>{{ submitResult.grading_breakdown.functional_score }} / 60</strong>
+                      </div>
+                      <div class="ai-breakdown-item">
+                        <span>算法关键步骤 A</span>
+                        <strong>{{ submitResult.grading_breakdown.algorithm_score ?? '-' }} / 20</strong>
+                      </div>
+                      <div class="ai-breakdown-item">
+                        <span>鲁棒性与性能 R</span>
+                        <strong>{{ submitResult.grading_breakdown.robustness_score }} / 10</strong>
+                      </div>
+                      <div class="ai-breakdown-item">
+                        <span>代码质量 Q</span>
+                        <strong>{{ submitResult.grading_breakdown.quality_score ?? '-' }} / 10</strong>
+                      </div>
+                    </div>
+                    <div v-if="submitResult.grading_breakdown.raw_total != null" class="ai-breakdown-total">
+                      原始分 {{ submitResult.grading_breakdown.raw_total }}
+                      <template v-if="submitResult.grading_breakdown.score_cap != null">
+                        · 分数上限 {{ submitResult.grading_breakdown.score_cap }}
+                      </template>
+                      · 最终得分 {{ submitResult.grading_breakdown.final_score_100 }}
+                    </div>
+                    <div v-if="submitResult.grading_breakdown.strengths?.length" class="ai-feedback ai-feedback-good">
+                      <strong>优点：</strong>{{ submitResult.grading_breakdown.strengths.join('；') }}
+                    </div>
+                    <div v-if="submitResult.grading_breakdown.issues?.length" class="ai-feedback ai-feedback-issue">
+                      <strong>问题：</strong>{{ submitResult.grading_breakdown.issues.join('；') }}
+                    </div>
+                    <div v-if="submitResult.grading_breakdown.suggestions?.length" class="ai-feedback ai-feedback-tip">
+                      <strong>建议：</strong>{{ submitResult.grading_breakdown.suggestions.join('；') }}
+                    </div>
+                  </div>
+
+                  <div
+                    v-else-if="currentGradingMode === 'shadow' && submitResult?.status === 'accepted'"
+                    class="shadow-mode-note"
+                  >
+                    <strong>影子评分：</strong>AI 评分结果仅供教师复核，不向学生展示，也不影响本次成绩。
                   </div>
                 </template>
               </div>
@@ -965,6 +1025,7 @@ function stopSubmitPolling() {
 }
 .submit-result-card.result-pass { background: var(--success-light); border-color: var(--success); }
 .submit-result-card.result-fail { background: var(--danger-light);  border-color: var(--danger); }
+.submit-result-card.result-pending { background: var(--surface-raised); border-color: var(--border); }
 
 .result-status {
   font-size: var(--text-md); font-weight: 600; margin-bottom: var(--space-2);
@@ -977,6 +1038,62 @@ function stopSubmitPolling() {
   font-size: var(--text-sm); color: var(--text-secondary);
   display: flex; gap: var(--space-4);
 }
+
+.ai-breakdown {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
+}
+.ai-breakdown-title {
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  margin-bottom: var(--space-3);
+}
+.ai-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.ai-breakdown-item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.ai-breakdown-item strong { color: var(--ink); white-space: nowrap; }
+.ai-breakdown-total {
+  margin-top: var(--space-3);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.ai-feedback {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+.ai-feedback-good { color: var(--success); background: color-mix(in srgb, var(--success-light) 70%, white); }
+.ai-feedback-issue { color: var(--danger); background: var(--danger-light); }
+.ai-feedback-tip { color: var(--primary); background: var(--accent-light); }
+.shadow-mode-note {
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+.shadow-mode-note strong { color: var(--ink); }
 
 /* ── Action Bar ──────────────────────────────────────────────────────── */
 .action-bar {
@@ -1056,5 +1173,6 @@ function stopSubmitPolling() {
   .action-bar { flex-direction: column; gap: var(--space-2); }
   .btn-self-test,
   .btn-submit-code { width: 100%; justify-content: center; }
+  .ai-breakdown-grid { grid-template-columns: 1fr; }
 }
 </style>

@@ -83,3 +83,25 @@ def test_grading_messages_do_not_leak_rubric_raw_response():
     user_msg = messages[-1]["content"]
     # 不应包含 raw_response（如果有的话）
     assert "raw_response" not in user_msg.lower()
+
+
+def test_grading_messages_pin_database_locked_rubric_version():
+    """评分请求必须使用数据库锁定版本，而不是 rubric_json 中陈旧的版本 1。"""
+    messages = build_grading_messages(
+        rubric={
+            "rubric_version": 1,
+            "algorithm_criteria": [
+                {"id": "A1", "name": "核心步骤", "points": 20},
+            ],
+            "quality_criteria": [],
+        },
+        rubric_version=3,
+        question={"title": "多版本 Rubric 题目"},
+        code="def solve():\n    return 1",
+        deterministic={"functional_score": 60, "robustness_score": 10},
+        static_analysis={"parseable": True},
+    )
+
+    user_msg = messages[-1]["content"]
+    assert '"rubric_version": 3' in user_msg
+    assert "输出中的 rubric_version 必须严格等于 3" in user_msg

@@ -71,6 +71,7 @@ def grade_code_submission(
         code=code,
         deterministic=deterministic,
         static_analysis=static,
+        rubric_version=rubric.version,
     )
 
     # 调用 AI

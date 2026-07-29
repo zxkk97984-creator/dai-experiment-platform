@@ -13,13 +13,19 @@ const submission = ref(null)
 const polling = ref(true)
 let timer = null
 
-const TERMINAL_STATUSES = ['accepted', 'wrong_answer', 'runtime_error', 'time_limit_exceeded', 'system_error', 'graded']
+const TERMINAL_STATUSES = ['accepted', 'wrong_answer', 'runtime_error', 'time_limit_exceeded', 'system_error']
+
+function isResultComplete(result) {
+  if (TERMINAL_STATUSES.includes(result.status)) return true
+  // graded 可能先于 CodeGrade 明细提交；等明细可见后再停止轮询。
+  return result.status === 'graded' && Boolean(result.grading_breakdown)
+}
 
 async function fetchResult() {
   try {
     const res = await judgeAPI.getResult(route.params.id)
     submission.value = res.data
-    if (TERMINAL_STATUSES.includes(res.data.status)) {
+    if (isResultComplete(res.data)) {
       polling.value = false
     }
   } catch { /* ignore */ }

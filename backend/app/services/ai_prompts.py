@@ -53,9 +53,14 @@ def build_grading_messages(
     code: str,
     deterministic: dict[str, Any],
     static_analysis: dict[str, Any],
+    rubric_version: int | None = None,
 ) -> list[dict[str, str]]:
     """构建代码评分的 system + user 消息——带行号代码、F/R 结果、静态分析"""
     system_prompt = _grading_system_prompt()
+    locked_rubric = dict(rubric)
+    if rubric_version is not None:
+        locked_rubric["rubric_version"] = rubric_version
+    expected_version = locked_rubric.get("rubric_version", 1)
 
     # 服务端生成不可伪造的行号
     numbered_lines = []
@@ -70,8 +75,9 @@ def build_grading_messages(
         "</question>",
         "",
         "<locked_rubric>",
-        json.dumps(rubric, ensure_ascii=False),
+        json.dumps(locked_rubric, ensure_ascii=False),
         "</locked_rubric>",
+        f"输出中的 rubric_version 必须严格等于 {expected_version}，不得使用示例版本号。",
         "",
         "<deterministic_results>",
         json.dumps(deterministic, ensure_ascii=False),
