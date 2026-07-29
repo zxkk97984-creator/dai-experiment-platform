@@ -36,6 +36,16 @@ describe('AIQuestionConfig 真实挂载', () => {
     expect(wrapper.text()).toContain('AI 评分配置')
   })
 
+  it('以 expanded=true 首次挂载时立即加载已有配置和 Rubric', async () => {
+    mount(AIQuestionConfig, {
+      props: { kind: 'assignment', questionId: 12, expanded: true },
+    })
+    await flushPromises()
+
+    expect(aiGradingAPI.getConfig).toHaveBeenCalledWith('assignment', 12)
+    expect(aiGradingAPI.listRubrics).toHaveBeenCalledWith('assignment', 12)
+  })
+
   it('评分模式选择器显示 legacy 选项', async () => {
     const wrapper = mount(AIQuestionConfig, {
       props: { kind: 'assignment', questionId: 2, expanded: true },
@@ -93,12 +103,81 @@ describe('AIQuestionConfig 真实挂载', () => {
     expect(wrapper.text()).toContain('分数上限规则')
   })
 
-  it('重复 test_groups ID 被检测', () => {
-    const groups = [
-      { id: 'F1', name: '基础', dimension: 'F', max_score: 30, tests: '' },
-      { id: 'F1', name: '核心', dimension: 'F', max_score: 30, tests: '' },
-    ]
-    const ids = groups.map(g => g.id)
-    expect(new Set(ids).size).not.toBe(ids.length)
+  it('添加上限规则时提供后端必填的描述字段', async () => {
+    const wrapper = mount(AIQuestionConfig, {
+      props: { kind: 'assignment', questionId: 8, expanded: true },
+    })
+    await flushPromises()
+
+    const addButton = wrapper.findAll('button').find(button => button.text().includes('添加上限'))
+    await addButton.trigger('click')
+
+    expect(wrapper.find('input[placeholder="描述（必填）"]').exists()).toBe(true)
+  })
+
+  it('教师约束 JSON 非法时阻止保存并显示错误', async () => {
+    const wrapper = mount(AIQuestionConfig, {
+      props: { kind: 'assignment', questionId: 9, expanded: true },
+    })
+    await flushPromises()
+
+    const constraints = wrapper.find('textarea[placeholder^="{"]')
+    await constraints.setValue('{invalid')
+    const saveButton = wrapper.findAll('button').find(button => button.text().includes('保存配置'))
+    await saveButton.trigger('click')
+    await flushPromises()
+
+    expect(aiGradingAPI.updateConfig).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('教师约束 JSON 格式错误')
+  })
+
+  it('有未保存配置时先保存再生成 Rubric', async () => {
+    const wrapper = mount(AIQuestionConfig, {
+      props: { kind: 'assignment', questionId: 10, expanded: true },
+    })
+    await flushPromises()
+
+    const constraints = wrapper.find('textarea[placeholder^="{"]')
+    await constraints.setValue('{"required_algorithm":"binary search"}')
+    const generateButton = wrapper.findAll('button').find(button => button.text().includes('AI 生成 Rubric'))
+    await generateButton.trigger('click')
+    await flushPromises()
+
+    expect(aiGradingAPI.updateConfig).toHaveBeenCalledTimes(1)
+    expect(aiGradingAPI.generateRubric).toHaveBeenCalledTimes(1)
+    expect(aiGradingAPI.updateConfig.mock.invocationCallOrder[0])
+      .toBeLessThan(aiGradingAPI.generateRubric.mock.invocationCallOrder[0])
+  })
+
+  it('后端拒绝重复测试组 ID 时显示真实接口错误', async () => {
+    aiGradingAPI.getConfig.mockResolvedValueOnce({
+      data: {
+        grading_mode: 'active',
+        teacher_constraints: {},
+        reference_solution: null,
+        test_groups: [
+          { id: 'F1', name: '基础', dimension: 'F', max_score: 30, tests: 'def test_1(): pass' },
+          { id: 'F2', name: '核心', dimension: 'F', max_score: 30, tests: 'def test_2(): pass' },
+          { id: 'R1', name: '边界', dimension: 'R', max_score: 10, tests: 'def test_3(): pass' },
+        ],
+        score_cap_rules: [],
+      },
+    })
+    aiGradingAPI.updateConfig.mockRejectedValueOnce({
+      response: { data: { detail: { message: '测试组 ID 必须唯一' } } },
+    })
+    const wrapper = mount(AIQuestionConfig, {
+      props: { kind: 'assignment', questionId: 11, expanded: true },
+    })
+    await flushPromises()
+
+    const ids = wrapper.findAll('input[placeholder="ID (如 F1)"]')
+    await ids[1].setValue('F1')
+    const saveButton = wrapper.findAll('button').find(button => button.text().includes('保存配置'))
+    await saveButton.trigger('click')
+    await flushPromises()
+
+    expect(aiGradingAPI.updateConfig).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('测试组 ID 必须唯一')
   })
 })

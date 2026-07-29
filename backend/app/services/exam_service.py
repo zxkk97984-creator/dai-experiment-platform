@@ -332,9 +332,16 @@ def create_question(db, exam_id, payload, user):
         raise api_error(404, "EXAM_NOT_FOUND", "考试不存在")
     require_exam_editable(exam, user)
     q = ExamQuestion(exam_id=exam_id, **payload)
-    # 新建编程题默认 shadow 模式（仅当用户未显式指定时生效）；选择题保持 DB 默认 legacy
-    if q.question_type == "code" and "grading_mode" not in payload:
-        q.grading_mode = "shadow"
+    requested_mode = payload.get("grading_mode")
+    if q.question_type == "code":
+        # JSON null 与未提供字段语义一致：新建编程题默认进入 shadow。
+        if requested_mode is None:
+            q.grading_mode = "shadow"
+    else:
+        # 选择题只能使用确定性的 legacy 评分。
+        if requested_mode not in (None, "legacy"):
+            raise api_error(422, "CHOICE_LEGACY_ONLY", "选择题只支持 legacy 模式")
+        q.grading_mode = "legacy"
 
     # 创建时立即校验
     errors = validate_question(q)

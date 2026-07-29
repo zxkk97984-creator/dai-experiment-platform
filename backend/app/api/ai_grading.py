@@ -275,6 +275,9 @@ def lock_rubric_endpoint(
 def _build_grade_base_query(db: Session, user: User, kind: str | None,
                              question_id: int | None, student_id: int | None, status: str | None):
     """构建带权限筛选的 CodeGrade 查询。按 kind 构建单一路径避免重复 JOIN。"""
+    if kind not in (None, "assignment", "exam"):
+        raise api_error(400, "INVALID_KIND", "kind 必须为 assignment 或 exam")
+
     course_ids = _teacher_course_ids(db, user)
     is_admin = user.role == "admin"
 
@@ -302,30 +305,29 @@ def _build_grade_base_query(db: Session, user: User, kind: str | None,
         if not is_admin:
             query = query.where(Exam.course_id.in_(course_ids))
             count_q = count_q.where(Exam.course_id.in_(course_ids))
-    elif is_admin:
-        # admin 无 kind 筛选：纯 CodeGrade 不做 JOIN（后续 filter 会按需加 JOIN）
-        query = select(CodeGrade)
-        count_q = select(func.count()).select_from(CodeGrade)
     else:
-        # 教师无 kind 筛选：两条路径
+        # 无 kind 筛选：一次性 JOIN 两条路径，后续组合筛选不得重复 JOIN。
         query = select(CodeGrade).distinct().outerjoin(
             Submission, CodeGrade.submission_id == Submission.id).outerjoin(
             JudgeQuestion, Submission.question_id == JudgeQuestion.id).outerjoin(
             Assignment, JudgeQuestion.assignment_id == Assignment.id).outerjoin(
             ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id).outerjoin(
             ExamQuestion, ExamAnswer.question_id == ExamQuestion.id).outerjoin(
-            Exam, ExamQuestion.exam_id == Exam.id).where(or_(
-                Assignment.course_id.in_(course_ids) if course_ids else False,
-                Exam.course_id.in_(course_ids) if course_ids else False))
-        count_q = select(func.count()).select_from(CodeGrade).distinct().outerjoin(
+            Exam, ExamQuestion.exam_id == Exam.id)
+        count_q = select(func.count(func.distinct(CodeGrade.id))).select_from(CodeGrade).outerjoin(
             Submission, CodeGrade.submission_id == Submission.id).outerjoin(
             JudgeQuestion, Submission.question_id == JudgeQuestion.id).outerjoin(
             Assignment, JudgeQuestion.assignment_id == Assignment.id).outerjoin(
             ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id).outerjoin(
             ExamQuestion, ExamAnswer.question_id == ExamQuestion.id).outerjoin(
-            Exam, ExamQuestion.exam_id == Exam.id).where(or_(
+            Exam, ExamQuestion.exam_id == Exam.id)
+        if not is_admin:
+            permission_filter = or_(
                 Assignment.course_id.in_(course_ids) if course_ids else False,
-                Exam.course_id.in_(course_ids) if course_ids else False))
+                Exam.course_id.in_(course_ids) if course_ids else False,
+            )
+            query = query.where(permission_filter)
+            count_q = count_q.where(permission_filter)
 
     # question_id 筛选：需要时添加 JOIN（admin 可能尚未 JOIN 相关表）
     if question_id is not None:
@@ -336,16 +338,12 @@ def _build_grade_base_query(db: Session, user: User, kind: str | None,
             query = query.where(Submission.question_id == question_id)
             count_q = count_q.where(Submission.question_id == question_id)
         else:
-            # 无 kind 或 admin 无 kind：需要添加两个方向的条件
-            from app.models import ExamAnswer as _EA
-            query = query.outerjoin(_EA, CodeGrade.exam_answer_id == _EA.id).outerjoin(
-                Submission, CodeGrade.submission_id == Submission.id).where(or_(
+            query = query.where(or_(
                 Submission.question_id == question_id,
-                _EA.question_id == question_id))
-            count_q = count_q.outerjoin(_EA, CodeGrade.exam_answer_id == _EA.id).outerjoin(
-                Submission, CodeGrade.submission_id == Submission.id).where(or_(
+                ExamAnswer.question_id == question_id))
+            count_q = count_q.where(or_(
                 Submission.question_id == question_id,
-                _EA.question_id == question_id))
+                ExamAnswer.question_id == question_id))
 
     # student_id 筛选
     if student_id is not None:
@@ -357,15 +355,13 @@ def _build_grade_base_query(db: Session, user: User, kind: str | None,
             query = query.where(Submission.student_id == student_id)
             count_q = count_q.where(Submission.student_id == student_id)
         else:
-            from app.models import ExamSubmission as _ES2, ExamAnswer as _EA2
-            query = query.outerjoin(_EA2, CodeGrade.exam_answer_id == _EA2.id).outerjoin(
-                _ES2, _EA2.submission_id == _ES2.id).outerjoin(
-                Submission, CodeGrade.submission_id == Submission.id).where(or_(
+            from app.models import ExamSubmission as _ES2
+            query = query.outerjoin(
+                _ES2, ExamAnswer.submission_id == _ES2.id).where(or_(
                 Submission.student_id == student_id,
                 _ES2.student_id == student_id))
-            count_q = count_q.outerjoin(_EA2, CodeGrade.exam_answer_id == _EA2.id).outerjoin(
-                _ES2, _EA2.submission_id == _ES2.id).outerjoin(
-                Submission, CodeGrade.submission_id == Submission.id).where(or_(
+            count_q = count_q.outerjoin(
+                _ES2, ExamAnswer.submission_id == _ES2.id).where(or_(
                 Submission.student_id == student_id,
                 _ES2.student_id == student_id))
 

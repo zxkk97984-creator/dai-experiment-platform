@@ -187,10 +187,10 @@ def create_question(
     assignment = require_assignment(assignment_id, db)
     ensure_assignment_manager(assignment, current_user, db)
     data = payload.model_dump(exclude_unset=True)
+    # JSON null 与未提供字段语义一致：新建编程题默认进入 shadow。
+    if data.get("grading_mode") is None:
+        data["grading_mode"] = "shadow"
     question = JudgeQuestion(assignment_id=assignment_id, **data)
-    # 新建编程题默认 shadow 模式（仅当用户未显式指定时生效）
-    if "grading_mode" not in data:
-        question.grading_mode = "shadow"
     db.add(question)
     db.commit()
     db.refresh(question)

@@ -239,7 +239,7 @@ async function lockRubricAction(id) {
   }
 }
 
-watch(() => props.expanded, (val) => { if (val) load() })
+watch(() => props.expanded, (val) => { if (val) load() }, { immediate: true })
 </script>
 
 <style scoped>

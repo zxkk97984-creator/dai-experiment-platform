@@ -223,6 +223,7 @@ class JudgeQuestionRead(BaseModel):
     public_cases: list[Any] = Field(default_factory=list)
     time_limit_ms: int
     memory_limit_mb: int
+    grading_mode: Literal["legacy", "shadow", "active"]
 
 
 class SubmissionCreate(BaseModel):
@@ -327,6 +328,7 @@ class ExamQuestionRead(BaseModel):
     order_index: int
     starter_code: str | None = None
     public_cases: list | None = None
+    grading_mode: Literal["legacy", "shadow", "active"]
 
 
 class ExamSubmissionRead(BaseModel):

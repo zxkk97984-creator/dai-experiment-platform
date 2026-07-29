@@ -238,6 +238,22 @@ def _legacy_judge_submission(db, redis_client, settings, submission, question, w
         return submission
 
     final_status, score = _status_from_pytest(returncode, stdout, stderr)
+    if final_status == "system_error":
+        fail_job(
+            db,
+            job_type="assignment",
+            object_id=submission.id,
+            error=f"Docker 判题系统错误（exit={returncode}）: {stderr[-1000:]}",
+            retryable=True,
+        )
+        submission.status = "system_error"
+        submission.score = None
+        submission.stdout = stdout[-8000:]
+        submission.stderr = stderr[-8000:]
+        submission.execution_time_ms = elapsed
+        submission.result_details = {"returncode": returncode}
+        db.commit()
+        return submission
     submission.status = final_status
     submission.stdout = stdout[-8000:]
     submission.stderr = stderr[-8000:]
@@ -302,11 +318,32 @@ def _v1_judge_submission(db, redis_client, settings, submission, question, workd
             fail_job(db, job_type="assignment", object_id=submission.id,
                      error=f"Docker 判题失败: {e}", retryable=True)
             submission.status = "system_error"
-            submission.score = 0
+            submission.score = None  # 基础设施异常不扣分
             submission.stderr = f"Docker 判题失败: {e}"
             db.commit()
             return submission
         legacy_status, legacy_score = _status_from_pytest(returncode, stdout, stderr)
+        if legacy_status == "system_error":
+            fail_job(
+                db,
+                job_type="assignment",
+                object_id=submission.id,
+                error=f"Docker 判题系统错误（exit={returncode}）: {stderr[-1000:]}",
+                retryable=True,
+            )
+            submission.status = "system_error"
+            submission.score = None
+            submission.stdout = stdout[-8000:]
+            submission.stderr = stderr[-8000:]
+            submission.execution_time_ms = elapsed
+            submission.result_details = {
+                "groups": details,
+                "system_errors": [f"Docker exit={returncode}"],
+                "f_score": f_score,
+                "r_score": r_score,
+            }
+            db.commit()
+            return submission
         submission.status = legacy_status
         submission.score = legacy_score
         submission.stdout = stdout[-8000:]
@@ -490,6 +527,19 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
                     return answer
 
                 final_status, _ = _status_from_pytest(returncode, stdout, stderr)
+                if final_status == "system_error":
+                    fail_job(
+                        db,
+                        job_type="exam",
+                        object_id=answer_id,
+                        error=f"Docker 判题系统错误（exit={returncode}）: {stderr[-1000:]}",
+                        retryable=True,
+                    )
+                    answer.score = None
+                    answer.system_error = f"Docker 判题系统错误（exit={returncode}）"
+                    answer.result_details = {"returncode": returncode}
+                    db.commit()
+                    return answer
                 answer.score = float(question.points) if final_status == "accepted" else 0.0
                 answer.grading_status = "completed"
                 answer.result_details = {"returncode": returncode}
@@ -560,6 +610,24 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
                         db.commit()
                         return answer
                     legacy_status, _ = _status_from_pytest(returncode, stdout, stderr)
+                    if legacy_status == "system_error":
+                        fail_job(
+                            db,
+                            job_type="exam",
+                            object_id=answer_id,
+                            error=f"Docker 判题系统错误（exit={returncode}）: {stderr[-1000:]}",
+                            retryable=True,
+                        )
+                        answer.score = None
+                        answer.system_error = f"Docker 判题系统错误（exit={returncode}）"
+                        answer.result_details = {
+                            "groups": details,
+                            "system_errors": [f"Docker exit={returncode}"],
+                            "f_score": f_score,
+                            "r_score": r_score,
+                        }
+                        db.commit()
+                        return answer
                     answer.score = float(question.points) if legacy_status == "accepted" else 0.0
                 else:
                     # active: 等 AI 完成后才定分
