@@ -221,7 +221,6 @@ class JudgeQuestionRead(BaseModel):
     signature: str | None = None
     starter_code: str | None = None
     public_cases: list[Any] = Field(default_factory=list)
-    hidden_tests: str | None = None
     time_limit_ms: int
     memory_limit_mb: int
     grading_mode: Literal["legacy", "shadow", "active"]

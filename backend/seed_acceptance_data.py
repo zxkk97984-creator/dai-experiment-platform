@@ -992,6 +992,14 @@ class ApiClient:
         resp = self._client.patch(f"{self.base_url}{path}", **kw)
         return self._safe(resp, f"PATCH {path}")
 
+    def put(self, path: str, json_data: dict) -> dict:
+        resp = self._client.put(
+            f"{self.base_url}{path}",
+            headers=self._headers(),
+            json=json_data,
+        )
+        return self._safe(resp, f"PUT {path}")
+
     def paginated_list(self, path: str, **params) -> list[dict]:
         """获取分页列表，自动翻页收集全部条目"""
         all_items: list[dict] = []
@@ -1197,15 +1205,14 @@ def _build_question_payload(q_data: dict) -> dict:
 
 
 def _question_fields_differ(existing: dict, desired: dict) -> bool:
-    """比较作业题关键字段是否有差异（仅比较 API 返回的可见字段）"""
+    """比较作业题关键字段是否有差异（仅比较 API 返回的可见字段，不含 hidden_tests）"""
     compare_keys = [
         "title", "description", "function_name", "signature", "starter_code",
-        "hidden_tests", "time_limit_ms", "memory_limit_mb", "grading_mode",
+        "time_limit_ms", "memory_limit_mb", "grading_mode",
     ]
     for key in compare_keys:
         ev = existing.get(key)
         dv = desired.get(key, "")
-        # 标准化 None → ""
         if ev is None:
             ev = ""
         if dv is None:
@@ -1213,6 +1220,38 @@ def _question_fields_differ(existing: dict, desired: dict) -> bool:
         if str(ev) != str(dv):
             return True
     return False
+
+
+def _build_ai_config(q_data: dict) -> dict | None:
+    """为非 legacy 题目构建 AI 评分配置 payload，无配置返回 None"""
+    gmode = q_data.get("grading_mode", "legacy")
+    if gmode == "legacy":
+        return None
+    fn = q_data["function_name"]
+    return {
+        "grading_mode": gmode,
+        "teacher_constraints": {
+            "require_function": fn,
+        },
+        "reference_solution": q_data.get("starter_code", ""),
+        "test_groups": [
+            {"id": "F1", "name": "功能正确性-基本用例", "dimension": "F",
+             "max_score": 30,
+             "tests": q_data.get("hidden_tests", "def test(): pass")},
+            {"id": "F2", "name": "功能正确性-边界用例", "dimension": "F",
+             "max_score": 30,
+             "tests": "def test_edge():\n    pass\n"},
+            {"id": "R1", "name": "鲁棒性检查", "dimension": "R",
+             "max_score": 10,
+             "tests": "def test_robust():\n    pass\n"},
+        ],
+        "score_cap_rules": [
+            {"id": "CAP1", "condition_code": "off_topic", "cap": 0,
+             "description": "离题代码，总分上限为0"},
+            {"id": "CAP2", "condition_code": "hardcoded_public_examples",
+             "cap": 20, "description": "硬编码公开样例，总分上限20"},
+        ],
+    }
 
 
 def _exam_question_differs(existing: dict, desired: dict) -> bool:
@@ -1239,6 +1278,113 @@ def _exam_question_differs(existing: dict, desired: dict) -> bool:
     return False
 
 
+def _sync_question_and_ai_config(
+    client: ApiClient,
+    asgn_id: int,
+    q: dict | None,
+    q_data: dict,
+    desired: dict,
+    stats: SeedStats,
+    needs_republish: list[bool],
+):
+    """同步作业题字段和 AI 配置，更新 needs_republish[0]"""
+    qid = q["id"] if q else None
+    ai_cfg = _build_ai_config(q_data)
+
+    if q:
+        # 比较公开字段
+        fields_changed = _question_fields_differ(q, desired)
+        # 比较 hidden_tests（通过教师 AI config API）
+        ht_changed = False
+        try:
+            cfg = client.get(f"/ai-grading/questions/assignment/{qid}/config")
+            existing_ht = cfg.get("hidden_tests") or ""
+            if existing_ht != (q_data.get("hidden_tests") or ""):
+                ht_changed = True
+        except SeedError:
+            pass  # 无 config 时视为需更新
+
+        if fields_changed or ht_changed:
+            current_status = client.get(f"/assignments/{asgn_id}").get("status", "")
+            if current_status != "draft":
+                client.patch(f"/assignments/{asgn_id}", {"status": "draft"})
+            client.patch(f"/assignments/{asgn_id}/questions/{qid}", desired)
+            needs_republish[0] = True
+
+        # 同步 AI 配置（非 legacy 题目）
+        if ai_cfg:
+            client.put(f"/ai-grading/questions/assignment/{qid}/config", ai_cfg)
+            needs_republish[0] = True
+        else:
+            stats.inc_reused()
+    else:
+        created_q = client.post(f"/assignments/{asgn_id}/questions", desired)
+        qid = created_q["id"]
+        stats.inc_created()
+        needs_republish[0] = True
+        # 新建题目后立即设置 AI 配置
+        if ai_cfg:
+            client.put(f"/ai-grading/questions/assignment/{qid}/config", ai_cfg)
+
+
+def _sync_exam_question_and_ai_config(
+    client: ApiClient,
+    exam_id: int,
+    q: dict | None,
+    q_data: dict,
+    desired: dict,
+    stats: SeedStats,
+    needs_republish: list[bool],
+):
+    """同步考试题字段和 AI 配置"""
+    qid = q["id"] if q else None
+    gmode = q_data.get("grading_mode", "legacy")
+
+    # 为考试代码题构建 AI config
+    ai_cfg = None
+    if q_data.get("question_type") == "code" and gmode != "legacy":
+        ai_cfg = {
+            "grading_mode": gmode,
+            "teacher_constraints": {},
+            "reference_solution": q_data.get("starter_code", ""),
+            "test_groups": [
+                {"id": "F1", "name": "功能正确性-基本用例", "dimension": "F",
+                 "max_score": 30,
+                 "tests": q_data.get("hidden_tests", "def test(): pass")},
+                {"id": "F2", "name": "功能正确性-边界用例", "dimension": "F",
+                 "max_score": 30,
+                 "tests": "def test_edge():\n    pass\n"},
+                {"id": "R1", "name": "鲁棒性检查", "dimension": "R",
+                 "max_score": 10,
+                 "tests": "def test_robust():\n    pass\n"},
+            ],
+            "score_cap_rules": [],
+        }
+
+    if q:
+        if _exam_question_differs(q, desired):
+            current_status = client.get(f"/exams/{exam_id}").get("status", "")
+            if current_status != "draft":
+                client.patch(f"/exams/{exam_id}", {"status": "draft"})
+            client.patch(f"/exams/{exam_id}/questions/{qid}", desired)
+            needs_republish[0] = True
+        else:
+            stats.inc_reused()
+
+        if ai_cfg:
+            client.put(f"/ai-grading/questions/exam/{qid}/config", ai_cfg)
+            needs_republish[0] = True
+    else:
+        client.post(f"/exams/{exam_id}/questions", desired)
+        stats.inc_created()
+        needs_republish[0] = True
+        # 新建后获取 ID 并设置 AI 配置
+        eqs = client.paginated_list(f"/exams/{exam_id}/questions")
+        new_q = find_exact(eqs, "prompt", q_data["prompt"])
+        if new_q and ai_cfg:
+            client.put(f"/ai-grading/questions/exam/{new_q['id']}/config", ai_cfg)
+
+
 def ensure_assignments(
     client: ApiClient,
     course_id: int,
@@ -1246,7 +1392,7 @@ def ensure_assignments(
     stats: SeedStats,
     publish_timeout: int = 180,
 ) -> list[int]:
-    """确保作业及代码题存在、字段同步并发布，返回作业 ID 列表"""
+    """确保作业及代码题存在、字段同步、AI 配置并发布，返回作业 ID 列表"""
     assignment_ids: list[int] = []
     existing_assignments = client.paginated_list("/assignments", course_id=course_id)
 
@@ -1265,30 +1411,16 @@ def ensure_assignments(
             asgn_id = created["id"]
             stats.inc_created()
 
-        # 确保题目存在且字段同步
         existing_qs = client.paginated_list(f"/assignments/{asgn_id}/questions")
-        needs_republish = False
+        needs_republish = [False]
         for q_data in asgn_data.get("questions", []):
             q = find_exact(existing_qs, "title", q_data["title"])
             desired = _build_question_payload(q_data)
-            if q:
-                if _question_fields_differ(q, desired):
-                    # 有差异：先切 draft → PATCH → 标记需重新发布
-                    current_status = client.get(f"/assignments/{asgn_id}").get("status", "")
-                    if current_status != "draft":
-                        client.patch(f"/assignments/{asgn_id}", {"status": "draft"})
-                    client.patch(f"/assignments/{asgn_id}/questions/{q['id']}", desired)
-                    needs_republish = True
-                else:
-                    stats.inc_reused()
-            else:
-                client.post(f"/assignments/{asgn_id}/questions", desired)
-                needs_republish = True
-                stats.inc_created()
+            _sync_question_and_ai_config(
+                client, asgn_id, q, q_data, desired, stats, needs_republish)
 
-        # 发布（需要时含 AI rubric 生成）
         current = client.get(f"/assignments/{asgn_id}")
-        if current.get("status") != "published" or needs_republish:
+        if current.get("status") != "published" or needs_republish[0]:
             if current.get("status") != "draft":
                 client.patch(f"/assignments/{asgn_id}", {"status": "draft"})
             _retry_publish(client, f"/assignments/{asgn_id}/publish", timeout=publish_timeout)
@@ -1336,7 +1468,7 @@ def ensure_exams(
     stats: SeedStats,
     publish_timeout: int = 180,
 ) -> list[int]:
-    """确保考试及题目存在、字段同步并发布，返回考试 ID 列表"""
+    """确保考试及题目存在、字段同步、AI 配置并发布，返回考试 ID 列表"""
     exam_ids: list[int] = []
     existing_exams = client.paginated_list("/exams")
 
@@ -1356,30 +1488,16 @@ def ensure_exams(
             exam_id = created["id"]
             stats.inc_created()
 
-        # 确保题目存在且字段同步
         existing_qs = client.paginated_list(f"/exams/{exam_id}/questions")
-        needs_republish = False
+        needs_republish = [False]
         for q_data in exam_data.get("questions", []):
             q = find_exact(existing_qs, "prompt", q_data["prompt"])
             desired = _build_exam_question_payload(q_data)
-            if q:
-                if _exam_question_differs(q, desired):
-                    # 有差异：切 draft → PATCH → 需重新发布
-                    current_status = client.get(f"/exams/{exam_id}").get("status", "")
-                    if current_status != "draft":
-                        client.patch(f"/exams/{exam_id}", {"status": "draft"})
-                    client.patch(f"/exams/{exam_id}/questions/{q['id']}", desired)
-                    needs_republish = True
-                else:
-                    stats.inc_reused()
-            else:
-                client.post(f"/exams/{exam_id}/questions", desired)
-                needs_republish = True
-                stats.inc_created()
+            _sync_exam_question_and_ai_config(
+                client, exam_id, q, q_data, desired, stats, needs_republish)
 
-        # 发布（需要时含 AI rubric 生成）
         current = client.get(f"/exams/{exam_id}")
-        if current.get("status") != "published" or needs_republish:
+        if current.get("status") != "published" or needs_republish[0]:
             if current.get("status") != "draft":
                 client.patch(f"/exams/{exam_id}", {"status": "draft"})
             _retry_publish(
@@ -1409,23 +1527,47 @@ def _lookup_question_id(
     course_title: str,
     assignment_title: str,
     question_title: str,
-) -> int | None:
-    """通过课程→作业→题目链查找题目 ID"""
+) -> tuple[int | None, str | None]:
+    """通过课程→作业→题目链查找题目 ID 和 grading_mode"""
     courses = client.paginated_list("/courses")
     course = find_exact(courses, "title", course_title)
     if not course:
-        return None
+        return None, None
     assignments = client.paginated_list("/assignments", course_id=course["id"])
     asgn = find_exact(assignments, "title", assignment_title)
     if not asgn:
-        return None
+        return None, None
     questions = client.paginated_list(f"/assignments/{asgn['id']}/questions")
     q = find_exact(questions, "title", question_title)
-    return q["id"] if q else None
+    if q:
+        return q["id"], q.get("grading_mode")
+    return None, None
 
 
-_TERMINAL_STATUSES = {"accepted", "wrong_answer", "time_limit_exceeded", "runtime_error", "system_error"}
-_GOOD_STATUSES = {"accepted", "wrong_answer"}
+_TERMINAL_STATUSES = {"accepted", "wrong_answer", "time_limit_exceeded", "runtime_error", "running", "system_error"}
+_GOOD_STATUSES = {"accepted", "wrong_answer", "running"}
+_CODE_GRADE_TERMINAL = {"completed", "review_required"}
+
+
+def _poll_code_grade(
+    client: ApiClient, question_id: int, student_id: int, timeout: int,
+) -> dict | None:
+    """轮询 AI 评分（仅 shadow/active 题目），返回 grade 或 None（legacy 或无 grade）"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        grades = client.paginated_list(
+            "/ai-grading/grades",
+            kind="assignment",
+            question_id=question_id,
+            student_id=student_id,
+        )
+        if grades:
+            g = grades[0]
+            if g.get("status") in _CODE_GRADE_TERMINAL:
+                return g
+        # 非 active/shadow 或 AI 尚未生成：短暂等待后返回 None 不阻塞
+        time.sleep(5)
+    return None
 
 
 def _create_and_poll(
@@ -1459,7 +1601,7 @@ def ensure_submissions(
     stats: SeedStats,
     submission_timeout: int = 180,
 ) -> list[dict]:
-    """创建代表性提交并轮询至终态——system_error 时创建一次替代提交"""
+    """创建代表性提交并轮询至终态——shadow/active 还需 CodeGrade 终态"""
     results: list[dict] = []
     student_password = os.environ.get("DAI_SEED_STUDENT_PASSWORD", DEFAULT_PASSWORD)
 
@@ -1468,7 +1610,7 @@ def ensure_submissions(
         sc = ApiClient(client.base_url)
         try:
             sc.login(student_username, student_password)
-            q_id = _lookup_question_id(
+            q_id, gmode = _lookup_question_id(
                 sc,
                 sub_data["course_title"],
                 sub_data["assignment_title"],
@@ -1489,46 +1631,55 @@ def ensure_submissions(
                 if s.get("question_id") == q_id
                 and s.get("student_id") == sc._user_id  # type: ignore[attr-defined]
             ]
+
+            sid = None
+            final_status = None
+            reused = False
+
             if existing:
                 sub = existing[0]
-                # 轮询到终态
                 sub = _poll_submission(sc, sub["id"], submission_timeout)
                 status = sub.get("status")
-                # system_error 不视为可复用：需创建替代提交
                 if status in _GOOD_STATUSES:
-                    results.append({
-                        "student": student_username,
-                        "question": sub_data["question_title"],
-                        "submission_id": sub["id"],
-                        "status": status,
-                        "reused": True,
-                    })
+                    sid = sub["id"]
+                    final_status = status
+                    reused = True
                     stats.inc_reused()
-                    continue
-                # system_error → 创建替代提交（最多一次）
-                if status == "system_error":
+                elif status == "system_error":
                     print(f"  既有提交 {sub['id']} 为 system_error，创建替代提交")
                     sub = _create_and_poll(sc, q_id, sub_data["code"], stats, submission_timeout)
-                    status = sub.get("status")
-                    if status not in _GOOD_STATUSES:
-                        # 替代提交仍然不在好终态——再试一次
-                        print(f"  替代提交 {sub['id']} 仍为 {status}，再试一次")
+                    sid = sub["id"]
+                    final_status = sub.get("status")
+                    if final_status == "system_error":
                         sub = _create_and_poll(sc, q_id, sub_data["code"], stats, submission_timeout)
-
+                        sid = sub["id"]
+                        final_status = sub.get("status")
             else:
                 sub = _create_and_poll(sc, q_id, sub_data["code"], stats, submission_timeout)
-                status = sub.get("status")
-                # system_error → 再试一次
-                if status == "system_error":
-                    print(f"  新提交 {sub['id']} 为 system_error，创建替代提交")
+                sid = sub["id"]
+                final_status = sub.get("status")
+                if final_status == "system_error":
+                    print(f"  新提交 {sid} 为 system_error，创建替代提交")
                     sub = _create_and_poll(sc, q_id, sub_data["code"], stats, submission_timeout)
+                    sid = sub["id"]
+                    final_status = sub.get("status")
+
+            # shadow/active 题目需要 CodeGrade 终态
+            grade_status = None
+            if gmode and gmode != "legacy" and final_status in _GOOD_STATUSES:
+                # 用教师身份查询 CodeGrade
+                grade = _poll_code_grade(client, q_id, sc._user_id, submission_timeout)  # type: ignore[attr-defined]
+                grade_status = grade.get("status") if grade else "no_grade"
+                if grade_status not in _CODE_GRADE_TERMINAL:
+                    final_status = f"grade:{grade_status}"  # 标记为不良状态
 
             results.append({
                 "student": student_username,
                 "question": sub_data["question_title"],
-                "submission_id": sub["id"],
-                "status": sub.get("status"),
-                "reused": False,
+                "submission_id": sid,
+                "status": final_status,
+                "grade_status": grade_status,
+                "reused": reused,
             })
         finally:
             sc.close()

@@ -128,6 +128,7 @@ def get_question_ai_config(
         "reference_solution": q.reference_solution,
         "test_groups": q.test_groups,
         "score_cap_rules": q.score_cap_rules,
+        "hidden_tests": q.hidden_tests if hasattr(q, "hidden_tests") else None,
     }
 
 

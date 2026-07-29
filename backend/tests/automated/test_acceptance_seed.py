@@ -168,10 +168,35 @@ class TestAcceptanceDataStructure:
         by_student = {}
         for sub in self.submissions:
             by_student.setdefault(sub["student"], []).append(sub["question_title"])
-        # 学生甲：正确提交
         assert "accept_student_a" in by_student
-        # 学生乙：错误提交
         assert "accept_student_b" in by_student
+
+    def test_all_non_legacy_have_test_groups(self):
+        """所有 shadow/active 作业题必须有合法 test_groups"""
+        from seed_acceptance_data import _build_ai_config
+        for course in self.data:
+            for a in course.get("assignments", []):
+                for q in a.get("questions", []):
+                    gmode = q.get("grading_mode", "legacy")
+                    if gmode == "legacy":
+                        continue
+                    cfg = _build_ai_config(q)
+                    assert cfg is not None, f"{q['title']} ({gmode}) 缺少 AI config"
+                    assert len(cfg["test_groups"]) >= 1, f"{q['title']} test_groups 为空"
+                    f_sum = sum(g["max_score"] for g in cfg["test_groups"] if g["dimension"] == "F")
+                    r_sum = sum(g["max_score"] for g in cfg["test_groups"] if g["dimension"] == "R")
+                    assert abs(f_sum - 60) < 1e-6, f"{q['title']} F 总分={f_sum}，应为60"
+                    assert abs(r_sum - 10) < 1e-6, f"{q['title']} R 总分={r_sum}，应为10"
+                    for g in cfg["test_groups"]:
+                        assert g["tests"].strip(), f"{q['title']} test_group {g['id']} tests 为空"
+
+    def test_judge_question_read_no_hidden_tests(self):
+        """JudgeQuestionRead 不应包含 hidden_tests（防泄题）"""
+        from app.schemas import JudgeQuestionRead
+        fields = JudgeQuestionRead.model_fields
+        assert "hidden_tests" not in fields, (
+            "JudgeQuestionRead 包含 hidden_tests 字段——这是泄题漏洞"
+        )
 
 
 class TestFakeApiIdempotency:
