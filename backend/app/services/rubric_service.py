@@ -176,7 +176,7 @@ def ensure_locked_rubrics_for_publish(
         else:
             question_id = q.id
             kind = "exam" if isinstance(q, ExamQuestion) else "assignment"
-            title = q.title
+            title = getattr(q, "title", None) or getattr(q, "prompt", "")
             description = getattr(q, "description", None) if hasattr(q, "description") else getattr(q, "prompt", None)
             function_name = getattr(q, "function_name", None) if hasattr(q, "function_name") else getattr(q, "prompt", None)
             teacher_constraints = getattr(q, "teacher_constraints", {})

@@ -88,11 +88,61 @@ npm run dev
 | `student_charlie` | `Test1234!` | 学生 | 已选课 |
 | `developer_wang` | `Test1234!` | 开发者 | 管理实验模板和模块 |
 
-> 种子数据包含 2 门课程（8 个课时含完整教学内容）、3 个作业（7 道编程题含答案）、2 个考试、2 个实验模块。如果没有种子数据，运行：
+> 基础种子数据包含 2 门课程（8 个课时含完整教学内容）、3 个作业（7 道编程题含答案）、2 个考试、2 个实验模块。如果没有种子数据，运行：
 > ```bash
 > cd backend
 > .venv\Scripts\python.exe -m app.seed_data
 > ```
+>
+> **注意**：以上为基础演示数据。如需创建包含完整作业/考试/判题/AI 评分的验收数据，请使用下方的「完整验收数据」脚本。
+
+---
+
+---
+## 完整验收数据
+
+用于验收课程管理、作业、考试、代码判题和 AI 评分全流程的幂等演示数据脚本。
+
+### 前置条件
+
+- Docker 服务已启动（`docker compose up -d`）
+- 后端环境已配置 DeepSeek API Key（环境变量 `DAI_AI_API_KEY`），模型为 `deepseek-v4-flash`
+- 后端 API 在 <http://localhost:8080> 可访问
+- 不需要把 API Key 放进命令行参数
+
+### 运行
+
+```bat
+cd backend
+.venv\Scripts\python.exe seed_acceptance_data.py --base-url http://localhost:8080/api/v1
+```
+
+### 验收账号
+
+| 角色 | 用户名 | 默认密码 | 用途 |
+|------|--------|----------|------|
+| 教师 | `teacher` | `Passw0rd!` | 课程、作业、考试和成绩验收 |
+| 学生甲 | `accept_student_a` | `Passw0rd!` | 正确/高质量提交 |
+| 学生乙 | `accept_student_b` | `Passw0rd!` | 错误或部分正确提交 |
+| 管理员 | `admin` | `Passw0rd!` | 仅用于创建学生账号 |
+
+密码可通过环境变量覆盖：`DAI_SEED_ADMIN_PASSWORD`、`DAI_SEED_TEACHER_PASSWORD`、`DAI_SEED_STUDENT_PASSWORD`。
+
+### 创建的课程
+
+| 课程 | 章节 | 课时 | 作业 | 考试 |
+|------|------|------|------|------|
+| `[验收] Python 算法与工程实践` | 3 章 | 6 课时 | 2 份（6 道编程题） | 1 份（6 道题，含 AI 评分） |
+| `[验收] 数据分析与机器学习入门` | 3 章 | 6 课时 | 1 份（3 道编程题） | 1 份（6 道题，含 AI 评分） |
+
+教师管理页 URL（脚本结束后输出课程 ID）：
+```text
+http://localhost:8080/teacher/courses/<脚本输出的课程ID>/manage
+```
+
+### 幂等性
+
+脚本可重复执行，第二次不会重复创建数据。所有资源按精确的 `[验收]` 标题和用户名识别，已存在的课程、章节、课时、作业、题目、考试和提交全部复用。
 
 ---
 
