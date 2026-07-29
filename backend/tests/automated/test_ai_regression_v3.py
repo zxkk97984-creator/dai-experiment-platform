@@ -26,8 +26,8 @@ def test_v1_without_test_groups_system_error(db_session_factory):
     with db_session_factory() as db:
         result = process_submission(db, None, settings, sub.id)
         assert result.status == "system_error", f"应为 system_error: {result.status}"
-        # 系统错误不扣分：score 保持 None（不覆盖）
-        assert result.score in (0, None), f"缺配置不应产生有效分: {result.score}"
+        # 系统错误不扣分：score 必须为 None（严禁写 0）
+        assert result.score is None, f"缺配置不应产生有效分，实际: {result.score}"
 
 
 def test_v1_missing_rubric_system_error(db_session_factory):

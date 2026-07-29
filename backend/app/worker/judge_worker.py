@@ -258,7 +258,7 @@ def _v1_judge_submission(db, redis_client, settings, submission, question, workd
         fail_job(db, job_type="assignment", object_id=submission.id,
                  error="shadow/active 需要测试组", retryable=True)
         submission.status = "system_error"
-        submission.score = 0
+        submission.score = None  # 系统错误不扣分
         db.commit()
         return submission
 
@@ -273,7 +273,7 @@ def _v1_judge_submission(db, redis_client, settings, submission, question, workd
         fail_job(db, job_type="assignment", object_id=submission.id,
                  error="shadow/active 缺少锁定 Rubric", retryable=True)
         submission.status = "system_error"
-        submission.score = 0
+        submission.score = None  # 系统错误不扣分
         db.commit()
         return submission
 
@@ -282,12 +282,12 @@ def _v1_judge_submission(db, redis_client, settings, submission, question, workd
     all_errs = list(result["system_errors"])
     f_score, r_score, details = _calc_fr_scores(test_groups, result["results"], all_errs)
 
-    # 系统错误 → 不创建 CodeGrade，退回重试
+    # 系统错误 → 不创建 CodeGrade，退回重试，不扣分
     if all_errs:
         fail_job(db, job_type="assignment", object_id=submission.id,
                  error="; ".join(all_errs), retryable=True)
         submission.status = "system_error"
-        submission.score = 0
+        submission.score = None  # 系统错误不扣分
         submission.result_details = {"groups": details, "system_errors": all_errs}
         db.commit()
         return submission
@@ -320,8 +320,9 @@ def _v1_judge_submission(db, redis_client, settings, submission, question, workd
     submission.result_details = {"groups": details, "system_errors": all_errs,
                                  "f_score": f_score, "r_score": r_score}
     db.commit()
+    # 不传 score：shadow 已设 legacy 分，active 保持 None 等 AI；complete_job 只标记 grading_status=completed
     complete_job(db, job_type="assignment", object_id=submission.id,
-                 score=float(f_score + r_score), result_details=submission.result_details)
+                 result_details=submission.result_details)
 
     # 创建 CodeGrade（幂等：检查是否已存在）
     existing = db.scalar(select(CodeGrade).where(CodeGrade.submission_id == submission.id))
@@ -359,7 +360,7 @@ def process_submission(db: Session, redis_client, settings: Settings, submission
             fail_job(db, job_type="assignment", object_id=submission_id,
                      error="题目不存在", retryable=False)
             submission.status = "system_error"
-            submission.score = 0
+            submission.score = None  # 系统错误不扣分
             db.commit()
             return submission
 
@@ -439,9 +440,8 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
             fail_job(db, job_type="exam", object_id=answer_id,
                      error="题目不存在", retryable=False)
             answer.system_error = "题目不存在"
-            answer.score = 0
+            answer.score = None  # 系统错误不扣分
             db.commit()
-            _maybe_finalize_exam(answer.submission_id, db)
             return answer
 
         _work_root = Path(settings.judge_work_dir) if settings.judge_work_dir else None
@@ -463,6 +463,14 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
 
             if gmode == "legacy":
                 # legacy 路径
+                if not question.hidden_tests or not question.hidden_tests.strip():
+                    fail_job(db, job_type="exam", object_id=answer_id,
+                             error="缺少隐藏测试", retryable=True)
+                    answer.score = None  # 系统错误不扣分
+                    answer.system_error = "缺少隐藏测试"
+                    db.commit()
+                    return answer
+
                 user_code = workdir / "user_code.py"
                 test_file = workdir / "test_user_code.py"
                 user_code.write_text(answer.code_answer or "", encoding="utf-8")
@@ -476,10 +484,9 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
                 except Exception as e:
                     fail_job(db, job_type="exam", object_id=answer_id,
                              error=f"Docker 判题失败: {e}", retryable=True)
-                    answer.score = 0
+                    answer.score = None  # 系统错误不扣分
                     answer.system_error = f"Docker 判题失败: {e}"
                     db.commit()
-                    _maybe_finalize_exam(answer.submission_id, db)
                     return answer
 
                 final_status, _ = _status_from_pytest(returncode, stdout, stderr)
@@ -490,21 +497,47 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
                 complete_job(db, job_type="exam", object_id=answer_id, score=answer.score)
                 _maybe_finalize_exam(answer.submission_id, db)
             else:
-                # V1 路径
+                # V1 路径：测试组 → FR 分 → 校验 → 创建 CodeGrade → 入队 AI
                 test_groups = question.test_groups or []
                 if not test_groups:
                     fail_job(db, job_type="exam", object_id=answer_id,
                              error="shadow/active 需要测试组", retryable=True)
-                    answer.score = 0
+                    answer.score = None  # 系统错误不扣分
                     answer.system_error = "缺少测试组"
                     db.commit()
-                    _maybe_finalize_exam(answer.submission_id, db)
+                    # 系统错误不可 finalize（score=None 会阻塞汇总）
+                    return answer
+
+                # 查找锁定 Rubric（缺失则系统错误，禁止继续）
+                locked = db.scalar(
+                    select(QuestionRubric).where(
+                        QuestionRubric.exam_question_id == question.id,
+                        QuestionRubric.status == "locked",
+                    ).order_by(QuestionRubric.version.desc()).limit(1)
+                )
+                if locked is None:
+                    fail_job(db, job_type="exam", object_id=answer_id,
+                             error="shadow/active 缺少锁定 Rubric", retryable=True)
+                    answer.score = None  # 系统错误不扣分
+                    answer.system_error = "缺少锁定 Rubric"
+                    db.commit()
                     return answer
 
                 result = run_test_groups(workdir, host_workdir, answer.code_answer or "",
                                          test_groups, settings, timeout_s, mem_mb)
                 all_errs = list(result["system_errors"])
                 f_score, r_score, details = _calc_fr_scores(test_groups, result["results"], all_errs)
+
+                # 系统错误（Docker/解析失败）→ 立即停止，不创建 CodeGrade，不 finalize
+                if all_errs:
+                    fail_job(db, job_type="exam", object_id=answer_id,
+                             error="; ".join(all_errs), retryable=True)
+                    answer.score = None  # 系统错误不扣分
+                    answer.system_error = "; ".join(all_errs)
+                    answer.result_details = {"groups": details, "system_errors": all_errs,
+                                             "f_score": f_score, "r_score": r_score}
+                    db.commit()
+                    return answer
 
                 if gmode == "shadow":
                     # 保留旧二元评分：全通过才满分
@@ -531,36 +564,25 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
                                          "f_score": f_score, "r_score": r_score}
                 db.commit()
 
-                if all_errs:
-                    fail_job(db, job_type="exam", object_id=answer_id,
-                             error="; ".join(all_errs), retryable=True)
-                else:
-                    complete_job(db, job_type="exam", object_id=answer_id,
-                                 score=answer.score, result_details=answer.result_details)
+                complete_job(db, job_type="exam", object_id=answer_id,
+                             score=answer.score, result_details=answer.result_details)
 
-                # 创建 CodeGrade
-                locked = db.scalar(
-                    select(QuestionRubric).where(
-                        QuestionRubric.exam_question_id == question.id,
-                        QuestionRubric.status == "locked",
-                    ).order_by(QuestionRubric.version.desc()).limit(1)
+                # 创建 CodeGrade 并入队 AI（locked rubric 已确保存在）
+                existing = db.scalar(
+                    select(CodeGrade).where(CodeGrade.exam_answer_id == answer_id)
                 )
-                if locked:
-                    existing = db.scalar(
-                        select(CodeGrade).where(CodeGrade.exam_answer_id == answer_id)
+                if existing is None:
+                    cg = CodeGrade(
+                        exam_answer_id=answer_id, rubric_id=locked.id,
+                        mode=gmode, status="pending",
+                        functional_score=f_score, robustness_score=r_score,
+                        deterministic_details={"groups": details, "system_errors": all_errs},
                     )
-                    if existing is None:
-                        cg = CodeGrade(
-                            exam_answer_id=answer_id, rubric_id=locked.id,
-                            mode=gmode, status="pending",
-                            functional_score=f_score, robustness_score=r_score,
-                            deterministic_details={"groups": details, "system_errors": all_errs},
-                        )
-                        db.add(cg)
-                        db.commit()
-                        from app.services.ai_grading_queue import enqueue_ai_grade
-                        enqueue_ai_grade(db, redis_client, cg.id)
-                        db.commit()
+                    db.add(cg)
+                    db.commit()
+                    from app.services.ai_grading_queue import enqueue_ai_grade
+                    enqueue_ai_grade(db, redis_client, cg.id)
+                    db.commit()
 
                 # shadow 立即汇总; active 等 AI
                 if gmode == "shadow":

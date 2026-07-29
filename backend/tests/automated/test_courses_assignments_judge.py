@@ -85,6 +85,7 @@ def test_course_assignment_submission_and_worker_result(
             "starter_code": "def add(a, b):\n    return 0\n",
             "public_cases": [{"args": [1, 2], "expected": 3}],
             "hidden_tests": "def test_add():\n    assert user_code.add(1, 2) == 3\n    assert user_code.add(-1, 1) == 0\n",
+            "grading_mode": "legacy",
             "time_limit_ms": 5000,
             "memory_limit_mb": 256,
         },
@@ -155,6 +156,7 @@ def test_worker_marks_wrong_answer(client, db_session_factory, redis_client, tes
             "starter_code": "def add(a, b):\n    return 0\n",
             "public_cases": [],
             "hidden_tests": "def test_add():\n    assert user_code.add(1, 2) == 3\n",
+            "grading_mode": "legacy",
         },
     ).json()["id"]
     submission_id = client.post(

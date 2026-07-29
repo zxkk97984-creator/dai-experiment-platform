@@ -1,4 +1,4 @@
-﻿"""考试系统业务逻辑"""
+"""考试系统业务逻辑"""
 from datetime import timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -255,17 +255,48 @@ def _finalize_grade(sub, score, db):
 
 
 def get_my_grade(exam_id, student, db):
+    from app.models import CodeGrade
     sub = db.scalar(select(ExamSubmission).where(
         ExamSubmission.exam_id == exam_id, ExamSubmission.student_id == student.id))
     if not sub:
         raise api_error(404, "SUBMISSION_NOT_FOUND", "未找到考试记录")
     answers = db.scalars(select(ExamAnswer).where(ExamAnswer.submission_id == sub.id)).all()
+
+    answer_list = []
+    for a in answers:
+        item = {"question_id": a.question_id, "grading_status": a.grading_status,
+                "score": a.score, "system_error": a.system_error}
+        # active 模式：返回安全的学生反馈（F/A/R/Q + strengths/issues/suggestions）
+        # shadow 模式：不泄露 AI 数据，仅返回确定性分数
+        cg = db.scalar(
+            select(CodeGrade).where(
+                CodeGrade.exam_answer_id == a.id,
+                CodeGrade.mode == "active",
+                CodeGrade.status == "completed",
+            )
+        )
+        if cg and cg.ai_result:
+            fb = (cg.ai_result or {}).get("student_feedback", {}) or {}
+            item["grading_breakdown"] = {
+                "functional_score": cg.functional_score,
+                "algorithm_score": cg.algorithm_score,
+                "robustness_score": cg.robustness_score,
+                "quality_score": cg.quality_score,
+                "raw_total": cg.raw_total,
+                "score_cap": cg.score_cap,
+                "final_score_100": cg.final_score_100,
+                "scaled_score": cg.scaled_score,
+                "strengths": fb.get("strengths", []),
+                "issues": fb.get("issues", []),
+                "suggestions": fb.get("suggestions", []),
+            }
+        answer_list.append(item)
+
     return {"submission_id": sub.id, "status": sub.status, "score": sub.score,
             "started_at": sub.started_at.isoformat() if sub.started_at else None,
             "expires_at": sub.expires_at.isoformat() if sub.expires_at else None,
             "submitted_at": sub.submitted_at.isoformat() if sub.submitted_at else None,
-            "answers": [{"question_id": a.question_id, "grading_status": a.grading_status,
-                         "score": a.score, "system_error": a.system_error} for a in answers]}
+            "answers": answer_list}
 
 
 def scan_expired_exams(db, now):
@@ -301,6 +332,9 @@ def create_question(db, exam_id, payload, user):
         raise api_error(404, "EXAM_NOT_FOUND", "考试不存在")
     require_exam_editable(exam, user)
     q = ExamQuestion(exam_id=exam_id, **payload)
+    # 新建编程题默认 shadow 模式（仅当用户未显式指定时生效）
+    if q.question_type == "code" and "grading_mode" not in payload:
+        q.grading_mode = "shadow"
 
     # 创建时立即校验
     errors = validate_question(q)

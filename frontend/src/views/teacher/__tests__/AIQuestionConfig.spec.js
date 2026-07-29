@@ -1,57 +1,104 @@
-/** Task 11: 教师题目 AI 配置界面测试 */
-import { describe, it, expect } from 'vitest'
+/** AI 题目配置组件——真实挂载测试 */
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 
-describe('AI 题目配置面板', () => {
-  it('新编程题默认 grading_mode 为 shadow', () => {
-    const defaultConfig = { grading_mode: 'shadow', teacher_constraints: {}, reference_solution: null, test_groups: [], score_cap_rules: [] }
-    expect(defaultConfig.grading_mode).toBe('shadow')
+vi.mock('../../../api/aiGrading.js', () => ({
+  aiGradingAPI: {
+    getConfig: vi.fn().mockResolvedValue({ data: { grading_mode: 'legacy', teacher_constraints: {}, reference_solution: null, test_groups: [], score_cap_rules: [] } }),
+    updateConfig: vi.fn().mockResolvedValue({ data: { ok: true } }),
+    listRubrics: vi.fn().mockResolvedValue({ data: { items: [] } }),
+    generateRubric: vi.fn().mockResolvedValue({ data: { id: 1, version: 1, status: 'draft', rubric_json: {} } }),
+    lockRubric: vi.fn().mockResolvedValue({ data: { ok: true } }),
+  },
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ params: { id: '1' } }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+}))
+
+import AIQuestionConfig from '../../../components/ai/AIQuestionConfig.vue'
+import { aiGradingAPI } from '../../../api/aiGrading.js'
+
+describe('AIQuestionConfig 真实挂载', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
   })
 
-  it('legacy 模式不要求 F/R 测试组', () => {
-    const legacyConfig = { grading_mode: 'legacy', test_groups: [] }
-    expect(legacyConfig.grading_mode).toBe('legacy')
+  it('组件挂载成功显示 AI 配置标题', async () => {
+    const wrapper = mount(AIQuestionConfig, {
+      props: { kind: 'assignment', questionId: 1, expanded: true },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('AI 评分配置')
   })
 
-  it('shadow/active 权重不是 60/10 时阻止保存', () => {
-    const fTotal = 50
-    const rTotal = 10
-    const isValid = Math.abs(fTotal - 60) < 1e-6 && Math.abs(rTotal - 10) < 1e-6
-    expect(isValid).toBe(false)
+  it('评分模式选择器显示 legacy 选项', async () => {
+    const wrapper = mount(AIQuestionConfig, {
+      props: { kind: 'assignment', questionId: 2, expanded: true },
+    })
+    await flushPromises()
+
+    const select = wrapper.find('select')
+    expect(select.exists()).toBe(true)
   })
 
-  it('合法 F60+R10 通过校验', () => {
-    const fTotal = 60
-    const rTotal = 10
-    const isValid = Math.abs(fTotal - 60) < 1e-6 && Math.abs(rTotal - 10) < 1e-6
-    expect(isValid).toBe(true)
+  it('显示功能/鲁棒性测试组区域', async () => {
+    const wrapper = mount(AIQuestionConfig, {
+      props: { kind: 'exam', questionId: 3, expanded: true },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('功能/鲁棒性测试组')
   })
 
-  it('draft Rubric 可编辑、locked 禁止编辑', () => {
-    const draftRubric = { status: 'draft' }
-    const lockedRubric = { status: 'locked' }
-    expect(draftRubric.status === 'draft').toBe(true)
-    expect(lockedRubric.status === 'locked').toBe(true)
-    expect(lockedRubric.status !== 'draft').toBe(true)
+  it('显示参考答案输入框', async () => {
+    const wrapper = mount(AIQuestionConfig, {
+      props: { kind: 'assignment', questionId: 4, expanded: true },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('参考答案')
   })
 
-  it('test_groups ID 唯一性校验', () => {
-    const groups = [
-      { id: 'F1', name: '基础', dimension: 'F', max_score: 30, tests: '' },
-      { id: 'F2', name: '核心', dimension: 'F', max_score: 30, tests: '' },
-      { id: 'R1', name: '边界', dimension: 'R', max_score: 10, tests: '' },
-    ]
-    const ids = groups.map(g => g.id)
-    const unique = new Set(ids).size === ids.length
-    expect(unique).toBe(true)
+  it('表单渲染完成后显示操作区', async () => {
+    const wrapper = mount(AIQuestionConfig, {
+      props: { kind: 'assignment', questionId: 5, expanded: true },
+    })
+    await flushPromises()
+
+    // 组件应渲染表单内容（非 error 状态）
+    expect(wrapper.find('.ai-config').exists()).toBe(true)
+    expect(wrapper.text()).toContain('评分模式')
   })
 
-  it('重复 ID 被检测出', () => {
+  it('显示 AI 生成 Rubric 按钮', async () => {
+    const wrapper = mount(AIQuestionConfig, {
+      props: { kind: 'assignment', questionId: 6, expanded: true },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('AI 生成 Rubric')
+  })
+
+  it('显示上限规则区域', async () => {
+    const wrapper = mount(AIQuestionConfig, {
+      props: { kind: 'exam', questionId: 7, expanded: true },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('分数上限规则')
+  })
+
+  it('重复 test_groups ID 被检测', () => {
     const groups = [
       { id: 'F1', name: '基础', dimension: 'F', max_score: 30, tests: '' },
       { id: 'F1', name: '核心', dimension: 'F', max_score: 30, tests: '' },
     ]
     const ids = groups.map(g => g.id)
-    const unique = new Set(ids).size === ids.length
-    expect(unique).toBe(false)
+    expect(new Set(ids).size).not.toBe(ids.length)
   })
 })

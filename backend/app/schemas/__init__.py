@@ -207,6 +207,7 @@ class JudgeQuestionCreate(BaseModel):
     hidden_tests: str
     time_limit_ms: int = 10000
     memory_limit_mb: int = 256
+    grading_mode: str | None = None  # legacy / shadow / active
 
 
 class JudgeQuestionRead(BaseModel):
@@ -297,6 +298,7 @@ class ExamQuestionCreate(BaseModel):
     hidden_tests: str | None = None
     time_limit_ms: int | None = None
     memory_limit_mb: int | None = None
+    grading_mode: str | None = None  # legacy / shadow / active
 
 
 class ExamQuestionUpdate(BaseModel):

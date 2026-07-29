@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
+import AIQuestionConfig from '../../components/ai/AIQuestionConfig.vue'
 import { assignmentsAPI } from '../../api/assignments.js'
 import { useAppStore } from '../../stores/app.js'
 
@@ -11,6 +12,7 @@ const assignment = ref(null)
 const questions = ref([])
 const loading = ref(true)
 const showForm = ref(false)
+const aiConfigQid = ref(null)  // 当前展开 AI 配置的题目 ID
 const form = ref({
   title: '', description: '', function_name: '', signature: '',
   starter_code: '', public_cases: '[]', hidden_tests: '',
@@ -139,10 +141,17 @@ onMounted(fetch)
             <h3 class="question-title">题目 {{ i + 1 }}: {{ q.title }}</h3>
             <p class="text-sm text-secondary question-meta">
               函数: {{ q.function_name }} | 超时: {{ q.time_limit_ms }}ms | 内存: {{ q.memory_limit_mb }}MB
+              <span v-if="q.grading_mode && q.grading_mode !== 'legacy'" class="badge-mode">{{ q.grading_mode }}</span>
             </p>
           </div>
-          <span class="badge badge-neutral">#{{ i + 1 }}</span>
+          <div class="q-actions">
+            <button class="btn-sm btn-outline" @click="aiConfigQid = aiConfigQid === q.id ? null : q.id">
+              {{ aiConfigQid === q.id ? '收起 AI 配置' : '🤖 AI 配置' }}
+            </button>
+            <span class="badge badge-neutral">#{{ i + 1 }}</span>
+          </div>
         </div>
+        <AIQuestionConfig v-if="aiConfigQid === q.id" :kind="'assignment'" :question-id="q.id" :expanded="true" @close="aiConfigQid = null" />
       </div>
     </div>
   </AppLayout>
@@ -220,4 +229,13 @@ input[type="number"]::-webkit-outer-spin-button {
 .question-meta {
   margin-top: 2px;
 }
+.badge-mode {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 500; margin-left: 6px;
+  background: #dbeafe; color: #1e40af;
+}
+.q-actions { display: flex; gap: 8px; align-items: center; }
+.btn-sm { padding: 4px 12px; font-size: 12px; border-radius: 4px; cursor: pointer; }
+.btn-outline { border: 1px solid #3b82f6; color: #3b82f6; background: #fff; }
+.btn-outline:hover { background: #eff6ff; }
 </style>

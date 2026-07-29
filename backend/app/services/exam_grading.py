@@ -27,12 +27,13 @@ def finalize_if_ready(submission_id: int, db: Session) -> bool:
     if submission.status != "grading":
         return False
 
-    # 阻塞检查：非终态答案 或 score=None(等待AI) 或 未完成 active CodeGrade
+    # 阻塞检查：非终态答案 / score=None(等待AI) / 系统错误（不可作为零分结算）/ 未完成 active CodeGrade
     blocking = db.scalar(
         select(ExamAnswer.id).where(
             ExamAnswer.submission_id == submission_id,
             or_(
                 ExamAnswer.grading_status.in_(NON_FINAL_STATUSES),
+                ExamAnswer.grading_status == "system_error",
                 ExamAnswer.score == None,
             )
         ).limit(1)

@@ -103,6 +103,8 @@ def fail_ai_grade(
 def recover_stale_ai_grades(db: Session, redis_client: Redis) -> dict[str, int]:
     """恢复僵死任务：running/pending/queued 超时→重置并重新推送。
 
+    关键：先 commit 状态变更，再 rpush Redis。避免消费者先收到消息却发现 DB 状态未更新导致 claim 失败。
+
     - running 超过 10 分钟→重置为 queued（保留原 attempt，不重复计数）
     - queued 超过 5 分钟→重新推送 Redis（DB 已 queued 但消息丢失）
     - pending 超过 2 分钟→直接转为 queued 并入队
@@ -111,7 +113,7 @@ def recover_stale_ai_grades(db: Session, redis_client: Redis) -> dict[str, int]:
     now = datetime.now(timezone.utc)
     qname = _ai_queue_name()
 
-    # running 超时 → queued，保留原 attempt_count（claim 时不再 +1 是错的 —— claim 是 +1 没错，但 recover 不应该 +1）
+    # running 超时 → queued（先 commit 再 rpush，防止消费者 claim 失败）
     running_threshold = now - timedelta(seconds=STALE_RUNNING_SECONDS)
     stale_running = db.scalars(
         select(CodeGrade).where(
@@ -125,8 +127,12 @@ def recover_stale_ai_grades(db: Session, redis_client: Redis) -> dict[str, int]:
             .where(CodeGrade.id == grade.id)
             .values(status="queued", last_error="Worker 超时未响应", queued_at=now)
         )
-        msg = json.dumps({"type": "ai_grade", "id": grade.id, "attempt": grade.attempt_count})
-        redis_client.rpush(qname, msg)
+        db.commit()  # 先持久化状态变更
+        try:
+            msg = json.dumps({"type": "ai_grade", "id": grade.id, "attempt": grade.attempt_count})
+            redis_client.rpush(qname, msg)
+        except Exception:
+            logger.warning("Redis 推送失败（running→queued），等待下次恢复: grade=%s", grade.id)
         recovered["running"] += 1
 
     # queued 超时 → 重新推送（消息可能丢失）
@@ -138,14 +144,18 @@ def recover_stale_ai_grades(db: Session, redis_client: Redis) -> dict[str, int]:
         )
     ).all()
     for grade in stale_queued:
-        msg = json.dumps({"type": "ai_grade", "id": grade.id, "attempt": grade.attempt_count})
-        redis_client.rpush(qname, msg)
         db.execute(
             update(CodeGrade).where(CodeGrade.id == grade.id).values(queued_at=now)
         )
+        db.commit()  # 先持久化
+        try:
+            msg = json.dumps({"type": "ai_grade", "id": grade.id, "attempt": grade.attempt_count})
+            redis_client.rpush(qname, msg)
+        except Exception:
+            logger.warning("Redis 推送失败（queued 重推），等待下次恢复: grade=%s", grade.id)
         recovered["queued"] += 1
 
-    # pending 超时 → 直接转为 queued 并入队
+    # pending 超时 → 直接转为 queued 并入队（先 commit 再 rpush）
     pending_threshold = now - timedelta(seconds=120)
     stale_pending = db.scalars(
         select(CodeGrade).where(
@@ -159,12 +169,15 @@ def recover_stale_ai_grades(db: Session, redis_client: Redis) -> dict[str, int]:
             .where(CodeGrade.id == grade.id)
             .values(status="queued", queued_at=now)
         )
-        msg = json.dumps({"type": "ai_grade", "id": grade.id, "attempt": grade.attempt_count})
-        redis_client.rpush(qname, msg)
+        db.commit()  # 先持久化状态变更
+        try:
+            msg = json.dumps({"type": "ai_grade", "id": grade.id, "attempt": grade.attempt_count})
+            redis_client.rpush(qname, msg)
+        except Exception:
+            logger.warning("Redis 推送失败（pending→queued），等待下次恢复: grade=%s", grade.id)
         recovered["pending"] += 1
 
     if any(recovered.values()):
-        db.commit()
         logger.info("stale_ai_recovery", extra=recovered)
 
     return recovered

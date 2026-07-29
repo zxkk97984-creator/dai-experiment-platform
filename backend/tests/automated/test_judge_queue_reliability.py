@@ -427,7 +427,7 @@ def test_p0_2_max_retries_syncs_submission_status(db_session_factory):
 
 
 def test_p0_2_exam_max_retries_immediate_finalize(db_session_factory):
-    """P0-2: 考试答案超过最大重试须立即调用 finalize_if_ready，不等下一轮扫描"""
+    """P0-2: 考试答案超过最大重试→system_error→阻塞汇总（第五轮修正：系统错误不可作为零分结算）"""
     aid = _setup_exam_answer(db_session_factory)
 
     with db_session_factory() as db:
@@ -438,10 +438,11 @@ def test_p0_2_exam_max_retries_immediate_finalize(db_session_factory):
         stats = requeue_stale_jobs(db, job_type="exam", stale_pending_seconds=0)
         assert stats["max_retries_reached"] >= 1
 
-        # 关键断言：提交状态应已变为 graded（finalize_if_ready 被立即调用）
+        # 系统错误阻塞汇总：submission 应保持 grading 而非变为 graded
         sub = db.get(ExamSubmission, ans.submission_id)
-        assert sub.status == "graded", \
-            f"考试汇总应立即触发，submission status 应为 graded，实际: {sub.status}"
+        # system_error 答案的 score=0 不可作为零分结算，汇总被阻塞
+        assert sub.status == "grading", \
+            f"系统错误不应 finalize，submission 应保持 grading，实际: {sub.status}"
 
 
 def test_p0_2_queued_repush_updates_queued_at(db_session_factory):

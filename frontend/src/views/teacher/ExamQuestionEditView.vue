@@ -2,11 +2,13 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
+import AIQuestionConfig from '../../components/ai/AIQuestionConfig.vue'
 import { examsAPI } from '../../api/exams.js'
 import { useAppStore } from '../../stores/app.js'
 const route = useRoute(); const router = useRouter(); const app = useAppStore()
 const examId = route.params.id; const exam = ref(null); const questions = ref([])
 const loading = ref(true); const showForm = ref(false); const editingQ = ref(null)
+const aiConfigQid = ref(null)  // 当前展开 AI 配置的题目 ID
 const form = ref({ question_type: 'single_choice', prompt: '', options_text: '{}', correct_answer_text: '{}', points: 1, starter_code: '', hidden_tests: '' })
 async function load() { loading.value = true; try { const [eR,qR] = await Promise.all([examsAPI.get(examId), examsAPI.getQuestions(examId)]); exam.value = eR.data; questions.value = qR.data.items || [] } catch { app.showToast('加载失败', 'error') } finally { loading.value = false } }
 function openAdd() { editingQ.value = null; form.value = { question_type: 'single_choice', prompt: '', options_text: '{}', correct_answer_text: '{}', points: 1, starter_code: '', hidden_tests: '' }; showForm.value = true }
@@ -64,12 +66,17 @@ onMounted(load)
             {{ { single_choice:'单选题', multi_choice:'多选题', code:'编程题' }[q.question_type] }}
           </span>
           <span class="qp">{{ q.points }} 分</span>
+          <span v-if="q.grading_mode && q.grading_mode !== 'legacy'" class="badge-mode">{{ q.grading_mode }}</span>
           <span class="qa">
+            <button v-if="q.question_type === 'code'" class="btn-ghost btn-sm btn-ai" @click="aiConfigQid = aiConfigQid === q.id ? null : q.id">
+              {{ aiConfigQid === q.id ? '收起 AI 配置' : '🤖 AI 配置' }}
+            </button>
             <button class="btn-ghost btn-sm" @click="openEdit(q)">编辑</button>
             <button class="btn-ghost btn-sm btn-del" @click="remove(q.id)">删除</button>
           </span>
         </div>
         <p class="qd">{{ q.prompt }}</p>
+        <AIQuestionConfig v-if="aiConfigQid === q.id && q.question_type === 'code'" :kind="'exam'" :question-id="q.id" :expanded="true" @close="aiConfigQid = null" />
       </div>
 
       <!-- ── Modal Form ─────────────────────────────────────────────────── -->
@@ -159,6 +166,13 @@ onMounted(load)
 .btn-del { color: var(--danger); }
 .btn-del:hover { background: var(--danger-light); }
 .qd { color: var(--text-secondary); font-size: var(--text-sm); margin: 0; line-height: 1.5; }
+.badge-mode {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 500;
+  background: #dbeafe; color: #1e40af;
+}
+.btn-ai { color: #3b82f6; }
+.btn-ai:hover { background: #eff6ff; }
 
 /* ── Modal ─────────────────────────────────────────────────────────── */
 .modal-overlay {

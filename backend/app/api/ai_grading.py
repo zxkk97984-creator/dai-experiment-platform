@@ -1,6 +1,8 @@
 """AI 评分 API——题目配置、Rubric 管理、教师复核、重评"""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select, or_
 from sqlalchemy.orm import Session
@@ -272,16 +274,47 @@ def lock_rubric_endpoint(
 
 def _build_grade_base_query(db: Session, user: User, kind: str | None,
                              question_id: int | None, student_id: int | None, status: str | None):
-    """构建带权限筛选的 CodeGrade 基础查询"""
+    """构建带权限筛选的 CodeGrade 查询。按 kind 构建单一路径避免重复 JOIN。"""
     course_ids = _teacher_course_ids(db, user)
 
     if user.role == "admin":
         query = select(CodeGrade)
         count_q = select(func.count()).select_from(CodeGrade)
+    elif kind == "assignment":
+        # 单一路径：CodeGrade → Submission → JudgeQuestion → Assignment
+        query = select(CodeGrade).join(
+            Submission, CodeGrade.submission_id == Submission.id
+        ).join(
+            JudgeQuestion, Submission.question_id == JudgeQuestion.id
+        ).join(
+            Assignment, JudgeQuestion.assignment_id == Assignment.id
+        ).where(Assignment.course_id.in_(course_ids))
+        count_q = select(func.count()).select_from(CodeGrade).join(
+            Submission, CodeGrade.submission_id == Submission.id
+        ).join(
+            JudgeQuestion, Submission.question_id == JudgeQuestion.id
+        ).join(
+            Assignment, JudgeQuestion.assignment_id == Assignment.id
+        ).where(Assignment.course_id.in_(course_ids))
+    elif kind == "exam":
+        # 单一路径：CodeGrade → ExamAnswer → ExamQuestion → Exam
+        query = select(CodeGrade).join(
+            ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id
+        ).join(
+            ExamQuestion, ExamAnswer.question_id == ExamQuestion.id
+        ).join(
+            Exam, ExamQuestion.exam_id == Exam.id
+        ).where(Exam.course_id.in_(course_ids))
+        count_q = select(func.count()).select_from(CodeGrade).join(
+            ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id
+        ).join(
+            ExamQuestion, ExamAnswer.question_id == ExamQuestion.id
+        ).join(
+            Exam, ExamQuestion.exam_id == Exam.id
+        ).where(Exam.course_id.in_(course_ids))
     else:
-        # 教师：只查自己课程的评分
-        # 通过 submission → JudgeQuestion → Assignment → Course
-        # 或 exam_answer → ExamQuestion → Exam → Course
+        # 无 kind 筛选：需要两条路径的 UNION（使用 distinct outerjoin 保底，但用子查询更干净）
+        # 这里用 OR 条件 + LEFT JOIN 两条路径，确保教师只能看到自己课程的数据
         query = select(CodeGrade).distinct().outerjoin(
             Submission, CodeGrade.submission_id == Submission.id
         ).outerjoin(
@@ -319,6 +352,7 @@ def _build_grade_base_query(db: Session, user: User, kind: str | None,
             )
         )
 
+    # kind 筛选：已在 base query 中按路径构建，这里只需过滤 NULL
     if kind:
         if kind == "assignment":
             query = query.where(CodeGrade.submission_id.isnot(None))
@@ -327,41 +361,31 @@ def _build_grade_base_query(db: Session, user: User, kind: str | None,
             query = query.where(CodeGrade.exam_answer_id.isnot(None))
             count_q = count_q.where(CodeGrade.exam_answer_id.isnot(None))
 
+    # question_id 筛选：使用已 JOIN 的表列，不再重复 JOIN
     if question_id is not None:
         if kind == "exam":
-            query = query.outerjoin(
-                ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id, full=False
-            ).where(ExamAnswer.question_id == question_id)
-            count_q = count_q.outerjoin(
-                ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id, full=False
-            ).where(ExamAnswer.question_id == question_id)
+            query = query.where(ExamAnswer.question_id == question_id)
+            count_q = count_q.where(ExamAnswer.question_id == question_id)
         else:
-            query = query.outerjoin(
-                Submission, CodeGrade.submission_id == Submission.id, full=False
-            ).where(Submission.question_id == question_id)
-            count_q = count_q.outerjoin(
-                Submission, CodeGrade.submission_id == Submission.id, full=False
-            ).where(Submission.question_id == question_id)
+            # assignment 或无 kind：通过 Submission → JudgeQuestion
+            query = query.where(Submission.question_id == question_id)
+            count_q = count_q.where(Submission.question_id == question_id)
 
+    # student_id 筛选：使用已 JOIN 的表列
     if student_id is not None:
         if kind == "exam":
+            # 需要 ExamSubmission 获取 student_id，只在需要时 JOIN
+            from app.models import ExamSubmission as _ExamSubmission
             query = query.outerjoin(
-                ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id, full=False
-            ).outerjoin(
-                ExamSubmission, ExamAnswer.submission_id == ExamSubmission.id, full=False
-            ).where(ExamSubmission.student_id == student_id)
+                _ExamSubmission, ExamAnswer.submission_id == _ExamSubmission.id
+            ).where(_ExamSubmission.student_id == student_id)
             count_q = count_q.outerjoin(
-                ExamAnswer, CodeGrade.exam_answer_id == ExamAnswer.id, full=False
-            ).outerjoin(
-                ExamSubmission, ExamAnswer.submission_id == ExamSubmission.id, full=False
-            ).where(ExamSubmission.student_id == student_id)
+                _ExamSubmission, ExamAnswer.submission_id == _ExamSubmission.id
+            ).where(_ExamSubmission.student_id == student_id)
         else:
-            query = query.outerjoin(
-                Submission, CodeGrade.submission_id == Submission.id, full=False
-            ).where(Submission.student_id == student_id)
-            count_q = count_q.outerjoin(
-                Submission, CodeGrade.submission_id == Submission.id, full=False
-            ).where(Submission.student_id == student_id)
+            # assignment 或无 kind：Submission 已在 base 中
+            query = query.where(Submission.student_id == student_id)
+            count_q = count_q.where(Submission.student_id == student_id)
 
     if status:
         query = query.where(CodeGrade.status == status)
@@ -415,29 +439,48 @@ def get_grade_detail(
     if cg is None:
         raise api_error(404, "NOT_FOUND", "评分记录不存在")
 
-    # 权限：确认属于教师自己的课程
+    # 权限：fail-closed——关联缺失时拒绝访问
     if current_user.role != "admin":
         course_ids = _teacher_course_ids(db, current_user)
+        if not course_ids:
+            raise api_error(403, "FORBIDDEN", "无权访问")
         if cg.submission_id:
             sub = db.get(Submission, cg.submission_id)
-            if sub:
-                q = db.get(JudgeQuestion, sub.question_id)
-                if q:
-                    a = db.get(Assignment, q.assignment_id)
-                    if a and a.course_id not in course_ids:
-                        raise api_error(403, "FORBIDDEN", "无权访问")
+            if not sub:
+                raise api_error(403, "FORBIDDEN", "提交记录不存在")
+            q = db.get(JudgeQuestion, sub.question_id)
+            if not q:
+                raise api_error(403, "FORBIDDEN", "题目不存在")
+            a = db.get(Assignment, q.assignment_id)
+            if not a or a.course_id not in course_ids:
+                raise api_error(403, "FORBIDDEN", "无权访问")
         elif cg.exam_answer_id:
             ans = db.get(ExamAnswer, cg.exam_answer_id)
-            if ans:
-                q = db.get(ExamQuestion, ans.question_id)
-                if q:
-                    e = db.get(Exam, q.exam_id)
-                    if e and e.course_id not in course_ids:
-                        raise api_error(403, "FORBIDDEN", "无权访问")
+            if not ans:
+                raise api_error(403, "FORBIDDEN", "答案记录不存在")
+            q = db.get(ExamQuestion, ans.question_id)
+            if not q:
+                raise api_error(403, "FORBIDDEN", "题目不存在")
+            e = db.get(Exam, q.exam_id)
+            if not e or e.course_id not in course_ids:
+                raise api_error(403, "FORBIDDEN", "无权访问")
+        else:
+            raise api_error(403, "FORBIDDEN", "无效的评分记录")
 
     overrides = db.scalars(
         select(GradeOverride).where(GradeOverride.code_grade_id == grade_id).order_by(GradeOverride.id.desc())
     ).all()
+
+    # 获取学生代码
+    student_code = None
+    if cg.submission_id:
+        sub = db.get(Submission, cg.submission_id)
+        if sub:
+            student_code = sub.code
+    elif cg.exam_answer_id:
+        ans = db.get(ExamAnswer, cg.exam_answer_id)
+        if ans:
+            student_code = ans.code_answer
 
     return {
         "id": cg.id, "submission_id": cg.submission_id, "exam_answer_id": cg.exam_answer_id,
@@ -449,6 +492,7 @@ def get_grade_detail(
         "deterministic_details": cg.deterministic_details,
         "static_analysis": cg.static_analysis,
         "ai_result": cg.ai_result, "raw_response": cg.raw_response,
+        "student_code": student_code,
         "needs_teacher_review": cg.needs_teacher_review,
         "review_reason": cg.review_reason,
         "attempt_count": cg.attempt_count, "last_error": cg.last_error,
@@ -477,9 +521,11 @@ def retry_grade(
     if current_user.role != "admin":
         _check_grade_permission(db, cg, current_user)
 
-    # 条件重置：只重置已终态（completed/review_required/system_error），不碰 running/queued
-    if cg.status in ("running", "queued"):
-        return {"ok": True, "grade_id": grade_id, "status": cg.status, "message": "评分正在进行中，不重复入队"}
+    # 条件重置：只重置失败终态（review_required/system_error），不碰 running/queued/completed
+    if cg.status in ("running", "queued", "pending"):
+        return {"ok": True, "grade_id": grade_id, "status": cg.status, "message": "评分进行中，不重复入队"}
+    if cg.status == "completed":
+        raise api_error(400, "ALREADY_COMPLETED", "评分已成功完成，无需重试。如需重新评分请使用重评功能。")
 
     cg.status = "pending"
     cg.last_error = None
@@ -556,8 +602,10 @@ def override_grade(
     )
     db.add(override_record)
 
-    # 同步正式分
+    # 同步正式分 + 标记为已完成
     if cg.mode == "active":
+        cg.status = "completed"
+        cg.finished_at = datetime.now(timezone.utc)
         if cg.submission_id:
             sub = db.get(Submission, cg.submission_id)
             if sub:
@@ -567,7 +615,9 @@ def override_grade(
             ans = db.get(ExamAnswer, cg.exam_answer_id)
             if ans and cg.scaled_score is not None:
                 ans.score = cg.scaled_score
+                ans.grading_status = "completed"
                 from app.services.exam_grading import finalize_if_ready
+                db.flush()  # 确保 ans 更新对 finalize 可见
                 finalize_if_ready(ans.submission_id, db)
 
     db.commit()
@@ -610,6 +660,9 @@ def regrade_question(
                 select(CodeGrade).where(CodeGrade.submission_id == sub.id)
             )
             if existing:
+                # 跳过进行中的评分，防止并发覆盖
+                if existing.status in ("running", "queued"):
+                    continue
                 existing.status = "pending"
                 existing.rubric_id = rubric.id
                 existing.last_error = None
@@ -634,6 +687,9 @@ def regrade_question(
                 select(CodeGrade).where(CodeGrade.exam_answer_id == ans.id)
             )
             if existing:
+                # 跳过进行中的评分，防止并发覆盖
+                if existing.status in ("running", "queued"):
+                    continue
                 existing.status = "pending"
                 existing.rubric_id = rubric.id
                 existing.last_error = None

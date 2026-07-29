@@ -129,10 +129,10 @@ def test_finalize_blocks_when_answer_running(db_session_factory):
 # ═══════════════════════════════════════════════════════════════
 
 def test_system_error_counted_in_total(db_session_factory):
-    """system_error 是终态，其分数（0分）计入总分"""
+    """system_error 阻塞汇总——不可作为零分 finalize（第五轮修正）"""
     ctx = _setup_two_code_questions(db_session_factory)
 
-    # 答案1 = completed(10) + 答案2 = system_error(0) → total = 10
+    # 答案1 = completed(10) + 答案2 = system_error(0) → 应阻塞汇总
     with db_session_factory() as db:
         ans2 = db.get(ExamAnswer, ctx["ans2_id"])
         ans2.grading_status = "system_error"
@@ -141,11 +141,11 @@ def test_system_error_counted_in_total(db_session_factory):
 
     with db_session_factory() as db:
         ok = finalize_if_ready(ctx["submission_id"], db)
-        assert ok is True
+        # 系统错误不作为零分 finalize——阻塞汇总
+        assert ok is False
 
         sub = db.get(ExamSubmission, ctx["submission_id"])
-        assert sub.status == "graded"
-        assert sub.score == 10.0
+        assert sub.status != "graded"
 
 
 # ═══════════════════════════════════════════════════════════════

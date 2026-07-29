@@ -14,6 +14,51 @@
         <p v-if="detail.last_error"><strong>最近错误：</strong>{{ detail.last_error }}</p>
       </div>
 
+      <!-- 学生代码 -->
+      <div v-if="detail.student_code" class="code-section">
+        <h3>学生代码</h3>
+        <pre class="student-code"><code>{{ detail.student_code }}</code></pre>
+      </div>
+
+      <!-- 确定性 F/R 证据 -->
+      <div v-if="detail.deterministic_details" class="evidence-section">
+        <h3>确定性测试结果 (F + R)</h3>
+        <div v-if="detail.deterministic_details.groups?.length">
+          <table class="item-table">
+            <thead><tr><th>测试组</th><th>维度</th><th>得分/满分</th><th>通过</th><th>失败</th><th>错误</th></tr></thead>
+            <tbody>
+              <tr v-for="g in detail.deterministic_details.groups" :key="g.id">
+                <td>{{ g.name || g.id }}</td>
+                <td>{{ g.dimension }}</td>
+                <td>{{ g.score }}/{{ g.max_score }}</td>
+                <td>{{ g.counts?.passed ?? '-' }}</td>
+                <td>{{ g.counts?.failed ?? '-' }}</td>
+                <td>{{ g.counts?.errors ?? '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-if="detail.deterministic_details.system_errors?.length" class="sys-errors">
+          <strong>系统错误：</strong>
+          <ul><li v-for="(e, ei) in detail.deterministic_details.system_errors" :key="ei">{{ e }}</li></ul>
+        </div>
+      </div>
+
+      <!-- 静态分析 -->
+      <div v-if="detail.static_analysis" class="static-section">
+        <h3>静态分析</h3>
+        <div v-if="detail.static_analysis.parse_error" class="parse-error">
+          <strong>语法错误：</strong>{{ detail.static_analysis.parse_error }}
+        </div>
+        <div v-if="detail.static_analysis.metrics">
+          <p>行数: {{ detail.static_analysis.metrics.lines }}, 函数数: {{ detail.static_analysis.metrics.functions }}, 圈复杂度: {{ detail.static_analysis.metrics.complexity }}</p>
+        </div>
+        <div v-if="detail.static_analysis.diagnostics?.length">
+          <h4>诊断信息</h4>
+          <ul><li v-for="(d, di) in detail.static_analysis.diagnostics.slice(0, 20)" :key="di">{{ d }}</li></ul>
+        </div>
+      </div>
+
       <div v-if="detail.ai_result" class="ai-result">
         <h3>AI 评分详情</h3>
         <div v-if="detail.ai_result.algorithm?.items?.length">
@@ -161,4 +206,11 @@ pre { background: #f5f5f5; padding: 10px; font-size: 12px; overflow-x: auto; max
 .error { color: #dc3545; }
 .success { color: #28a745; }
 button { padding: 6px 16px; cursor: pointer; }
+/* 新增加区块样式 */
+.code-section { margin: 16px 0; }
+.code-section h3, .evidence-section h3, .static-section h3 { font-size: 15px; margin-bottom: 8px; }
+.student-code { background: #0F172A; color: #E2E8F0; padding: 12px; border-radius: 6px; font-size: 13px; line-height: 1.5; max-height: 400px; white-space: pre-wrap; }
+.evidence-section, .static-section { margin: 16px 0; padding: 12px; background: #f8f9fa; border-radius: 6px; }
+.sys-errors { color: #dc3545; font-size: 13px; margin-top: 8px; }
+.parse-error { color: #dc3545; font-size: 13px; }
 </style>
