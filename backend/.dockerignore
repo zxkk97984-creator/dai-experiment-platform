@@ -1,6 +1,7 @@
 # pytest 临时文件
 .pytest-tmp
 .pt-tmp
+.pt*
 .pytest_cache
 
 # Python

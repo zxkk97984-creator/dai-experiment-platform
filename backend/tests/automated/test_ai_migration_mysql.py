@@ -60,6 +60,30 @@ class _FakeInspector:
         return [{"name": "ix_judge_questions_grading_mode"}]
 
 
+class _TablesWithoutImplicitIndexesInspector:
+    def get_columns(self, table_name):
+        return [
+            {"name": name}
+            for name in (
+                "grading_mode",
+                "teacher_constraints",
+                "reference_solution",
+                "test_groups",
+                "score_cap_rules",
+            )
+        ]
+
+    def get_table_names(self):
+        return ["question_rubrics", "code_grades", "grade_overrides"]
+
+    def get_indexes(self, table_name):
+        existing = {
+            "judge_questions": "ix_judge_questions_grading_mode",
+            "exam_questions": "ix_exam_questions_grading_mode",
+        }
+        return [{"name": existing[table_name]}] if table_name in existing else []
+
+
 def test_mysql_json_default_uses_expression_syntax(monkeypatch):
     migration = _load_migration()
     monkeypatch.setattr(migration, "op", _FakeOp())
@@ -113,3 +137,25 @@ def test_create_index_skips_index_left_by_later_partial_mysql_migration(monkeypa
     )
 
     assert fake_op.created_indexes == []
+
+
+def test_upgrade_recreates_indexes_missing_from_existing_ai_tables(monkeypatch):
+    """CREATE TABLE 后索引 DDL 失败时，重跑须补齐所有表内索引。"""
+    migration = _load_migration()
+    fake_op = _FakeOp()
+    monkeypatch.setattr(migration, "op", fake_op)
+    monkeypatch.setattr(
+        migration.sa,
+        "inspect",
+        lambda bind: _TablesWithoutImplicitIndexesInspector(),
+    )
+
+    migration.upgrade()
+
+    assert {index[0] for index in fake_op.created_indexes} == {
+        "ix_question_rubrics_judge_question_id",
+        "ix_question_rubrics_exam_question_id",
+        "ix_question_rubrics_status",
+        "ix_code_grades_status",
+        "ix_grade_overrides_code_grade_id",
+    }

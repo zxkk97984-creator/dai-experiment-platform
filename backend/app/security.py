@@ -36,9 +36,20 @@ def create_token(
     return jwt.encode(payload, secret_key, algorithm=algorithm)
 
 
-def decode_token(token: str, secret_key: str, algorithm: str) -> dict:
+def decode_token(
+    token: str,
+    secret_key: str,
+    algorithm: str,
+    *,
+    verify_exp: bool = True,
+) -> dict:
     try:
-        return jwt.decode(token, secret_key, algorithms=[algorithm])
+        return jwt.decode(
+            token,
+            secret_key,
+            algorithms=[algorithm],
+            options={"verify_exp": verify_exp},
+        )
     except JWTError as exc:
         raise ValueError("Invalid token") from exc
 

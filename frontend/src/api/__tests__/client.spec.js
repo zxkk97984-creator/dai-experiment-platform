@@ -116,6 +116,29 @@ describe('认证 401 拦截', () => {
       },
     )
   })
+
+  it('新会话已经建立时丢弃旧刷新结果但不清除新会话 Cookie', async () => {
+    let resolveRefresh
+    state.auth.isAuthenticated = true
+    state.axiosPost.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveRefresh = resolve
+      }),
+    )
+    const error = {
+      config: { url: '/courses', headers: {} },
+      response: { status: 401 },
+    }
+
+    const retry = state.responseRejected(error)
+    await Promise.resolve()
+    state.auth.sessionGeneration += 1
+    resolveRefresh({ data: { access_token: 'old-rotated-access-token' } })
+
+    await expect(retry).rejects.toThrow('会话已改变')
+    expect(state.auth.setAccessToken).not.toHaveBeenCalled()
+    expect(state.axiosPost).toHaveBeenCalledTimes(1)
+  })
 })
 
 
@@ -133,7 +156,7 @@ describe('认证 API', () => {
     ['login', ['teacher', 'secret']],
     ['refresh', []],
   ])('%s 请求跳过通用 401 刷新拦截器', async (method, args) => {
-    state.authAPI[method](...args)
+    await state.authAPI[method](...args)
 
     expect(state.client.post).toHaveBeenCalledWith(
       expect.any(String),
@@ -152,6 +175,23 @@ describe('认证 API', () => {
         skipAuthRefresh: true,
         headers: { Authorization: 'Bearer access-token' },
       },
+    )
+  })
+
+  it('login 等待旧 refresh 完整收尾后才建立新会话', async () => {
+    const { beginAuthRefresh } = await import('../authRefreshCoordinator.js')
+    const finishRefresh = beginAuthRefresh()
+
+    const loginRequest = state.authAPI.login('teacher', 'secret')
+    await Promise.resolve()
+    expect(state.client.post).not.toHaveBeenCalled()
+
+    finishRefresh()
+    await loginRequest
+    expect(state.client.post).toHaveBeenCalledWith(
+      '/auth/login',
+      { username: 'teacher', password: 'secret' },
+      { skipAuthRefresh: true },
     )
   })
 })

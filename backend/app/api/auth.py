@@ -55,7 +55,12 @@ def _logout_access_payload(request: Request, settings: Settings) -> dict | None:
     if scheme.lower() != "bearer" or not token:
         return None
     try:
-        payload = decode_token(token, settings.secret_key, settings.algorithm)
+        payload = decode_token(
+            token,
+            settings.secret_key,
+            settings.algorithm,
+            verify_exp=False,
+        )
     except ValueError:
         return None
     return payload if payload.get("type") == "access" else None
@@ -121,13 +126,14 @@ def logout(
     # Origin 校验：防止跨域 logout 攻击
     _validate_origin(request, settings)
     access_payload = _logout_access_payload(request, settings)
-    revoke_tokens(
+    clear_refresh_cookie = revoke_tokens(
         access_payload,
         dai_refresh_token or (payload.refresh_token if payload else None),
         redis_client,
         settings,
     )
-    _delete_refresh_cookie(response)
+    if clear_refresh_cookie:
+        _delete_refresh_cookie(response)
     response.status_code = status.HTTP_204_NO_CONTENT
     return None
 

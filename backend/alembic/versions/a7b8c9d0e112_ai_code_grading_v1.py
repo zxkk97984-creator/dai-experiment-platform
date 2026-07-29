@@ -82,10 +82,10 @@ def upgrade() -> None:
     _create_table_if_missing(
         "question_rubrics",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("judge_question_id", sa.Integer(), sa.ForeignKey("judge_questions.id"), nullable=True, index=True),
-        sa.Column("exam_question_id", sa.Integer(), sa.ForeignKey("exam_questions.id"), nullable=True, index=True),
+        sa.Column("judge_question_id", sa.Integer(), sa.ForeignKey("judge_questions.id"), nullable=True),
+        sa.Column("exam_question_id", sa.Integer(), sa.ForeignKey("exam_questions.id"), nullable=True),
         sa.Column("version", sa.Integer(), nullable=False),
-        sa.Column("status", sa.String(length=20), nullable=False, server_default="draft", index=True),
+        sa.Column("status", sa.String(length=20), nullable=False, server_default="draft"),
         sa.Column("source_hash", sa.String(length=64), nullable=False),
         sa.Column("source_snapshot", sa.JSON(), nullable=False),
         sa.Column("rubric_json", sa.JSON(), nullable=False),
@@ -111,7 +111,7 @@ def upgrade() -> None:
         sa.Column("exam_answer_id", sa.Integer(), sa.ForeignKey("exam_answers.id"), nullable=True, unique=True),
         sa.Column("rubric_id", sa.Integer(), sa.ForeignKey("question_rubrics.id"), nullable=False),
         sa.Column("mode", sa.String(length=20), nullable=False),
-        sa.Column("status", sa.String(length=30), nullable=False, server_default="pending", index=True),
+        sa.Column("status", sa.String(length=30), nullable=False, server_default="pending"),
         sa.Column("functional_score", sa.Float(), nullable=False, server_default="0"),
         sa.Column("algorithm_score", sa.Float(), nullable=True),
         sa.Column("robustness_score", sa.Float(), nullable=False, server_default="0"),
@@ -144,7 +144,7 @@ def upgrade() -> None:
     _create_table_if_missing(
         "grade_overrides",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("code_grade_id", sa.Integer(), sa.ForeignKey("code_grades.id"), nullable=False, index=True),
+        sa.Column("code_grade_id", sa.Integer(), sa.ForeignKey("code_grades.id"), nullable=False),
         sa.Column("original_snapshot", sa.JSON(), nullable=False),
         sa.Column("replacement_snapshot", sa.JSON(), nullable=False),
         sa.Column("reason", sa.Text(), nullable=False),
@@ -154,6 +154,27 @@ def upgrade() -> None:
     )
 
     # ── 索引 ──
+    _create_index_if_missing(
+        "ix_question_rubrics_judge_question_id",
+        "question_rubrics",
+        ["judge_question_id"],
+    )
+    _create_index_if_missing(
+        "ix_question_rubrics_exam_question_id",
+        "question_rubrics",
+        ["exam_question_id"],
+    )
+    _create_index_if_missing(
+        "ix_question_rubrics_status",
+        "question_rubrics",
+        ["status"],
+    )
+    _create_index_if_missing("ix_code_grades_status", "code_grades", ["status"])
+    _create_index_if_missing(
+        "ix_grade_overrides_code_grade_id",
+        "grade_overrides",
+        ["code_grade_id"],
+    )
     _create_index_if_missing("ix_judge_questions_grading_mode", "judge_questions", ["grading_mode"])
     _create_index_if_missing("ix_exam_questions_grading_mode", "exam_questions", ["grading_mode"])
 

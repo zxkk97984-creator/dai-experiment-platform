@@ -162,6 +162,48 @@ def test_logout_with_expired_access_revokes_valid_refresh_cookie(
     assert replay_r.status_code == 401
 
 
+def test_logout_does_not_revoke_another_users_refresh_cookie(
+    client,
+    db_session_factory,
+):
+    """旧会话的 access token 不能清除随后建立的其他用户会话。"""
+    create_user(db_session_factory, "lo_old_t", "teacher")
+    create_user(db_session_factory, "lo_new_t", "teacher")
+    old_login = client.post(
+        f"{API}/auth/login",
+        json={"username": "lo_old_t", "password": "Passw0rd!"},
+    )
+    new_login = client.post(
+        f"{API}/auth/login",
+        json={"username": "lo_new_t", "password": "Passw0rd!"},
+    )
+    old_access = old_login.json()["access_token"]
+    new_refresh = next(
+        cookie.split("dai_refresh_token=")[1].split(";")[0]
+        for cookie in new_login.headers.get_list("set-cookie")
+        if "dai_refresh_token=" in cookie
+    )
+
+    logout_r = client.post(
+        f"{API}/auth/logout",
+        json={},
+        cookies={"dai_refresh_token": new_refresh},
+        headers=auth_header(old_access),
+    )
+
+    assert logout_r.status_code == 204
+    assert not any(
+        "dai_refresh_token=" in cookie and "Max-Age=0" in cookie
+        for cookie in logout_r.headers.get_list("set-cookie")
+    )
+    refresh_r = client.post(
+        f"{API}/auth/refresh",
+        json={},
+        cookies={"dai_refresh_token": new_refresh},
+    )
+    assert refresh_r.status_code == 200, refresh_r.text
+
+
 # ═══════════════════════════════════════════════════════════════
 # 并发 refresh —— 真并发 Barrier
 # ═══════════════════════════════════════════════════════════════

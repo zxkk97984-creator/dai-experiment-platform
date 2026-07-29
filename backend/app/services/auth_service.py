@@ -69,7 +69,13 @@ def refresh_token_pair(db: Session, refresh_token: str, redis_client, settings: 
     return issue_token_pair(user, redis_client, settings)
 
 
-def revoke_tokens(access_payload: dict | None, refresh_token: str | None, redis_client, settings: Settings) -> None:
+def revoke_tokens(
+    access_payload: dict | None,
+    refresh_token: str | None,
+    redis_client,
+    settings: Settings,
+) -> bool:
+    """撤销同一会话的令牌；返回是否应清除请求携带的 refresh cookie。"""
     jti = access_payload.get("jti") if access_payload else None
     if jti:
         redis_client.setex(f"blacklist:{jti}", max(token_ttl_seconds(access_payload), 1), "1")
@@ -77,5 +83,10 @@ def revoke_tokens(access_payload: dict | None, refresh_token: str | None, redis_
         try:
             refresh_payload = decode_token(refresh_token, settings.secret_key, settings.algorithm)
         except ValueError:
-            return
+            return True
+        access_subject = access_payload.get("sub") if access_payload else None
+        refresh_subject = refresh_payload.get("sub")
+        if access_subject and refresh_subject and access_subject != refresh_subject:
+            return False
         redis_client.delete(f"refresh:{refresh_payload.get('jti')}")
+    return True

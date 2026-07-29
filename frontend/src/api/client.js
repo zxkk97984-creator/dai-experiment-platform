@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { useAuthStore } from '../stores/auth.js'
 import router from '../router/index.js'
+import { beginAuthRefresh } from './authRefreshCoordinator.js'
 
 const client = axios.create({
   baseURL: '/api/v1',
@@ -64,6 +65,7 @@ client.interceptors.response.use(
     isRefreshing = true
     config._retry = true
     const refreshGeneration = auth.sessionGeneration
+    const finishAuthRefresh = beginAuthRefresh()
 
     try {
       // Refresh via cookie（不需要手动传 refresh_token）
@@ -76,13 +78,19 @@ client.interceptors.response.use(
         auth.sessionGeneration !== refreshGeneration ||
         !auth.isAuthenticated
       ) {
-        // 手动退出与 refresh 并发时，响应 Cookie 可能已被轮换。
-        // 丢弃 access token，并用它发起幂等 logout 清理旋转后的 Cookie。
-        await axios.post('/api/v1/auth/logout', {}, {
-          timeout: 10000,
-          withCredentials: true,
-          headers: { Authorization: `Bearer ${newToken}` },
-        }).catch(() => {})
+        const newSessionIsActive = (
+          auth.sessionGeneration !== refreshGeneration &&
+          auth.isAuthenticated
+        )
+        if (!newSessionIsActive) {
+          // 手动退出与 refresh 并发时，响应 Cookie 可能已被轮换。
+          // 没有新会话时，用迟到 token 幂等清理旋转后的旧 Cookie。
+          await axios.post('/api/v1/auth/logout', {}, {
+            timeout: 10000,
+            withCredentials: true,
+            headers: { Authorization: `Bearer ${newToken}` },
+          }).catch(() => {})
+        }
         const sessionChangedError = new Error('会话已改变，已丢弃迟到的刷新结果')
         rejectQueue(sessionChangedError)
         return Promise.reject(sessionChangedError)
@@ -110,6 +118,7 @@ client.interceptors.response.use(
       return Promise.reject(error)
     } finally {
       isRefreshing = false
+      finishAuthRefresh()
     }
   }
 )

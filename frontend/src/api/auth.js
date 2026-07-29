@@ -1,7 +1,10 @@
 import client from './client.js'
+import { trackAuthLogout, waitForAuthTransitions } from './authRefreshCoordinator.js'
 
 export const authAPI = {
-  login(username, password) {
+  async login(username, password) {
+    // 避免旧 refresh/logout 的迟到 Set-Cookie 覆盖刚建立的新会话。
+    await waitForAuthTransitions()
     return client.post(
       '/auth/login',
       { username, password },
@@ -18,7 +21,7 @@ export const authAPI = {
     if (accessToken) {
       config.headers = { Authorization: `Bearer ${accessToken}` }
     }
-    return client.post('/auth/logout', {}, config)
+    return trackAuthLogout(client.post('/auth/logout', {}, config))
   },
   me() { return client.get('/auth/me') },
 }
