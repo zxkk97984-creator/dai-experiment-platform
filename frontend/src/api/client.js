@@ -36,13 +36,17 @@ client.interceptors.response.use(
   (res) => res,
   async (error) => {
     const { config, response } = error
-    if (!response || response.status !== 401 || config._retry) {
+    if (
+      !response ||
+      response.status !== 401 ||
+      config?._retry ||
+      config?.skipAuthRefresh
+    ) {
       return Promise.reject(error)
     }
 
     const auth = useAuthStore()
     if (!auth.isAuthenticated) {
-      auth.logout()
       router.push('/login')
       return Promise.reject(error)
     }

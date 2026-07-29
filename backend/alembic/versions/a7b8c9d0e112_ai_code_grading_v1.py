@@ -15,26 +15,40 @@ branch_labels = None
 depends_on = None
 
 
+def _json_server_default(value: str):
+    literal = f"'{value}'"
+    if op.get_bind().dialect.name == "mysql":
+        literal = f"({literal})"
+    return sa.text(literal)
+
+
+def _add_missing_columns(table_name: str, columns: list[sa.Column]) -> None:
+    existing_columns = {
+        column["name"] for column in sa.inspect(op.get_bind()).get_columns(table_name)
+    }
+    for column in columns:
+        if column.name not in existing_columns:
+            op.add_column(table_name, column)
+
+
 def upgrade() -> None:
     # ── 作业题目 AI 评分字段 ──
-    for col in [
+    _add_missing_columns("judge_questions", [
         sa.Column("grading_mode", sa.String(length=20), nullable=False, server_default="legacy"),
-        sa.Column("teacher_constraints", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+        sa.Column("teacher_constraints", sa.JSON(), nullable=False, server_default=_json_server_default("{}")),
         sa.Column("reference_solution", sa.Text(), nullable=True),
-        sa.Column("test_groups", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
-        sa.Column("score_cap_rules", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
-    ]:
-        op.add_column("judge_questions", col)
+        sa.Column("test_groups", sa.JSON(), nullable=False, server_default=_json_server_default("[]")),
+        sa.Column("score_cap_rules", sa.JSON(), nullable=False, server_default=_json_server_default("[]")),
+    ])
 
     # ── 考试题目 AI 评分字段 ──
-    for col in [
+    _add_missing_columns("exam_questions", [
         sa.Column("grading_mode", sa.String(length=20), nullable=False, server_default="legacy"),
-        sa.Column("teacher_constraints", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+        sa.Column("teacher_constraints", sa.JSON(), nullable=False, server_default=_json_server_default("{}")),
         sa.Column("reference_solution", sa.Text(), nullable=True),
-        sa.Column("test_groups", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
-        sa.Column("score_cap_rules", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
-    ]:
-        op.add_column("exam_questions", col)
+        sa.Column("test_groups", sa.JSON(), nullable=False, server_default=_json_server_default("[]")),
+        sa.Column("score_cap_rules", sa.JSON(), nullable=False, server_default=_json_server_default("[]")),
+    ])
 
     # ── Rubric 版本表 ──
     op.create_table(
@@ -78,8 +92,8 @@ def upgrade() -> None:
         sa.Column("score_cap", sa.Float(), nullable=True),
         sa.Column("final_score_100", sa.Float(), nullable=True),
         sa.Column("scaled_score", sa.Float(), nullable=True),
-        sa.Column("deterministic_details", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
-        sa.Column("static_analysis", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+        sa.Column("deterministic_details", sa.JSON(), nullable=False, server_default=_json_server_default("{}")),
+        sa.Column("static_analysis", sa.JSON(), nullable=False, server_default=_json_server_default("{}")),
         sa.Column("ai_result", sa.JSON(), nullable=True),
         sa.Column("raw_response", sa.Text(), nullable=True),
         sa.Column("needs_teacher_review", sa.Boolean(), nullable=False, server_default="0"),
