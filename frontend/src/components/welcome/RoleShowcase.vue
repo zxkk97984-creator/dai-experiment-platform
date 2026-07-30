@@ -1,0 +1,330 @@
+<script setup>
+import { ref } from 'vue'
+import { roles } from '../../views/welcome/welcomeContent.js'
+
+const activeScene = ref(null)
+</script>
+
+<template>
+  <section id="roles" class="roles" aria-label="角色场景">
+    <div class="roles-inner">
+      <header class="roles-header">
+        <p class="roles-eyebrow">角色场景</p>
+        <h2 class="roles-title">为每一位参与者设计</h2>
+        <p class="roles-sub">学生、教师、管理员和开发者，各自拥有专属的工作界面与交互流程。</p>
+      </header>
+
+      <div class="roles-grid">
+        <div
+          v-for="(scene, i) in roles"
+          :key="scene.id"
+          class="role-card"
+          :class="{
+            hovered: activeScene === i,
+            'role-card--student': scene.id === 'student',
+            'role-card--teacher': scene.id === 'teacher',
+            'role-card--admin': scene.id === 'admin',
+            'role-card--developer': scene.id === 'developer',
+          }"
+          @mouseenter="activeScene = i"
+          @mouseleave="activeScene = null"
+        >
+          <div class="role-chrome" aria-hidden="true">
+            <span class="role-dot"></span>
+            <span class="role-dot"></span>
+            <span class="role-dot"></span>
+            <span class="role-label">{{ scene.subtitle }}</span>
+          </div>
+          <div class="role-body">
+            <div class="role-sidebar" aria-hidden="true">
+              <span v-for="n in 4" :key="n" class="role-sidebar-item"></span>
+            </div>
+            <div class="role-main">
+              <div class="role-header-row">
+                <h3 class="role-name">{{ scene.title }}</h3>
+              </div>
+              <p class="role-desc">{{ scene.desc }}</p>
+              <div class="role-features">
+                <span v-for="h in scene.highlights" :key="h" class="role-feature">
+                  <i class="role-feature-dot"></i>
+                  {{ h }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cta-section">
+        <h2 class="cta-title">准备好开始了吗？</h2>
+        <p class="cta-desc">免费注册，即刻体验完整的 Python 在线学习与实验平台。</p>
+        <button class="cta-btn" @click="$emit('login')">
+          立即登录
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.roles {
+  padding: 80px 56px;
+  background: #F8FAFF;
+}
+
+.roles-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.roles-header {
+  margin-bottom: 48px;
+}
+
+.roles-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: #7359ED;
+  margin: 0 0 12px;
+}
+
+.roles-title {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #13213A;
+  margin: 0 0 12px;
+}
+
+.roles-sub {
+  font-size: 16px;
+  color: #6E7B92;
+  max-width: 560px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.roles-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 24px;
+}
+
+.role-card {
+  position: relative;
+  background: #fff;
+  border: 1px solid #E2E8F0;
+  border-radius: 16px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.35s ease;
+}
+
+.role-card--student { grid-column: span 7; }
+.role-card--teacher { grid-column: span 5; }
+.role-card--admin { grid-column: span 5; }
+.role-card--developer { grid-column: span 7; }
+
+.role-card:hover,
+.role-card.hovered {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.08);
+  border-color: #CBD5E1;
+}
+
+.role-card--student:hover,
+.role-card--student.hovered { border-color: #2467ED; }
+
+.role-card--teacher:hover,
+.role-card--teacher.hovered { border-color: #7359ED; }
+
+.role-card--admin:hover,
+.role-card--admin.hovered { border-color: #58DDA7; }
+
+.role-card--developer:hover,
+.role-card--developer.hovered { border-color: #2467ED; }
+
+.role-chrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+  background: #FAFBFC;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.role-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #CBD5E1;
+}
+
+.role-label {
+  margin-left: auto;
+  font-size: 11px;
+  color: #94A3B8;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.role-body {
+  display: flex;
+  min-height: 160px;
+}
+
+.role-sidebar {
+  width: 48px;
+  padding: 14px 10px;
+  background: #FAFBFC;
+  border-right: 1px solid #F1F5F9;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.role-sidebar-item {
+  height: 6px;
+  background: #E2E8F0;
+  border-radius: 3px;
+}
+
+.role-sidebar-item:nth-child(1) { width: 85%; }
+.role-sidebar-item:nth-child(2) { width: 70%; }
+.role-sidebar-item:nth-child(3) { width: 95%; }
+.role-sidebar-item:nth-child(4) { width: 60%; }
+
+.role-main {
+  flex: 1;
+  padding: 20px;
+}
+
+.role-header-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.role-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: #13213A;
+  margin: 0;
+}
+
+.role-desc {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #6E7B92;
+  margin: 0 0 14px;
+}
+
+.role-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.role-feature {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #64748B;
+}
+
+.role-feature-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #2467ED;
+  flex-shrink: 0;
+}
+
+/* ====== CTA ====== */
+.cta-section {
+  margin-top: 72px;
+  text-align: center;
+  padding: 56px 32px;
+  background: linear-gradient(135deg, rgba(36,103,237,0.04), rgba(115,89,237,0.04)), #fff;
+  border: 1px solid rgba(36,103,237,0.1);
+  border-radius: 24px;
+}
+
+.cta-title {
+  font-size: clamp(22px, 2.8vw, 30px);
+  font-weight: 700;
+  color: #13213A;
+  margin: 0 0 10px;
+}
+
+.cta-desc {
+  font-size: 15px;
+  color: #6E7B92;
+  margin: 0 0 24px;
+}
+
+.cta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 36px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #fff;
+  background: #2467ED;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cta-btn:hover {
+  background: #1D4ED8;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(36,103,237,0.3);
+}
+
+/* ====== Responsive ====== */
+@media (max-width: 1024px) {
+  .roles-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+  .role-card--student,
+  .role-card--developer { grid-column: span 4; }
+  .role-card--teacher,
+  .role-card--admin { grid-column: span 2; }
+}
+
+@media (max-width: 768px) {
+  .roles {
+    padding: 48px 24px;
+  }
+  .roles-grid {
+    grid-template-columns: 1fr;
+  }
+  .role-card--student,
+  .role-card--teacher,
+  .role-card--admin,
+  .role-card--developer { grid-column: span 1; }
+  .cta-section {
+    padding: 40px 24px;
+    margin-top: 48px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .role-card:hover,
+  .role-card.hovered {
+    transform: none;
+  }
+}
+</style>
