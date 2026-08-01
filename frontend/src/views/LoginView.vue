@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
+import { homeForRole } from '../router/roleHome.js'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -12,8 +13,6 @@ const error = ref('')
 const loading = ref(false)
 const showPwd = ref(false)
 
-const roleHome = { student: '/student/courses', teacher: '/teacher/courses', admin: '/admin/users' }
-
 async function handleLogin() {
   if (!username.value || !password.value) {
     error.value = '请输入用户名和密码'
@@ -23,7 +22,7 @@ async function handleLogin() {
   error.value = ''
   try {
     const user = await auth.login(username.value, password.value)
-    router.push(roleHome[user.role] || '/login')
+    router.push(homeForRole(user.role))
   } catch (e) {
     const detail = e.response?.data?.detail
     error.value = detail?.message || '登录失败，请检查用户名和密码'

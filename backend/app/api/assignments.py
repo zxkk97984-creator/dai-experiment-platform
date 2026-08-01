@@ -188,9 +188,9 @@ def create_question(
     assignment = require_assignment(assignment_id, db)
     ensure_assignment_manager(assignment, current_user, db)
     data = payload.model_dump(exclude_unset=True)
-    # JSON null 与未提供字段语义一致：新建编程题默认进入 shadow。
+    # JSON null 与未提供字段语义一致：新建编程题默认进入 active。
     if data.get("grading_mode") is None:
-        data["grading_mode"] = "shadow"
+        data["grading_mode"] = "active"
     question = JudgeQuestion(assignment_id=assignment_id, **data)
     db.add(question)
     db.commit()

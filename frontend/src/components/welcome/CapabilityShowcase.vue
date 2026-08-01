@@ -16,13 +16,24 @@ const hoveredId = ref(null)
 
       <div class="cap-grid">
         <div
-          v-for="item in capabilities"
+          v-for="(item, idx) in capabilities"
           :key="item.id"
           class="cap-card"
-          :class="{ hovered: hoveredId === item.id }"
+          :class="{
+            hovered: hoveredId === item.id,
+            'cap-card--courses': item.id === 'courses',
+            'cap-card--coding': item.id === 'coding',
+            'cap-card--notebook': item.id === 'notebook',
+            'cap-card--assignments': item.id === 'assignments',
+            'cap-card--exams': item.id === 'exams',
+            'cap-card--judging': item.id === 'judging',
+            'cap-card--aiGrading': item.id === 'aiGrading',
+            'cap-card--templates': item.id === 'templates',
+          }"
           @mouseenter="hoveredId = item.id"
           @mouseleave="hoveredId = null"
         >
+          <span class="cap-card-index">{{ String(idx + 1).padStart(2, "0") }} · {{ item.label }}</span>
           <div class="cap-card-icon" aria-hidden="true">
             <span class="cap-card-emoji">{{ item.icon === 'courses' ? '📚' : item.icon === 'coding' ? '💻' : item.icon === 'notebook' ? '📓' : item.icon === 'assignments' ? '📋' : item.icon === 'exams' ? '📝' : item.icon === 'judging' ? '⚡' : item.icon === 'aiGrading' ? '🤖' : '🧩' }}</span>
           </div>
@@ -31,7 +42,6 @@ const hoveredId = ref(null)
           <div class="cap-card-tags">
             <span v-for="tag in item.tags" :key="tag" class="cap-card-tag">{{ tag }}</span>
           </div>
-          <div class="cap-card-shine" aria-hidden="true"></div>
         </div>
       </div>
     </div>
@@ -82,95 +92,286 @@ const hoveredId = ref(null)
 .cap-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
+  gap: 16px;
 }
 
 .cap-card {
+  --accent: #2467ED;
   position: relative;
-  background: #fff;
-  border: 1px solid #E2E8F0;
-  border-radius: 16px;
-  padding: 24px 20px;
-  cursor: pointer;
-  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  min-height: 180px;
+  padding: 20px;
   overflow: hidden;
+  border: 1px solid rgba(45, 75, 127, 0.13);
+  border-radius: 16px;
+  color: #13213A;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 8px 20px rgba(40, 69, 118, 0.04);
+  cursor: default;
+  transform: translateY(0);
+  transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), border-color 260ms ease, box-shadow 260ms ease, background 260ms ease;
 }
 
+.cap-card--courses   { --accent: #2467ED; }
+.cap-card--coding    { --accent: #7359ED; }
+.cap-card--notebook  { --accent: #14A886; }
+.cap-card--assignments { --accent: #E4872D; }
+.cap-card--exams     { --accent: #D9467E; }
+.cap-card--judging   { --accent: #F59E0B; }
+.cap-card--aiGrading { --accent: #7359ED; }
+.cap-card--templates { --accent: #2467ED; }
+
 .cap-card::before {
-  content: '';
+  content: "";
   position: absolute;
   inset: 0;
-  border-radius: 16px;
   opacity: 0;
-  transition: opacity 0.3s ease;
-  background: linear-gradient(135deg, rgba(36,103,237,0.03), rgba(115,89,237,0.03));
+  z-index: 0;
+  background: linear-gradient(115deg, transparent 24%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 68%);
+  transform: translateX(-70%);
+  transition: opacity 220ms ease;
+}
+
+.cap-card::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 99px;
+  z-index: 0;
+  opacity: 0;
+  background: var(--accent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 54%, transparent);
+  transform: scaleX(0.3);
+  transition: opacity 240ms ease, transform 320ms ease;
 }
 
 .cap-card:hover,
 .cap-card.hovered {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 36px rgba(0,0,0,0.08);
-  border-color: #CBD5E1;
+  transform: translateY(-8px);
+  border-color: color-mix(in srgb, var(--accent) 35%, white);
+  background: #fff;
+  box-shadow: 0 20px 38px rgba(39, 70, 122, 0.13);
 }
 
 .cap-card:hover::before,
 .cap-card.hovered::before {
   opacity: 1;
+  animation: cardSheen 0.9s ease forwards;
+}
+
+.cap-card:hover::after,
+.cap-card.hovered::after {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+@keyframes cardSheen {
+  from { transform: translateX(-70%); }
+  to { transform: translateX(70%); }
+}
+
+.cap-card-index {
+  position: relative;
+  z-index: 1;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  color: #94A3B8;
+  margin-bottom: 14px;
+  text-transform: uppercase;
 }
 
 .cap-card-icon {
-  font-size: 28px;
-  margin-bottom: 12px;
   position: relative;
+  z-index: 1;
+  font-size: 26px;
+  margin-bottom: 10px;
 }
 
 .cap-card-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #13213A;
-  margin: 0 0 8px;
   position: relative;
+  z-index: 1;
+  font-size: 15px;
+  font-weight: 650;
+  color: #13213A;
+  margin: 0 0 6px;
+  letter-spacing: -0.01em;
 }
 
 .cap-card-summary {
-  font-size: 13px;
+  position: relative;
+  z-index: 1;
+  font-size: 12px;
   line-height: 1.55;
   color: #6E7B92;
-  margin: 0 0 14px;
-  position: relative;
+  margin: 0 0 12px;
 }
 
 .cap-card-tags {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  position: relative;
+  gap: 5px;
 }
 
 .cap-card-tag {
-  font-size: 11px;
-  padding: 3px 10px;
+  font-size: 10px;
+  padding: 3px 9px;
   border-radius: 20px;
   background: #F1F5F9;
   color: #64748B;
   font-weight: 500;
 }
 
-.cap-card-shine {
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 60%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
-  transform: skewX(-15deg);
-  transition: left 0.6s ease;
-  pointer-events: none;
+.cap-card-visual {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-top: auto;
+  padding-top: 14px;
+  min-height: 32px;
+  opacity: 0.4;
+  transition: opacity 0.28s ease 0.1s;
 }
 
-.cap-card:hover .cap-card-shine,
-.cap-card.hovered .cap-card-shine {
-  left: 120%;
+.cap-card:hover .cap-card-visual,
+.cap-card.hovered .cap-card-visual {
+  opacity: 1;
+}
+
+.vis-dot {
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.5;
+}
+.cap-card:hover .vis-dot,
+.cap-card.hovered .vis-dot {
+  animation: visDotBounce 0.65s ease-in-out infinite alternate;
+}
+@keyframes visDotBounce {
+  0% { transform: translateY(0); opacity: 0.3; }
+  100% { transform: translateY(-6px); opacity: 1; }
+}
+
+.vis-bar {
+  width: 22px;
+  height: calc(var(--h) * 1px);
+  border-radius: 3px;
+  background: rgba(45,75,127,0.1);
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+.vis-bar i {
+  display: block;
+  width: 100%;
+  height: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: height 0.4s ease;
+}
+.cap-card:hover .vis-bar i,
+.cap-card.hovered .vis-bar i {
+  height: 100%;
+  transition: height 0.45s ease calc(var(--h) * 0.02s);
+}
+
+.vis-wave {
+  width: 16px; height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0.4;
+}
+.cap-card:hover .vis-wave,
+.cap-card.hovered .vis-wave {
+  animation: visWaveDrift 0.7s ease-in-out infinite alternate;
+}
+@keyframes visWaveDrift {
+  0% { transform: translateX(-3px); opacity: 0.25; }
+  100% { transform: translateX(3px); opacity: 0.8; }
+}
+
+.vis-arrow {
+  font-size: 14px;
+  color: var(--accent);
+  opacity: 0.4;
+}
+.cap-card:hover .vis-arrow,
+.cap-card.hovered .vis-arrow {
+  animation: visArrowSlide 0.55s ease-in-out infinite alternate;
+}
+@keyframes visArrowSlide {
+  0% { transform: translateX(-3px); opacity: 0.2; }
+  100% { transform: translateX(4px); opacity: 0.9; }
+}
+
+.vis-ring {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  opacity: 0.4;
+}
+.cap-card:hover .vis-ring,
+.cap-card.hovered .vis-ring {
+  animation: visRingExpand 0.65s ease-in-out infinite alternate;
+}
+@keyframes visRingExpand {
+  0% { transform: scale(0.6); opacity: 0.2; }
+  100% { transform: scale(1); opacity: 0.85; }
+}
+
+.vis-bolt {
+  font-size: 13px;
+  opacity: 0.35;
+}
+.cap-card:hover .vis-bolt,
+.cap-card.hovered .vis-bolt {
+  animation: visBoltFlash 0.45s ease-in-out infinite alternate;
+}
+@keyframes visBoltFlash {
+  0% { transform: scale(0.7); opacity: 0.2; filter: brightness(1); }
+  100% { transform: scale(1.25); opacity: 1; filter: brightness(1.6); }
+}
+
+.vis-pulse {
+  position: absolute;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  opacity: 0;
+}
+.cap-card:hover .vis-pulse,
+.cap-card.hovered .vis-pulse {
+  animation: visPulse 1.1s ease-out infinite;
+}
+@keyframes visPulse {
+  0% { width: 6px; height: 6px; opacity: 0.7; }
+  100% { width: 22px; height: 22px; opacity: 0; }
+}
+
+.vis-cell {
+  width: 5px; height: 5px;
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 0;
+}
+.cap-card:hover .vis-cell,
+.cap-card.hovered .vis-cell {
+  animation: visGridFlicker 1s ease-in-out infinite;
+  animation-delay: calc(var(--x) * 0.1s + var(--y) * 0.15s);
+}
+@keyframes visGridFlicker {
+  0%, 100% { opacity: 0.1; }
+  50% { opacity: 0.7; }
 }
 
 @media (max-width: 1024px) {
@@ -193,8 +394,15 @@ const hoveredId = ref(null)
   .cap-card.hovered {
     transform: none;
   }
-  .cap-card-shine {
+  .cap-card::before,
+  .cap-card::after {
     display: none;
+  }
+  .cap-card-visual {
+    opacity: 0;
+  }
+  .vis-dot, .vis-bar i, .vis-wave, .vis-arrow, .vis-ring, .vis-bolt, .vis-pulse, .vis-cell {
+    animation: none !important;
   }
 }
 </style>

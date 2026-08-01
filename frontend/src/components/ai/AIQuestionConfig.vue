@@ -115,7 +115,7 @@ const props = defineProps({
 
 defineEmits(['close'])
 
-const config = ref({ grading_mode: 'shadow', teacher_constraints: {}, reference_solution: null, test_groups: [], score_cap_rules: [] })
+const config = ref({ grading_mode: 'active', teacher_constraints: {}, reference_solution: null, test_groups: [], score_cap_rules: [] })
 const constraintsStr = ref('')
 const loading = ref(false)
 const saving = ref(false)

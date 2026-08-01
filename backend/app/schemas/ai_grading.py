@@ -149,6 +149,15 @@ class GradeDimension(BaseModel):
     items: list[GradeItem] = Field(default_factory=list)
 
 
+class CodeSuggestion(BaseModel):
+    """AI 给出的具体代码修改建议（unified diff）"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=200)
+    diff: str = Field(min_length=1)
+
+
 class StudentFeedback(BaseModel):
     """学生可解释反馈"""
 
@@ -157,6 +166,7 @@ class StudentFeedback(BaseModel):
     strengths: list[str] = Field(default_factory=list)
     issues: list[str] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
+    code_suggestions: list[CodeSuggestion] = Field(default_factory=list)
 
 
 class AIGradeResponse(BaseModel):

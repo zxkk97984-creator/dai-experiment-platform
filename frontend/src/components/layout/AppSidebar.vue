@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth.js'
 import { useAppStore } from '../../stores/app.js'
+import { homeForRole } from '../../router/roleHome.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -11,6 +12,7 @@ const app = useAppStore()
 
 // Modern icons — clean line style
 const ICONS = {
+  home:        'M3 10l9-7 9 7 M5 9v11h14V9',
   courses:     'M4 4h6l2 2h8v10H4V4z M4 18h16',
   assignments: 'M9 5l-5 5 5 5 M15 5l5 5-5 5',
   exams:       'M5 3h12v18H5V3z M8 8h6 M8 12h4',
@@ -19,6 +21,7 @@ const ICONS = {
 }
 
 const menuItems = computed(() => {
+  const home = (root) => ({ path: root, label: '首页', sub: 'Home', icon: 'home', key: 'home' })
   const base = [
     { path: '/student/courses',     label: '课程',     sub: 'Courses',     icon: 'courses',     key: 'courses' },
     { path: '/student/assignments', label: '作业',     sub: 'Assignments', icon: 'assignments', key: 'assignments' },
@@ -26,6 +29,7 @@ const menuItems = computed(() => {
     { path: '/student/experiments', label: '实验',     sub: 'Lab',         icon: 'experiments', key: 'experiments' },
   ]
   if (auth.isTeacher) return [
+    home('/teacher'),
     { path: '/teacher/courses',     label: '课程',     sub: 'Courses',      icon: 'courses',     key: 'courses' },
     { path: '/teacher/assignments', label: '作业',     sub: 'Assignments',  icon: 'assignments', key: 'assignments' },
     { path: '/teacher/exams',       label: '考试',     sub: 'Exams',        icon: 'exams',       key: 'exams' },
@@ -48,13 +52,15 @@ const menuItems = computed(() => {
       key: 'templates',
     },
   ]
-  return base
+  return [home('/student'), ...base]
 })
 
 function isActive(path) {
   if (path === '/student/assignments' && route.path.startsWith('/student/submissions')) return true
   if (path === '/teacher/submissions' && route.path.startsWith('/teacher/submissions')) return true
   if (path === '/admin/submissions' && route.path.startsWith('/admin/submissions')) return true
+  // 角色首页项仅精确匹配根路由，子页面不高亮
+  if (path === '/student' || path === '/teacher') return route.path === path
   return route.path.startsWith(path)
 }
 
@@ -65,8 +71,13 @@ function navigate(path) {
 
 <template>
   <aside class="sidebar" :class="{ collapsed: app.sidebarCollapsed }">
-    <!-- Logo -->
-    <div class="logo" @click="navigate(menuItems[0]?.path || '/')">
+    <!-- Logo：真实 button，原生键盘可聚焦与回车激活 -->
+    <button
+      type="button"
+      class="logo"
+      aria-label="返回首页"
+      @click="navigate(homeForRole(auth.role))"
+    >
       <div class="logo-mark">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
           <path d="M12 2L3 7v10l9 5 9-5V7l-9-5z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
@@ -76,7 +87,7 @@ function navigate(path) {
       <div class="logo-text" v-if="!app.sidebarCollapsed">
         <span class="logo-name">DAI 实验平台</span>
       </div>
-    </div>
+    </button>
 
     <!-- Nav -->
     <nav class="nav">
@@ -85,6 +96,7 @@ function navigate(path) {
         v-for="item in menuItems" :key="item.path"
         class="nav-item"
         :class="{ active: isActive(item.path) }"
+        :aria-label="item.label"
         @click="navigate(item.path)"
         :title="app.sidebarCollapsed ? item.label : ''"
       >
@@ -94,7 +106,7 @@ function navigate(path) {
           </svg>
         </span>
         <span class="nav-text" v-if="!app.sidebarCollapsed">{{ item.label }}</span>
-        <span class="nav-active-dot" v-if="isActive(item.path) && app.sidebarCollapsed"></span>
+        <span class="nav-active-dot" v-if="isActive(item.path)"></span>
       </button>
     </nav>
 
@@ -145,6 +157,15 @@ function navigate(path) {
   cursor: pointer;
   user-select: none;
   border-bottom: 1px solid var(--border);
+  /* button 原生样式重置：保持与既有 div 外观一致 */
+  width: 100%;
+  box-sizing: border-box;
+  border-left: none;
+  border-top: none;
+  border-right: none;
+  background: none;
+  font-family: inherit;
+  text-align: left;
 }
 
 .logo-mark {
@@ -251,6 +272,7 @@ function navigate(path) {
 }
 
 .nav-active-dot {
+  display: none;
   position: absolute;
   right: 8px; top: 50%;
   transform: translateY(-50%);
@@ -258,6 +280,7 @@ function navigate(path) {
   background: var(--primary);
   border-radius: 50%;
 }
+.sidebar.collapsed .nav-active-dot { display: block; }
 
 .sidebar.collapsed .nav { padding: 16px 8px; }
 .sidebar.collapsed .nav-item {
@@ -299,4 +322,19 @@ function navigate(path) {
 }
 
 .sidebar.collapsed .collapse-btn { padding: 8px 0; }
+
+/* ── 移动端：强制紧凑图标栏（约 56px），避免固定 224px 侧栏挤压主内容 ── */
+@media (max-width: 768px) {
+  .sidebar { width: 56px; }
+  .logo { justify-content: center; padding: 16px 0; }
+  .logo-text,
+  .nav-label,
+  .nav-text,
+  .collapse-text { display: none; }
+  .nav { padding: 16px 8px; }
+  .nav-item { justify-content: center; padding: 12px 8px; gap: 0; }
+  .nav-active-dot { display: block; }
+  /* 移动端侧栏固定为图标形态，折叠控件无实际效果，隐藏避免误导 */
+  .collapse-btn { display: none; }
+}
 </style>

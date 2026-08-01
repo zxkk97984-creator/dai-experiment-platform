@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
+import { homeForRole } from './roleHome.js'
 
 const routes = [
   { path: '/welcome', name: 'Welcome', component: () => import('../views/WelcomeView.vue'), meta: { guest: true } },
@@ -59,13 +60,6 @@ const router = createRouter({
   routes,
 })
 
-const roleHome = {
-  student: '/student/courses',
-  teacher: '/teacher/courses',
-  admin: '/admin/users',
-  developer: '/developer/templates',
-}
-
 let fetchMePromise = null
 
 router.beforeEach(async (to, from, next) => {
@@ -73,7 +67,7 @@ router.beforeEach(async (to, from, next) => {
 
   // Guest-only pages (login/welcome)
   if (to.meta.guest) {
-    if (auth.isAuthenticated) return next(roleHome[auth.role] || '/login')
+    if (auth.isAuthenticated) return next(homeForRole(auth.role))
     return next()
   }
 
@@ -98,7 +92,7 @@ router.beforeEach(async (to, from, next) => {
 
   // Role check
   if (to.meta.role && to.meta.role !== auth.role) {
-    return next(roleHome[auth.role] || '/login')
+    return next(homeForRole(auth.role))
   }
 
   next()

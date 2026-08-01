@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
+import StudentAIGradingResult from '../../components/ai/StudentAIGradingResult.vue'
 import { assignmentsAPI } from '../../api/assignments.js'
 import { judgeAPI } from '../../api/judge.js'
 import { useAppStore } from '../../stores/app.js'
@@ -468,52 +469,19 @@ function stopSubmitPolling() {
                   <div class="result-meta">
                     <span v-if="submitResult?.execution_time_ms != null">{{ submitResult.execution_time_ms }}ms</span>
                   </div>
-
-                  <div v-if="submitResult?.grading_breakdown" class="ai-breakdown">
-                    <div class="ai-breakdown-title">AI 评分详情</div>
-                    <div class="ai-breakdown-grid">
-                      <div class="ai-breakdown-item">
-                        <span>功能正确性 F</span>
-                        <strong>{{ submitResult.grading_breakdown.functional_score }} / 60</strong>
-                      </div>
-                      <div class="ai-breakdown-item">
-                        <span>算法关键步骤 A</span>
-                        <strong>{{ submitResult.grading_breakdown.algorithm_score ?? '-' }} / 20</strong>
-                      </div>
-                      <div class="ai-breakdown-item">
-                        <span>鲁棒性与性能 R</span>
-                        <strong>{{ submitResult.grading_breakdown.robustness_score }} / 10</strong>
-                      </div>
-                      <div class="ai-breakdown-item">
-                        <span>代码质量 Q</span>
-                        <strong>{{ submitResult.grading_breakdown.quality_score ?? '-' }} / 10</strong>
-                      </div>
-                    </div>
-                    <div v-if="submitResult.grading_breakdown.raw_total != null" class="ai-breakdown-total">
-                      原始分 {{ submitResult.grading_breakdown.raw_total }}
-                      <template v-if="submitResult.grading_breakdown.score_cap != null">
-                        · 分数上限 {{ submitResult.grading_breakdown.score_cap }}
-                      </template>
-                      · 最终得分 {{ submitResult.grading_breakdown.final_score_100 }}
-                    </div>
-                    <div v-if="submitResult.grading_breakdown.strengths?.length" class="ai-feedback ai-feedback-good">
-                      <strong>优点：</strong>{{ submitResult.grading_breakdown.strengths.join('；') }}
-                    </div>
-                    <div v-if="submitResult.grading_breakdown.issues?.length" class="ai-feedback ai-feedback-issue">
-                      <strong>问题：</strong>{{ submitResult.grading_breakdown.issues.join('；') }}
-                    </div>
-                    <div v-if="submitResult.grading_breakdown.suggestions?.length" class="ai-feedback ai-feedback-tip">
-                      <strong>建议：</strong>{{ submitResult.grading_breakdown.suggestions.join('；') }}
-                    </div>
-                  </div>
-
-                  <div
-                    v-else-if="currentGradingMode === 'shadow' && submitResult?.status === 'accepted'"
-                    class="shadow-mode-note"
-                  >
-                    <strong>影子评分：</strong>AI 评分结果仅供教师复核，不向学生展示，也不影响本次成绩。
-                  </div>
                 </template>
+              </div>
+
+              <StudentAIGradingResult
+                v-if="submitResult?.grading_breakdown"
+                :breakdown="submitResult.grading_breakdown"
+              />
+
+              <div
+                v-if="!submitResult?.grading_breakdown && currentGradingMode === 'shadow' && submitResult?.status === 'accepted'"
+                class="shadow-mode-note"
+              >
+                <strong>影子评分：</strong>AI 评分结果仅供教师复核，不向学生展示，也不影响本次成绩。
               </div>
             </div>
           </transition>
@@ -1050,10 +1018,9 @@ function stopSubmitPolling() {
 .submit-result-card {
   padding: var(--space-4); border-radius: var(--radius-md);
   border: 1px solid var(--border);
+  background: var(--surface);
 }
-.submit-result-card.result-pass { background: var(--success-light); border-color: var(--success); }
-.submit-result-card.result-fail { background: var(--danger-light);  border-color: var(--danger); }
-.submit-result-card.result-pending { background: var(--surface-raised); border-color: var(--border); }
+.submit-result-card.result-pending { background: var(--surface-raised); }
 
 .result-status {
   font-size: var(--text-md); font-weight: 600; margin-bottom: var(--space-2);
@@ -1067,50 +1034,6 @@ function stopSubmitPolling() {
   display: flex; gap: var(--space-4);
 }
 
-.ai-breakdown {
-  margin-top: var(--space-4);
-  padding-top: var(--space-4);
-  border-top: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
-}
-.ai-breakdown-title {
-  color: var(--ink);
-  font-size: var(--text-sm);
-  font-weight: 700;
-  margin-bottom: var(--space-3);
-}
-.ai-breakdown-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-2);
-}
-.ai-breakdown-item {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-}
-.ai-breakdown-item strong { color: var(--ink); white-space: nowrap; }
-.ai-breakdown-total {
-  margin-top: var(--space-3);
-  color: var(--ink);
-  font-size: var(--text-sm);
-  font-weight: 600;
-}
-.ai-feedback {
-  margin-top: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  line-height: 1.6;
-}
-.ai-feedback-good { color: var(--success); background: color-mix(in srgb, var(--success-light) 70%, white); }
-.ai-feedback-issue { color: var(--danger); background: var(--danger-light); }
-.ai-feedback-tip { color: var(--primary); background: var(--accent-light); }
 .shadow-mode-note {
   margin-top: var(--space-4);
   padding: var(--space-3);
@@ -1201,6 +1124,5 @@ function stopSubmitPolling() {
   .action-bar { flex-direction: column; gap: var(--space-2); }
   .btn-self-test,
   .btn-submit-code { width: 100%; justify-content: center; }
-  .ai-breakdown-grid { grid-template-columns: 1fr; }
 }
 </style>

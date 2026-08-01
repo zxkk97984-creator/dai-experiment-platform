@@ -1,508 +1,477 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+// 教师工作台：一次聚合请求渲染真实数据；工作队列优先，含课程公告发布
+
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+
 import AppLayout from '../../components/layout/AppLayout.vue'
+import AnnouncementComposer from '../../components/dashboard/AnnouncementComposer.vue'
+import AnnouncementPanel from '../../components/dashboard/AnnouncementPanel.vue'
+import DashboardAsyncState from '../../components/dashboard/DashboardAsyncState.vue'
+import { announcementsAPI } from '../../api/announcements.js'
+import { dashboardAPI } from '../../api/dashboard.js'
 import { useAuthStore } from '../../stores/auth.js'
-import { coursesAPI } from '../../api/courses.js'
-import { assignmentsAPI } from '../../api/assignments.js'
-import { examsAPI } from '../../api/exams.js'
 
-const router = useRouter()
 const auth = useAuthStore()
+const router = useRouter()
 
-const courseCount = ref(null)
-const assignmentCount = ref(null)
-const examCount = ref(null)
-
-async function loadCounts() {
-  try {
-    const cRes = await coursesAPI.list({ per_page: 1 })
-    const courses = cRes.data.items || cRes.data
-    courseCount.value = Array.isArray(courses) ? courses.length : (courses.total ?? courses.length ?? null)
-  } catch { courseCount.value = null }
-  try {
-    const aRes = await assignmentsAPI.list({ per_page: 1 })
-    const assignments = aRes.data.items || aRes.data
-    assignmentCount.value = Array.isArray(assignments) ? assignments.length : (assignments.total ?? assignments.length ?? null)
-  } catch { assignmentCount.value = null }
-  try {
-    const eRes = await examsAPI.list({ per_page: 1 })
-    const exams = eRes.data.items || eRes.data
-    examCount.value = Array.isArray(exams) ? exams.length : (exams.total ?? exams.length ?? null)
-  } catch { examCount.value = null }
-}
-
-onMounted(loadCounts)
+const loading = ref(true)
+const error = ref(false)
+const dashboard = ref(null)
+const showComposer = ref(false)
+const panelRef = ref(null)
 
 const teacherName = (auth.user?.real_name || auth.user?.username || '老师').slice(0, 8)
 
-const stats = [
-  { key: 'courses',     label: '我管理的课程', value: courseCount,     unit: '门', color: 'blue',   icon: '📚', trend: '点击查看课程详情' },
-  { key: 'assignments', label: '已布置作业',   value: assignmentCount, unit: '份', color: 'orange', icon: '✍️', trend: '含编程题与实验' },
-  { key: 'exams',        label: '已创建考试',   value: examCount,        unit: '场', color: 'purple', icon: '📝', trend: '客观题 + 主观题' },
-]
+const todayText = new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  weekday: 'long',
+}).format(new Date())
 
-const pending = [
-  { date: '今日', time: '15:40', title: '《决策树》作业三 提交 12 份待批改', meta: 'ASG-03 · 12 份待批改', status: 'warning', icon: '📥' },
-  { date: '今日', time: '10:22', title: '《神经网络》实验二 共 8 名学生已提交', meta: 'EXP-02 · 平均用时 38 分钟', status: 'info', icon: '🧪' },
-  { date: '昨日', time: '21:05', title: '期中考试题目集 已发布', meta: 'EXAM-MID · 共 8 道题', status: 'success', icon: '✅' },
-]
+const timeFmt = new Intl.DateTimeFormat('zh-CN', {
+  month: 'numeric',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+})
 
-const sections = [
-  { num: '01', label: '课程管理',   sub: 'Courses',      desc: '创建与维护课程、章节、课时安排',         path: '/teacher/courses',     icon: '📚', color: 'blue' },
-  { num: '02', label: '作业中心',   sub: 'Assignments',  desc: '布置作业、编写判题题目与用例',           path: '/teacher/assignments', icon: '✍️', color: 'orange' },
-  { num: '03', label: '考试管理',   sub: 'Examinations', desc: '创建考试、查看成绩单与统计',             path: '/teacher/exams',       icon: '📝', color: 'purple' },
-  { num: '04', label: '实验管理',   sub: 'Experiments',  desc: '创建实验模块、配置 JupyterLab 环境',     path: '/teacher/experiments', icon: '🧪', color: 'green' },
-]
+const urgencyText = { urgent: '紧急', soon: '即将', normal: '常规' }
 
-function go(p) { router.push(p) }
-function statusText(s) {
-  return s === 'success' ? '已完成' : s === 'warning' ? '待处理' : s === 'info' ? '通知' : '记录'
+async function loadDashboard() {
+  loading.value = true
+  error.value = false
+  try {
+    const { data } = await dashboardAPI.teacher()
+    dashboard.value = data
+  } catch {
+    error.value = true
+  } finally {
+    loading.value = false
+  }
 }
+
+function go(route) {
+  // 仅允许服务端返回的教师相对路由
+  if (route === '/teacher' || route.startsWith('/teacher/')) {
+    router.push(route)
+  }
+}
+
+function formatTime(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : timeFmt.format(date)
+}
+
+function primaryWork() {
+  return dashboard.value?.work_items?.[0] || null
+}
+
+function primaryActionRoute() {
+  return primaryWork()?.route || '/teacher/courses'
+}
+
+async function markRead(notice) {
+  try {
+    await announcementsAPI.markRead(notice.id)
+    if (!dashboard.value) return
+    dashboard.value = {
+      ...dashboard.value,
+      announcements: dashboard.value.announcements.map((a) =>
+        a.id === notice.id ? { ...a, is_read: true } : a,
+      ),
+    }
+  } catch {
+    // 标记失败保持原状，下次操作可重试
+  }
+}
+
+function onPublished() {
+  showComposer.value = false
+  loadDashboard()
+  // 发布成功后同样把焦点还给发布按钮
+  nextTick(() => {
+    panelRef.value?.$el?.querySelector('.publish-btn')?.focus()
+  })
+}
+
+function onCloseComposer() {
+  showComposer.value = false
+  // 关闭后把焦点还给发布按钮
+  nextTick(() => {
+    panelRef.value?.$el?.querySelector('.publish-btn')?.focus()
+  })
+}
+
+const primaryActionLabel = computed(() =>
+  primaryWork() ? '处理工作' : '管理课程',
+)
+
+onMounted(loadDashboard)
 </script>
 
 <template>
   <AppLayout>
     <div class="dash">
-      <!-- ── Hero / Page Head ──────────────────────────────────────────── -->
-      <header class="page-head hero">
-        <div class="hero-content">
-          <div class="hero-eyebrow">
-            <span class="eyebrow-dot"></span>
-            <span>教师工作台 · 在线</span>
-          </div>
-          <h1 class="hero-title">
-            欢迎回来，{{ teacherName }} 👨‍🏫
-          </h1>
-          <p class="hero-sub">
-            你有 <strong>3 项</strong>待办事项，其中 <strong>1 份作业</strong>需要批改。
-          </p>
-          <div class="hero-actions">
-            <button class="btn-primary" @click="go('/teacher/assignments')">
-              去批改作业
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                <path d="M3 8h10 M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </button>
-            <button class="btn-ghost" @click="go('/teacher/courses')">
-              管理课程
-            </button>
-          </div>
+      <!-- 问候行：角色问候 + 日期 + 一个上下文主操作 -->
+      <header class="greeting">
+        <div class="greeting-text">
+          <h1 class="greeting-title">你好，{{ teacherName }}</h1>
+          <p class="greeting-date">{{ todayText }}</p>
         </div>
-        <div class="hero-visual" aria-hidden="true">
-          <div class="insight-card">
-            <div class="insight-emoji">📊</div>
-            <div class="insight-body">
-              <div class="insight-num">38<span class="insight-unit">min</span></div>
-              <div class="insight-label">学生平均实验用时</div>
-            </div>
-          </div>
-        </div>
+        <button
+          type="button"
+          class="work-queue-btn"
+          @click="go(primaryActionRoute())"
+        >
+          {{ primaryActionLabel }}
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path d="M3 8h10 M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
       </header>
 
-      <!-- ── Stats ──────────────────────────────────────────────────────── -->
-      <section class="stats">
-        <article v-for="s in stats" :key="s.key" class="card stat-card" :class="'stat-' + s.color">
-          <div class="stat-icon">{{ s.icon }}</div>
-          <div class="stat-body">
-            <div class="stat-value">
-              <!-- 已加载：显示数值；加载中：骨架；错误：'—' -->
-              <span v-if="s.value !== null" class="stat-num">{{ s.value }}</span>
-              <span v-else-if="s.value === null" class="stat-num stat-num--skeleton"></span>
-              <span class="stat-unit">{{ s.unit }}</span>
-            </div>
-            <div class="stat-label">{{ s.label }}</div>
-            <div class="stat-trend">{{ s.trend }}</div>
-          </div>
-        </article>
+      <!-- 摘要条 -->
+      <section class="summary-strip" aria-label="工作概况">
+        <div class="summary-item">
+          <span class="summary-num">{{ dashboard?.summary?.course_count ?? '—' }}</span>
+          <span class="summary-label">课程</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-num">{{ dashboard?.summary?.student_count ?? '—' }}</span>
+          <span class="summary-label">学生</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-num">{{ dashboard?.summary?.pending_review_count ?? '—' }}</span>
+          <span class="summary-label">待复核</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-num">{{ dashboard?.summary?.upcoming_deadline_count ?? '—' }}</span>
+          <span class="summary-label">近 7 天截止</span>
+        </div>
       </section>
 
-      <!-- ── Main grid ──────────────────────────────────────────────────── -->
-      <div class="dash-grid">
-        <!-- 待办时间线 -->
+      <!-- 主双列：待处理工作 + 通知公告 -->
+      <div class="main-grid">
         <section class="card panel-card">
-          <div class="panel-head">
-            <div>
-              <h2 class="panel-title">待办与近期提交</h2>
-              <p class="panel-sub">{{ pending.length }} 项需要关注</p>
-            </div>
-            <span class="badge badge-warning">Pending</span>
-          </div>
-          <ul v-if="pending.length" class="timeline">
-            <li v-for="(a, i) in pending" :key="i" class="tl-item">
-              <div class="tl-icon" :class="'tl-' + a.status">{{ a.icon }}</div>
-              <div class="tl-body">
-                <div class="tl-title">{{ a.title }}</div>
-                <div class="tl-meta">
-                  <span class="tl-meta-code">{{ a.meta }}</span>
-                  <span class="tl-sep">·</span>
-                  <span class="tl-time">{{ a.date }} {{ a.time }}</span>
-                </div>
-              </div>
-              <span class="badge" :class="'badge-' + a.status">{{ statusText(a.status) }}</span>
-            </li>
-          </ul>
-          <div v-else class="empty-state">
-            <p>🎉 暂无待办事项</p>
-          </div>
+          <h2 class="panel-title">待处理工作</h2>
+          <DashboardAsyncState
+            :loading="loading"
+            :error="error"
+            :empty="!dashboard?.work_items?.length"
+            empty-title="暂无待处理工作"
+            empty-body="当前没有需要复核或即将截止的任务"
+            @retry="loadDashboard"
+          >
+            <ul v-if="dashboard" class="work-list">
+              <li
+                v-for="item in dashboard.work_items"
+                :key="item.kind + '-' + item.id"
+                class="work-item"
+              >
+                <span class="urgency-dot" :class="'urgency-' + item.urgency" aria-hidden="true"></span>
+                <button type="button" class="work-item-link" @click="go(item.route)">
+                  <span class="work-item-title">{{ item.title }}</span>
+                  <span class="work-item-meta">
+                    {{ item.course_title }}
+                    <template v-if="item.time_at">· {{ formatTime(item.time_at) }}</template>
+                  </span>
+                </button>
+                <span class="work-item-detail">{{ item.detail }}</span>
+              </li>
+            </ul>
+          </DashboardAsyncState>
         </section>
 
-        <!-- 管理入口 -->
-        <aside class="card panel-card">
-          <div class="panel-head">
-            <div>
-              <h2 class="panel-title">管理入口</h2>
-              <p class="panel-sub">快速进入各管理模块</p>
-            </div>
-          </div>
-          <div class="section-list">
-            <button
-              v-for="s in sections" :key="s.num"
-              class="section-row"
-              :class="'sec-' + s.color"
-              @click="go(s.path)"
-            >
-              <div class="sec-icon">{{ s.icon }}</div>
-              <div class="sec-body">
-                <div class="sec-label">
-                  <span class="sec-zh">{{ s.label }}</span>
-                  <span class="sec-num">{{ s.num }}</span>
-                </div>
-                <p class="sec-desc">{{ s.desc }}</p>
-              </div>
-              <svg class="sec-arrow" width="14" height="14" viewBox="0 0 16 16" fill="none">
-                <path d="M5 3l5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </button>
-          </div>
-        </aside>
+        <section class="card panel-card">
+          <AnnouncementPanel
+            ref="panelRef"
+            :announcements="dashboard?.announcements || []"
+            :loading="loading"
+            :error="error"
+            :can-publish="true"
+            @retry="loadDashboard"
+            @publish="showComposer = true"
+            @mark-read="markRead"
+          />
+        </section>
       </div>
+
+      <!-- 课程概览 -->
+      <section class="card panel-card">
+        <h2 class="panel-title">课程概览</h2>
+        <DashboardAsyncState
+          :loading="loading"
+          :error="error"
+          :empty="!dashboard?.course_health?.length"
+          empty-title="暂无课程"
+          empty-body="创建课程后，健康度会展示在这里"
+          @retry="loadDashboard"
+        >
+          <ul v-if="dashboard" class="health-list">
+            <li v-for="row in dashboard.course_health" :key="row.course_id" class="health-row">
+              <button type="button" class="health-link" @click="go(row.route)">
+                {{ row.title }}
+              </button>
+              <span class="health-meta">
+                {{ row.student_count }} 名学生
+                <template v-if="row.pending_review_count">· {{ row.pending_review_count }} 项待复核</template>
+                <template v-if="row.upcoming_deadline_count">· {{ row.upcoming_deadline_count }} 项即将截止</template>
+                ·
+                <template v-if="row.at_risk_expected_count">
+                  {{ row.at_risk_submitted_count ?? 0 }}/{{ row.at_risk_expected_count }} 已提交
+                </template>
+                <template v-else>—</template>
+              </span>
+            </li>
+          </ul>
+        </DashboardAsyncState>
+      </section>
+
+      <!-- 最近动态 -->
+      <section class="card panel-card">
+        <h2 class="panel-title">最近动态</h2>
+        <DashboardAsyncState
+          :loading="loading"
+          :error="error"
+          :empty="!dashboard?.recent_activity?.length"
+          empty-title="暂无动态"
+          empty-body="学生提交后，动态会出现在这里"
+          @retry="loadDashboard"
+        >
+          <ul v-if="dashboard" class="activity-list">
+            <li
+              v-for="item in dashboard.recent_activity"
+              :key="item.kind + '-' + item.id"
+              class="activity-item"
+            >
+              <button type="button" class="activity-link" @click="go(item.route)">
+                {{ item.title }}
+              </button>
+              <span class="activity-meta">
+                {{ item.course_title }} · {{ formatTime(item.happened_at) }}
+              </span>
+            </li>
+          </ul>
+        </DashboardAsyncState>
+      </section>
+
+      <AnnouncementComposer
+        v-if="showComposer"
+        :courses="dashboard?.managed_courses || []"
+        @close="onCloseComposer"
+        @published="onPublished"
+      />
     </div>
   </AppLayout>
 </template>
 
 <style scoped>
-/* ═══════════════════════════════════════════════════════════════════════
-   Teacher Dashboard — Code Studio
-   Hero + KPI stats（异步加载 + 骨架屏）+ pending timeline + section dir.
-   设计系统：全局 card / badge / btn-*，颜色全用 var()
-   ═══════════════════════════════════════════════════════════════════════ */
-.dash { display: flex; flex-direction: column; gap: 32px; }
+.dash { display: flex; flex-direction: column; gap: 24px; }
 
-/* ── Hero ─────────────────────────────────────────────────────────── */
-.hero {
-  background: linear-gradient(135deg, #0F172A 0%, #1E3A8A 70%, var(--primary) 100%);
-  border-radius: var(--radius-2xl);
-  padding: 36px 36px;
-  color: #FFFFFF;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 24px;
+/* ── 问候行 ─────────────────────────────────────────────────── */
+.greeting {
+  display: flex;
   align-items: center;
-  position: relative;
-  overflow: hidden;
-  box-shadow: var(--shadow-xl);
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 0;
 }
-.hero::before {
-  content: '';
-  position: absolute; inset: 0;
-  background-image:
-    radial-gradient(circle at 85% 20%, rgba(249, 115, 22, 0.3) 0%, transparent 45%),
-    radial-gradient(circle at 20% 80%, rgba(139, 92, 246, 0.18) 0%, transparent 50%);
-  pointer-events: none;
-}
-.hero::after {
-  content: '';
-  position: absolute; inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-  background-size: 28px 28px;
-  pointer-events: none;
-}
-
-.hero-content { position: relative; z-index: 1; }
-.hero-eyebrow {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 5px 11px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: var(--radius-full);
-  font-size: var(--text-xs);
-  color: rgba(255, 255, 255, 0.85);
-  font-weight: 500;
-  margin-bottom: 14px;
-}
-.eyebrow-dot {
-  width: 6px; height: 6px;
-  background: var(--success);
-  border-radius: 50%;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
-  animation: pulse 2s infinite;
-}
-@keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3); }
-  50%      { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
-}
-.hero-title {
-  font-size: 30px;
+.greeting-title {
+  margin: 0;
+  font-size: 24px;
   font-weight: 700;
-  color: #FFFFFF;
+  color: var(--ink);
   letter-spacing: -0.02em;
-  line-height: 1.15;
-  margin: 0 0 10px;
 }
-.hero-sub {
-  font-size: 15px;
-  color: rgba(255, 255, 255, 0.8);
-  line-height: 1.55;
-  margin: 0 0 18px;
+.greeting-date {
+  margin: 4px 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
 }
-.hero-sub strong { color: var(--warning-soft); font-weight: 600; }
-.hero-actions {
-  display: flex; gap: 10px; flex-wrap: wrap;
-}
-.hero-actions .btn-primary {
-  background: #FFFFFF;
-  color: #1E3A8A;
-  border-color: #FFFFFF;
+.work-queue-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 18px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--primary);
+  color: var(--surface);
+  font-size: var(--text-sm);
   font-weight: 600;
+  cursor: pointer;
 }
-.hero-actions .btn-primary:hover {
-  background: rgba(255, 255, 255, 0.92);
-  color: var(--primary-dark);
-  box-shadow: 0 8px 20px rgba(255, 255, 255, 0.2);
-}
-.hero-actions .btn-ghost {
-  background: rgba(255, 255, 255, 0.08);
-  color: #FFFFFF;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-}
-.hero-actions .btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.15);
-  color: #FFFFFF;
-  border-color: rgba(255, 255, 255, 0.3);
-}
+.work-queue-btn:hover { background: var(--primary-dark); }
 
-.hero-visual { position: relative; z-index: 1; }
-.insight-card {
-  display: flex; align-items: center; gap: 14px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: var(--radius-xl);
-  padding: 18px 22px;
-  backdrop-filter: blur(10px);
+/* ── 摘要条 ─────────────────────────────────────────────────── */
+.summary-strip {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
 }
-.insight-emoji { font-size: 32px; line-height: 1; }
-.insight-num {
-  font-size: 28px;
+.summary-item {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 14px 20px;
+  border-right: 1px solid var(--border);
+}
+.summary-item:last-child { border-right: none; }
+.summary-num {
+  font-family: var(--font-display);
+  font-size: 22px;
   font-weight: 700;
-  color: var(--warning-soft);
-  letter-spacing: -0.02em;
+  color: var(--ink);
   line-height: 1;
 }
-.insight-unit {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
-  font-weight: 500; margin-left: 4px;
-}
-.insight-label {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.7);
-  font-weight: 500; letter-spacing: 0.04em; margin-top: 4px;
-}
-
-/* ── Stats — 复用 .card，异步加载带骨架屏 ──────────────────────── */
-.stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-}
-.stat-card {
-  padding: 18px;
-  display: flex; align-items: flex-start; gap: 14px;
-  transition: border-color var(--duration-normal) var(--ease-out),
-              box-shadow var(--duration-normal) var(--ease-out),
-              transform var(--duration-fast) var(--ease-out);
-}
-.stat-card:hover { transform: translateY(-2px); }
-.stat-icon {
-  width: 40px; height: 40px;
-  border-radius: var(--radius-md);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 18px; flex-shrink: 0;
-  background: var(--primary-light);
-}
-.stat-blue .stat-icon   { background: var(--primary-light); }
-.stat-orange .stat-icon { background: var(--accent-light); }
-.stat-purple .stat-icon { background: var(--purple-light); }
-
-.stat-body { flex: 1; min-width: 0; }
-.stat-value {
-  display: flex; align-items: baseline; gap: 3px;
-  font-family: var(--font-display);
-  font-weight: 700; margin-bottom: 2px;
-}
-.stat-num {
-  font-size: 24px;
-  color: var(--ink);
-  letter-spacing: -0.02em; line-height: 1;
-}
-/* 骨架屏：异步数据未到达时显示 */
-.stat-num--skeleton {
-  display: inline-block;
-  width: 48px; height: 24px;
-  background: linear-gradient(90deg, var(--border) 25%, var(--surface-raised) 50%, var(--border) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.6s infinite;
-  border-radius: var(--radius-sm);
-  vertical-align: middle;
-}
-@keyframes shimmer {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-.stat-unit {
+.summary-label {
   font-size: var(--text-xs);
-  color: var(--text-secondary); font-weight: 500;
-}
-.stat-label {
-  font-size: var(--text-sm);
-  color: var(--ink); font-weight: 500; margin-bottom: 4px;
-}
-.stat-trend {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
+  color: var(--text-secondary);
 }
 
-/* ── Dash grid ─────────────────────────────────────────────────────── */
-.dash-grid {
+/* ── 面板 ───────────────────────────────────────────────────── */
+.panel-card { padding: 20px; }
+.panel-title {
+  margin: 0 0 14px;
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.main-grid {
   display: grid;
   grid-template-columns: 1.4fr 1fr;
-  gap: 24px;
+  gap: 20px;
   align-items: start;
 }
 
-/* 面板卡片 */
-.panel-card { padding: 24px; }
-.panel-head {
-  display: flex; justify-content: space-between; align-items: flex-start;
-  margin-bottom: 18px;
-}
-.panel-title {
-  font-size: 17px; font-weight: 600;
-  color: var(--ink); letter-spacing: -0.01em; margin: 0;
-}
-.panel-sub {
-  font-size: var(--text-xs); color: var(--text-secondary); margin: 3px 0 0;
-}
-
-/* 时间线 */
-.timeline { list-style: none; padding: 0; margin: 0; }
-.tl-item {
-  display: flex; align-items: flex-start; gap: 12px;
-  padding: 14px 0;
+/* ── 待处理工作 ─────────────────────────────────────────────── */
+.work-list { list-style: none; margin: 0; padding: 0; }
+.work-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
   border-bottom: 1px solid var(--border);
 }
-.tl-item:first-child { padding-top: 0; }
-.tl-item:last-child { border-bottom: none; padding-bottom: 0; }
-.tl-icon {
-  width: 36px; height: 36px;
-  border-radius: var(--radius-md);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 16px; flex-shrink: 0;
-  background: var(--primary-light);
-}
-.tl-warning .tl-icon { background: var(--accent-light); }
-.tl-info .tl-icon    { background: var(--primary-light); }
-.tl-success .tl-icon { background: var(--success-light); }
-.tl-neutral .tl-icon { background: var(--surface-sunken); }
+.work-item:first-child { padding-top: 0; }
+.work-item:last-child { border-bottom: none; padding-bottom: 0; }
 
-.tl-body { flex: 1; min-width: 0; }
-.tl-title {
-  font-size: var(--text-sm); font-weight: 500;
-  color: var(--ink); line-height: 1.4; margin-bottom: 4px;
+.urgency-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
 }
-.tl-meta {
-  display: flex; gap: 6px;
-  font-size: 11px; color: var(--text-secondary); flex-wrap: wrap;
-}
-.tl-meta-code { font-family: var(--font-mono); color: var(--text-tertiary); }
-.tl-sep { color: var(--text-tertiary); }
-.tl-time { color: var(--text-tertiary); }
+.urgency-dot.urgency-urgent { background: var(--danger); }
+.urgency-dot.urgency-soon { background: var(--warning); }
 
-/* 管理入口列表 */
-.section-list {
-  display: flex; flex-direction: column; gap: 10px;
+.work-item-link {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
-.section-row {
-  display: flex; align-items: center; gap: 14px;
-  background: var(--surface-sunken);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 14px 16px;
-  cursor: pointer; text-align: left; width: 100%;
-  transition: border-color var(--duration-fast) var(--ease-out),
-              background var(--duration-fast) var(--ease-out),
-              transform var(--duration-fast) var(--ease-out),
-              box-shadow var(--duration-fast) var(--ease-out);
+.work-item-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
 }
-.section-row:hover {
-  border-color: var(--border-strong);
-  background: var(--surface);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
+.work-item-link:hover .work-item-title { color: var(--primary); }
+.work-item-meta {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
 }
-.sec-icon {
-  width: 38px; height: 38px;
-  border-radius: var(--radius-md);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 17px; flex-shrink: 0;
-  background: var(--primary-light);
-}
-.sec-blue .sec-icon   { background: var(--primary-light); }
-.sec-orange .sec-icon { background: var(--accent-light); }
-.sec-purple .sec-icon { background: var(--purple-light); }
-.sec-green .sec-icon  { background: var(--success-light); }
 
-.sec-body { flex: 1; min-width: 0; }
-.sec-label {
-  display: flex; align-items: baseline; gap: 8px;
-  margin-bottom: 2px;
-}
-.sec-zh {
-  font-size: var(--text-sm); font-weight: 600;
-  color: var(--ink); letter-spacing: -0.005em; line-height: 1.2;
-}
-.sec-num {
+.work-item-detail {
+  flex-shrink: 0;
   font-size: 11px;
-  font-family: var(--font-mono); color: var(--text-tertiary);
-  font-weight: 500; letter-spacing: 0.04em;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-xs);
+  color: var(--warning);
+  background: var(--warning-light);
 }
-.sec-desc {
-  font-size: var(--text-xs); color: var(--text-secondary);
-  line-height: 1.4; margin: 0;
-}
-.sec-arrow {
-  color: var(--text-tertiary); flex-shrink: 0;
-  transition: transform var(--duration-fast) var(--ease-out),
-              color var(--duration-fast) var(--ease-out);
-}
-.section-row:hover .sec-arrow { color: var(--primary); transform: translateX(2px); }
 
-/* ── Responsive ─────────────────────────────────────────────────────── */
-@media (max-width: 1024px) {
-  .stats { grid-template-columns: repeat(2, 1fr); }
-  .dash-grid { grid-template-columns: 1fr; }
+/* ── 课程概览 ───────────────────────────────────────────────── */
+.health-list { list-style: none; margin: 0; padding: 0; }
+.health-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
 }
+.health-row:last-child { border-bottom: none; }
+.health-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.health-link:hover { color: var(--primary); }
+.health-meta { font-size: var(--text-xs); color: var(--text-secondary); flex-shrink: 0; }
+
+/* ── 最近动态 ───────────────────────────────────────────────── */
+.activity-list { list-style: none; margin: 0; padding: 0; }
+.activity-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.activity-item:last-child { border-bottom: none; }
+.activity-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.activity-link:hover { color: var(--primary); }
+.activity-meta { font-size: var(--text-xs); color: var(--text-tertiary); flex-shrink: 0; }
+
+/* ── 响应式 ─────────────────────────────────────────────────── */
+@media (max-width: 1024px) {
+  .main-grid { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 768px) {
-  .hero { grid-template-columns: 1fr; padding: 24px; }
-  .hero-visual { display: none; }
-  .hero-title { font-size: 24px; }
-  .stats { grid-template-columns: 1fr; gap: 12px; }
-  .stat-card { padding: 14px; }
-  .stat-num { font-size: 20px; }
-  .panel-card { padding: 18px; }
+  /* 摘要条 2x2 网格：flex-basis 固定 50% 且禁止收缩，保证换行成两列 */
+  .summary-strip { flex-wrap: wrap; }
+  .summary-item {
+    flex: 0 0 50%;
+    box-sizing: border-box;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+  }
+  .summary-item:nth-last-child(-n + 2) { border-bottom: none; }
+  .greeting { align-items: flex-start; flex-direction: column; }
+  .panel-card { padding: 16px; }
 }
 </style>

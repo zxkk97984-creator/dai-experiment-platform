@@ -125,7 +125,7 @@ onUnmounted(() => {
     </div>
 
     <div ref="roleRef" id="roles">
-      <RoleShowcase />
+      <RoleShowcase @login="goLogin" />
     </div>
 
     <footer class="w-footer" role="contentinfo">

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { heroContent, codeLines, codeOutput } from '../../views/welcome/welcomeContent.js'
 
 const props = defineProps({
@@ -12,17 +12,41 @@ const revealedLines = ref(0)
 const showOutput = ref(false)
 const showScore = ref(false)
 
-onMounted(() => {
-  // Staggered reveal animation
+let loopTimer = null
+const CYCLE_MS = 7800
+
+function resetDemo() {
+  revealedLines.value = 0
+  showOutput.value = false
+  showScore.value = false
+}
+
+function startTyping() {
+  resetDemo()
   const interval = setInterval(() => {
     if (revealedLines.value < codeLines.length) {
       revealedLines.value++
     } else {
       clearInterval(interval)
       setTimeout(() => { showOutput.value = true }, 200)
-      setTimeout(() => { showScore.value = true }, 600)
+      setTimeout(() => { showScore.value = true }, 500)
     }
-  }, 80)
+  }, 70)
+}
+
+
+onUnmounted(() => {
+  if (loopTimer) {
+    clearInterval(loopTimer)
+    loopTimer = null
+  }
+})
+
+onMounted(() => {
+  startTyping()
+  loopTimer = setInterval(() => {
+    startTyping()
+  }, CYCLE_MS)
 })
 </script>
 
@@ -66,19 +90,30 @@ onMounted(() => {
             </div>
             <pre class="code-content"><code v-for="(line, i) in codeLines" :key="i" :class="{ visible: i < revealedLines }" :style="{ paddingLeft: line.indent * 20 + 'px' }">{{ line.text }}</code></pre>
           </div>
-        </div>
 
-        <div class="output-strip" :class="{ visible: showOutput }">
-          <div class="output-meta">
-            <span class="output-item">Epochs <strong>{{ codeOutput.epochs }}</strong></span>
-            <span class="output-item">Accuracy <strong class="txt-accent">{{ codeOutput.accuracy }}</strong></span>
-            <span class="output-item">Tests <strong class="txt-success">{{ codeOutput.testsPassed ? '全部测试通过' : '' }}</strong></span>
+          <!-- Output strip: now inside the dark code window -->
+          <div class="code-footer" :class="{ visible: showOutput }">
+            <div class="code-footer-meta">
+              <span class="code-footer-item">
+                <span class="code-footer-label">Epochs</span>
+                <strong>{{ codeOutput.epochs }}</strong>
+              </span>
+              <span class="code-footer-item">
+                <span class="code-footer-label">Accuracy</span>
+                <strong class="txt-accent">{{ codeOutput.accuracy }}</strong>
+              </span>
+              <span class="code-footer-item">
+                <span class="code-footer-label">Tests</span>
+                <strong class="txt-success">{{ codeOutput.testsPassed ? '全部测试通过' : '' }}</strong>
+              </span>
+            </div>
           </div>
         </div>
 
-        <div class="score-panel" :class="{ visible: showScore }">
+        <!-- Score panel: also integrated into the dark theme -->
+        <div class="score-strip" :class="{ visible: showScore }">
           <div class="score-badge">AI</div>
-          <div class="score-body">
+          <div class="score-text">
             <span class="score-label">{{ codeOutput.scoreLabel }}：优秀</span>
             <span class="score-comment">{{ codeOutput.scoreComment }}</span>
           </div>
@@ -236,6 +271,7 @@ onMounted(() => {
 .code-body {
   display: flex;
   padding: 18px 0;
+  min-height: 200px;
 }
 
 .code-lines {
@@ -250,6 +286,7 @@ onMounted(() => {
   line-height: 1.7;
   color: rgba(255,255,255,0.2);
   user-select: none;
+  flex-shrink: 0;
 }
 
 .code-content {
@@ -268,6 +305,11 @@ onMounted(() => {
   opacity: 0;
   transform: translateX(8px);
   transition: all 0.3s ease;
+  background: transparent;
+  color: #CBD5E1;
+  padding: 0;
+  border: none;
+  border-radius: 0;
 }
 
 .code-content code.visible {
@@ -275,69 +317,71 @@ onMounted(() => {
   transform: translateX(0);
 }
 
-/* ====== Output Strip ====== */
-.output-strip {
-  margin-top: 16px;
-  background: #fff;
-  border: 1px solid #E2E8F0;
-  border-radius: 16px;
-  padding: 18px 20px;
+/* ====== Code Footer (output strip inside dark window) ====== */
+.code-footer {
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding: 14px 20px;
+  background: rgba(0, 0, 0, 0.18);
   opacity: 0;
-  transform: translateY(10px);
+  transform: translateY(8px);
   transition: all 0.4s ease;
 }
 
-.output-strip.visible {
+.code-footer.visible {
   opacity: 1;
   transform: translateY(0);
 }
 
-.output-meta {
+.code-footer-meta {
   display: flex;
   gap: 32px;
 }
 
-.output-item {
-  font-size: 12px;
-  color: #94A3B8;
+.code-footer-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.code-footer-label {
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
+  color: rgba(255,255,255,0.35);
 }
 
-.output-item strong {
-  display: block;
-  margin-top: 4px;
-  font-size: 20px;
+.code-footer-item strong {
+  font-size: 17px;
   font-weight: 700;
-  color: #13213A;
+  color: #E2E8F0;
 }
 
-.txt-accent { color: #2467ED !important; }
+.txt-accent { color: #60A5FA !important; }
 .txt-success { color: #58DDA7 !important; }
 
-/* ====== Score Panel ====== */
-.score-panel {
-  margin-top: 12px;
-  background: #fff;
-  border: 1px solid #E2E8F0;
-  border-radius: 16px;
-  padding: 16px 20px;
+/* ====== Score Strip (below code window, dark themed) ====== */
+.score-strip {
+  margin-top: 10px;
+  background: #14213B;
+  border-radius: 12px;
+  padding: 14px 18px;
   display: flex;
-  gap: 14px;
-  align-items: flex-start;
+  gap: 12px;
+  align-items: center;
   opacity: 0;
-  transform: translateY(10px);
+  transform: translateY(8px);
   transition: all 0.4s ease 0.15s;
+  box-shadow: 0 8px 30px rgba(20,33,59,0.18);
 }
 
-.score-panel.visible {
+.score-strip.visible {
   opacity: 1;
   transform: translateY(0);
 }
 
 .score-badge {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -349,21 +393,21 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-.score-body {
+.score-text {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .score-label {
   font-size: 14px;
   font-weight: 600;
-  color: #13213A;
+  color: #E2E8F0;
 }
 
 .score-comment {
   font-size: 12px;
-  color: #94A3B8;
+  color: rgba(255,255,255,0.45);
   line-height: 1.4;
 }
 
@@ -389,6 +433,13 @@ onMounted(() => {
     width: 100%;
     justify-content: center;
   }
+  .code-body {
+    min-height: 160px;
+  }
+  .code-footer-meta {
+    gap: 16px;
+    flex-wrap: wrap;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -397,8 +448,8 @@ onMounted(() => {
     transform: none;
     transition: none;
   }
-  .output-strip,
-  .score-panel {
+  .code-footer,
+  .score-strip {
     opacity: 1;
     transform: none;
     transition: none;

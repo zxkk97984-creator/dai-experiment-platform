@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
+import StudentAIGradingResult from '../../components/ai/StudentAIGradingResult.vue'
 import { examsAPI } from '../../api/exams.js'
 import { useAppStore } from '../../stores/app.js'
 const route = useRoute(); const app = useAppStore()
@@ -188,35 +189,16 @@ function isSelected(qId, optKey) { const ans = answers.value[qId]; return ans &&
       </div>
 
       <!-- ── Active AI 评分逐题明细（仅对学生显示安全信息） ────────────── -->
-      <div v-if="graded && hasBreakdown" class="card breakdown-section">
+      <section v-if="graded && hasBreakdown" class="breakdown-section">
         <h3 class="breakdown-title">AI 评分详情</h3>
         <div v-for="(ans, ai) in (submission?.answers || [])" :key="ai">
-          <div v-if="ans.grading_breakdown" class="breakdown-item">
-            <h4>第 {{ ai + 1 }} 题</h4>
-            <div class="breakdown-grid">
-              <div class="breakdown-cell"><span class="blabel">功能 F</span><span class="bval">{{ ans.grading_breakdown.functional_score ?? '-' }} / 60</span></div>
-              <div class="breakdown-cell"><span class="blabel">算法 A</span><span class="bval">{{ ans.grading_breakdown.algorithm_score ?? '-' }} / 20</span></div>
-              <div class="breakdown-cell"><span class="blabel">鲁棒性 R</span><span class="bval">{{ ans.grading_breakdown.robustness_score ?? '-' }} / 10</span></div>
-              <div class="breakdown-cell"><span class="blabel">代码质量 Q</span><span class="bval">{{ ans.grading_breakdown.quality_score ?? '-' }} / 10</span></div>
-            </div>
-            <div class="breakdown-meta" v-if="ans.grading_breakdown.raw_total != null">
-              <span>原始: {{ ans.grading_breakdown.raw_total }}</span>
-              <span v-if="ans.grading_breakdown.score_cap != null"> → 上限: {{ ans.grading_breakdown.score_cap }}</span>
-              <span> → 最终: {{ ans.grading_breakdown.final_score_100 ?? '-' }}</span>
-              <span v-if="ans.grading_breakdown.scaled_score != null"> → 折算: {{ ans.grading_breakdown.scaled_score }}</span>
-            </div>
-            <div v-if="ans.grading_breakdown.strengths?.length" class="feedback-box feedback-good">
-              <strong>优点：</strong>{{ ans.grading_breakdown.strengths.join('；') }}
-            </div>
-            <div v-if="ans.grading_breakdown.issues?.length" class="feedback-box feedback-issue">
-              <strong>问题：</strong>{{ ans.grading_breakdown.issues.join('；') }}
-            </div>
-            <div v-if="ans.grading_breakdown.suggestions?.length" class="feedback-box feedback-tip">
-              <strong>建议：</strong>{{ ans.grading_breakdown.suggestions.join('；') }}
-            </div>
-          </div>
+          <StudentAIGradingResult
+            v-if="ans.grading_breakdown"
+            :breakdown="ans.grading_breakdown"
+            :heading="'第 ' + (ai + 1) + ' 题'"
+          />
         </div>
-      </div>
+      </section>
 
       <!-- ── Submitted ─────────────────────────────────────────────────── -->
       <div v-else-if="submitted" class="card result-card">
@@ -428,19 +410,18 @@ function isSelected(qId, optKey) { const ans = answers.value[qId]; return ans &&
 .submit-btn { padding: 12px 56px; font-size: 16px; font-weight: 600; }
 
 /* ── Active AI 评分逐题明细（学生安全展示） ─────────────────────── */
-.breakdown-section { padding: 20px; margin-top: 16px; }
-.breakdown-title { font-size: 16px; font-weight: 600; margin: 0 0 16px; color: var(--ink); }
-.breakdown-item { border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
-.breakdown-item h4 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: #475569; }
-.breakdown-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 8px; }
-.breakdown-cell { text-align: center; padding: 8px; background: #f8f9fa; border-radius: 6px; }
-.blabel { display: block; font-size: 11px; color: #94a3b8; margin-bottom: 2px; }
-.bval { display: block; font-size: 16px; font-weight: 700; color: #333; }
-.breakdown-meta { font-size: 12px; color: #94a3b8; display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-.feedback-box { padding: 8px 12px; border-radius: 6px; font-size: 12px; margin-top: 6px; line-height: 1.5; }
-.feedback-good { background: #f0fdf4; color: #166534; }
-.feedback-issue { background: #fef2f2; color: #991b1b; }
-.feedback-tip { background: #eff6ff; color: #1e40af; }
+.breakdown-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 20px;
+}
+.breakdown-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+}
 
 @media (max-width: 640px) {
   .exam-header { flex-direction: column; }

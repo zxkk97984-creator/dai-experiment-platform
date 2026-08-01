@@ -526,3 +526,50 @@ class GradeOverride(TimestampMixin, Base):
     replacement_snapshot: Mapped[dict] = mapped_column(JSON)
     reason: Mapped[str] = mapped_column(Text)
     reviewer_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+
+
+# ── 公告与已读回执 ─────────────────────────────────────────────
+
+
+class Announcement(TimestampMixin, Base):
+    """公告：全局（管理员）或课程（任课教师）范围，纯文本内容"""
+
+    __tablename__ = "announcements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(120))
+    content: Mapped[str] = mapped_column(Text)
+    priority: Mapped[str] = mapped_column(String(20), default="normal", index=True)
+    scope: Mapped[str] = mapped_column(String(20), index=True)  # global / course
+    course_id: Mapped[int | None] = mapped_column(
+        ForeignKey("courses.id"), nullable=True, index=True
+    )
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    published_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    course: Mapped[Course | None] = relationship()
+    author: Mapped[User] = relationship()
+
+
+class AnnouncementRead(Base):
+    """已读回执——(announcement_id, user_id) 唯一，标记已读幂等"""
+
+    __tablename__ = "announcement_reads"
+    __table_args__ = (
+        UniqueConstraint("announcement_id", "user_id", name="uq_announcement_read_user"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    announcement_id: Mapped[int] = mapped_column(
+        ForeignKey("announcements.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    read_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

@@ -53,5 +53,7 @@ const app = useAppStore()
 
 @media (max-width: 768px) {
   .content-inner { padding: 20px 16px 60px; }
+  /* 移动端侧栏固定为 56px 图标栏，主区域 offset 保持一致 */
+  .main-area { margin-left: 56px; }
 }
 </style>

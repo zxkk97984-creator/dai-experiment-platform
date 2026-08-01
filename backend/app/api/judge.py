@@ -13,6 +13,7 @@ from app.errors import api_error
 from app.models import Assignment, CodeGrade, Course, CourseEnrollment, JudgeQuestion, Submission, User
 from app.schemas import PaginatedResponse, SampleRunResponse, SubmissionCreate, SubmissionRead
 from app.worker.judge_worker import _get_timeout, _run_docker_pytest, _status_from_pytest
+from app.services.student_ai_results import build_student_grading_breakdown
 
 router = APIRouter(prefix="/judge", tags=["judge"])
 
@@ -148,20 +149,7 @@ def get_submission_result(
             )
         )
         if cg and cg.ai_result:
-            ai = cg.ai_result
-            feedback = ai.get("student_feedback", {}) if isinstance(ai, dict) else {}
-            submission.grading_breakdown = {
-                "functional_score": cg.functional_score,
-                "algorithm_score": cg.algorithm_score,
-                "robustness_score": cg.robustness_score,
-                "quality_score": cg.quality_score,
-                "raw_total": cg.raw_total,
-                "score_cap": cg.score_cap,
-                "final_score_100": cg.final_score_100,
-                "strengths": feedback.get("strengths", []),
-                "issues": feedback.get("issues", []),
-                "suggestions": feedback.get("suggestions", []),
-            }
+            submission.grading_breakdown = build_student_grading_breakdown(cg)
 
     return submission
 

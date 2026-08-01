@@ -87,7 +87,7 @@ export const capabilities = [
     tags: ['多组用例', '错误定位', '性能评测'],
   },
   {
-    id: 'ai-grading',
+    id: 'aiGrading',
     icon: 'aiGrading',
     title: 'AI 评分',
     summary: '大模型驱动的代码评审，从正确性、风格、效率多维度给出反馈。',

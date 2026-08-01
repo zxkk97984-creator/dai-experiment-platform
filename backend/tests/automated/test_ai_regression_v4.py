@@ -5,14 +5,14 @@ from unittest.mock import patch, MagicMock
 
 
 # ═══════════════════════════════════════════════════════════════
-# 1. grading_mode 默认 shadow + Literal 拒绝非法值
+# 1. grading_mode 默认 active + Literal 拒绝非法值
 # ═══════════════════════════════════════════════════════════════
 
 class TestGradingModeDefault:
-    """新建代码题默认 shadow，显式 legacy 保持 legacy，非法值被 Literal 拒绝"""
+    """新建代码题默认 active，显式 legacy 保持 legacy，非法值被 Literal 拒绝"""
 
-    def test_assignment_create_defaults_to_shadow(self, client, db_session_factory):
-        """创建作业题不传 grading_mode → 默认 shadow"""
+    def test_assignment_create_defaults_to_active(self, client, db_session_factory):
+        """创建作业题不传 grading_mode → 默认 active"""
         from conftest import create_user, login, auth_header
         create_user(db_session_factory, "gmd_t", "teacher")
         tok, _ = login(client, "gmd_t")
@@ -33,8 +33,8 @@ class TestGradingModeDefault:
         cfg = client.get(f"/api/v1/ai-grading/questions/assignment/{qid}/config",
                          headers=auth_header(tok))
         assert cfg.status_code == 200
-        assert cfg.json()["grading_mode"] == "shadow", \
-            f"新建题应为 shadow: {cfg.json()}"
+        assert cfg.json()["grading_mode"] == "active", \
+            f"新建题应为 active: {cfg.json()}"
 
     def test_assignment_explicit_legacy_stays_legacy(self, client, db_session_factory):
         """显式传 legacy → 保持 legacy"""
@@ -58,8 +58,8 @@ class TestGradingModeDefault:
                          headers=auth_header(tok))
         assert cfg.json()["grading_mode"] == "legacy"
 
-    def test_exam_code_question_defaults_to_shadow(self, client, db_session_factory):
-        """考试编程题不传 grading_mode → 默认 shadow"""
+    def test_exam_code_question_defaults_to_active(self, client, db_session_factory):
+        """考试编程题不传 grading_mode → 默认 active"""
         from conftest import create_user, login, auth_header
         create_user(db_session_factory, "ecd_t", "teacher")
         create_user(db_session_factory, "ecd_s", "student")
@@ -83,11 +83,11 @@ class TestGradingModeDefault:
 
         cfg = client.get(f"/api/v1/ai-grading/questions/exam/{qid}/config",
                          headers=auth_header(tok))
-        assert cfg.json()["grading_mode"] == "shadow", \
-            f"考试编程题应为 shadow: {cfg.json()}"
+        assert cfg.json()["grading_mode"] == "active", \
+            f"考试编程题应为 active: {cfg.json()}"
 
     def test_exam_choice_question_stays_legacy(self, client, db_session_factory):
-        """选择题始终 legacy（不触发代码题默认 shadow 逻辑）"""
+        """选择题始终 legacy（不触发代码题默认 active 逻辑）"""
         from conftest import create_user, login, auth_header
         create_user(db_session_factory, "ech_t", "teacher")
         tok, _ = login(client, "ech_t")

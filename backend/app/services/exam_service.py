@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.errors import api_error
 from app.models import Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission, User
+from app.services.student_ai_results import build_student_grading_breakdown
 
 def require_exam_editable(exam, user):
     if user.role != "admin" and exam.created_by_id != user.id:
@@ -266,7 +267,7 @@ def get_my_grade(exam_id, student, db):
     for a in answers:
         item = {"question_id": a.question_id, "grading_status": a.grading_status,
                 "score": a.score, "system_error": a.system_error}
-        # active 模式：返回安全的学生反馈（F/A/R/Q + strengths/issues/suggestions）
+        # active 模式：返回安全的学生反馈（F/A/R/Q、扣分依据、测试结果、代码建议）
         # shadow 模式：不泄露 AI 数据，仅返回确定性分数
         cg = db.scalar(
             select(CodeGrade).where(
@@ -276,20 +277,7 @@ def get_my_grade(exam_id, student, db):
             )
         )
         if cg and cg.ai_result:
-            fb = (cg.ai_result or {}).get("student_feedback", {}) or {}
-            item["grading_breakdown"] = {
-                "functional_score": cg.functional_score,
-                "algorithm_score": cg.algorithm_score,
-                "robustness_score": cg.robustness_score,
-                "quality_score": cg.quality_score,
-                "raw_total": cg.raw_total,
-                "score_cap": cg.score_cap,
-                "final_score_100": cg.final_score_100,
-                "scaled_score": cg.scaled_score,
-                "strengths": fb.get("strengths", []),
-                "issues": fb.get("issues", []),
-                "suggestions": fb.get("suggestions", []),
-            }
+            item["grading_breakdown"] = build_student_grading_breakdown(cg)
         answer_list.append(item)
 
     return {"submission_id": sub.id, "status": sub.status, "score": sub.score,
@@ -334,9 +322,9 @@ def create_question(db, exam_id, payload, user):
     q = ExamQuestion(exam_id=exam_id, **payload)
     requested_mode = payload.get("grading_mode")
     if q.question_type == "code":
-        # JSON null 与未提供字段语义一致：新建编程题默认进入 shadow。
+        # JSON null 与未提供字段语义一致：新建编程题默认进入 active。
         if requested_mode is None:
-            q.grading_mode = "shadow"
+            q.grading_mode = "active"
     else:
         # 选择题只能使用确定性的 legacy 评分。
         if requested_mode not in (None, "legacy"):

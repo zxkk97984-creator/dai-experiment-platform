@@ -37,7 +37,7 @@ const activeScene = ref(null)
           </div>
           <div class="role-body">
             <div class="role-sidebar" aria-hidden="true">
-              <span v-for="n in 4" :key="n" class="role-sidebar-item"></span>
+              <span v-for="n in 4" :key="n" class="role-sidebar-item" :style="{ '--i': n }"></span>
             </div>
             <div class="role-main">
               <div class="role-header-row">
@@ -246,6 +246,58 @@ const activeScene = ref(null)
   border-radius: 50%;
   background: #2467ED;
   flex-shrink: 0;
+  transition: transform 0.25s ease;
+}
+
+.role-card:hover .role-feature-dot,
+.role-card.hovered .role-feature-dot {
+  animation: featureDotPulse 0.4s ease forwards;
+}
+.role-feature:nth-child(1) .role-feature-dot { animation-delay: 0s; }
+.role-feature:nth-child(2) .role-feature-dot { animation-delay: 0.06s; }
+.role-feature:nth-child(3) .role-feature-dot { animation-delay: 0.12s; }
+.role-feature:nth-child(4) .role-feature-dot { animation-delay: 0.18s; }
+@keyframes featureDotPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.8); background: #7359ED; }
+  100% { transform: scale(1); background: #2467ED; }
+}
+
+/* Sidebar items animate on hover */
+.role-sidebar-item {
+  transition: all 0.3s ease;
+}
+.role-card:hover .role-sidebar-item,
+.role-card.hovered .role-sidebar-item {
+  background: #CBD5E1;
+  animation: sidebarSlide 0.5s ease forwards;
+  animation-delay: calc(var(--i) * 0.08s);
+}
+@keyframes sidebarSlide {
+  0% { transform: translateX(0); }
+  50% { transform: translateX(4px); background: #2467ED; }
+  100% { transform: translateX(0); background: #CBD5E1; }
+}
+
+/* Accent line at bottom */
+.role-card::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 0;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  transform: translateX(-50%);
+  transition: width 0.35s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.role-card--student::after { background: #2467ED; }
+.role-card--teacher::after { background: #7359ED; }
+.role-card--admin::after { background: #58DDA7; }
+.role-card--developer::after { background: #2467ED; }
+.role-card:hover::after,
+.role-card.hovered::after {
+  width: 50%;
 }
 
 /* ====== CTA ====== */
@@ -326,5 +378,8 @@ const activeScene = ref(null)
   .role-card.hovered {
     transform: none;
   }
+  .role-card::after { display: none; }
+  .role-feature-dot { animation: none !important; }
+  .role-sidebar-item { animation: none !important; }
 }
 </style>

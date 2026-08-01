@@ -31,7 +31,7 @@ def _create_course_and_exam(client, db_session_factory, username: str):
     return headers, course_id, exam_id
 
 
-def test_assignment_explicit_null_mode_still_defaults_to_shadow(client, db_session_factory):
+def test_assignment_explicit_null_mode_still_defaults_to_active(client, db_session_factory):
     from conftest import auth_header, create_user, login
 
     create_user(db_session_factory, "null_assignment_teacher", "teacher")
@@ -62,15 +62,15 @@ def test_assignment_explicit_null_mode_still_defaults_to_shadow(client, db_sessi
     )
 
     assert response.status_code == 201, response.text
-    assert response.json()["grading_mode"] == "shadow"
+    assert response.json()["grading_mode"] == "active"
     config = client.get(
         f"/api/v1/ai-grading/questions/assignment/{response.json()['id']}/config",
         headers=headers,
     )
-    assert config.json()["grading_mode"] == "shadow"
+    assert config.json()["grading_mode"] == "active"
 
 
-def test_exam_code_explicit_null_mode_still_defaults_to_shadow(client, db_session_factory):
+def test_exam_code_explicit_null_mode_still_defaults_to_active(client, db_session_factory):
     headers, _, exam_id = _create_course_and_exam(
         client, db_session_factory, "null_exam_teacher"
     )
@@ -89,12 +89,12 @@ def test_exam_code_explicit_null_mode_still_defaults_to_shadow(client, db_sessio
     )
 
     assert response.status_code == 201, response.text
-    assert response.json()["grading_mode"] == "shadow"
+    assert response.json()["grading_mode"] == "active"
     config = client.get(
         f"/api/v1/ai-grading/questions/exam/{response.json()['id']}/config",
         headers=headers,
     )
-    assert config.json()["grading_mode"] == "shadow"
+    assert config.json()["grading_mode"] == "active"
 
 
 def test_exam_choice_question_rejects_ai_mode(client, db_session_factory):
