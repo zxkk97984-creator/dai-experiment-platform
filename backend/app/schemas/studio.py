@@ -31,8 +31,9 @@ class StudioCell(BaseModel):
     type: Literal["markdown", "code"]
     source: str = ""
     order: int
-    student_editable: bool
-    source_hidden: bool
+    # 历史草稿/版本数据可能缺失这两个字段，读取时按默认值兼容
+    student_editable: bool = True
+    source_hidden: bool = False
 
     @model_validator(mode="after")
     def reject_hidden_markdown(self):

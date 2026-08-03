@@ -1,6 +1,10 @@
+// 学生首页：参考图 04 构成——问候 → 续学面板 → 四摘要卡 → 左列(待办|反馈) → 右列(学习概览|公告|我的课程)
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { useAuthStore } from '../../../stores/auth.js'
 
@@ -17,9 +21,11 @@ vi.mock('vue-router', async (importOriginal) => {
 
 const studentMock = vi.hoisted(() => ({ student: vi.fn() }))
 const markReadMock = vi.hoisted(() => ({ markRead: vi.fn() }))
+const coursesMock = vi.hoisted(() => ({ getChapters: vi.fn() }))
 
 vi.mock('../../../api/dashboard.js', () => ({ dashboardAPI: studentMock }))
 vi.mock('../../../api/announcements.js', () => ({ announcementsAPI: markReadMock }))
+vi.mock('../../../api/courses.js', () => ({ coursesAPI: coursesMock }))
 
 import DashboardView from '../DashboardView.vue'
 
@@ -87,6 +93,9 @@ const dashboardData = () => ({
   ],
 })
 
+// 课程 2 有两个课时，本地完成 1 个 → 50%
+const chaptersData = { items: [{ id: 1, lessons: [{ id: 8 }, { id: 9 }] }] }
+
 function mountView() {
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -104,91 +113,154 @@ beforeEach(() => {
   vi.clearAllMocks()
   studentMock.student.mockReset()
   markReadMock.markRead.mockReset()
+  coursesMock.getChapters.mockReset()
 })
 
-describe('学生首页 DashboardView', () => {
+describe('学生首页 DashboardView（参考图 04 构成）', () => {
   it('挂载时请求一次聚合数据', async () => {
     studentMock.student.mockResolvedValue({ data: dashboardData() })
+    coursesMock.getChapters.mockResolvedValue({ data: chaptersData })
     mountView()
     await flushPromises()
     expect(studentMock.student).toHaveBeenCalledTimes(1)
   })
 
-  it('展示真实摘要计数与旧 mock 数字', async () => {
+  it('渲染顺序：问候 → 续学面板 → 四摘要卡 → 双列', async () => {
     studentMock.student.mockResolvedValue({ data: dashboardData() })
+    coursesMock.getChapters.mockResolvedValue({ data: chaptersData })
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.text()).toContain('待交作业')
-    expect(wrapper.text()).toContain('即将考试')
-    expect(wrapper.text()).toContain('未读公告')
-    expect(wrapper.text()).toContain('特征工程')
-    expect(wrapper.text()).not.toContain('进行中课程')
-    expect(wrapper.text()).not.toContain('今日学习目标')
-    expect(wrapper.text()).not.toContain('快速入口')
+    const order = wrapper.findAll('.dash > *').map((n) => n.classes().join(' '))
+    expect(order[0]).toMatch(/greeting/)
+    expect(order[1]).toMatch(/continue-panel/)
+    expect(order[2]).toMatch(/summary-cards/)
+    expect(order[3]).toMatch(/dash-grid/)
   })
 
-  it('优先项按服务端顺序展示', async () => {
+  it('双列内部顺序：左列待办→反馈；右列学习概览→公告→我的课程', async () => {
     studentMock.student.mockResolvedValue({ data: dashboardData() })
+    coursesMock.getChapters.mockResolvedValue({ data: chaptersData })
     const wrapper = mountView()
     await flushPromises()
-    const items = wrapper.findAll('.priority-item')
-    expect(items[0].text()).toContain('特征工程')
-    expect(items[0].text()).toContain('紧急')
+    const left = wrapper.findAll('.col-left > *').map((n) => n.classes().join(' '))
+    expect(left[0]).toMatch(/tasks-panel/)
+    expect(left[1]).toMatch(/feedback-panel/)
+    const right = wrapper.findAll('.col-right > *').map((n) => n.classes().join(' '))
+    expect(right[0]).toMatch(/learning-panel/)
+    expect(right[1]).toMatch(/announcement-panel-wrap/)
+    expect(right[2]).toMatch(/courses-panel/)
   })
 
-  it('继续学习按钮跳转服务端续学路由', async () => {
+  it('问候显示姓名与格式化日期', async () => {
     studentMock.student.mockResolvedValue({ data: dashboardData() })
+    coursesMock.getChapters.mockResolvedValue({ data: chaptersData })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.get('.greeting-title').text()).toContain('张同学')
+    expect(wrapper.get('.greeting-date').text()).toMatch(/月|日/)
+  })
+
+  it('续学面板展示真实课程标题、副标题与本地进度', async () => {
+    studentMock.student.mockResolvedValue({ data: dashboardData() })
+    coursesMock.getChapters.mockResolvedValue({ data: chaptersData })
+    localStorage.setItem('course_2_completed', JSON.stringify([8]))
+    const wrapper = mountView()
+    await flushPromises()
+    const panel = wrapper.get('.continue-panel')
+    expect(panel.text()).toContain('决策树实验')
+    expect(panel.text()).toContain('机器学习导论')
+    expect(panel.text()).toContain('50%')
+    expect(panel.find('.ui-progress').exists()).toBe(true)
+  })
+
+  it('续学按钮跳转服务端路由且只接受 /student 前缀', async () => {
+    studentMock.student.mockResolvedValue({ data: dashboardData() })
+    coursesMock.getChapters.mockResolvedValue({ data: chaptersData })
     const wrapper = mountView()
     await flushPromises()
     await wrapper.get('.continue-btn').trigger('click')
     expect(routerState.push).toHaveBeenCalledWith('/student/courses/2/notebook/8')
+    routerState.push.mockClear()
+    // 服务端返回非 /student 路由时拒绝跳转
+    studentMock.student.mockResolvedValue({
+      data: { ...dashboardData(), continue_learning: { ...dashboardData().continue_learning, route: 'https://evil.example' } },
+    })
+    const wrapper2 = mountView()
+    await flushPromises()
+    await wrapper2.get('.continue-btn').trigger('click')
+    expect(routerState.push).not.toHaveBeenCalled()
+  })
+
+  it('四个摘要卡展示真实计数', async () => {
+    studentMock.student.mockResolvedValue({ data: dashboardData() })
+    coursesMock.getChapters.mockResolvedValue({ data: chaptersData })
+    const wrapper = mountView()
+    await flushPromises()
+    const nums = wrapper.findAll('.summary-num').map((n) => n.text())
+    expect(nums).toEqual(['2', '1', '1', '2'])
+    const labels = wrapper.findAll('.summary-label').map((n) => n.text())
+    expect(labels).toEqual(['课程', '待交作业', '即将考试', '未读公告'])
+  })
+
+  it('待办任务最多三条并支持查看全部', async () => {
+    studentMock.student.mockResolvedValue({
+      data: {
+        ...dashboardData(),
+        priority_items: Array.from({ length: 5 }, (_, i) => ({
+          kind: 'assignment', id: i, title: `任务${i}`, urgency: 'normal', route: '/student/assignments/1',
+        })),
+      },
+    })
+    coursesMock.getChapters.mockResolvedValue({ data: chaptersData })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.findAll('.task-row').length).toBe(3)
+    await wrapper.findAll('.view-all-btn')[0].trigger('click')
+    expect(routerState.push).toHaveBeenCalledWith('/student/assignments')
+  })
+
+  it('最新反馈最多三条且“查看全部反馈”路由到 /student/feedback', async () => {
+    studentMock.student.mockResolvedValue({ data: dashboardData() })
+    coursesMock.getChapters.mockResolvedValue({ data: chaptersData })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.text()).toContain('特征选择解释清晰。')
+    expect(wrapper.text()).toContain('92')
+    const allBtn = wrapper.findAll('.view-all-btn').find((b) => b.text().includes('查看全部反馈'))
+    await allBtn.trigger('click')
+    expect(routerState.push).toHaveBeenCalledWith('/student/feedback')
   })
 
   it('课程快照跳转课程路由', async () => {
     studentMock.student.mockResolvedValue({ data: dashboardData() })
+    coursesMock.getChapters.mockResolvedValue({ data: chaptersData })
     const wrapper = mountView()
     await flushPromises()
-    await wrapper.get('.course-snap-link').trigger('click')
+    await wrapper.get('.course-row-link').trigger('click')
     expect(routerState.push).toHaveBeenCalledWith('/student/courses/2')
   })
 
-  it('最新反馈展示真实评分与评语', async () => {
+  it('公告渲染且标记已读后本地更新并安全减一', async () => {
     studentMock.student.mockResolvedValue({ data: dashboardData() })
-    const wrapper = mountView()
-    await flushPromises()
-    expect(wrapper.text()).toContain('最新反馈')
-    expect(wrapper.text()).toContain('特征选择解释清晰。')
-    expect(wrapper.text()).toContain('92')
-  })
-
-  it('公告渲染且标记已读后本地更新', async () => {
-    studentMock.student.mockResolvedValue({ data: dashboardData() })
+    coursesMock.getChapters.mockResolvedValue({ data: chaptersData })
     markReadMock.markRead.mockResolvedValue({})
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.text()).toContain('实验课机房调整')
+    const nums = () => wrapper.findAll('.summary-num').map((n) => n.text())
+    expect(nums()[3]).toBe('2')
     await wrapper.get('.mark-read-btn').trigger('click')
     expect(markReadMock.markRead).toHaveBeenCalledWith(9)
     await flushPromises()
     expect(wrapper.find('.mark-read-btn').exists()).toBe(false)
-  })
-
-  it('标记已读后未读公告计数安全减一', async () => {
-    studentMock.student.mockResolvedValue({ data: dashboardData() })
-    markReadMock.markRead.mockResolvedValue({})
-    const wrapper = mountView()
-    await flushPromises()
-    const summaryNums = () => wrapper.findAll('.summary-num').map((n) => n.text())
-    expect(summaryNums()[3]).toBe('2')
-    await wrapper.get('.mark-read-btn').trigger('click')
-    await flushPromises()
-    expect(summaryNums()[3]).toBe('1')
+    expect(nums()[3]).toBe('1')
   })
 
   it('请求失败展示错误并可重试', async () => {
     studentMock.student
       .mockRejectedValueOnce(new Error('network'))
       .mockResolvedValueOnce({ data: dashboardData() })
+    coursesMock.getChapters.mockResolvedValue({ data: chaptersData })
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.text()).toContain('加载失败')
@@ -198,7 +270,7 @@ describe('学生首页 DashboardView', () => {
     expect(wrapper.text()).toContain('特征工程')
   })
 
-  it('空数据展示如实空态', async () => {
+  it('空数据展示如实空态，不渲染假数字', async () => {
     studentMock.student.mockResolvedValue({
       data: {
         summary: {
@@ -220,5 +292,26 @@ describe('学生首页 DashboardView', () => {
     expect(wrapper.text()).toContain('暂无公告')
     expect(wrapper.text()).toContain('暂无课程')
     expect(wrapper.text()).toContain('暂无反馈')
+    // 不渲染虚构数字
+    expect(wrapper.text()).not.toContain('78%')
+    expect(wrapper.text()).not.toContain('6 门')
+  })
+
+  it('续学章节请求失败时页面不报错，进度不伪造', async () => {
+    studentMock.student.mockResolvedValue({ data: dashboardData() })
+    coursesMock.getChapters.mockRejectedValue(new Error('boom'))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.find('.continue-panel').exists()).toBe(true)
+    // 进度不可用时不渲染伪造百分比
+    expect(wrapper.text()).not.toMatch(/\d+%/)
+  })
+
+  it('源码不含参考图样例姓名与数字', () => {
+    const here = dirname(fileURLToPath(import.meta.url))
+    const source = readFileSync(resolve(here, '../DashboardView.vue'), 'utf-8')
+    for (const sample of ['爱丽丝', '张老师', '张教授', '机器学习导论']) {
+      expect(source).not.toContain(sample)
+    }
   })
 })

@@ -92,6 +92,12 @@ class ChapterCreate(BaseModel):
     order_index: int = 0
 
 
+class ChapterUpdate(BaseModel):
+    """编辑章节：标题 / 排序位置均为可选"""
+    title: str | None = None
+    order_index: int | None = None
+
+
 class LessonCreate(BaseModel):
     title: str
     content_type: str = "markdown"
@@ -99,6 +105,19 @@ class LessonCreate(BaseModel):
     notebook_path: str | None = None
     video_url: str | None = None
     order_index: int = 0
+    status: str = "draft"
+
+
+class LessonUpdate(BaseModel):
+    """更新课时：全部字段可选；chapter_id 用于移动到其他章节"""
+    title: str | None = None
+    content_type: str | None = None
+    content: str | None = None
+    notebook_path: str | None = None
+    video_url: str | None = None
+    order_index: int | None = None
+    chapter_id: int | None = None
+    status: str | None = None
 
 
 class LessonRead(BaseModel):
@@ -112,6 +131,7 @@ class LessonRead(BaseModel):
     notebook_path: str | None = None
     video_url: str | None = None
     order_index: int
+    status: str = "published"
 
 
 class ChapterRead(BaseModel):
@@ -354,6 +374,8 @@ class ExamSubmissionRead(BaseModel):
     status: str
     score: float | None = None
     expires_at: datetime | None = None
+    review_reason: str | None = None
+    review_required_at: datetime | None = None
 
 
 class ExamGradeRead(BaseModel):
@@ -363,6 +385,12 @@ class ExamGradeRead(BaseModel):
     exam_id: int
     student_id: int
     score: float
+
+
+class ExamRetryRequest(BaseModel):
+    """显式重试 review_required 提交——选中的 system_error 答案"""
+
+    answer_ids: list[int]
 
 
 # ── Notebook 模板 Schemas ─────────────────────────────────────

@@ -317,11 +317,11 @@ def test_fail_job_permanent(db_session_factory):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 6. system_error 状态可以重新入队
+# 6. system_error 不可自动复活（只接受显式受控重试）
 # ═══════════════════════════════════════════════════════════════
 
-def test_system_error_can_be_retried(db_session_factory):
-    """system_error 状态的任务可以通过 enqueue_job 重新入队"""
+def test_system_error_not_auto_retried(db_session_factory):
+    """system_error 是终态：自动 enqueue_job 不得复活（显式 retry 才可）"""
     sid = _setup_assignment_submission(db_session_factory)
 
     with db_session_factory() as db:
@@ -331,12 +331,12 @@ def test_system_error_can_be_retried(db_session_factory):
                  error="临时错误", retryable=False)
         assert db.get(Submission, sid).grading_status == "system_error"
 
-        # 重新入队：system_error → queued
+        # 自动入队拒绝 system_error：不再复活
         ok = enqueue_job(db, job_type="assignment", object_id=sid)
-        assert ok is True
+        assert ok is False, "system_error 不应被自动入队复活"
         sub = db.get(Submission, sid)
-        assert sub.grading_status == "queued"
-        assert sub.attempt_count == 2  # 第二次尝试
+        assert sub.grading_status == "system_error"
+        assert sub.attempt_count == 1  # 不再递增
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -427,7 +427,7 @@ def test_p0_2_max_retries_syncs_submission_status(db_session_factory):
 
 
 def test_p0_2_exam_max_retries_immediate_finalize(db_session_factory):
-    """P0-2: 考试答案超过最大重试→system_error→阻塞汇总（第五轮修正：系统错误不可作为零分结算）"""
+    """P0-2: 考试答案超过最大重试→system_error→父级立即转 review_required（不按零分结算）"""
     aid = _setup_exam_answer(db_session_factory)
 
     with db_session_factory() as db:
@@ -438,11 +438,23 @@ def test_p0_2_exam_max_retries_immediate_finalize(db_session_factory):
         stats = requeue_stale_jobs(db, job_type="exam", stale_pending_seconds=0)
         assert stats["max_retries_reached"] >= 1
 
-        # 系统错误阻塞汇总：submission 应保持 grading 而非变为 graded
+        # system_error 答案不可作为零分结算：父级转入 review_required 终态
         sub = db.get(ExamSubmission, ans.submission_id)
-        # system_error 答案的 score=0 不可作为零分结算，汇总被阻塞
-        assert sub.status == "grading", \
-            f"系统错误不应 finalize，submission 应保持 grading，实际: {sub.status}"
+        assert sub.status == "review_required", \
+            f"system_error 后父级应转 review_required，实际: {sub.status}"
+        assert sub.review_required_at is not None
+        assert _count_exam_grades(db, sub) == 0, "系统错误不得创建 ExamGrade"
+
+
+def _count_exam_grades(db, sub):
+    from app.models import ExamGrade
+    from sqlalchemy import func, select
+    return db.scalar(
+        select(func.count()).select_from(ExamGrade).where(
+            ExamGrade.exam_id == sub.exam_id,
+            ExamGrade.student_id == sub.student_id,
+        )
+    ) or 0
 
 
 def test_p0_2_queued_repush_updates_queued_at(db_session_factory):

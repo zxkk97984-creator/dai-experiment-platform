@@ -268,6 +268,16 @@ export const useStudioStore = defineStore('studio', () => {
 
   // 预览运行
   async function previewRun(cellId) {
+    // 后端 preview_run 只查数据库中的 draft_cells：未保存的本地 cell 后端不可见，
+    // 直接运行必然 404。因此有未保存修改时先保存草稿，再按 id 发起运行。
+    if (dirty.value) {
+      const ok = await saveDraft()
+      if (!ok) return null
+    }
+    if (!cellId) {
+      app.showToast('请先运行某个代码 Cell', 'error')
+      return null
+    }
     runningCellId.value = cellId
     try {
       const res = await studioAPI.previewRun(templateId.value, { cell_id: cellId })

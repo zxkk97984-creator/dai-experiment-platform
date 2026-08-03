@@ -13,7 +13,7 @@ from app.dependencies import get_db, get_redis_client
 from app.errors import api_error
 from app.models import (
     Assignment, CodeGrade, Course, Exam, ExamAnswer, ExamQuestion,
-    GradeOverride, JudgeQuestion, QuestionRubric, Submission, User,
+    ExamSubmission, GradeOverride, JudgeQuestion, QuestionRubric, Submission, User,
 )
 from app.schemas import PaginatedResponse
 from app.schemas.ai_grading import AIQuestionConfigUpdate, GradeOverrideCreate, RubricDocument
@@ -450,16 +450,46 @@ def get_grade_detail(
         select(GradeOverride).where(GradeOverride.code_grade_id == grade_id).order_by(GradeOverride.id.desc())
     ).all()
 
-    # 获取学生代码
+    # 获取学生代码与只读上下文（关联缺失时字段为 None，不抛错）
     student_code = None
+    student_name = student_username = question_title = course_title = None
+    submitted_at = None
+    execution_time_ms = None
     if cg.submission_id:
         sub = db.get(Submission, cg.submission_id)
         if sub:
             student_code = sub.code
+            submitted_at = sub.created_at
+            execution_time_ms = sub.execution_time_ms
+            student = db.get(User, sub.student_id)
+            if student:
+                student_name = student.real_name
+                student_username = student.username
+            q = db.get(JudgeQuestion, sub.question_id)
+            if q:
+                question_title = q.title
+                a = db.get(Assignment, q.assignment_id)
+                if a:
+                    c = db.get(Course, a.course_id)
+                    course_title = c.title if c else None
     elif cg.exam_answer_id:
         ans = db.get(ExamAnswer, cg.exam_answer_id)
         if ans:
             student_code = ans.code_answer
+            submitted_at = ans.created_at
+            es = db.get(ExamSubmission, ans.submission_id)
+            if es:
+                student = db.get(User, es.student_id)
+                if student:
+                    student_name = student.real_name
+                    student_username = student.username
+            eq = db.get(ExamQuestion, ans.question_id)
+            if eq:
+                question_title = eq.prompt
+                ex = db.get(Exam, eq.exam_id)
+                if ex:
+                    c = db.get(Course, ex.course_id)
+                    course_title = c.title if c else None
 
     return {
         "id": cg.id, "submission_id": cg.submission_id, "exam_answer_id": cg.exam_answer_id,
@@ -475,6 +505,11 @@ def get_grade_detail(
         "needs_teacher_review": cg.needs_teacher_review,
         "review_reason": cg.review_reason,
         "attempt_count": cg.attempt_count, "last_error": cg.last_error,
+        "student_name": student_name, "student_username": student_username,
+        "question_title": question_title, "course_title": course_title,
+        "submitted_at": submitted_at.isoformat() if submitted_at else None,
+        "finished_at": cg.finished_at.isoformat() if cg.finished_at else None,
+        "execution_time_ms": execution_time_ms,
         "overrides": [{
             "id": o.id, "original_snapshot": o.original_snapshot,
             "replacement_snapshot": o.replacement_snapshot,

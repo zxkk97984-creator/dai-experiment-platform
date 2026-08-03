@@ -541,16 +541,16 @@ class TestSystemErrorNotCounted:
     """system_error answer 不参与 finalize"""
 
     def test_system_error_blocks_exam_finalize(self, db_session_factory):
-        """system_error 答案阻止考试汇总"""
-        from app.services.exam_grading import finalize_if_ready
-        from app.models import ExamAnswer, ExamSubmission
+        """system_error 答案 → 父转 review_required，不按 0 分结算（公平性保留）"""
+        from app.services.exam_grading import finalize_if_ready, FinalizeOutcome
+        from app.models import ExamAnswer, ExamGrade, ExamSubmission
 
         with db_session_factory() as db:
             from app.models import Exam, ExamQuestion
             e = Exam(id=1, course_id=1, title="SE", status="published", duration_minutes=60)
             db.add(e); db.flush()
             eq = ExamQuestion(exam_id=e.id, question_type="code", prompt="t",
-                             correct_answer={"test_file":""}, points=10, grading_mode="legacy")
+                             correct_answer={"test_file": ""}, points=10, grading_mode="legacy")
             db.add(eq); db.flush()
             es = ExamSubmission(exam_id=e.id, student_id=1, status="grading")
             db.add(es); db.flush()
@@ -559,7 +559,14 @@ class TestSystemErrorNotCounted:
             db.add(ea); db.commit()
 
             result = finalize_if_ready(es.id, db)
-            assert result is False, "system_error 答案必须阻止汇总"
+            assert result.outcome == FinalizeOutcome.REVIEW_REQUIRED, \
+                f"system_error 答案应转 review_required: {result}"
 
+            db.expire_all()  # finalize 用条件 UPDATE，不依赖会话同步
             es2 = db.get(ExamSubmission, es.id)
-            assert es2.status == "grading", "汇总被阻止后 submission 应保持 grading"
+            assert es2.status == "review_required", "父应转 review_required"
+            assert es2.review_required_at is not None
+
+            # 公平性：不得创建 ExamGrade，不得按 0 分结算
+            grades = db.query(ExamGrade).filter(ExamGrade.exam_id == e.id).all()
+            assert len(grades) == 0, "system_error 不得创建 ExamGrade"

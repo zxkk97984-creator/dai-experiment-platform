@@ -1,12 +1,15 @@
-"""Task 3: 考试最终评分原子化——并发测试"""
+"""考试最终评分结构化 finalize——并发测试 + 父级 review_required 终态语义。
+
+新语义（FinalizeOutcome）：
+- graded：全部可评分 → 父 graded + 幂等 ExamGrade
+- waiting：pending/queued/running 答案或 active CodeGrade 未完成
+- review_required：system_error / completed+NULL / active CodeGrade review_required → 父转终态，无 ExamGrade
+- noop：父已 graded / review_required / 非 grading
+"""
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
 
-import pytest
-
-from app.models import ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission
-from app.services.exam_grading import finalize_if_ready
-from conftest import auth_header, create_user, login
+from app.models import CodeGrade, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission
+from app.services.exam_grading import finalize_if_ready, FinalizeOutcome
 
 
 def _setup_two_code_questions(db_session_factory):
@@ -36,68 +39,64 @@ def _setup_two_code_questions(db_session_factory):
                           code_answer="def b(): pass", grading_status="completed", score=20.0)
         db.add_all([ans1, ans2]); db.commit()
         return {"submission_id": sub.id, "exam_id": exam.id, "student_id": student.id,
-                "ans1_id": ans1.id, "ans2_id": ans2.id}
+                "ans1_id": ans1.id, "ans2_id": ans2.id, "q2_id": q2.id}
 
 
-# ═══════════════════════════════════════════════════════════════
-# 1. 两个独立 Session 同时汇总 → 只有一条 ExamGrade
-# ═══════════════════════════════════════════════════════════════
-
-def test_concurrent_finalize_produces_single_grade(db_session_factory):
-    """两个 Session 同时完成汇总：只有一条 ExamGrade，分数正确"""
-    ctx = _setup_two_code_questions(db_session_factory)
-
-    # 两个独立 Session 并发尝试汇总
-    with db_session_factory() as db1:
-        # 模拟第一题完成后的汇总
-        ok1 = finalize_if_ready(ctx["submission_id"], db1)
-
-    with db_session_factory() as db2:
-        # 第二个 Worker 完成最后一题后的汇总
-        ok2 = finalize_if_ready(ctx["submission_id"], db2)
-
-    assert ok1 is True
-    assert ok2 is True  # 幂等：已 graded 时返回 True
-
-    # 验证：只有一条 ExamGrade
+def _count_grades(db_session_factory, ctx):
     with db_session_factory() as db:
-        grades = db.query(ExamGrade).where(
+        return db.query(ExamGrade).where(
             ExamGrade.exam_id == ctx["exam_id"],
             ExamGrade.student_id == ctx["student_id"],
         ).all()
-        assert len(grades) == 1, f"应只有一条成绩，实际: {len(grades)}"
-        assert grades[0].score == 30.0
 
+
+# ═══════════════════════════════════════════════════════════════
+# 1. 正常汇总：graded + 幂等
+# ═══════════════════════════════════════════════════════════════
+
+def test_concurrent_finalize_produces_single_grade(db_session_factory):
+    """两个 Session 同时汇总：只有一条 ExamGrade，分数正确"""
+    ctx = _setup_two_code_questions(db_session_factory)
+
+    with db_session_factory() as db1:
+        r1 = finalize_if_ready(ctx["submission_id"], db1)
+
+    with db_session_factory() as db2:
+        r2 = finalize_if_ready(ctx["submission_id"], db2)
+
+    assert r1.outcome == FinalizeOutcome.GRADED
+    assert r2.outcome == FinalizeOutcome.NOOP  # 已 graded 幂等
+
+    grades = _count_grades(db_session_factory, ctx)
+    assert len(grades) == 1, f"应只有一条成绩，实际: {len(grades)}"
+    assert grades[0].score == 30.0
+
+    with db_session_factory() as db:
         sub = db.get(ExamSubmission, ctx["submission_id"])
         assert sub.status == "graded"
         assert sub.score == 30.0
 
 
 # ═══════════════════════════════════════════════════════════════
-# 2. 还有未完成答案时不应结算
+# 2. 未完成答案：waiting
 # ═══════════════════════════════════════════════════════════════
 
-def test_finalize_blocks_when_answer_pending(db_session_factory):
-    """有答案仍在 pending/queued/running 状态时，汇总被阻止"""
+def test_finalize_waiting_when_answer_pending(db_session_factory):
     ctx = _setup_two_code_questions(db_session_factory)
 
-    # 将第一个答案设回 pending（模拟尚未判题）
     with db_session_factory() as db:
         ans = db.get(ExamAnswer, ctx["ans1_id"])
         ans.grading_status = "pending"
         db.commit()
 
-    # 尝试汇总
     with db_session_factory() as db:
-        ok = finalize_if_ready(ctx["submission_id"], db)
-        assert ok is False, "有 pending 答案时不应汇总"
-
+        r = finalize_if_ready(ctx["submission_id"], db)
+        assert r.outcome == FinalizeOutcome.WAITING, f"应有 pending 答案时 waiting: {r}"
         sub = db.get(ExamSubmission, ctx["submission_id"])
         assert sub.status == "grading", "状态不应改变"
 
 
-def test_finalize_blocks_when_answer_queued(db_session_factory):
-    """有答案在 queued 状态时阻汇总"""
+def test_finalize_waiting_when_answer_queued(db_session_factory):
     ctx = _setup_two_code_questions(db_session_factory)
 
     with db_session_factory() as db:
@@ -106,12 +105,11 @@ def test_finalize_blocks_when_answer_queued(db_session_factory):
         db.commit()
 
     with db_session_factory() as db:
-        ok = finalize_if_ready(ctx["submission_id"], db)
-        assert ok is False
+        r = finalize_if_ready(ctx["submission_id"], db)
+        assert r.outcome == FinalizeOutcome.WAITING
 
 
-def test_finalize_blocks_when_answer_running(db_session_factory):
-    """有答案在 running 状态时阻汇总"""
+def test_finalize_waiting_when_answer_running(db_session_factory):
     ctx = _setup_two_code_questions(db_session_factory)
 
     with db_session_factory() as db:
@@ -120,67 +118,198 @@ def test_finalize_blocks_when_answer_running(db_session_factory):
         db.commit()
 
     with db_session_factory() as db:
-        ok = finalize_if_ready(ctx["submission_id"], db)
-        assert ok is False
+        r = finalize_if_ready(ctx["submission_id"], db)
+        assert r.outcome == FinalizeOutcome.WAITING
 
 
-# ═══════════════════════════════════════════════════════════════
-# 3. system_error 答案计入总分
-# ═══════════════════════════════════════════════════════════════
-
-def test_system_error_counted_in_total(db_session_factory):
-    """system_error 阻塞汇总——不可作为零分 finalize（第五轮修正）"""
+def test_finalize_waiting_when_active_codegrade_incomplete(db_session_factory):
+    """active CodeGrade 仍在 running/queued/pending 时 → waiting（不提前终态）"""
     ctx = _setup_two_code_questions(db_session_factory)
 
-    # 答案1 = completed(10) + 答案2 = system_error(0) → 应阻塞汇总
+    with db_session_factory() as db:
+        from app.models import QuestionRubric
+        rubric = QuestionRubric(exam_question_id=ctx["q2_id"], version=1, status="locked",
+                                source_hash="h", source_snapshot={}, rubric_json={},
+                                model_name="m", locked_at=datetime.now(timezone.utc))
+        db.add(rubric); db.flush()
+        cg = CodeGrade(exam_answer_id=ctx["ans2_id"], rubric_id=rubric.id,
+                       mode="active", status="running",
+                       functional_score=60, robustness_score=10)
+        db.add(cg); db.commit()
+
+    with db_session_factory() as db:
+        r = finalize_if_ready(ctx["submission_id"], db)
+        assert r.outcome == FinalizeOutcome.WAITING, f"active CodeGrade 未完成应 waiting: {r}"
+        sub = db.get(ExamSubmission, ctx["submission_id"])
+        assert sub.status == "grading"
+
+
+# ═══════════════════════════════════════════════════════════════
+# 3. 系统错误 / 不完整终态 → 父级 review_required（公平性：不按 0 分结算）
+# ═══════════════════════════════════════════════════════════════
+
+def test_system_error_triggers_parent_review_required(db_session_factory):
+    """system_error 答案 → 父转 review_required，不创建 ExamGrade，不按 0 分结算"""
+    ctx = _setup_two_code_questions(db_session_factory)
+
     with db_session_factory() as db:
         ans2 = db.get(ExamAnswer, ctx["ans2_id"])
         ans2.grading_status = "system_error"
-        ans2.score = 0.0
+        ans2.score = None
+        ans2.last_error = "缺少隐藏测试"
         db.commit()
 
     with db_session_factory() as db:
-        ok = finalize_if_ready(ctx["submission_id"], db)
-        # 系统错误不作为零分 finalize——阻塞汇总
-        assert ok is False
+        r = finalize_if_ready(ctx["submission_id"], db)
+        assert r.outcome == FinalizeOutcome.REVIEW_REQUIRED, f"系统错误应转 review_required: {r}"
 
         sub = db.get(ExamSubmission, ctx["submission_id"])
-        assert sub.status != "graded"
+        assert sub.status == "review_required"
+        assert sub.review_required_at is not None, "应记录转人工时间"
+        assert sub.review_reason and "系统错误" in sub.review_reason, "应记录脱敏原因"
+
+        # 子答案保持 system_error/score=NULL，不被覆盖
+        ans2b = db.get(ExamAnswer, ctx["ans2_id"])
+        assert ans2b.grading_status == "system_error"
+        assert ans2b.score is None
+
+    assert _count_grades(db_session_factory, ctx) == [], "系统错误不得创建 ExamGrade"
 
 
-# ═══════════════════════════════════════════════════════════════
-# 4. 幂等：已 graded 的提交重复汇总无害
-# ═══════════════════════════════════════════════════════════════
-
-def test_finalize_idempotent_on_graded(db_session_factory):
-    """已 graded 的提交重复调用 finalize_if_ready 返回 True，不重复创建 grade"""
+def test_completed_null_score_triggers_parent_review_required(db_session_factory):
+    """completed 但 score=NULL（active 等待 AI 分但 AI 终止）→ 父 review_required"""
     ctx = _setup_two_code_questions(db_session_factory)
 
-    # 第一次汇总
     with db_session_factory() as db:
-        ok1 = finalize_if_ready(ctx["submission_id"], db)
-        assert ok1 is True
+        ans2 = db.get(ExamAnswer, ctx["ans2_id"])
+        ans2.grading_status = "completed"
+        ans2.score = None
+        db.commit()
 
-    # 第二次汇总（幂等）
     with db_session_factory() as db:
-        ok2 = finalize_if_ready(ctx["submission_id"], db)
-        assert ok2 is True
+        r = finalize_if_ready(ctx["submission_id"], db)
+        assert r.outcome == FinalizeOutcome.REVIEW_REQUIRED
+        sub = db.get(ExamSubmission, ctx["submission_id"])
+        assert sub.status == "review_required"
 
-    # 仍然只有一条 grade
+    assert _count_grades(db_session_factory, ctx) == []
+
+
+def test_unknown_answer_status_triggers_review_required(db_session_factory):
+    """未知 ExamAnswer 状态（allowlist 外，如 bogus）→ 父 review_required，不按分数 graded"""
+    ctx = _setup_two_code_questions(db_session_factory)
+
     with db_session_factory() as db:
-        grades = db.query(ExamGrade).where(
-            ExamGrade.exam_id == ctx["exam_id"],
-            ExamGrade.student_id == ctx["student_id"],
-        ).all()
-        assert len(grades) == 1
+        ans2 = db.get(ExamAnswer, ctx["ans2_id"])
+        ans2.grading_status = "bogus"
+        ans2.score = 10.0  # 有分也不能 graded——状态不变量优先
+        db.commit()
+
+    with db_session_factory() as db:
+        r = finalize_if_ready(ctx["submission_id"], db)
+        assert r.outcome == FinalizeOutcome.REVIEW_REQUIRED, \
+            f"未知状态应转 review_required: {r}"
+        sub = db.get(ExamSubmission, ctx["submission_id"])
+        assert sub.status == "review_required"
+        assert "未知评分状态" in (sub.review_reason or ""), "reason 应脱敏且描述不变量破坏"
+
+    assert _count_grades(db_session_factory, ctx) == [], "未知状态不得创建 ExamGrade"
+
+
+def test_unknown_codegrade_status_triggers_review_required(db_session_factory):
+    """未知 active CodeGrade 状态 → 父 review_required"""
+    ctx = _setup_two_code_questions(db_session_factory)
+
+    with db_session_factory() as db:
+        from app.models import QuestionRubric
+        rubric = QuestionRubric(exam_question_id=ctx["q2_id"], version=1, status="locked",
+                                source_hash="h", source_snapshot={}, rubric_json={},
+                                model_name="m", locked_at=datetime.now(timezone.utc))
+        db.add(rubric); db.flush()
+        cg = CodeGrade(exam_answer_id=ctx["ans2_id"], rubric_id=rubric.id,
+                       mode="active", status="bogus",
+                       functional_score=60, robustness_score=10)
+        db.add(cg); db.commit()
+
+    with db_session_factory() as db:
+        r = finalize_if_ready(ctx["submission_id"], db)
+        assert r.outcome == FinalizeOutcome.REVIEW_REQUIRED
+        sub = db.get(ExamSubmission, ctx["submission_id"])
+        assert sub.status == "review_required"
+        assert "未知 AI 评分状态" in (sub.review_reason or "")
+
+    assert _count_grades(db_session_factory, ctx) == []
+
+
+def test_active_codegrade_review_required_triggers_parent(db_session_factory):
+    """active CodeGrade 处于 review_required → 父转 review_required（同一父级缺口）"""
+    ctx = _setup_two_code_questions(db_session_factory)
+
+    with db_session_factory() as db:
+        from app.models import QuestionRubric
+        rubric = QuestionRubric(exam_question_id=ctx["q2_id"], version=1, status="locked",
+                                source_hash="h", source_snapshot={}, rubric_json={},
+                                model_name="m", locked_at=datetime.now(timezone.utc))
+        db.add(rubric); db.flush()
+        cg = CodeGrade(exam_answer_id=ctx["ans2_id"], rubric_id=rubric.id,
+                       mode="active", status="review_required",
+                       needs_teacher_review=True, review_reason="AI 评分失败",
+                       functional_score=60, robustness_score=10)
+        db.add(cg); db.commit()
+
+    with db_session_factory() as db:
+        r = finalize_if_ready(ctx["submission_id"], db)
+        assert r.outcome == FinalizeOutcome.REVIEW_REQUIRED, f"active CodeGrade review_required 应转父: {r}"
+        sub = db.get(ExamSubmission, ctx["submission_id"])
+        assert sub.status == "review_required"
+
+    assert _count_grades(db_session_factory, ctx) == []
 
 
 # ═══════════════════════════════════════════════════════════════
-# 5. submission 不在 grading 状态时跳过
+# 4. 幂等与 noop
 # ═══════════════════════════════════════════════════════════════
+
+def test_finalize_noop_on_graded(db_session_factory):
+    """已 graded 的提交重复调用返回 noop，不重复创建 grade"""
+    ctx = _setup_two_code_questions(db_session_factory)
+
+    with db_session_factory() as db:
+        r1 = finalize_if_ready(ctx["submission_id"], db)
+        assert r1.outcome == FinalizeOutcome.GRADED
+
+    with db_session_factory() as db:
+        r2 = finalize_if_ready(ctx["submission_id"], db)
+        assert r2.outcome == FinalizeOutcome.NOOP
+
+    assert len(_count_grades(db_session_factory, ctx)) == 1
+
+
+def test_finalize_noop_on_review_required(db_session_factory):
+    """已 review_required 的父提交不再重复转换（扫描噪声停止）"""
+    ctx = _setup_two_code_questions(db_session_factory)
+
+    with db_session_factory() as db:
+        ans2 = db.get(ExamAnswer, ctx["ans2_id"])
+        ans2.grading_status = "system_error"
+        ans2.score = None
+        db.commit()
+
+    with db_session_factory() as db:
+        r1 = finalize_if_ready(ctx["submission_id"], db)
+        assert r1.outcome == FinalizeOutcome.REVIEW_REQUIRED
+
+    with db_session_factory() as db:
+        r2 = finalize_if_ready(ctx["submission_id"], db)
+        assert r2.outcome == FinalizeOutcome.NOOP, "review_required 后应 noop"
+
+        sub = db.get(ExamSubmission, ctx["submission_id"])
+        assert sub.status == "review_required"
+        assert sub.review_required_at is not None  # 不重复刷新
+
 
 def test_finalize_skips_non_grading_submission(db_session_factory):
-    """submission 为 started/submitted 时不处理"""
+    """submission 为 started/submitted 时不处理（noop）"""
     ctx = _setup_two_code_questions(db_session_factory)
 
     with db_session_factory() as db:
@@ -189,16 +318,16 @@ def test_finalize_skips_non_grading_submission(db_session_factory):
         db.commit()
 
     with db_session_factory() as db:
-        ok = finalize_if_ready(ctx["submission_id"], db)
-        assert ok is False
+        r = finalize_if_ready(ctx["submission_id"], db)
+        assert r.outcome == FinalizeOutcome.NOOP
 
 
 # ═══════════════════════════════════════════════════════════════
-# P1-5: 真并发测试——同步屏障
+# 5. 真并发：graded 只一条 / review_required 只转换一次
 # ═══════════════════════════════════════════════════════════════
 
 def test_p1_5_true_concurrent_finalize_single_grade(db_session_factory):
-    """P1-5: 两个线程通过同步屏障真并发执行 finalize_if_ready，只产生一条成绩"""
+    """两个线程真并发执行 finalize：只产生一条成绩，outcome 恰好 graded+noop"""
     import threading
 
     ctx = _setup_two_code_questions(db_session_factory)
@@ -209,10 +338,9 @@ def test_p1_5_true_concurrent_finalize_single_grade(db_session_factory):
     def do_finalize(worker_name):
         try:
             with db_session_factory() as db:
-                # 等待双方都准备好
                 barrier.wait()
-                ok = finalize_if_ready(ctx["submission_id"], db)
-                results.append((worker_name, ok))
+                r = finalize_if_ready(ctx["submission_id"], db)
+                results.append((worker_name, r.outcome))
         except Exception as e:
             errors.append((worker_name, str(e)))
 
@@ -225,16 +353,58 @@ def test_p1_5_true_concurrent_finalize_single_grade(db_session_factory):
 
     assert len(errors) == 0, f"并发汇总出错: {errors}"
     assert len(results) == 2, f"两个 Worker 都应完成: {results}"
+    outcomes = sorted(r for _, r in results)
+    assert outcomes == [FinalizeOutcome.GRADED, FinalizeOutcome.NOOP], \
+        f"应恰好一个 graded 一个 noop: {results}"
 
-    # 验证：只有一条 ExamGrade
+    grades = _count_grades(db_session_factory, ctx)
+    assert len(grades) == 1
+    assert grades[0].score == 30.0
+
     with db_session_factory() as db:
-        grades = db.query(ExamGrade).where(
-            ExamGrade.exam_id == ctx["exam_id"],
-            ExamGrade.student_id == ctx["student_id"],
-        ).all()
-        assert len(grades) == 1, f"真并发也只应有一条成绩: {len(grades)}"
-        assert grades[0].score == 30.0
-
         sub = db.get(ExamSubmission, ctx["submission_id"])
         assert sub.status == "graded"
 
+
+def test_concurrent_review_required_transition_once(db_session_factory):
+    """两个线程并发触发 review_required：父只转换一次，只记一次原因"""
+    import threading
+
+    ctx = _setup_two_code_questions(db_session_factory)
+    with db_session_factory() as db:
+        ans2 = db.get(ExamAnswer, ctx["ans2_id"])
+        ans2.grading_status = "system_error"
+        ans2.score = None
+        db.commit()
+
+    results = []
+    barrier = threading.Barrier(2, timeout=5)
+    errors = []
+
+    def do_finalize(worker_name):
+        try:
+            with db_session_factory() as db:
+                barrier.wait()
+                r = finalize_if_ready(ctx["submission_id"], db)
+                results.append((worker_name, r.outcome))
+        except Exception as e:
+            errors.append((worker_name, str(e)))
+
+    t1 = threading.Thread(target=do_finalize, args=("w1",))
+    t2 = threading.Thread(target=do_finalize, args=("w2",))
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+
+    assert len(errors) == 0, f"并发转换出错: {errors}"
+    outcomes = sorted(r for _, r in results)
+    assert outcomes == [FinalizeOutcome.NOOP, FinalizeOutcome.REVIEW_REQUIRED], \
+        f"应恰好一次转换: {results}"
+
+    with db_session_factory() as db:
+        sub = db.get(ExamSubmission, ctx["submission_id"])
+        assert sub.status == "review_required"
+        assert sub.review_required_at is not None
+
+    assert _count_grades(db_session_factory, ctx) == []

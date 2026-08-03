@@ -8,12 +8,14 @@ from app.models import Chapter, Course, CourseEnrollment, Lesson, User
 from app.schemas import (
     ChapterCreate,
     ChapterRead,
+    ChapterUpdate,
     CourseCreate,
     CourseRead,
     CourseUpdate,
     EnrollmentRead,
     LessonCreate,
     LessonRead,
+    LessonUpdate,
     PaginatedResponse,
 )
 
@@ -244,7 +246,30 @@ def create_lesson(
 @router.patch("/lessons/{lesson_id}", response_model=LessonRead)
 def update_lesson(
     lesson_id: int,
-    payload: LessonCreate,
+    payload: LessonUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """更新课时：支持标题/内容/发布状态，传 chapter_id 可移动到其他章节"""
+    lesson = db.get(Lesson, lesson_id)
+    if not lesson:
+        raise api_error(404, "LESSON_NOT_FOUND", "课时不存在")
+    ensure_course_manager(lesson.chapter.course, current_user)
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("chapter_id") is not None and data["chapter_id"] != lesson.chapter_id:
+        target = db.get(Chapter, data["chapter_id"])
+        if not target or target.course_id != lesson.chapter.course_id:
+            raise api_error(400, "INVALID_CHAPTER", "目标章节不存在或不属于同一课程")
+    for key, value in data.items():
+        setattr(lesson, key, value)
+    db.commit()
+    db.refresh(lesson)
+    return lesson
+
+
+@router.delete("/lessons/{lesson_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_lesson(
+    lesson_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -252,8 +277,39 @@ def update_lesson(
     if not lesson:
         raise api_error(404, "LESSON_NOT_FOUND", "课时不存在")
     ensure_course_manager(lesson.chapter.course, current_user)
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(lesson, key, value)
+    db.delete(lesson)
     db.commit()
-    db.refresh(lesson)
-    return lesson
+
+
+@router.patch("/chapters/{chapter_id}", response_model=ChapterRead)
+def update_chapter(
+    chapter_id: int,
+    payload: ChapterUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """编辑章节：标题 / 排序位置（移动章节）"""
+    chapter = db.get(Chapter, chapter_id)
+    if not chapter:
+        raise api_error(404, "CHAPTER_NOT_FOUND", "章节不存在")
+    ensure_course_manager(chapter.course, current_user)
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(chapter, key, value)
+    db.commit()
+    db.refresh(chapter)
+    return chapter
+
+
+@router.delete("/chapters/{chapter_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_chapter(
+    chapter_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """删除章节：级联删除章节内全部课时"""
+    chapter = db.get(Chapter, chapter_id)
+    if not chapter:
+        raise api_error(404, "CHAPTER_NOT_FOUND", "章节不存在")
+    ensure_course_manager(chapter.course, current_user)
+    db.delete(chapter)
+    db.commit()

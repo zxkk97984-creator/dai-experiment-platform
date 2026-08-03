@@ -1,54 +1,48 @@
 <script setup>
+// AppSidebar：共享认证侧栏。角色菜单与权限保持原样；
+// 视觉按参考设计：白底、软填充激活行、无左侧条纹、真实图标库。
+
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth.js'
 import { useAppStore } from '../../stores/app.js'
 import { homeForRole } from '../../router/roleHome.js'
+import AppIcon from '../ui/AppIcon.vue'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const app = useAppStore()
 
-// Modern icons — clean line style
-const ICONS = {
-  home:        'M3 10l9-7 9 7 M5 9v11h14V9',
-  courses:     'M4 4h6l2 2h8v10H4V4z M4 18h16',
-  assignments: 'M9 5l-5 5 5 5 M15 5l5 5-5 5',
-  exams:       'M5 3h12v18H5V3z M8 8h6 M8 12h4',
-  experiments: 'M10 3v6h4V3 M8 9h8v12H8V9z',
-  users:       'M8 7a3 3 0 100-6 3 3 0 000 6z M2 19c0-3.3 2.7-6 6-6s6 2.7 6 6',
-}
-
 const menuItems = computed(() => {
   const home = (root) => ({ path: root, label: '首页', sub: 'Home', icon: 'home', key: 'home' })
   const base = [
-    { path: '/student/courses',     label: '课程',     sub: 'Courses',     icon: 'courses',     key: 'courses' },
-    { path: '/student/assignments', label: '作业',     sub: 'Assignments', icon: 'assignments', key: 'assignments' },
-    { path: '/student/exams',       label: '考试',     sub: 'Exams',       icon: 'exams',       key: 'exams' },
-    { path: '/student/experiments', label: '实验',     sub: 'Lab',         icon: 'experiments', key: 'experiments' },
+    { path: '/student/courses',     label: '课程',     sub: 'Courses',     icon: 'course',     key: 'courses' },
+    { path: '/student/assignments', label: '作业',     sub: 'Assignments', icon: 'assignment', key: 'assignments' },
+    { path: '/student/exams',       label: '考试',     sub: 'Exams',       icon: 'exam',       key: 'exams' },
+    { path: '/student/experiments', label: '实验',     sub: 'Lab',         icon: 'experiment', key: 'experiments' },
   ]
   if (auth.isTeacher) return [
     home('/teacher'),
-    { path: '/teacher/courses',     label: '课程',     sub: 'Courses',      icon: 'courses',     key: 'courses' },
-    { path: '/teacher/assignments', label: '作业',     sub: 'Assignments',  icon: 'assignments', key: 'assignments' },
-    { path: '/teacher/exams',       label: '考试',     sub: 'Exams',        icon: 'exams',       key: 'exams' },
-    { path: '/teacher/experiments', label: '实验',     sub: 'Experiments',  icon: 'experiments', key: 'experiments' },
-    { path: '/teacher/submissions', label: '提交列表', sub: 'Submissions',  icon: 'assignments', key: 'submissions' },
-    { path: '/teacher/ai-grading',  label: 'AI 评分',   sub: 'AI Grading',    icon: 'assignments', key: 'ai-grading' },
+    { path: '/teacher/courses',     label: '课程',     sub: 'Courses',      icon: 'course',     key: 'courses' },
+    { path: '/teacher/assignments', label: '作业',     sub: 'Assignments',  icon: 'assignment', key: 'assignments' },
+    { path: '/teacher/exams',       label: '考试',     sub: 'Exams',        icon: 'exam',       key: 'exams' },
+    { path: '/teacher/experiments', label: '实验',     sub: 'Experiments',  icon: 'experiment', key: 'experiments' },
+    { path: '/teacher/submissions', label: '提交列表', sub: 'Submissions',  icon: 'assignment', key: 'submissions' },
+    { path: '/teacher/ai-grading',  label: 'AI 评分',   sub: 'AI Grading',    icon: 'assignment', key: 'ai-grading' },
   ]
   if (auth.isAdmin) return [
-    { path: '/admin/users',         label: '用户',     sub: 'Users',       icon: 'users',       key: 'users' },
-    { path: '/admin/courses',       label: '课程',     sub: 'Courses',     icon: 'courses',     key: 'courses' },
-    { path: '/admin/experiments',   label: '实验',     sub: 'Experiments', icon: 'experiments', key: 'experiments' },
-    { path: '/admin/ai-grading',    label: 'AI 评分',   sub: 'AI Grading',    icon: 'assignments', key: 'ai-grading' },
+    { path: '/admin/users',         label: '用户',     sub: 'Users',       icon: 'user',       key: 'users' },
+    { path: '/admin/courses',       label: '课程',     sub: 'Courses',     icon: 'course',     key: 'courses' },
+    { path: '/admin/experiments',   label: '实验',     sub: 'Experiments', icon: 'experiment', key: 'experiments' },
+    { path: '/admin/ai-grading',    label: 'AI 评分',   sub: 'AI Grading',    icon: 'assignment', key: 'ai-grading' },
   ]
   if (auth.isDeveloper) return [
     {
       path: '/developer/templates',
       label: '实验模板',
       sub: 'Templates',
-      icon: 'experiments',
+      icon: 'experiment',
       key: 'templates',
     },
   ]
@@ -59,8 +53,9 @@ function isActive(path) {
   if (path === '/student/assignments' && route.path.startsWith('/student/submissions')) return true
   if (path === '/teacher/submissions' && route.path.startsWith('/teacher/submissions')) return true
   if (path === '/admin/submissions' && route.path.startsWith('/admin/submissions')) return true
-  // 角色首页项仅精确匹配根路由，子页面不高亮
-  if (path === '/student' || path === '/teacher') return route.path === path
+  // 角色首页项：根路由精确匹配；/student/feedback 镜像参考图 01 归属首页
+  if (path === '/student') return route.path === path || route.path === '/student/feedback'
+  if (path === '/teacher') return route.path === path
   return route.path.startsWith(path)
 }
 
@@ -71,27 +66,23 @@ function navigate(path) {
 
 <template>
   <aside class="sidebar" :class="{ collapsed: app.sidebarCollapsed }">
-    <!-- Logo：真实 button，原生键盘可聚焦与回车激活 -->
+    <!-- Logo：真实 button + 库图标（蓝色方块内的立方体） -->
     <button
       type="button"
       class="logo"
       aria-label="返回首页"
       @click="navigate(homeForRole(auth.role))"
     >
-      <div class="logo-mark">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-          <path d="M12 2L3 7v10l9 5 9-5V7l-9-5z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-          <path d="M12 2v20 M3 7l9 5 9-5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-        </svg>
-      </div>
-      <div class="logo-text" v-if="!app.sidebarCollapsed">
+      <span class="logo-mark" aria-hidden="true">
+        <AppIcon name="cube" :size="20" />
+      </span>
+      <span class="logo-text" v-if="!app.sidebarCollapsed">
         <span class="logo-name">DAI 实验平台</span>
-      </div>
+      </span>
     </button>
 
     <!-- Nav -->
     <nav class="nav">
-      <div class="nav-label" v-if="!app.sidebarCollapsed">主导航</div>
       <button
         v-for="item in menuItems" :key="item.path"
         class="nav-item"
@@ -101,16 +92,13 @@ function navigate(path) {
         :title="app.sidebarCollapsed ? item.label : ''"
       >
         <span class="nav-icon" aria-hidden="true">
-          <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-            <path :d="ICONS[item.icon]" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+          <AppIcon :name="item.icon" :size="20" />
         </span>
         <span class="nav-text" v-if="!app.sidebarCollapsed">{{ item.label }}</span>
-        <span class="nav-active-dot" v-if="isActive(item.path)"></span>
       </button>
     </nav>
 
-    <!-- Footer -->
+    <!-- Footer：折叠动作，箭头旋转不依赖自定义 SVG -->
     <div class="sidebar-footer">
       <button
         class="collapse-btn"
@@ -118,10 +106,9 @@ function navigate(path) {
         :title="app.sidebarCollapsed ? '展开侧栏' : '收起侧栏'"
         aria-label="Toggle sidebar"
       >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"
-             :style="app.sidebarCollapsed ? 'transform: rotate(180deg)' : ''">
-          <path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        <span class="collapse-arrow" :class="{ 'is-collapsed': app.sidebarCollapsed }" aria-hidden="true">
+          <AppIcon name="chevron-right" :size="16" />
+        </span>
         <span v-if="!app.sidebarCollapsed" class="collapse-text">收起</span>
       </button>
     </div>
@@ -130,13 +117,12 @@ function navigate(path) {
 
 <style scoped>
 /* ═══════════════════════════════════════════════════════════════════════
-   App Sidebar — Light theme
-   白底 + 右侧边框 + 蓝色 active 态
+   App Sidebar — 参考设计：白底、右侧细边框、软填充激活行（无左侧条纹）
    ═══════════════════════════════════════════════════════════════════════ */
 .sidebar {
   position: fixed;
   left: 0; top: 0; bottom: 0;
-  width: 224px;
+  width: var(--sidebar-width, 264px);
   background: var(--surface);
   display: flex;
   flex-direction: column;
@@ -146,18 +132,19 @@ function navigate(path) {
   border-right: 1px solid var(--border);
 }
 
-.sidebar.collapsed { width: 56px; }
+.sidebar.collapsed { width: var(--sidebar-collapsed-width, 64px); }
 
-/* ── Logo ──────────────────────────────────────────────────────────── */
+/* ── Logo 行（82px 高） ─────────────────────────────────────────── */
 .logo {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: flex-start;
+  gap: 12px;
   padding: 16px;
+  height: 82px;
   cursor: pointer;
   user-select: none;
   border-bottom: 1px solid var(--border);
-  /* button 原生样式重置：保持与既有 div 外观一致 */
   width: 100%;
   box-sizing: border-box;
   border-left: none;
@@ -169,17 +156,16 @@ function navigate(path) {
 }
 
 .logo-mark {
-  width: 28px; height: 28px;
-  border-radius: var(--radius-md);
-  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+  width: 32px; height: 32px;
+  border-radius: var(--radius-control, 7px);
+  background: var(--primary);
   display: flex; align-items: center; justify-content: center;
   color: var(--surface);
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
 }
 
 .logo-text {
-  display: flex; flex-direction: column; gap: 0px;
+  display: flex; flex-direction: column; gap: 0;
   min-width: 0;
 }
 .logo-name {
@@ -199,38 +185,31 @@ function navigate(path) {
 /* ── Nav ───────────────────────────────────────────────────────────── */
 .nav {
   flex: 1;
-  padding: 16px 12px;
+  padding: 12px 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.nav-label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text-tertiary);
-  padding: 12px 12px 6px;
-}
-
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
+  justify-content: flex-start;
+  gap: 12px;
+  height: 46px;
+  margin: 0 20px;
+  padding: 0 14px;
   background: transparent;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-card, 12px);
   color: var(--text-secondary);
   font-family: var(--font-body);
   font-size: var(--text-sm);
   font-weight: 500;
-  width: 100%;
+  width: auto;
   text-align: left;
   cursor: pointer;
-  position: relative;
   transition: background var(--duration-fast) var(--ease-out),
               color var(--duration-fast) var(--ease-out);
   text-transform: none;
@@ -240,21 +219,12 @@ function navigate(path) {
 .nav-item:hover {
   background: var(--primary-light);
   color: var(--primary);
-  border-color: transparent;
 }
 
 .nav-item.active {
   background: var(--primary-light);
   color: var(--primary);
-}
-.nav-item.active::before {
-  content: '';
-  position: absolute;
-  left: 0; top: 50%;
-  transform: translateY(-50%);
-  width: 2px; height: 16px;
-  background: var(--primary);
-  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  font-weight: 600;
 }
 
 .nav-icon {
@@ -266,29 +236,22 @@ function navigate(path) {
 
 .nav-text {
   font-size: var(--text-sm);
-  font-weight: 500;
+  font-weight: inherit;
   line-height: 1.3;
   color: inherit;
+  white-space: nowrap;
 }
 
-.nav-active-dot {
-  display: none;
-  position: absolute;
-  right: 8px; top: 50%;
-  transform: translateY(-50%);
-  width: 6px; height: 6px;
-  background: var(--primary);
-  border-radius: 50%;
-}
-.sidebar.collapsed .nav-active-dot { display: block; }
-
-.sidebar.collapsed .nav { padding: 16px 8px; }
+/* ── 折叠态 ─────────────────────────────────────────────────────── */
+.sidebar.collapsed .nav { padding: 12px 0; }
 .sidebar.collapsed .nav-item {
   justify-content: center;
-  padding: 12px 8px;
+  height: 46px;
+  width: 46px;
+  margin: 2px auto;
+  padding: 0;
   gap: 0;
 }
-.sidebar.collapsed .nav-label { display: none; }
 
 /* ── Footer ─────────────────────────────────────────────────────────── */
 .sidebar-footer {
@@ -304,7 +267,7 @@ function navigate(path) {
   border: none;
   color: var(--text-tertiary);
   padding: 8px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-card, 12px);
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out),
               color var(--duration-fast) var(--ease-out);
@@ -314,8 +277,14 @@ function navigate(path) {
 .collapse-btn:hover {
   background: var(--surface-raised);
   color: var(--ink);
-  border-color: transparent;
 }
+
+.collapse-arrow {
+  display: inline-flex;
+  transition: transform var(--duration-normal) var(--ease-out);
+}
+.collapse-arrow.is-collapsed { transform: rotate(180deg); }
+
 .collapse-text {
   font-size: var(--text-xs);
   letter-spacing: 0.02em;
@@ -323,17 +292,19 @@ function navigate(path) {
 
 .sidebar.collapsed .collapse-btn { padding: 8px 0; }
 
-/* ── 移动端：强制紧凑图标栏（约 56px），避免固定 224px 侧栏挤压主内容 ── */
-@media (max-width: 768px) {
-  .sidebar { width: 56px; }
+/* ── ≤1199px：强制 64px 折叠图标栏（769–1199 与移动端一致） ───────── */
+@media (max-width: 1199px) {
+  .sidebar { width: var(--sidebar-collapsed-width, 64px); }
   .logo { justify-content: center; padding: 16px 0; }
   .logo-text,
-  .nav-label,
   .nav-text,
   .collapse-text { display: none; }
-  .nav { padding: 16px 8px; }
-  .nav-item { justify-content: center; padding: 12px 8px; gap: 0; }
-  .nav-active-dot { display: block; }
+  .nav { padding: 12px 0; }
+  .nav-item { justify-content: center; height: 46px; width: 46px; margin: 2px auto; padding: 0; gap: 0; }
+}
+
+/* ── ≤767.98px（含 768 的 sub-pixel 视口）：隐藏折叠控件 ───────────── */
+@media (max-width: 767.98px) {
   /* 移动端侧栏固定为图标形态，折叠控件无实际效果，隐藏避免误导 */
   .collapse-btn { display: none; }
 }

@@ -32,13 +32,14 @@ const app = useAppStore()
   flex: 1;
   display: flex;
   flex-direction: column;
-  margin-left: 224px;
+  margin-left: var(--sidebar-width, 264px);
   transition: margin-left var(--duration-slow) var(--ease-out);
   min-width: 0;
   background: var(--paper);
 }
-.main-area.collapsed { margin-left: 56px; }
+.main-area.collapsed { margin-left: var(--sidebar-collapsed-width, 64px); }
 
+/* 内容区：fluid，页面自身滚动，侧栏不滚动 */
 .content {
   flex: 1;
   overflow-y: auto;
@@ -46,14 +47,18 @@ const app = useAppStore()
 }
 
 .content-inner {
-  max-width: 1280px;
+  max-width: var(--content-max, 1440px);
   margin: 0 auto;
-  padding: 32px 40px 80px;
+  padding: 28px 36px 80px;
 }
 
-@media (max-width: 768px) {
+/* ≤1199px：64px 折叠侧栏 + 单列内容 */
+@media (max-width: 1199px) {
+  .main-area { margin-left: var(--sidebar-collapsed-width, 64px); }
+}
+
+@media (max-width: 767.98px) {
   .content-inner { padding: 20px 16px 60px; }
-  /* 移动端侧栏固定为 56px 图标栏，主区域 offset 保持一致 */
-  .main-area { margin-left: 56px; }
+  .main-area { margin-left: var(--sidebar-collapsed-width, 64px); }
 }
 </style>

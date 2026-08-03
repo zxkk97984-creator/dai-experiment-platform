@@ -185,8 +185,126 @@ def test_max_retries_reaches_system_error(db_session_factory):
         assert "超过最大重试次数" in (sub2.last_error or "")
 
 
+def _setup_active_submission(db_session_factory):
+    """创建 active 模式作业提交（含测试组与锁定 Rubric，测试按需破坏配置）"""
+    with db_session_factory() as db:
+        from app.models import Assignment, Course, JudgeQuestion, QuestionRubric, User
+        teacher = User(username="pc_t", real_name="PCT", role="teacher", status="active",
+                       password_hash="x")
+        student = User(username="pc_s", real_name="PCS", role="student", status="active",
+                       password_hash="x")
+        db.add_all([teacher, student]); db.flush()
+        course = Course(title="PCC", status="published", teacher_id=teacher.id)
+        db.add(course); db.flush()
+        assignment = Assignment(course_id=course.id, title="PCA", status="published")
+        db.add(assignment); db.flush()
+        q = JudgeQuestion(assignment_id=assignment.id, title="PCQ", function_name="f",
+                          hidden_tests="assert True", public_cases=[],
+                          grading_mode="active",
+                          test_groups=[{"id": "F1", "name": "F", "dimension": "F",
+                                        "max_score": 60, "tests": "def test(): pass"}])
+        db.add(q); db.flush()
+        rub = QuestionRubric(judge_question_id=q.id, version=1, status="locked",
+                             source_hash="h", source_snapshot={}, rubric_json={},
+                             model_name="m", locked_at=datetime.now(timezone.utc))
+        db.add(rub); db.flush()
+        sub = Submission(question_id=q.id, student_id=student.id,
+                         code="def f(): pass", status="queued", grading_status="pending")
+        db.add(sub); db.commit()
+        return {"sid": sub.id, "qid": q.id}
+
+
+def _run_process_submission(db_session_factory, sid):
+    """入队 + process_submission（内部自行 claim）"""
+    from app.worker.judge_worker import process_submission
+    from app.config import get_settings
+    import fakeredis
+    with db_session_factory() as db:
+        enqueue_job(db, job_type="assignment", object_id=sid)
+    with db_session_factory() as db:
+        process_submission(db, fakeredis.FakeStrictRedis(), get_settings(), sid)
+    with db_session_factory() as db:
+        return db.get(Submission, sid)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 3.1 作业路径永久配置错误：立即 system_error，不消耗重试
+# ═══════════════════════════════════════════════════════════════
+
+def test_submission_missing_test_groups_permanent_error_immediate(db_session_factory):
+    """作业 active 缺 test_groups：永久配置错误，立即 system_error，不消耗重试"""
+    from app.models import JudgeQuestion
+    ctx = _setup_active_submission(db_session_factory)
+
+    with db_session_factory() as db:
+        db.get(JudgeQuestion, ctx["qid"]).test_groups = []
+        db.commit()
+
+    sub = _run_process_submission(db_session_factory, ctx["sid"])
+    assert sub.grading_status == "system_error", \
+        f"作业缺测试组应立即 system_error: {sub.grading_status}"
+    assert sub.status == "system_error"
+    assert sub.attempt_count <= 1, f"不应消耗重试: {sub.attempt_count}"
+    assert sub.score is None  # 系统错误不扣分
+
+
+def test_submission_missing_locked_rubric_permanent_error_immediate(db_session_factory):
+    """作业 active 缺锁定 Rubric：永久配置错误，立即 system_error，不消耗重试"""
+    from app.models import JudgeQuestion, QuestionRubric
+    ctx = _setup_active_submission(db_session_factory)
+
+    with db_session_factory() as db:
+        db.get(JudgeQuestion, ctx["qid"]).test_groups = [
+            {"id": "F1", "name": "F", "dimension": "F",
+             "max_score": 60, "tests": "def test(): pass"}]
+        rub = db.query(QuestionRubric).filter(
+            QuestionRubric.judge_question_id == ctx["qid"]).first()
+        db.delete(rub)
+        db.commit()
+
+    sub = _run_process_submission(db_session_factory, ctx["sid"])
+    assert sub.grading_status == "system_error", \
+        f"作业缺锁定 Rubric 应立即 system_error: {sub.grading_status}"
+    assert sub.attempt_count <= 1, f"不应消耗重试: {sub.attempt_count}"
+    assert sub.score is None
+
+
+def test_submission_test_group_missing_tests_permanent_error_immediate(db_session_factory):
+    """作业 test_groups 内缺 tests 代码：永久配置错误，立即 system_error，不进入 Docker"""
+    from app.models import JudgeQuestion
+    ctx = _setup_active_submission(db_session_factory)
+
+    with db_session_factory() as db:
+        db.get(JudgeQuestion, ctx["qid"]).test_groups = [
+            {"id": "F1", "name": "F", "dimension": "F", "max_score": 60, "tests": ""}]
+        db.commit()
+
+    sub = _run_process_submission(db_session_factory, ctx["sid"])
+    assert sub.grading_status == "system_error", \
+        f"测试组缺 tests 应立即 system_error: {sub.grading_status}"
+    assert sub.attempt_count <= 1, f"不应消耗重试: {sub.attempt_count}"
+    assert sub.score is None
+
+
+def test_submission_missing_hidden_tests_permanent_error_immediate(db_session_factory):
+    """作业 legacy 缺 hidden_tests：永久配置错误，立即 system_error，不消耗重试"""
+    sid = _setup_submission(db_session_factory)
+
+    with db_session_factory() as db:
+        from app.models import JudgeQuestion
+        qid = db.get(Submission, sid).question_id
+        db.get(JudgeQuestion, qid).hidden_tests = ""  # NOT NULL 约束：用空串模拟缺失
+        db.commit()
+
+    sub = _run_process_submission(db_session_factory, sid)
+    assert sub.grading_status == "system_error", \
+        f"作业缺 hidden_tests 应立即 system_error: {sub.grading_status}"
+    assert sub.attempt_count <= 1, f"不应消耗重试: {sub.attempt_count}"
+    assert sub.score is None
+
+
 def test_exam_answer_max_retries_with_finalize(db_session_factory):
-    """考试题超过最大重试 → system_error + 触发最终汇总"""
+    """考试题超过最大重试 → system_error + 父级立即转 review_required（公平性不结算）"""
     aid = _setup_exam_answer(db_session_factory)
 
     with db_session_factory() as db:
@@ -201,9 +319,157 @@ def test_exam_answer_max_retries_with_finalize(db_session_factory):
         assert ans2.grading_status == "system_error"
         assert ans2.score is None  # 系统错误不扣分（第六轮修正）
 
-        # 验证提交状态已变为 graded（因为所有答案都是终态）
+        # 父级转入 review_required 终态，而非永远卡在 grading
         sub = db.get(ExamSubmission, ans2.submission_id)
-        assert sub.status in ("graded", "grading"), f"应为 graded/grading: {sub.status}"
+        assert sub.status == "review_required", f"应为 review_required: {sub.status}"
+        assert sub.review_required_at is not None
+
+
+def test_missing_hidden_tests_permanent_error_immediate(db_session_factory):
+    """缺 hidden_tests 是永久配置错误：立即 system_error，不消耗重试"""
+    from app.worker.judge_worker import process_exam_answer
+    from app.config import get_settings
+    import fakeredis
+
+    aid = _setup_exam_answer(db_session_factory)
+    settings = get_settings()
+
+    with db_session_factory() as db:
+        # 清掉隐藏测试（模拟历史数据/导入绕过校验）
+        ans = db.get(ExamAnswer, aid)
+        q = db.get(ExamQuestion, ans.question_id)
+        q.hidden_tests = None
+        db.commit()
+
+    with db_session_factory() as db:
+        enqueue_job(db, job_type="exam", object_id=aid)
+
+    with db_session_factory() as db:
+        process_exam_answer(db, fakeredis.FakeStrictRedis(), settings, aid)
+
+        ans = db.get(ExamAnswer, aid)
+        # 永久错误：一次尝试即 system_error，attempt_count 不递增到 MAX
+        assert ans.grading_status == "system_error", \
+            f"缺 hidden_tests 应立即 system_error: {ans.grading_status}"
+        assert ans.attempt_count <= 1, f"不应耗尽重试: {ans.attempt_count}"
+        assert ans.score is None  # 系统错误不扣分
+
+        # 父级当场转 review_required
+        sub = db.get(ExamSubmission, ans.submission_id)
+        assert sub.status == "review_required", f"父级应转 review_required: {sub.status}"
+
+
+def test_test_group_missing_tests_permanent_error_immediate(db_session_factory):
+    """test_groups 内缺 tests 代码是永久配置错误：立即 system_error + 父 review_required，不重试"""
+    from app.worker.judge_worker import process_exam_answer
+    from app.config import get_settings
+    import fakeredis
+
+    aid = _setup_exam_answer(db_session_factory)
+    settings = get_settings()
+
+    with db_session_factory() as db:
+        ans = db.get(ExamAnswer, aid)
+        q = db.get(ExamQuestion, ans.question_id)
+        q.grading_mode = "active"
+        q.hidden_tests = None
+        q.test_groups = [{"id": "F1", "name": "F", "dimension": "F",
+                          "max_score": 60, "tests": ""}]  # 配置缺失：无 tests 代码
+        # 需锁定 rubric（否则先命中 rubric 检查；为验证 tests 缺失，补一个）
+        from app.models import QuestionRubric
+        from datetime import datetime, timezone
+        rub = QuestionRubric(exam_question_id=q.id, version=1, status="locked",
+                             source_hash="h", source_snapshot={}, rubric_json={},
+                             model_name="m", locked_at=datetime.now(timezone.utc))
+        db.add(rub)
+        db.commit()
+
+    with db_session_factory() as db:
+        enqueue_job(db, job_type="exam", object_id=aid)
+
+    with db_session_factory() as db:
+        process_exam_answer(db, fakeredis.FakeStrictRedis(), settings, aid)
+
+        ans = db.get(ExamAnswer, aid)
+        assert ans.grading_status == "system_error", \
+            f"测试组缺 tests 应立即 system_error: {ans.grading_status}"
+        assert ans.attempt_count <= 1, f"不应消耗重试: {ans.attempt_count}"
+        assert ans.score is None
+        assert ans.system_error == "测试组缺少测试代码"
+
+        sub = db.get(ExamSubmission, ans.submission_id)
+        assert sub.status == "review_required", f"父级应转 review_required: {sub.status}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# 3.5 状态 CAS：旧 Worker 的 fail 不得覆盖新 Worker 已完成的判题结果
+# ═══════════════════════════════════════════════════════════════
+
+def test_fail_job_does_not_override_completed(db_session_factory):
+    """fail_job 仅对 running 生效——已完成的任务不被旧 Worker 失败覆盖"""
+    sid = _setup_submission(db_session_factory)
+
+    with db_session_factory() as db:
+        enqueue_job(db, job_type="assignment", object_id=sid)
+        claim_job(db, job_type="assignment", object_id=sid)
+        # 新 Worker 已完成
+        complete_job(db, job_type="assignment", object_id=sid, score=80.0)
+        assert db.get(Submission, sid).grading_status == "completed"
+
+        # 旧 Worker 迟到 fail
+        fail_job(db, job_type="assignment", object_id=sid,
+                 error="旧 Worker 超时", retryable=True)
+        db.expire_all()
+        sub = db.get(Submission, sid)
+        assert sub.grading_status == "completed", \
+            f"已完成的任务不应被旧 Worker 失败覆盖: {sub.grading_status}"
+        assert sub.score == 80.0
+
+
+def test_fail_ai_grade_does_not_override_completed(db_session_factory):
+    """fail_ai_grade 仅对 running 生效——已完成 CodeGrade 不被旧 Worker 失败覆盖"""
+    from app.services.ai_grading_queue import fail_ai_grade
+    from unittest.mock import MagicMock
+    from datetime import datetime, timezone
+    from app.models import CodeGrade, QuestionRubric
+    from app.models import Assignment, Course, JudgeQuestion, Submission as Sub, User
+
+    with db_session_factory() as db:
+        teacher = User(username="fa_t", real_name="FAT", role="teacher", status="active",
+                       password_hash="x")
+        student = User(username="fa_s", real_name="FAS", role="student", status="active",
+                       password_hash="x")
+        db.add_all([teacher, student]); db.flush()
+        course = Course(title="FAC", status="published", teacher_id=teacher.id)
+        db.add(course); db.flush()
+        assignment = Assignment(course_id=course.id, title="FAA", status="published")
+        db.add(assignment); db.flush()
+        q = JudgeQuestion(assignment_id=assignment.id, title="FAQ", function_name="f",
+                          hidden_tests="assert True", public_cases=[],
+                          grading_mode="active",
+                          test_groups=[{"id": "F1", "name": "F", "dimension": "F",
+                                        "max_score": 60, "tests": "def test(): pass"}])
+        db.add(q); db.flush()
+        rub = QuestionRubric(judge_question_id=q.id, version=1, status="locked",
+                             source_hash="h", source_snapshot={}, rubric_json={},
+                             model_name="m", locked_at=datetime.now(timezone.utc))
+        db.add(rub); db.flush()
+        sub = Sub(question_id=q.id, student_id=student.id,
+                  code="def f(): pass", status="running", grading_status="running")
+        db.add(sub); db.commit()
+        cg = CodeGrade(submission_id=sub.id, rubric_id=rub.id, mode="active",
+                       status="completed", functional_score=60, robustness_score=10)
+        db.add(cg); db.commit()
+        cg_id = cg.id
+
+    with db_session_factory() as db:
+        # 已完成状态：fail_ai_grade 不得覆盖
+        fail_ai_grade(db, MagicMock(), cg_id, "旧 Worker 超时",
+                      retryable=True, max_attempts=3)
+        db.expire_all()
+        cg2 = db.get(CodeGrade, cg_id)
+        assert cg2.status == "completed", \
+            f"已完成 CodeGrade 不应被旧 Worker 失败覆盖: {cg2.status}"
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -592,3 +592,121 @@ def test_preview_hidden_failure_destroys_kernel(client, studio_context, monkeypa
     assert response.json()["detail"]["code"] == "KERNEL_INIT_FAILED"
     session_id = next(event[1] for event in fake.events if event[0] == "session")
     assert ("destroy", session_id) in fake.events
+
+
+def test_legacy_draft_cells_missing_flags_still_preview_run(
+    client, db_session_factory, studio_context, monkeypatch
+):
+    """历史草稿数据缺少 source_hidden/student_editable 字段时，预览执行不应 500"""
+    from app.api import studio as studio_api
+
+    ctx = studio_context
+    fake = FakeKernelManager()
+    monkeypatch.setattr(studio_api, "get_kernel_manager", lambda: fake)
+    template = _create_teacher_template(client, ctx)
+
+    # 直接写库模拟旧版 seed 数据：markdown 无任何可选字段，code 缺 source_hidden
+    legacy_cells = [
+        {"id": "c1", "type": "markdown", "source": "# 标题", "order": 0},
+        {"id": "c2", "type": "code", "source": "hidden_init()", "order": 1,
+         "student_editable": False},
+        {"id": "c3", "type": "code", "source": "show()", "order": 2,
+         "student_editable": True},
+    ]
+    with db_session_factory() as db:
+        record = db.get(NotebookTemplate, template["id"])
+        record.draft_cells = legacy_cells
+        db.commit()
+
+    response = client.post(
+        f"/api/v1/studio/templates/{template['id']}/preview/run",
+        headers=_headers(ctx, "studio_teacher"),
+        json={"cell_id": "c3"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["outputs"][0]["content"]["text"] == "show()"
+
+    # 缺字段的 code cell 不应被误判为隐藏初始化 cell
+    assert [e[2] for e in fake.events if e[0] == "execute"] == ["show()"]
+
+    # GET 模板读取时补齐默认字段
+    detail = client.get(
+        f"/api/v1/studio/templates/{template['id']}",
+        headers=_headers(ctx, "studio_teacher"),
+    )
+    assert detail.status_code == 200, detail.text
+    by_id = {c["id"]: c for c in detail.json()["draft_cells"]}
+    assert by_id["c3"]["source_hidden"] is False
+    assert by_id["c3"]["student_editable"] is True
+    assert by_id["c2"]["source_hidden"] is False
+
+
+def test_preview_run_without_saved_draft_returns_404(
+    client, studio_context, monkeypatch
+):
+    """新建模板尚未保存草稿（draft_cells 为空）时，预览运行应明确返回 404，
+    提示先保存草稿，而不是 500 或静默失败。"""
+    from app.api import studio as studio_api
+
+    ctx = studio_context
+    fake = FakeKernelManager()
+    monkeypatch.setattr(studio_api, "get_kernel_manager", lambda: fake)
+    template = _create_teacher_template(client, ctx)
+
+    # 不保存任何草稿，直接预览运行前端本地新增的 cell_id
+    response = client.post(
+        f"/api/v1/studio/templates/{template['id']}/preview/run",
+        headers=_headers(ctx, "studio_teacher"),
+        json={"cell_id": "cell-abc12345"},
+    )
+    assert response.status_code == 404, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "CELL_NOT_FOUND"
+    assert "保存" in detail["message"]
+    assert fake.events == []
+
+
+def test_legacy_published_version_missing_flags_still_readable(
+    client, db_session_factory, studio_context
+):
+    """历史发布版本缺字段时，模板读取/版本列表/导出不应 500"""
+    ctx = studio_context
+    template = _create_teacher_template(client, ctx)
+
+    legacy_cells = [
+        {"id": "c1", "type": "markdown", "source": "# 旧标题", "order": 0},
+        {"id": "c2", "type": "code", "source": "print(1)", "order": 1},
+    ]
+    with db_session_factory() as db:
+        record = db.get(NotebookTemplate, template["id"])
+        record.draft_cells = legacy_cells
+        db.commit()
+
+    published = client.post(
+        f"/api/v1/studio/templates/{template['id']}/publish",
+        headers=_headers(ctx, "studio_teacher"),
+    )
+    assert published.status_code == 201, published.text
+
+    detail = client.get(
+        f"/api/v1/studio/templates/{template['id']}",
+        headers=_headers(ctx, "studio_teacher"),
+    )
+    assert detail.status_code == 200, detail.text
+    version_cells = detail.json()["current_version"]["cells"]
+    by_id = {c["id"]: c for c in version_cells}
+    assert by_id["c2"]["source_hidden"] is False
+    assert by_id["c2"]["student_editable"] is True
+    assert by_id["c1"]["student_editable"] is False
+
+    history = client.get(
+        f"/api/v1/studio/templates/{template['id']}/versions",
+        headers=_headers(ctx, "studio_teacher"),
+    )
+    assert history.status_code == 200, history.text
+
+    exported = client.get(
+        f"/api/v1/studio/templates/{template['id']}/export?scope=draft",
+        headers=_headers(ctx, "studio_teacher"),
+    )
+    assert exported.status_code == 200, exported.text

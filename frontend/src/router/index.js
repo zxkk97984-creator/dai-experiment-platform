@@ -12,6 +12,7 @@ const routes = [
   { path: '/student/courses/:id', name: 'StudentCourseDetail', component: () => import('../views/student/CourseDetailView.vue'), meta: { role: 'student' } },
   { path: '/student/courses/:id/lessons/:lid', name: 'StudentLesson', component: () => import('../views/student/LessonView.vue'), meta: { role: 'student' } },
   { path: '/student/assignments', name: 'StudentAssignments', component: () => import('../views/student/AssignmentListView.vue'), meta: { role: 'student' } },
+  { path: '/student/feedback', name: 'StudentFeedback', component: () => import('../views/student/FeedbackListView.vue'), meta: { role: 'student' } },
   { path: '/student/assignments/:id', name: 'StudentAssignmentDetail', component: () => import('../views/student/AssignmentDetailView.vue'), meta: { role: 'student' } },
   { path: '/student/submissions/:id', name: 'StudentSubmission', component: () => import('../views/student/SubmissionView.vue'), meta: { role: 'student' } },
   { path: '/student/exams', name: 'StudentExams', component: () => import('../views/student/ExamListView.vue'), meta: { role: 'student' } },
@@ -23,7 +24,7 @@ const routes = [
   // Teacher
   { path: '/teacher', name: 'TeacherHome', component: () => import('../views/teacher/DashboardView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/courses', name: 'TeacherCourses', component: () => import('../views/teacher/CourseManageView.vue'), meta: { role: 'teacher' } },
-  { path: '/teacher/courses/:id/manage', name: 'TeacherChapterManage', component: () => import('../views/teacher/ChapterManageView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/courses/:courseId/manage', name: 'TeacherChapterManage', component: () => import('../views/teacher/ChapterManageView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/assignments', name: 'TeacherAssignments', component: () => import('../views/teacher/AssignmentManageView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/assignments/:id/edit', name: 'TeacherAssignmentQuestionEdit', component: () => import('../views/teacher/QuestionEditView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/exams', name: 'TeacherExams', component: () => import('../views/teacher/ExamManageView.vue'), meta: { role: 'teacher' } },

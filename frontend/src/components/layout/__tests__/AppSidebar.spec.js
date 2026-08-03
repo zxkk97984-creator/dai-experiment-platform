@@ -91,6 +91,24 @@ describe('AppSidebar 角色首页导航', () => {
     expect(navItems[0].attributes('aria-label')).toBe('首页')
     expect(navItems[1].attributes('aria-label')).toBe('课程')
   })
+
+  it('/student/feedback 镜像参考图 01，高亮首页', () => {
+    const { wrapper } = mountAs('student', '/student/feedback')
+    const navItems = wrapper.findAll('.nav-item')
+    expect(navItems[0].text()).toContain('首页')
+    expect(navItems[0].classes()).toContain('active')
+  })
+
+  it('折叠按钮切换 collapsed 类并保留导航可访问名称', async () => {
+    const { wrapper } = mountAs('student', '/student')
+    const sidebar = wrapper.find('.sidebar')
+    expect(sidebar.classes()).not.toContain('collapsed')
+    await wrapper.get('.collapse-btn').trigger('click')
+    expect(sidebar.classes()).toContain('collapsed')
+    for (const item of wrapper.findAll('.nav-item')) {
+      expect(item.attributes('aria-label')).toBeTruthy()
+    }
+  })
 })
 
 describe('AppSidebar developer navigation', () => {

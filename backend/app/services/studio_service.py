@@ -70,13 +70,34 @@ def preview_session_key(template_id: int, user_id: int) -> int:
     return -(((total * (total + 1)) // 2) + user_id + 1)
 
 
+def _normalize_cell(cell: dict) -> dict:
+    """兼容历史数据：早期草稿/版本可能缺少 student_editable / source_hidden 字段，读取时补齐默认值。
+
+    默认值语义与前端创建 Cell 时一致：code cell 可编辑，source_hidden 默认为 False（避免旧
+    code cell 被误判为隐藏初始化 Cell）。
+    """
+    cell_type = cell.get("type") if cell.get("type") in ("markdown", "code") else "markdown"
+    return {
+        "id": str(cell.get("id", "")).strip(),
+        "type": cell_type,
+        "source": cell.get("source", ""),
+        "order": int(cell.get("order", 0)),
+        "student_editable": bool(cell.get("student_editable", cell_type == "code")),
+        "source_hidden": bool(cell.get("source_hidden", False)),
+    }
+
+
+def _normalize_cells(cells: list[dict] | None) -> list[dict]:
+    return [_normalize_cell(cell) for cell in (cells or [])]
+
+
 def _version_read(version: NotebookTemplateVersion) -> StudioVersionRead:
     return StudioVersionRead(
         id=version.id,
         template_id=version.template_id,
         version_number=version.version_number,
         sha256=version.sha256,
-        cells=version.cells,
+        cells=_normalize_cells(version.cells),
         cell_order=version.cell_order,
         notebook_metadata=version.notebook_metadata or {},
         assets_dir=version.assets_dir,
@@ -111,7 +132,7 @@ def template_read(db: Session, template: NotebookTemplate) -> StudioTemplateRead
         status=template.status,
         current_version_id=template.current_version_id,
         owner_id=template.owner_id,
-        draft_cells=template.draft_cells or [],
+        draft_cells=_normalize_cells(template.draft_cells),
         draft_revision=template.draft_revision,
         draft_metadata=template.draft_metadata or {},
         draft_assets_dir=template.draft_assets_dir,
@@ -689,7 +710,7 @@ def publish_template(
         )
     )
     version_number = (latest or 0) + 1
-    cells = copy.deepcopy(template.draft_cells or [])
+    cells = copy.deepcopy(_normalize_cells(template.draft_cells))
     metadata = copy.deepcopy(template.draft_metadata or {})
     digest = hashlib.sha256(canonical_snapshot(cells, metadata)).hexdigest()
     assets_dir = None
@@ -749,7 +770,7 @@ def get_version(
 
 def export_notebook(cells: list[dict], metadata: dict) -> bytes:
     notebook_cells = []
-    for definition in sorted(cells, key=lambda cell: cell["order"]):
+    for definition in sorted(_normalize_cells(cells), key=lambda cell: cell["order"]):
         cell_metadata = {
             "dai": {
                 "student_editable": definition["student_editable"],
@@ -779,10 +800,11 @@ def export_notebook(cells: list[dict], metadata: dict) -> bytes:
 
 
 def preview_run(template: NotebookTemplate, user: User, cell_id: str, manager):
+    cells = _normalize_cells(template.draft_cells)
     requested = next(
         (
             cell
-            for cell in template.draft_cells
+            for cell in cells
             if cell["id"] == cell_id
             and cell["type"] == "code"
             and not cell["source_hidden"]
@@ -791,7 +813,9 @@ def preview_run(template: NotebookTemplate, user: User, cell_id: str, manager):
     )
     if requested is None:
         raise api_error(
-            404, "CELL_NOT_FOUND", "可见的代码 Cell 不存在"
+            404,
+            "CELL_NOT_FOUND",
+            "可见的代码 Cell 不存在（草稿可能尚未保存，请先保存草稿后重试）",
         )
     session_id = preview_session_key(template.id, user.id)
     try:
@@ -803,7 +827,7 @@ def preview_run(template: NotebookTemplate, user: User, cell_id: str, manager):
         hidden = sorted(
             (
                 cell
-                for cell in template.draft_cells
+                for cell in cells
                 if cell["type"] == "code" and cell["source_hidden"]
             ),
             key=lambda cell: cell["order"],

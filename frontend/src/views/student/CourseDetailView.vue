@@ -1,11 +1,22 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+// 课程概览（参考图 03）：hero + 七个标签页。
+// 概览双栏：左章节路径 + 最近作业考试；右待办任务 + 课程反馈 + 考试与公告。
+// 数据全部来自既有 API 与本地真实学习记录；403/404/通用失败保留恢复动作。
+
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+
 import AppLayout from '../../components/layout/AppLayout.vue'
+import StudentCourseHero from '../../components/student/StudentCourseHero.vue'
+import StudentCourseTabs from '../../components/student/StudentCourseTabs.vue'
+import AppIcon from '../../components/ui/AppIcon.vue'
+import UiPanel from '../../components/ui/UiPanel.vue'
 import { coursesAPI } from '../../api/courses.js'
 import { assignmentsAPI } from '../../api/assignments.js'
 import { examsAPI } from '../../api/exams.js'
+import { dashboardAPI } from '../../api/dashboard.js'
 import { useAppStore } from '../../stores/app.js'
+import { getCourseProgress, getFirstIncompleteLesson } from '../../utils/studentUi.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -15,15 +26,20 @@ const course = ref(null)
 const chapters = ref([])
 const assignments = ref([])
 const exams = ref([])
+const dashboard = ref(null)
 const loading = ref(true)
 const enrolling = ref(false)
 const enrolled = ref(false)
 const fetchError = ref(false)
+const notFound = ref(false)
+const tab = ref('overview')
 
 const courseId = computed(() => route.params.id)
 
+const timeFmt = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+const kindLabel = { assignment: '作业', exam: '考试', experiment: '实验' }
+
 const completedLessonIds = computed(() => {
-  // 从 localStorage 读取已完成的课时 ID 集合
   try {
     const raw = localStorage.getItem(`course_${courseId.value}_completed`)
     return raw ? JSON.parse(raw) : []
@@ -32,44 +48,120 @@ const completedLessonIds = computed(() => {
 
 const totalLessons = computed(() => {
   let count = 0
-  for (const ch of chapters.value) {
-    if (ch.lessons) count += ch.lessons.length
-  }
+  for (const ch of chapters.value) count += ch?.lessons?.length || 0
   return count
 })
 
-const progressPercent = computed(() => {
-  if (totalLessons.value === 0) return 0
-  return Math.round((completedLessonIds.value.length / totalLessons.value) * 100)
+const progressPercent = computed(() => getCourseProgress(courseId.value, chapters.value, localStorage))
+
+const nextLesson = computed(() => {
+  if (!chapters.value.length) return null
+  return getFirstIncompleteLesson(courseId.value, chapters.value, localStorage)
 })
+
+/** 课时状态：completed / current（第一个未完成）/ locked（后续） */
+const lessonStates = computed(() => {
+  const completed = new Set(completedLessonIds.value)
+  const states = new Map()
+  let currentFound = false
+  for (const ch of chapters.value) {
+    for (const l of ch?.lessons || []) {
+      if (completed.has(l.id)) { states.set(l.id, 'completed'); continue }
+      if (!currentFound) { states.set(l.id, 'current'); currentFound = true }
+      else states.set(l.id, 'locked')
+    }
+  }
+  return states
+})
+
+/** 概览右列：待办任务（来自首页聚合，按课程名匹配） */
+const pendingTasks = computed(() => {
+  const title = course.value?.title
+  if (!title) return []
+  return (dashboard.value?.priority_items || []).filter((i) => i.course_title === title).slice(0, 3)
+})
+
+/** 课程反馈（聚合中本课程的最近反馈） */
+const courseFeedback = computed(() => {
+  const title = course.value?.title
+  if (!title) return []
+  return (dashboard.value?.recent_feedback || []).filter((i) => i.course_title === title)
+})
+
+/** 本课程公告 */
+const courseAnnouncements = computed(() =>
+  (dashboard.value?.announcements || []).filter((a) => Number(a.course_id) === Number(courseId.value)),
+)
+
+/** 下一场考试：最近一场尚未开始的 */
+const nextExam = computed(() => {
+  const now = Date.now()
+  const future = exams.value.filter((e) => e.starts_at && new Date(e.starts_at).getTime() > now)
+  return future.sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at))[0] || null
+})
+
+/** 实验入口：章节中的 notebook 课时 */
+const experimentLessons = computed(() =>
+  chapters.value.flatMap((ch) => (ch?.lessons || []).filter((l) => l.content_type === 'notebook')),
+)
+
+function formatTime(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : timeFmt.format(date)
+}
+
+function stateClass(lesson) {
+  return `is-${lessonStates.value.get(lesson.id) || 'locked'}`
+}
+
+function stateLabel(lesson, fallback) {
+  const s = lessonStates.value.get(lesson.id)
+  if (s === 'completed') return `${fallback}，已完成`
+  if (s === 'current') return `${fallback}，当前学习`
+  return `${fallback}，未解锁`
+}
+
+function lessonIcon(lesson) {
+  const s = lessonStates.value.get(lesson.id)
+  if (s === 'completed') return 'check'
+  if (s === 'current') return 'book'
+  return 'lock'
+}
 
 async function fetchAll() {
   loading.value = true
+  fetchError.value = false
+  notFound.value = false
   const results = await Promise.allSettled([
     coursesAPI.get(courseId.value),
     coursesAPI.getChapters(courseId.value),
     assignmentsAPI.list({ course_id: courseId.value }),
     examsAPI.list({ course_id: courseId.value }),
+    dashboardAPI.student(),
   ])
   if (results[0].status === 'fulfilled') {
     course.value = results[0].value.data
-  }
-  if (results[1].status === 'fulfilled') {
-    chapters.value = results[1].value.data.items || results[1].value.data || []
-  }
-  if (results[2].status === 'fulfilled') {
-    assignments.value = results[2].value.data.items || results[2].value.data || []
-  }
-  if (results[3].status === 'fulfilled') {
-    exams.value = results[3].value.data.items || results[3].value.data || []
-  }
-  if (results[0].status === 'fulfilled') {
     enrolled.value = true
   } else if (results[0].reason?.response?.status === 403) {
     enrolled.value = false
+  } else if (results[0].reason?.response?.status === 404) {
+    notFound.value = true
   } else {
     fetchError.value = true
     app.showToast('加载课程失败', 'error')
+  }
+  if (results[1].status === 'fulfilled') {
+    chapters.value = results[1].value.data?.items || results[1].value.data || []
+  }
+  if (results[2].status === 'fulfilled') {
+    assignments.value = results[2].value.data?.items || results[2].value.data || []
+  }
+  if (results[3].status === 'fulfilled') {
+    exams.value = results[3].value.data?.items || results[3].value.data || []
+  }
+  if (results[4].status === 'fulfilled') {
+    dashboard.value = results[4].value.data
   }
   loading.value = false
 }
@@ -90,17 +182,36 @@ async function handleEnroll() {
 function goLesson(lesson) {
   router.push(`/student/courses/${courseId.value}/lessons/${lesson.id}`)
 }
-
 function goAssignment(id) {
   router.push(`/student/assignments/${id}`)
 }
-
 function goExam(id) {
   router.push(`/student/exams/${id}`)
 }
-
+function goExperiment(lessonId) {
+  router.push(`/student/experiments/${lessonId}`)
+}
+function goNext() {
+  if (nextLesson.value) goLesson(nextLesson.value)
+  else tab.value = 'chapters'
+}
 function goBack() {
   router.push('/student/courses')
+}
+
+/** 仅允许服务端返回的学生相对路由 */
+function go(route) {
+  if (route === '/student' || route.startsWith('/student/')) {
+    router.push(route)
+  }
+}
+
+/** 分数色调：null → 待评分（warning）；<60 → 需修改（danger）；≥60 → 通过（success） */
+function scoreTone(score) {
+  if (score == null) return ''
+  const s = Number(score)
+  if (Number.isNaN(s)) return ''
+  return s < 60 ? 'is-needs-revision' : 'is-passed'
 }
 
 onMounted(fetchAll)
@@ -108,264 +219,478 @@ onMounted(fetchAll)
 
 <template>
   <AppLayout>
-    <!-- Loading state -->
-    <div v-if="loading" class="course-loading">
-      <div class="skeleton" style="height:28px;width:240px;margin-bottom:12px"></div>
-      <div class="skeleton" style="height:14px;width:360px;margin-bottom:24px"></div>
-      <div class="skeleton" style="height:120px;width:100%;margin-bottom:16px"></div>
-      <div v-for="i in 3" :key="i" class="skeleton" style="height:48px;width:100%;margin-bottom:8px"></div>
+    <!-- Loading -->
+    <div v-if="loading" class="detail-loading">
+      <div class="skeleton" style="height:166px;width:100%;margin-bottom:16px"></div>
+      <div class="skeleton" style="height:52px;width:100%;margin-bottom:20px"></div>
+      <div class="skeleton" style="height:120px;width:100%"></div>
     </div>
 
-    <!-- Error: fetch failed -->
+    <!-- 通用失败 -->
     <div v-else-if="fetchError" class="empty-state">
       <p>加载课程失败</p>
-      <button class="btn-primary" @click="fetchAll" style="margin-top:12px">重新加载</button>
+      <button type="button" class="btn-primary retry-btn" @click="fetchAll" style="margin-top:12px">重试</button>
     </div>
 
-    <!-- Error: not enrolled -->
+    <!-- 课程不存在 -->
+    <div v-else-if="notFound" class="empty-state">
+      <p>课程不存在</p>
+      <button type="button" class="btn-primary back-list-btn" @click="goBack" style="margin-top:12px">返回课程列表</button>
+    </div>
+
+    <!-- 未选课 -->
     <div v-else-if="!course && !enrolled" class="empty-state">
-      <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3">
-        <rect x="4" y="8" width="40" height="32" rx="4"/>
-        <path d="M16 22h16M16 28h12"/>
-      </svg>
-      <p>你还未选这门课</p>
-      <button class="btn-primary" :disabled="enrolling" @click="handleEnroll" style="margin-top:12px">
+      <p>你还未选这门课，加入后即可查看课程内容</p>
+      <button type="button" class="btn-primary hero-enroll-btn" :disabled="enrolling" @click="handleEnroll" style="margin-top:12px">
         {{ enrolling ? '选课中...' : '立即选课' }}
       </button>
     </div>
 
-    <!-- Error: course not found -->
+    <!-- 防御：课程缺失 -->
     <div v-else-if="!course" class="empty-state">
       <p>课程不存在</p>
-      <button class="btn-primary" @click="goBack" style="margin-top:12px">返回课程列表</button>
+      <button type="button" class="btn-primary back-list-btn" @click="goBack" style="margin-top:12px">返回课程列表</button>
     </div>
 
-    <!-- Course portal -->
     <template v-else>
-      <!-- Back -->
-      <button class="btn-ghost btn-sm back-link" @click="goBack">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"/></svg>
-        返回课程列表
-      </button>
+      <div class="course-detail">
+        <StudentCourseHero
+          :course="course"
+          :progress="progressPercent"
+          :total-lessons="totalLessons"
+          :completed-lessons="completedLessonIds.length"
+          :total-chapters="chapters.length"
+          :enrolled="enrolled"
+          @continue="goNext"
+          @enroll="handleEnroll"
+          @back="goBack"
+        />
 
-      <!-- Info card -->
-      <div class="course-hero">
-        <h1 class="course-hero-title">📚 {{ course.title }}</h1>
-        <p class="course-hero-desc" v-if="course.description">{{ course.description }}</p>
-        <div class="course-hero-stats">
-          <div class="hero-stat">
-            <span class="hero-stat-value">{{ chapters.length }}</span>
-            <span class="hero-stat-label">章节</span>
+        <StudentCourseTabs :active="tab" @change="tab = $event" />
+
+        <!-- ── 概览 ─────────────────────────────────────────────── -->
+        <div v-if="tab === 'overview'" class="overview-grid">
+          <div class="overview-left">
+            <UiPanel compact class="chapters-panel">
+              <template #header><h2 class="panel-title">章节路径</h2></template>
+              <ul v-if="chapters.length" class="chapter-list">
+                <li v-for="ch in chapters" :key="ch.id">
+                  <div class="chapter-group-title">第{{ ch.order_index + 1 }}章 {{ ch.title }}</div>
+                  <button
+                    v-for="l in ch.lessons"
+                    :key="l.id"
+                    type="button"
+                    class="chapter-row"
+                    :class="stateClass(l)"
+                    :aria-label="stateLabel(l, l.title)"
+                    @click="goLesson(l)"
+                  >
+                    <span class="chapter-row-icon" aria-hidden="true">
+                      <AppIcon :name="lessonIcon(l)" :size="16" />
+                    </span>
+                    <span class="chapter-row-title">{{ l.title }}</span>
+                    <span v-if="lessonStates.get(l.id) === 'completed'" class="chapter-check" aria-hidden="true">
+                      <AppIcon name="check" :size="14" />
+                    </span>
+                  </button>
+                </li>
+              </ul>
+              <p v-else class="empty-inline">暂无章节内容</p>
+            </UiPanel>
+
+            <UiPanel compact class="recent-panel">
+              <template #header><h2 class="panel-title">最近作业与考试</h2></template>
+              <div v-if="assignments.length || exams.length" class="recent-list">
+                <button
+                  v-for="a in assignments.slice(0, 3)"
+                  :key="'a' + a.id"
+                  type="button"
+                  class="recent-row"
+                  @click="goAssignment(a.id)"
+                >
+                  <span class="recent-row-icon" aria-hidden="true"><AppIcon name="assignment" :size="16" /></span>
+                  <span class="recent-row-text">
+                    <span class="recent-row-title">{{ a.title }}</span>
+                    <span class="recent-row-meta">作业 · 截止 {{ formatTime(a.due_at) }}</span>
+                  </span>
+                  <AppIcon name="chevron-right" :size="14" />
+                </button>
+                <button
+                  v-for="e in exams.slice(0, 3)"
+                  :key="'e' + e.id"
+                  type="button"
+                  class="recent-row"
+                  @click="goExam(e.id)"
+                >
+                  <span class="recent-row-icon" aria-hidden="true"><AppIcon name="exam" :size="16" /></span>
+                  <span class="recent-row-text">
+                    <span class="recent-row-title">{{ e.title }}</span>
+                    <span class="recent-row-meta">考试 · {{ formatTime(e.starts_at) }}</span>
+                  </span>
+                  <AppIcon name="chevron-right" :size="14" />
+                </button>
+              </div>
+              <p v-else class="empty-inline">暂无作业与考试</p>
+            </UiPanel>
           </div>
-          <div class="hero-stat">
-            <span class="hero-stat-value">{{ totalLessons }}</span>
-            <span class="hero-stat-label">课时</span>
+
+          <div class="overview-right">
+            <UiPanel compact class="pending-panel">
+              <template #header><h2 class="panel-title">待办任务</h2></template>
+              <ul v-if="pendingTasks.length" class="side-list">
+                <li v-for="item in pendingTasks" :key="item.kind + '-' + item.id" class="side-row">
+                  <span class="side-row-dot" :class="'urgency-' + item.urgency" aria-hidden="true"></span>
+                  <button type="button" class="side-row-main" @click="go(item.route)">
+                    <span class="side-row-title">{{ item.title }}</span>
+                    <span class="side-row-meta">{{ kindLabel[item.kind] || item.kind }}<template v-if="item.time_at"> · {{ formatTime(item.time_at) }}</template></span>
+                  </button>
+                </li>
+              </ul>
+              <p v-else class="empty-inline">暂无待办任务</p>
+            </UiPanel>
+
+            <UiPanel compact class="feedback-panel">
+              <template #header><h2 class="panel-title">课程反馈</h2></template>
+              <ul v-if="courseFeedback.length" class="side-list">
+                <li v-for="item in courseFeedback.slice(0, 3)" :key="item.kind + '-' + item.id" class="side-row">
+                  <span class="side-score" :class="scoreTone(item.score)">{{ item.score ?? '—' }}</span>
+                  <button type="button" class="side-row-main" @click="go(item.route)">
+                    <span class="side-row-title">{{ item.title }}</span>
+                    <span class="side-row-meta">{{ item.feedback || '暂无文字反馈' }}</span>
+                  </button>
+                </li>
+              </ul>
+              <p v-else class="empty-inline">暂无反馈</p>
+            </UiPanel>
+
+            <UiPanel compact class="upcoming-panel">
+              <template #header><h2 class="panel-title">考试与公告</h2></template>
+              <ul v-if="nextExam || courseAnnouncements.length" class="side-list">
+                <li v-if="nextExam" class="side-row">
+                  <span class="side-row-icon" aria-hidden="true"><AppIcon name="exam" :size="16" /></span>
+                  <button type="button" class="side-row-main" @click="goExam(nextExam.id)">
+                    <span class="side-row-title">下一场考试：{{ nextExam.title }}</span>
+                    <span class="side-row-meta">{{ formatTime(nextExam.starts_at) }} · {{ nextExam.duration_minutes }} 分钟</span>
+                  </button>
+                </li>
+                <li v-for="a in courseAnnouncements.slice(0, 3)" :key="a.id" class="side-row">
+                  <span class="side-row-icon" aria-hidden="true"><AppIcon name="notification" :size="16" /></span>
+                  <div class="side-row-main">
+                    <span class="side-row-title">{{ a.title }}</span>
+                    <span class="side-row-meta">{{ a.content }}</span>
+                  </div>
+                </li>
+              </ul>
+              <p v-else class="empty-inline">暂无考试与公告</p>
+            </UiPanel>
           </div>
         </div>
-        <!-- Progress bar -->
-        <div class="progress-wrap" v-if="totalLessons > 0">
-          <div class="progress-bar">
-            <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
-          </div>
-          <span class="progress-text">{{ progressPercent }}% 完成</span>
-        </div>
-      </div>
 
-      <!-- Assignments quick entry -->
-      <div class="quick-section" v-if="assignments.length > 0">
-        <h2 class="quick-section-title">作业</h2>
-        <div class="quick-list">
-          <div v-for="a in assignments" :key="a.id" class="quick-item" @click="goAssignment(a.id)">
-            <span class="quick-item-icon">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h7l4 4v7H2V3z"/><path d="M9 3v4h4"/></svg>
-            </span>
-            <span class="quick-item-title">{{ a.title }}</span>
-          </div>
-        </div>
-      </div>
+        <!-- ── 章节内容 ─────────────────────────────────────────── -->
+        <UiPanel v-else-if="tab === 'chapters'" compact>
+          <template #header><h2 class="panel-title">章节内容</h2></template>
+          <ul v-if="chapters.length" class="chapter-list">
+            <li v-for="ch in chapters" :key="ch.id">
+              <div class="chapter-group-title">第{{ ch.order_index + 1 }}章 {{ ch.title }}</div>
+              <button
+                v-for="l in ch.lessons"
+                :key="l.id"
+                type="button"
+                class="chapter-row"
+                :class="stateClass(l)"
+                :aria-label="stateLabel(l, l.title)"
+                @click="goLesson(l)"
+              >
+                <span class="chapter-row-icon" aria-hidden="true"><AppIcon :name="lessonIcon(l)" :size="16" /></span>
+                <span class="chapter-row-title">{{ l.title }}</span>
+                <span v-if="lessonStates.get(l.id) === 'completed'" class="chapter-check" aria-hidden="true">
+                  <AppIcon name="check" :size="14" />
+                </span>
+              </button>
+            </li>
+          </ul>
+          <p v-else class="empty-inline">暂无章节内容</p>
+        </UiPanel>
 
-      <!-- Exams quick entry -->
-      <div class="quick-section" v-if="exams.length > 0">
-        <h2 class="quick-section-title">考试</h2>
-        <div class="quick-list">
-          <div v-for="e in exams" :key="e.id" class="quick-item" @click="goExam(e.id)">
-            <span class="quick-item-icon">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 7l2 2 4-4"/></svg>
-            </span>
-            <span class="quick-item-title">{{ e.title }}</span>
-            <span class="quick-item-meta" v-if="e.duration_minutes">{{ e.duration_minutes }} 分钟</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Chapter outline -->
-      <div class="chapter-outline" v-if="chapters.length > 0">
-        <div v-for="ch in chapters" :key="ch.id" class="chapter-card">
-          <h3 class="chapter-title">第{{ ch.order_index + 1 }}章  {{ ch.title }}</h3>
-          <div v-if="ch.lessons && ch.lessons.length" class="lesson-list">
-            <div v-for="l in ch.lessons" :key="l.id" class="lesson-item" @click="goLesson(l)">
-              <span class="lesson-type-icon">
-                <template v-if="l.content_type === 'markdown'">
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h10v8H2z"/><path d="M4 6h6M4 9h4"/></svg>
-                </template>
-                <template v-else-if="l.content_type === 'video'">
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="5"/><path d="M6 5v4l3-2z"/></svg>
-                </template>
-                <template v-else>
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="10" height="10" rx="1"/><path d="M5 6h4M5 9h2"/></svg>
-                </template>
+        <!-- ── 作业 ─────────────────────────────────────────────── -->
+        <UiPanel v-else-if="tab === 'assignments'" compact>
+          <template #header><h2 class="panel-title">作业</h2></template>
+          <div v-if="assignments.length" class="recent-list">
+            <button v-for="a in assignments" :key="a.id" type="button" class="recent-row" @click="goAssignment(a.id)">
+              <span class="recent-row-icon" aria-hidden="true"><AppIcon name="assignment" :size="16" /></span>
+              <span class="recent-row-text">
+                <span class="recent-row-title">{{ a.title }}</span>
+                <span class="recent-row-meta">截止 {{ formatTime(a.due_at) }}</span>
               </span>
-              <span class="lesson-title">{{ l.title }}</span>
-              <span v-if="completedLessonIds.includes(l.id)" class="lesson-check">✓</span>
+              <AppIcon name="chevron-right" :size="14" />
+            </button>
+          </div>
+          <p v-else class="empty-inline">暂无作业</p>
+        </UiPanel>
+
+        <!-- ── 实验 ─────────────────────────────────────────────── -->
+        <UiPanel v-else-if="tab === 'experiments'" compact>
+          <template #header><h2 class="panel-title">实验</h2></template>
+          <div v-if="experimentLessons.length" class="recent-list">
+            <button v-for="l in experimentLessons" :key="l.id" type="button" class="recent-row" @click="goExperiment(l.id)">
+              <span class="recent-row-icon" aria-hidden="true"><AppIcon name="experiment" :size="16" /></span>
+              <span class="recent-row-text">
+                <span class="recent-row-title">{{ l.title }}</span>
+                <span class="recent-row-meta">实验课时</span>
+              </span>
+              <AppIcon name="chevron-right" :size="14" />
+            </button>
+          </div>
+          <p v-else class="empty-inline">暂无实验</p>
+        </UiPanel>
+
+        <!-- ── 考试 ─────────────────────────────────────────────── -->
+        <UiPanel v-else-if="tab === 'exams'" compact>
+          <template #header><h2 class="panel-title">考试</h2></template>
+          <div v-if="exams.length" class="recent-list">
+            <button v-for="e in exams" :key="e.id" type="button" class="recent-row exam-row-link" @click="goExam(e.id)">
+              <span class="recent-row-icon" aria-hidden="true"><AppIcon name="exam" :size="16" /></span>
+              <span class="recent-row-text">
+                <span class="recent-row-title">{{ e.title }}</span>
+                <span class="recent-row-meta">{{ formatTime(e.starts_at) }} · {{ e.duration_minutes }} 分钟</span>
+              </span>
+              <AppIcon name="chevron-right" :size="14" />
+            </button>
+          </div>
+          <p v-else class="empty-inline">暂无考试</p>
+        </UiPanel>
+
+        <!-- ── 公告 ─────────────────────────────────────────────── -->
+        <UiPanel v-else-if="tab === 'announcements'" compact>
+          <template #header><h2 class="panel-title">公告</h2></template>
+          <div v-if="courseAnnouncements.length" class="recent-list">
+            <div v-for="a in courseAnnouncements" :key="a.id" class="recent-row static">
+              <span class="recent-row-icon" aria-hidden="true"><AppIcon name="notification" :size="16" /></span>
+              <span class="recent-row-text">
+                <span class="recent-row-title">{{ a.title }}</span>
+                <span class="recent-row-meta">{{ a.content }} · {{ a.author_name }} · {{ formatTime(a.published_at) }}</span>
+              </span>
             </div>
           </div>
-          <p v-else class="lesson-empty">暂无课时</p>
-        </div>
-      </div>
+          <p v-else class="empty-inline">暂无公告</p>
+        </UiPanel>
 
+        <!-- ── 成绩 ─────────────────────────────────────────────── -->
+        <UiPanel v-else-if="tab === 'grades'" compact>
+          <template #header><h2 class="panel-title">成绩</h2></template>
+          <div v-if="courseFeedback.length" class="recent-list">
+            <div v-for="item in courseFeedback" :key="item.kind + '-' + item.id" class="recent-row static">
+              <span class="recent-row-icon" aria-hidden="true"><AppIcon name="chart" :size="16" /></span>
+              <span class="recent-row-text">
+                <span class="recent-row-title">{{ item.title }} · <span class="score-text" :class="scoreTone(item.score)">{{ item.score ?? '待评分' }}</span></span>
+                <span class="recent-row-meta">{{ item.feedback || '暂无文字反馈' }} · {{ formatTime(item.graded_at) }}</span>
+              </span>
+            </div>
+          </div>
+          <p v-else class="empty-inline">暂无成绩</p>
+        </UiPanel>
+      </div>
     </template>
   </AppLayout>
 </template>
 
 <style scoped>
-/* ── Back link ─────────────────────────────── */
-.back-link {
-  display: inline-flex; align-items: center; gap: 4px;
-  color: var(--text-secondary); font-size: var(--text-sm); margin-bottom: var(--space-5);
-}
-.back-link:hover { color: var(--text); }
-
-/* ── Hero card ─────────────────────────────── */
-.course-hero {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-6);
-  margin-bottom: var(--space-5);
-  transition: border-color var(--duration-normal) var(--ease-out),
-              box-shadow var(--duration-normal) var(--ease-out);
-}
-.course-hero:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-md);
+.course-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
-.course-hero-title {
-  font-family: var(--font-display);
-  font-size: var(--text-2xl);
-  font-weight: 600;
+.panel-title {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 700;
   color: var(--ink);
-  letter-spacing: -0.01em;
-  margin: 0 0 var(--space-2);
-  line-height: 1.2;
 }
 
-.course-hero-desc {
+.empty-inline {
+  margin: 0;
+  padding: 16px 0;
+  text-align: center;
   font-size: var(--text-sm);
-  color: var(--text-secondary);
-  margin: 0 0 var(--space-5);
-  line-height: 1.6;
+  color: var(--text-tertiary);
 }
 
-.course-hero-stats { display: flex; gap: var(--space-6); margin-bottom: var(--space-4); }
-.hero-stat { display: flex; flex-direction: column; }
-.hero-stat-value { font-family: var(--font-display); font-size: 22px; color: var(--ink); font-weight: 600; }
-.hero-stat-label { font-size: var(--text-xs); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
+.detail-loading { display: flex; flex-direction: column; gap: 0; }
 
-/* Progress bar */
-.progress-wrap { display: flex; align-items: center; gap: var(--space-3); }
-.progress-bar {
-  flex: 1; height: 6px; background: var(--surface-raised);
-  border-radius: 3px; overflow: hidden;
+/* ── 概览双栏（左 1.15fr / 右 0.85fr） ───────────────────────── */
+.overview-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 20px;
+  align-items: start;
 }
-.progress-fill {
-  height: 100%; background: var(--primary);
-  border-radius: 3px; transition: width var(--duration-slow) var(--ease-out);
-}
-.progress-text {
-  font-size: var(--text-xs); color: var(--text-secondary);
-  white-space: nowrap; font-weight: 500;
+.overview-left, .overview-right {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
 }
 
-/* ── Quick sections (assignments & exams) ─── */
-.quick-section {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-5) var(--space-6);
-  margin-bottom: var(--space-4);
-  transition: border-color var(--duration-normal) var(--ease-out),
-              box-shadow var(--duration-normal) var(--ease-out);
-}
-.quick-section:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-md);
-}
-
-.quick-section-title {
-  font-family: var(--font-display);
-  font-size: var(--text-md);
-  font-weight: 600;
-  color: var(--ink);
-  margin: 0 0 var(--space-3);
-  letter-spacing: -0.01em;
-}
-
-.quick-list { display: flex; flex-direction: column; gap: 2px; }
-.quick-item {
-  display: flex; align-items: center; gap: var(--space-3);
-  padding: 8px 10px; border-radius: var(--radius-md);
-  cursor: pointer; transition: background var(--duration-fast) var(--ease-out);
-}
-.quick-item:hover { background: var(--surface-raised); }
-
-.quick-item-icon { color: var(--text-secondary); flex-shrink: 0; display: flex; }
-.quick-item-title { flex: 1; font-size: var(--text-sm); font-weight: 500; color: var(--text); }
-.quick-item-meta { font-size: var(--text-xs); color: var(--text-secondary); }
-
-/* ── Chapter outline ───────────────────────── */
-.chapter-outline { display: flex; flex-direction: column; gap: var(--space-4); }
-.chapter-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-5) var(--space-6);
-  transition: border-color var(--duration-normal) var(--ease-out),
-              box-shadow var(--duration-normal) var(--ease-out);
-}
-.chapter-card:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-md);
-}
-
-.chapter-title {
+/* ── 章节路径 ───────────────────────────────────────────────── */
+.chapter-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.chapter-group-title {
   font-size: var(--text-sm);
   font-weight: 600;
   color: var(--ink);
-  margin: 0 0 var(--space-3);
-  letter-spacing: 0.01em;
+  margin-bottom: 6px;
+}
+.chapter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-body);
+}
+.chapter-row:hover { background: var(--paper); }
+.chapter-row-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--text-tertiary);
+}
+.chapter-row-title {
+  flex: 1;
+  font-size: var(--text-sm);
+  color: var(--ink);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chapter-check {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--success);
 }
 
-.lesson-list { display: flex; flex-direction: column; gap: 2px; }
-.lesson-item {
-  display: flex; align-items: center; gap: var(--space-2);
-  padding: 7px 10px; border-radius: var(--radius-md);
-  cursor: pointer; transition: background var(--duration-fast) var(--ease-out);
+/* 状态样式：当前为蓝色、锁定为灰、已完成含勾 */
+.chapter-row.is-current .chapter-row-icon { color: var(--primary); }
+.chapter-row.is-current .chapter-row-title { font-weight: 600; color: var(--primary); }
+.chapter-row.is-locked { cursor: default; opacity: 0.6; }
+.chapter-row.is-locked:hover { background: transparent; }
+.chapter-row.is-completed .chapter-row-title { color: var(--text-secondary); }
+
+/* ── 最近作业考试 / 通用行 ─────────────────────────────────── */
+.recent-list { display: flex; flex-direction: column; }
+.recent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 4px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-body);
 }
-.lesson-item:hover { background: var(--surface-raised); }
-
-.lesson-type-icon { color: var(--text-secondary); flex-shrink: 0; display: flex; }
-.lesson-title { flex: 1; font-size: var(--text-sm); color: var(--text); }
-.lesson-check { color: var(--success); font-size: var(--text-xs); font-weight: 600; }
-.lesson-empty { font-size: var(--text-xs); color: var(--text-secondary); padding: var(--space-2) 0; margin: 0; }
-
-/* ── Loading ───────────────────────────────── */
-.course-loading { padding: var(--space-2) 0; }
-
-/* ── Empty state ───────────────────────────── */
-.empty-state {
-  text-align: center; padding: var(--space-12) var(--space-6);
-  color: var(--text-secondary);
+.recent-row:last-child { border-bottom: none; }
+.recent-row.static { cursor: default; }
+.recent-row-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--text-tertiary);
 }
-.empty-state p { font-size: var(--text-sm); margin-bottom: var(--space-3); }
+.recent-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.recent-row-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+.recent-row:hover .recent-row-title { color: var(--primary); }
+.recent-row.static:hover .recent-row-title { color: var(--ink); }
+.recent-row-meta {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.score-text { font-weight: 700; }
+
+/* ── 侧栏列表 ───────────────────────────────────────────────── */
+.side-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.side-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.side-row:last-child { border-bottom: none; }
+.side-row-dot {
+  flex-shrink: 0;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+.side-row-dot.urgency-urgent { background: var(--danger); }
+.side-row-dot.urgency-soon { background: var(--warning); }
+.side-row-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--text-tertiary);
+}
+.side-score {
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  min-width: 34px;
+  text-align: center;
+  color: var(--warning);
+}
+.side-score.is-passed { color: var(--success); }
+.side-score.is-needs-revision { color: var(--danger); }
+.side-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-body);
+}
+.side-row-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+.side-row-main:hover .side-row-title { color: var(--primary); }
+.side-row-meta {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── 响应式 ─────────────────────────────────────────────────── */
+@media (max-width: 1199px) {
+  .overview-grid { grid-template-columns: 1fr; }
+}
 </style>

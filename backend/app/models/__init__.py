@@ -78,6 +78,8 @@ class Lesson(TimestampMixin, Base):
     notebook_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     video_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, default=0)
+    # 发布状态：draft（草稿）/ published（已发布）/ pending（待发布）
+    status: Mapped[str] = mapped_column(String(20), default="draft", server_default="published", nullable=False)
 
     chapter: Mapped[Chapter] = relationship(back_populates="lessons")
     notebook_template: Mapped["NotebookTemplate | None"] = relationship(foreign_keys=[template_id])
@@ -192,12 +194,17 @@ class Exam(TimestampMixin, Base):
 
 
 class ExamSubmission(TimestampMixin, Base):
-    """考试提交记录。answers 已删除，ExamAnswer 是唯一事实源。"""
+    """考试提交记录。answers 已删除，ExamAnswer 是唯一事实源。
+
+    状态机：started -> submitted -> grading -> graded
+            grading -> review_required（自动评分终止，需人工处理）
+            review_required -> grading（仅显式受控重试）
+    """
     __tablename__ = "exam_submissions"
     __table_args__ = (
         UniqueConstraint("exam_id", "student_id", name="uq_exam_student"),
         CheckConstraint(
-            "status IN ('started', 'submitted', 'grading', 'graded')",
+            "status IN ('started', 'submitted', 'grading', 'graded', 'review_required')",
             name="ck_exam_submission_status",
         ),
     )
@@ -206,16 +213,36 @@ class ExamSubmission(TimestampMixin, Base):
     exam_id: Mapped[int] = mapped_column(ForeignKey("exams.id"), index=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     status: Mapped[str] = mapped_column(String(30), default="started", index=True)
-    # started -> submitted -> grading -> graded
+    # started -> submitted -> grading -> graded；grading -> review_required -> grading
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     graded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # ── 自动评分终止（需人工处理） ────────────────────────────
+    review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)  # 只存脱敏短摘要
+    review_required_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     exam: Mapped[Exam] = relationship()
     student: Mapped[User] = relationship()
     answers: Mapped[list["ExamAnswer"]] = relationship(back_populates="submission", cascade="all, delete-orphan")
+
+
+class SchedulerLease(TimestampMixin, Base):
+    """多实例任务租约——同一时刻只允许一个实例执行某类扫描/恢复任务。
+
+    - task_name 主键，天然防重复插入
+    - lease_until 过期后其他实例可接管（崩溃自动释放）
+    - 同一 owner 可续租
+    - 不持有长事务：每轮扫描小批量，TTL 大于正常扫描时长
+    """
+
+    __tablename__ = "scheduler_leases"
+
+    task_name: Mapped[str] = mapped_column(String(80), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(120))
+    lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ExamGrade(TimestampMixin, Base):

@@ -41,7 +41,8 @@ def test_kernel_docker_argv_has_exact_security_params():
             MagicMock(returncode=0),      # 0: docker rm cleanup
             MagicMock(returncode=0, stdout='abc\n'),  # 1: docker run
             MagicMock(returncode=0, stdout='abc\n'),  # 2: docker ps alive
-            MagicMock(returncode=0),      # 3: docker rm rollback
+            MagicMock(returncode=0),      # 3: docker exec 就绪探测
+            MagicMock(returncode=0),      # 4: docker rm rollback
         ]
         km.create_session(1, '')
 
@@ -91,9 +92,10 @@ def test_kernel_dod_mounts_use_docker_host_paths():
             },
         )
         mock_run.side_effect = [
-            MagicMock(returncode=0),
-            MagicMock(returncode=0, stdout="abc\n"),
-            MagicMock(returncode=0, stdout="abc\n"),
+            MagicMock(returncode=0),                    # docker rm cleanup
+            MagicMock(returncode=0, stdout="abc\n"),    # docker run
+            MagicMock(returncode=0, stdout="abc\n"),    # docker ps alive
+            MagicMock(returncode=0),                    # docker exec 就绪探测
         ]
 
         km.create_session(7, "")
@@ -187,7 +189,8 @@ def test_create_session_redis_write_failure_rolls_back():
             MagicMock(returncode=0),      # 0: docker rm cleanup
             MagicMock(returncode=0, stdout='abc\n'),  # 1: docker run
             MagicMock(returncode=0, stdout='abc\n'),  # 2: docker ps alive
-            MagicMock(returncode=0),      # 3: docker rm rollback
+            MagicMock(returncode=0),      # 3: docker exec 就绪探测
+            MagicMock(returncode=0),      # 4: docker rm rollback
         ]
         with pytest.raises(RuntimeError, match='Redis'):
             km.create_session(1, '')

@@ -189,11 +189,11 @@ def create_templates(db: Session, users: dict[str, User]) -> dict[str, tuple[Not
 
     # ── 模板1：Python基础实验 ──
     t1_draft_cells = [
-        {"id": "c1", "type": "markdown", "source": "# Python 基础练习\n欢迎！", "order": 0},
-        {"id": "c2", "type": "code", "source": "# 写代码\nprint('Hello')", "order": 1, "student_editable": True},
+        {"id": "c1", "type": "markdown", "source": "# Python 基础练习\n欢迎！", "order": 0, "student_editable": False, "source_hidden": False},
+        {"id": "c2", "type": "code", "source": "# 写代码\nprint('Hello')", "order": 1, "student_editable": True, "source_hidden": False},
         {"id": "c3", "type": "code", "source": "import numpy as np\nimport pandas as pd", "order": 2, "student_editable": False, "source_hidden": True},
-        {"id": "c4", "type": "markdown", "source": "## 练习1\n创建变量并打印", "order": 3},
-        {"id": "c5", "type": "code", "source": "# 练习1代码", "order": 4, "student_editable": True},
+        {"id": "c4", "type": "markdown", "source": "## 练习1\n创建变量并打印", "order": 3, "student_editable": False, "source_hidden": False},
+        {"id": "c5", "type": "code", "source": "# 练习1代码", "order": 4, "student_editable": True, "source_hidden": False},
     ]
     t1_cell_order = ["c1", "c2", "c3", "c4", "c5"]
 
@@ -231,10 +231,10 @@ def create_templates(db: Session, users: dict[str, User]) -> dict[str, tuple[Not
 
     # ── 模板2：数据分析实验 ──
     t2_draft_cells = [
-        {"id": "c1", "type": "markdown", "source": "# 数据分析入门", "order": 0},
+        {"id": "c1", "type": "markdown", "source": "# 数据分析入门", "order": 0, "student_editable": False, "source_hidden": False},
         {"id": "c2", "type": "code", "source": "import numpy as np\nimport pandas as pd\nimport matplotlib.pyplot as plt\nprint('环境就绪')", "order": 1, "student_editable": False, "source_hidden": True},
-        {"id": "c3", "type": "markdown", "source": "## 任务：数据统计", "order": 2},
-        {"id": "c4", "type": "code", "source": "import numpy as np\ndata = np.array([1,2,3,4,5])\nprint(f'均值: {data.mean()}')", "order": 3, "student_editable": True},
+        {"id": "c3", "type": "markdown", "source": "## 任务：数据统计", "order": 2, "student_editable": False, "source_hidden": False},
+        {"id": "c4", "type": "code", "source": "import numpy as np\ndata = np.array([1,2,3,4,5])\nprint(f'均值: {data.mean()}')", "order": 3, "student_editable": True, "source_hidden": False},
     ]
     t2_cell_order = ["c1", "c2", "c3", "c4"]
 
@@ -272,10 +272,10 @@ def create_templates(db: Session, users: dict[str, User]) -> dict[str, tuple[Not
 
     # ── 模板3：机器学习基础 ──
     t3_draft_cells = [
-        {"id": "c1", "type": "markdown", "source": "# 机器学习入门", "order": 0},
+        {"id": "c1", "type": "markdown", "source": "# 机器学习入门", "order": 0, "student_editable": False, "source_hidden": False},
         {"id": "c2", "type": "code", "source": "import numpy as np\nfrom sklearn.datasets import make_classification\nprint('ML环境就绪')", "order": 1, "student_editable": False, "source_hidden": True},
-        {"id": "c3", "type": "markdown", "source": "## 线性回归基础", "order": 2},
-        {"id": "c4", "type": "code", "source": "# 实现简单线性回归\nprint('Hello ML')", "order": 3, "student_editable": True},
+        {"id": "c3", "type": "markdown", "source": "## 线性回归基础", "order": 2, "student_editable": False, "source_hidden": False},
+        {"id": "c4", "type": "code", "source": "# 实现简单线性回归\nprint('Hello ML')", "order": 3, "student_editable": True, "source_hidden": False},
     ]
     t3_cell_order = ["c1", "c2", "c3", "c4"]
 

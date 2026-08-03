@@ -32,29 +32,32 @@ def _normalize_detail(detail):
 
 
 async def _expiry_scanner():
-    """定期扫描：过期考试自动交卷 + 判题任务恢复"""
+    """定期扫描：过期考试自动交卷 + grading finalize（约 30 秒一轮）。
+
+    多 API 实例下通过 exam-expiry DB 租约保证同一时刻只有一个实例执行；
+    judge/AI stale recovery 由 Judge Worker 在 grading-recovery 租约下负责，
+    此处不再重复做判题恢复。
+    """
+    import os
+    import socket
+    import uuid
+    # owner 每进程唯一：hostname + pid + 随机实例 ID
+    # （同机多 API 进程若只含 hostname 会共享 owner，导致同时续租同时扫描）
+    _instance_id = uuid.uuid4().hex[:8]
+    owner_id = f"api:{socket.gethostname()}:{os.getpid()}:{_instance_id}"
     while True:
         try:
-            await asyncio.sleep(15)
+            await asyncio.sleep(30)
             with SessionLocal() as db:
-                # 考试过期扫描
+                from app.services.scheduler_lease import try_acquire_lease
+                if not try_acquire_lease(db, "exam-expiry", owner_id, ttl_seconds=90):
+                    continue  # 其他实例持有租约
                 from app.services.time_utils import utc_now
-                count = scan_expired_exams(db, utc_now())
-                if count > 0:
-                    logger.info("过期考试扫描：自动交卷 %d 份", count)
+                metrics = scan_expired_exams(db, utc_now())
+                if any(v > 0 for v in metrics.values()):
+                    logger.info("考试扫描: %s", metrics)
         except Exception:
             logger.exception("过期考试扫描异常")
-
-        try:
-            await asyncio.sleep(15)
-            with SessionLocal() as db:
-                # 判题任务恢复扫描（作业 + 考试）
-                from app.services.judge_queue import requeue_stale_jobs
-                stats = requeue_stale_jobs(db)
-                if any(v > 0 for v in stats.values()):
-                    logger.info("判题任务恢复扫描：%s", stats)
-        except Exception:
-            logger.exception("判题任务恢复扫描异常")
 
 
 async def _kernel_cleanup():

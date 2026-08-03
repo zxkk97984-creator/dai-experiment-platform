@@ -2,6 +2,7 @@
 import json as _json
 import logging
 import math
+import os
 import secrets
 import subprocess
 import tempfile
@@ -224,6 +225,14 @@ def _calc_fr_scores(groups, results, sys_errs):
 def _legacy_judge_submission(db, redis_client, settings, submission, question, workdir, host_workdir, timeout_s, mem_mb):
     """传统判题路径：隐藏测试全过/不过 → accepted/0"""
     from app.services.judge_queue import complete_job, fail_job
+    if not question.hidden_tests or not question.hidden_tests.strip():
+        # 永久配置错误：立即终态，不消耗重试
+        fail_job(db, job_type="assignment", object_id=submission.id,
+                 error="缺少隐藏测试", retryable=False)
+        submission.status = "system_error"
+        submission.score = None  # 系统错误不扣分
+        db.commit()
+        return submission
     _write_submission_files(workdir, submission, question)
     try:
         stdout, stderr, returncode, elapsed = _run_docker_pytest(
@@ -266,13 +275,18 @@ def _legacy_judge_submission(db, redis_client, settings, submission, question, w
 
 
 def _v1_judge_submission(db, redis_client, settings, submission, question, workdir, host_workdir, timeout_s, mem_mb):
-    """V1 评分路径：运行测试组 → 创建 CodeGrade → 入队 AI。系统错误/缺配置时走 fail_job 可重试。"""
+    """V1 评分路径：运行测试组 → 创建 CodeGrade → 入队 AI。
+
+    配置完整性错误（缺测试组/缺锁定 Rubric/测试组缺 tests 代码）是永久错误：
+    立即 system_error 终态，不消耗重试；仅 Docker/基础设施异常可重试。
+    """
     from app.services.judge_queue import complete_job, fail_job
 
     test_groups = question.test_groups or []
     if not test_groups:
+        # 永久配置错误：立即终态，不消耗重试
         fail_job(db, job_type="assignment", object_id=submission.id,
-                 error="shadow/active 需要测试组", retryable=True)
+                 error="shadow/active 需要测试组", retryable=False)
         submission.status = "system_error"
         submission.score = None
         db.commit()
@@ -286,8 +300,21 @@ def _v1_judge_submission(db, redis_client, settings, submission, question, workd
         ).order_by(QuestionRubric.version.desc()).limit(1)
     )
     if locked is None:
+        # 永久配置错误：立即终态，不消耗重试
         fail_job(db, job_type="assignment", object_id=submission.id,
-                 error="shadow/active 缺少锁定 Rubric", retryable=True)
+                 error="shadow/active 缺少锁定 Rubric", retryable=False)
+        submission.status = "system_error"
+        submission.score = None  # 系统错误不扣分
+        db.commit()
+        return submission
+
+    # 配置完整性：测试组必须有 tests 代码（永久错误，不重试、不进入 Docker）
+    missing_tests = [g.get("id") for g in test_groups
+                     if not (g.get("tests") or "").strip()]
+    if missing_tests:
+        fail_job(db, job_type="assignment", object_id=submission.id,
+                 error="测试组缺少测试代码: " + ",".join(str(x) for x in missing_tests),
+                 retryable=False)
         submission.status = "system_error"
         submission.score = None  # 系统错误不扣分
         db.commit()
@@ -298,7 +325,7 @@ def _v1_judge_submission(db, redis_client, settings, submission, question, workd
     all_errs = list(result["system_errors"])
     f_score, r_score, details = _calc_fr_scores(test_groups, result["results"], all_errs)
 
-    # 系统错误 → 不创建 CodeGrade，退回重试，不扣分
+    # 系统错误（Docker 执行异常/结果解析失败——配置缺失已在前面拦截）→ 不创建 CodeGrade，退回重试，不扣分
     if all_errs:
         fail_job(db, job_type="assignment", object_id=submission.id,
                  error="; ".join(all_errs), retryable=True)
@@ -479,6 +506,7 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
             answer.system_error = "题目不存在"
             answer.score = None  # 系统错误不扣分
             db.commit()
+            _maybe_finalize_exam(answer.submission_id, db)
             return answer
 
         _work_root = Path(settings.judge_work_dir) if settings.judge_work_dir else None
@@ -501,11 +529,13 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
             if gmode == "legacy":
                 # legacy 路径
                 if not question.hidden_tests or not question.hidden_tests.strip():
+                    # 永久配置错误：立即终态，不消耗重试
                     fail_job(db, job_type="exam", object_id=answer_id,
-                             error="缺少隐藏测试", retryable=True)
+                             error="缺少隐藏测试", retryable=False)
                     answer.score = None  # 系统错误不扣分
                     answer.system_error = "缺少隐藏测试"
                     db.commit()
+                    _maybe_finalize_exam(answer.submission_id, db)
                     return answer
 
                 user_code = workdir / "user_code.py"
@@ -550,11 +580,13 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
                 # V1 路径：测试组 → FR 分 → 校验 → 创建 CodeGrade → 入队 AI
                 test_groups = question.test_groups or []
                 if not test_groups:
+                    # 永久配置错误：立即终态，不消耗重试
                     fail_job(db, job_type="exam", object_id=answer_id,
-                             error="shadow/active 需要测试组", retryable=True)
+                             error="shadow/active 需要测试组", retryable=False)
                     answer.score = None
                     answer.system_error = "缺少测试组"
                     db.commit()
+                    _maybe_finalize_exam(answer.submission_id, db)
                     return answer
 
                 # 查找锁定 Rubric（缺失则系统错误，禁止继续）
@@ -565,11 +597,26 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
                     ).order_by(QuestionRubric.version.desc()).limit(1)
                 )
                 if locked is None:
+                    # 永久配置错误：立即终态，不消耗重试
                     fail_job(db, job_type="exam", object_id=answer_id,
-                             error="shadow/active 缺少锁定 Rubric", retryable=True)
+                             error="shadow/active 缺少锁定 Rubric", retryable=False)
                     answer.score = None  # 系统错误不扣分
                     answer.system_error = "缺少锁定 Rubric"
                     db.commit()
+                    _maybe_finalize_exam(answer.submission_id, db)
+                    return answer
+
+                # 配置完整性：测试组必须有 tests 代码（永久错误，不重试、不进入 Docker）
+                missing_tests = [g.get("id") for g in test_groups
+                                 if not (g.get("tests") or "").strip()]
+                if missing_tests:
+                    fail_job(db, job_type="exam", object_id=answer_id,
+                             error="测试组缺少测试代码: " + ",".join(str(x) for x in missing_tests),
+                             retryable=False)
+                    answer.score = None  # 系统错误不扣分
+                    answer.system_error = "测试组缺少测试代码"
+                    db.commit()
+                    _maybe_finalize_exam(answer.submission_id, db)
                     return answer
 
                 result = run_test_groups(workdir, host_workdir, answer.code_answer or "",
@@ -706,6 +753,14 @@ def process_ai_grade(db: Session, redis_client, settings: Settings, code_grade_i
                 if ans:
                     from app.services.exam_grading import finalize_if_ready
                     finalize_if_ready(ans.submission_id, db)
+        else:
+            # review_required（AI 自动终态）：考试 active 父级当场转 review_required
+            # finalize 自身幂等/CAS，重复触发无害
+            if cg.exam_answer_id and cg.mode == "active":
+                ans = db.get(ExamAnswer, cg.exam_answer_id)
+                if ans:
+                    from app.services.exam_grading import finalize_if_ready
+                    finalize_if_ready(ans.submission_id, db)
         return cg
     except AIServiceError as exc:
         db.rollback()
@@ -721,24 +776,38 @@ def process_ai_grade(db: Session, redis_client, settings: Settings, code_grade_i
 # Worker 主循环
 # ═══════════════════════════════════════════════════════════════
 
+def _recover_stale(db, redis_client, owner_id: str) -> bool:
+    """在 grading-recovery 租约下执行 judge + AI stale recovery。
+
+    多 Worker 实例同一时刻只有一个执行；租约被他人持有时跳过本轮。
+    """
+    from app.services.scheduler_lease import try_acquire_lease
+    if not try_acquire_lease(db, "grading-recovery", owner_id, ttl_seconds=120):
+        return False
+    from app.services.judge_queue import requeue_stale_jobs
+    from app.services.ai_grading_queue import recover_stale_ai_grades
+    j_stats = requeue_stale_jobs(db)
+    a_stats = recover_stale_ai_grades(db, redis_client)
+    if any(v > 0 for v in j_stats.values()) or any(v > 0 for v in a_stats.values()):
+        logger.info("Grading 恢复: judge=%s ai=%s", j_stats, a_stats)
+    return True
+
+
 def run_worker_loop():
     import redis as _redis
 
     settings = get_settings()
     redis_client = _redis.Redis.from_url(settings.redis_url, decode_responses=True)
     ai_queue = settings.ai_queue_name
+    import socket
+    owner_id = f"worker:{socket.gethostname()}:{os.getpid()}"
 
     queues = [settings.judge_queue_name, EXAM_JUDGE_QUEUE, ai_queue]
     logger.info("Worker 启动，监听队列: %s", queues)
 
     last_recovery = time.monotonic()
     with SessionLocal() as db:
-        from app.services.judge_queue import requeue_stale_jobs
-        from app.services.ai_grading_queue import recover_stale_ai_grades
-        j_stats = requeue_stale_jobs(db)
-        logger.info("Judge 恢复: %s", j_stats)
-        a_stats = recover_stale_ai_grades(db, redis_client)
-        logger.info("AI 恢复: %s", a_stats)
+        _recover_stale(db, redis_client, owner_id)
 
     while True:
         try:
@@ -746,10 +815,7 @@ def run_worker_loop():
             if result is None:
                 if time.monotonic() - last_recovery > 120:
                     with SessionLocal() as db:
-                        from app.services.judge_queue import requeue_stale_jobs
-                        from app.services.ai_grading_queue import recover_stale_ai_grades
-                        requeue_stale_jobs(db)
-                        recover_stale_ai_grades(db, redis_client)
+                        _recover_stale(db, redis_client, owner_id)
                     last_recovery = time.monotonic()
                 continue
 

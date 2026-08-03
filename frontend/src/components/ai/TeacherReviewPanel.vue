@@ -1,0 +1,473 @@
+<script setup>
+// TeacherReviewPanel：教师复核卡。只负责表单、校验、总分预览、确认弹窗与本地草稿；
+// 通过 emit('submit', payload) 提交，API 调用由页面负责。
+// 模式：review_required 默认编辑；completed 默认只读 + "调整评分"入口（保留纠错能力）。
+
+import { computed, onMounted, ref, watch } from 'vue'
+import { autoTotal, fmtDateTime, safeNumber } from '../../utils/gradingUi.js'
+
+const props = defineProps({
+  detail: { type: Object, required: true },
+  teacherId: { type: [Number, null], default: null },
+  submitting: { type: Boolean, default: false },
+})
+
+const emit = defineEmits(['submit'])
+
+const editing = ref(props.detail?.status === 'review_required')
+const a = ref(null)
+const q = ref(null)
+const useFinal = ref(false)
+const final = ref(null)
+const reason = ref('')
+const confirmOpen = ref(false)
+const restoredTip = ref(false)
+
+const DRAFT_VERSION = 1
+const DRAFT_TTL_MS = 24 * 60 * 60 * 1000
+const draftKey = computed(() => `ai_grade_draft_v1_${props.teacherId}_${props.detail?.id}`)
+
+const isReview = computed(() => props.detail?.status === 'review_required')
+const confirmTitle = computed(() => (isReview.value ? '确认复核并生效' : '确认覆盖评分'))
+const panelTitle = computed(() => (isReview.value ? '等待教师复核' : '评分已生效'))
+
+const origA = computed(() => (props.detail?.algorithm_score == null ? null : safeNumber(props.detail.algorithm_score)))
+const origQ = computed(() => (props.detail?.quality_score == null ? null : safeNumber(props.detail.quality_score)))
+const origFinal = computed(() => (props.detail?.final_score_100 == null ? null : safeNumber(props.detail.final_score_100)))
+
+const hasChanges = computed(() => {
+  const aChanged = a.value != null && safeNumber(a.value) !== safeNumber(origA.value)
+  const qChanged = q.value != null && safeNumber(q.value) !== safeNumber(origQ.value)
+  const fChanged = useFinal.value && final.value != null && safeNumber(final.value) !== safeNumber(origFinal.value)
+  return aChanged || qChanged || fChanged
+})
+
+const reasonOk = computed(() => (reason.value || '').trim().length >= 3)
+const valid = computed(() => hasChanges.value && reasonOk.value)
+
+// 总分预览（系统自动计算，提交后以后端合分为准）
+const preview = computed(() => autoTotal(props.detail, {
+  a: a.value, q: q.value, useFinal: useFinal.value, final: final.value,
+}))
+
+const changeSummary = computed(() => {
+  const parts = []
+  if (a.value != null && safeNumber(a.value) !== safeNumber(origA.value)) {
+    parts.push(`算法关键步骤 ${origA.value ?? '—'} → ${a.value}`)
+  }
+  if (q.value != null && safeNumber(q.value) !== safeNumber(origQ.value)) {
+    parts.push(`代码质量 ${origQ.value ?? '—'} → ${q.value}`)
+  }
+  if (useFinal.value && final.value != null && safeNumber(final.value) !== safeNumber(origFinal.value)) {
+    parts.push(`最终得分 ${origFinal.value ?? '—'} → ${final.value}`)
+  }
+  return parts.join('、') || '—'
+})
+
+// ── 本地草稿（按教师隔离，仅本机暂存） ─────────────────────────
+function canStore() {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem != null
+  } catch {
+    return false
+  }
+}
+
+function loadDraft() {
+  if (!canStore()) return false
+  try {
+    const raw = localStorage.getItem(draftKey.value)
+    if (!raw) return false
+    const d = JSON.parse(raw)
+    if (d.version !== DRAFT_VERSION || !d.savedAt) return false
+    const age = Date.now() - new Date(d.savedAt).getTime()
+    if (!Number.isFinite(age) || age > DRAFT_TTL_MS) {
+      localStorage.removeItem(draftKey.value)
+      return false
+    }
+    a.value = d.a ?? null
+    q.value = d.q ?? null
+    useFinal.value = !!d.useFinal
+    final.value = d.final ?? null
+    reason.value = d.reason ?? ''
+    return true
+  } catch {
+    return false
+  }
+}
+
+function saveDraft() {
+  if (!canStore()) return
+  try {
+    localStorage.setItem(draftKey.value, JSON.stringify({
+      version: DRAFT_VERSION,
+      savedAt: new Date().toISOString(),
+      a: a.value, q: q.value, useFinal: useFinal.value, final: final.value, reason: reason.value,
+    }))
+  } catch {
+    /* 存储不可用时静默跳过 */
+  }
+}
+
+watch([a, q, useFinal, final, reason], saveDraft)
+
+/** 覆盖成功后由页面调用：清除本机草稿 */
+function clearDraft() {
+  if (!canStore()) return
+  try {
+    localStorage.removeItem(draftKey.value)
+  } catch {
+    /* 忽略 */
+  }
+}
+
+defineExpose({ clearDraft })
+
+onMounted(() => {
+  if (loadDraft()) {
+    restoredTip.value = true
+  }
+})
+
+// ── 提交 ────────────────────────────────────────────────────────
+function buildPayload() {
+  const payload = {}
+  if (a.value != null && safeNumber(a.value) !== safeNumber(origA.value)) payload.algorithm_score = a.value
+  if (q.value != null && safeNumber(q.value) !== safeNumber(origQ.value)) payload.quality_score = q.value
+  if (useFinal.value) payload.final_score_100 = final.value
+  payload.reason = (reason.value || '').trim()
+  return payload
+}
+
+function doConfirm() {
+  confirmOpen.value = false
+  emit('submit', buildPayload())
+}
+
+// ── 评分历史（只显示后端真实存在的字段） ────────────────────────
+const historyRows = computed(() => {
+  const overrides = props.detail?.overrides || []
+  return overrides.map((o) => {
+    const orig = o.original_snapshot || {}
+    const repl = o.replacement_snapshot || {}
+    const diff = []
+    for (const [k, label] of [
+      ['algorithm_score', '算法关键步骤'], ['quality_score', '代码质量'], ['final_score_100', '最终得分'],
+    ]) {
+      if (orig[k] !== repl[k]) diff.push(`${label} ${orig[k] ?? '—'} → ${repl[k] ?? '—'}`)
+    }
+    return { id: o.id, diff, reason: o.reason, createdAt: o.created_at }
+  })
+})
+</script>
+
+<template>
+  <section class="review-panel">
+    <header class="review-panel__head">
+      <h3 class="review-panel__title">教师复核</h3>
+      <span v-if="!editing" class="review-panel__status">{{ panelTitle }}</span>
+    </header>
+
+    <!-- 只读模式：completed 默认展示，保留调整入口 -->
+    <div v-if="!editing" class="review-readonly">
+      <p class="review-readonly__lead">评分已经生效</p>
+      <div class="ro-row">
+        <span>当前正式得分</span>
+        <strong>{{ origFinal ?? '—' }}</strong>
+      </div>
+      <div class="ro-row">
+        <span>是否经教师调整</span>
+        <strong>{{ historyRows.length ? `已调整 ${historyRows.length} 次` : '尚未经过教师调整' }}</strong>
+      </div>
+      <button type="button" class="btn-outline review-edit-btn" @click="editing = true">
+        调整评分
+      </button>
+    </div>
+
+    <!-- 编辑模式 -->
+    <div v-else class="review-form">
+      <div class="field">
+        <label class="field__label" for="ov-a">算法关键步骤 A</label>
+        <input id="ov-a" v-model.number="a" type="number" min="0" max="20" step="0.1" />
+        <p class="field__hint">当前 {{ origA ?? '—' }} 分，范围 0–20</p>
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="ov-q">代码质量 Q</label>
+        <input id="ov-q" v-model.number="q" type="number" min="0" max="10" step="0.1" />
+        <p class="field__hint">当前 {{ origQ ?? '—' }} 分，范围 0–10</p>
+      </div>
+
+      <label class="final-switch">
+        <input v-model="useFinal" type="checkbox" />
+        <span>直接调整总分</span>
+      </label>
+
+      <div v-if="useFinal" class="field">
+        <label class="field__label" for="ov-final">调整后总分</label>
+        <input id="ov-final" v-model.number="final" type="number" min="0" max="100" step="0.1" />
+        <p class="field__hint">范围 0–100</p>
+      </div>
+
+      <div class="preview">
+        <div class="preview__head">
+          <span>调整后总分</span>
+          <strong class="preview__value">{{ preview.final }}</strong>
+        </div>
+        <p class="preview__hint">
+          {{ useFinal ? '将按手动总分提交' : '系统自动计算（F+R+A+Q）' }}，提交后以后端合分为准
+        </p>
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="ov-reason">调整理由</label>
+        <textarea id="ov-reason" v-model="reason" rows="3" placeholder="请填写调整原因..."></textarea>
+        <p class="field__hint">必填，将记录在评分历史中</p>
+      </div>
+
+      <p v-if="!valid" class="form-error">
+        请至少修改一个评分项，并填写调整理由（将记录在评分历史中）。
+      </p>
+      <p v-if="restoredTip" class="draft-tip">已恢复本机未提交的调整内容</p>
+
+      <button
+        type="button"
+        class="btn-primary review-submit"
+        :disabled="!valid || submitting"
+        @click="confirmOpen = true"
+      >
+        {{ confirmTitle }}
+      </button>
+    </div>
+
+    <!-- 评分历史 -->
+    <div v-if="historyRows.length" class="review-history">
+      <h4 class="review-history__title">评分历史</h4>
+      <ol class="history-list">
+        <li v-for="o in historyRows" :key="o.id" class="history-item">
+          <p class="history-item__diff">{{ o.diff.join('；') }}</p>
+          <p v-if="o.reason" class="history-item__reason">{{ o.reason }}</p>
+          <p v-if="o.createdAt" class="history-item__time">{{ fmtDateTime(o.createdAt) }}</p>
+        </li>
+      </ol>
+    </div>
+
+    <!-- 确认弹窗 -->
+    <div v-if="confirmOpen" class="confirm-overlay" @click.self="confirmOpen = false">
+      <div class="confirm-dialog" role="dialog" aria-modal="true" aria-label="确认覆盖评分">
+        <h3 class="confirm-dialog__title">确认{{ confirmTitle }}？</h3>
+        <dl class="confirm-dialog__list">
+          <div class="confirm-row">
+            <dt>原始得分</dt>
+            <dd>{{ origFinal ?? '—' }}</dd>
+          </div>
+          <div class="confirm-row">
+            <dt>调整后得分</dt>
+            <dd>{{ preview.final }}</dd>
+          </div>
+          <div class="confirm-row">
+            <dt>调整项</dt>
+            <dd>{{ changeSummary }}</dd>
+          </div>
+          <div class="confirm-row">
+            <dt>理由</dt>
+            <dd>{{ (reason || '').trim() }}</dd>
+          </div>
+        </dl>
+        <p class="confirm-dialog__note">该操作将记录到评分历史中。</p>
+        <div class="confirm-dialog__actions">
+          <button type="button" class="btn-outline" @click="confirmOpen = false">取消</button>
+          <button type="button" class="btn-danger" :disabled="submitting" @click="doConfirm">
+            {{ confirmTitle }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.review-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.review-panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.review-panel__title { margin: 0; font-size: 15px; font-weight: 700; color: var(--ink); }
+.review-panel__status { font-size: var(--text-xs); font-weight: 600; color: var(--text-tertiary); }
+
+/* ── 只读模式 ─────────────────────────────────────────────────── */
+.review-readonly { display: flex; flex-direction: column; gap: 10px; }
+.review-readonly__lead { margin: 0; font-size: var(--text-sm); color: var(--text-secondary); }
+.ro-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.ro-row strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.review-edit-btn { align-self: flex-start; margin-top: 4px; }
+
+/* ── 编辑表单（纵向全宽，避免标签换行） ───────────────────────── */
+.review-form { display: flex; flex-direction: column; gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field__label { font-size: var(--text-sm); font-weight: 600; color: var(--ink); }
+.field input, .field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+}
+.field input:focus, .field textarea:focus { border-color: var(--primary); outline: none; }
+.field__hint { margin: 0; font-size: var(--text-xs); color: var(--text-tertiary); }
+
+.final-switch {
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 8px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-sunken);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.final-switch:hover {
+  border-color: var(--border-strong);
+  background: var(--primary-light);
+}
+.final-switch input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  accent-color: var(--primary);
+}
+.final-switch span {
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.preview {
+  padding: 14px 16px;
+  border: 1px solid var(--primary-soft);
+  border-radius: var(--radius-control);
+  background: var(--primary-light);
+}
+.preview__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.preview__head span { font-size: var(--text-sm); font-weight: 600; color: var(--text-secondary); }
+.preview__value { font-size: 28px; line-height: 1; font-weight: 700; color: var(--primary); font-variant-numeric: tabular-nums; }
+.preview__hint { margin: 8px 0 0; font-size: var(--text-xs); color: var(--text-secondary); line-height: 1.55; }
+
+.form-error { margin: 0; font-size: var(--text-xs); color: var(--danger); line-height: 1.6; }
+.draft-tip { margin: 0; font-size: var(--text-xs); color: var(--warning); }
+.review-submit { width: 100%; justify-content: center; }
+
+/* ── 评分历史 ─────────────────────────────────────────────────── */
+.review-history {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.review-history__title { margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--ink); }
+.history-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.history-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+}
+.history-item__diff { margin: 0; font-size: var(--text-sm); color: var(--ink); font-variant-numeric: tabular-nums; }
+.history-item__reason { margin: 4px 0 0; font-size: var(--text-xs); color: var(--text-secondary); line-height: 1.6; }
+.history-item__time { margin: 4px 0 0; font-size: var(--text-xs); color: var(--text-tertiary); }
+
+/* ── 确认弹窗 ─────────────────────────────────────────────────── */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.4);
+}
+.confirm-dialog {
+  width: min(420px, calc(100vw - 32px));
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: 0 16px 48px rgba(15, 23, 42, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.confirm-dialog__title { margin: 0; font-size: 16px; font-weight: 700; color: var(--ink); }
+.confirm-dialog__list { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.confirm-row { display: flex; gap: 12px; font-size: var(--text-sm); }
+.confirm-row dt { color: var(--text-tertiary); min-width: 84px; flex-shrink: 0; }
+.confirm-row dd { margin: 0; color: var(--ink); word-break: break-word; }
+.confirm-dialog__note { margin: 0; font-size: var(--text-xs); color: var(--text-tertiary); }
+.confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+/* 全局按钮原语缺省时兜底 */
+.btn-outline {
+  padding: 8px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.btn-outline:hover:not(:disabled) { background: var(--primary-light); color: var(--primary); }
+.btn-danger {
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: var(--danger);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-danger:hover:not(:disabled) { filter: brightness(0.94); }
+.btn-danger:disabled, .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+</style>

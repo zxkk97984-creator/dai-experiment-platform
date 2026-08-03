@@ -9,8 +9,8 @@ from app.config import Settings, get_settings
 from app.dependencies import get_current_user, get_db, require_roles
 from app.errors import api_error
 from app.models import Course, CourseEnrollment, Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission, User
-from app.schemas import ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionUpdate, ExamRead, ExamSubmitRequest, ExamSubmissionRead, ExamUpdate, PaginatedResponse
-from app.services.exam_service import create_question, delete_question, get_my_grade, get_question, list_questions, require_exam_editable, save_answer, start_exam as svc_start_exam, submit_exam as svc_submit_exam, update_question, validate_publish
+from app.schemas import ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionUpdate, ExamRead, ExamRetryRequest, ExamSubmitRequest, ExamSubmissionRead, ExamUpdate, PaginatedResponse
+from app.services.exam_service import create_question, delete_question, get_my_grade, get_question, list_questions, require_exam_editable, retry_exam_submission as retry_exam_submission_service, save_answer, start_exam as svc_start_exam, submit_exam as svc_submit_exam, update_question, validate_publish
 
 router = APIRouter(prefix="/exams", tags=["exams"])
 
@@ -173,10 +173,27 @@ def submit_exam(
     )
     if not sub:
         raise api_error(403, "EXAM_NOT_STARTED", "请先开始考试")
-    # 幂等：重复提交返回当前状态，不报错
-    if sub.status in ("submitted", "grading", "graded"):
+    # 幂等：重复提交返回当前状态，不报错（review_required 不自动重试）
+    if sub.status in ("submitted", "grading", "graded", "review_required"):
         return ExamSubmissionRead.model_validate(sub)
     return svc_submit_exam(exam, current_user, db)
+
+
+@router.post("/{exam_id}/submissions/{submission_id}/retry", response_model=ExamSubmissionRead)
+def retry_exam_submission(
+    exam_id: int,
+    submission_id: int,
+    payload: ExamRetryRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("teacher", "admin")),
+):
+    """显式重试 review_required 的考试提交（教师/管理员受控入口）"""
+    exam = require_exam(exam_id, db)
+    ensure_course_manager(exam.course, current_user)
+    sub = db.get(ExamSubmission, submission_id)
+    if not sub or sub.exam_id != exam_id:
+        raise api_error(404, "SUBMISSION_NOT_FOUND", "考试提交不存在")
+    return retry_exam_submission_service(submission_id, payload.answer_ids, current_user, db)
 
 
 @router.get("/{exam_id}/grades", response_model=PaginatedResponse)

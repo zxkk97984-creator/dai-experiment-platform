@@ -1,36 +1,86 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+// 我的课程（参考图 02）：标题 + 状态标签页 + 搜索 + 横向课程行。
+// 每行按课程抓取章节（allSettled），403 视为未选课；
+// 进度与下一步全部来自本地真实学习记录，失败降级为 0 而不是隐藏课程。
+
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+
 import AppLayout from '../../components/layout/AppLayout.vue'
+import CourseIdentity from '../../components/student/CourseIdentity.vue'
+import DashboardAsyncState from '../../components/dashboard/DashboardAsyncState.vue'
+import AppIcon from '../../components/ui/AppIcon.vue'
+import UiProgress from '../../components/ui/UiProgress.vue'
 import { coursesAPI } from '../../api/courses.js'
 import { useAppStore } from '../../stores/app.js'
-import { statusBadge, PUBLISH_STATUS_MAP } from '../../utils/status.js'
-import { formatDate } from '../../utils/format.js'
+import { getCourseProgress, getFirstIncompleteLesson } from '../../utils/studentUi.js'
 
 const router = useRouter()
 const app = useAppStore()
+
 const courses = ref([])
+const rows = ref([])
 const loading = ref(true)
-const total = ref(0)
-const page = ref(1)
-const pageSize = 12
+const error = ref(false)
+const activeTab = ref('all')
+const query = ref('')
 
 async function fetchCourses() {
   loading.value = true
+  error.value = false
   try {
-    const res = await coursesAPI.list({ page: page.value, page_size: pageSize })
-    courses.value = res.data.items
-    total.value = res.data.total
-  } catch (e) {
-    app.showToast('加载课程列表失败', 'error')
-  } finally { loading.value = false }
+    const res = await coursesAPI.list({ page: 1, page_size: 100 })
+    courses.value = res.data.items || []
+  } catch {
+    error.value = true
+    courses.value = []
+  }
+  await loadRows()
+  loading.value = false
 }
+
+async function loadRows() {
+  // 每个课程独立抓取章节：一个失败不影响其他行
+  const results = await Promise.allSettled(
+    courses.value.map((c) => coursesAPI.getChapters(c.id)),
+  )
+  rows.value = courses.value.map((course, i) => {
+    const res = results[i]
+    const enrolled = res.status === 'fulfilled'
+    const chapters = enrolled ? (res.value.data?.items || res.value.data || []) : []
+    const progress = enrolled ? getCourseProgress(course.id, chapters, localStorage) : 0
+    const nextLesson = enrolled
+      ? getFirstIncompleteLesson(course.id, chapters, localStorage)
+      : null
+    return {
+      course,
+      enrolled,
+      chapters,
+      progress,
+      nextLesson,
+      chapterTitle: chapters[0]?.title || '',
+    }
+  })
+}
+
+const filteredRows = computed(() => {
+  let list = rows.value
+  const q = query.value.trim().toLowerCase()
+  if (q) {
+    list = list.filter((r) =>
+      [r.course.title, r.course.description || ''].join(' ').toLowerCase().includes(q),
+    )
+  }
+  if (activeTab.value === 'active') return list.filter((r) => r.progress > 0 && r.progress < 100)
+  if (activeTab.value === 'done') return list.filter((r) => r.progress === 100)
+  return list
+})
 
 async function handleEnroll(course) {
   try {
     await coursesAPI.enroll(course.id)
-    app.showToast('选课成功 🎉', 'success')
-    fetchCourses()
+    app.showToast('选课成功', 'success')
+    await loadRows()
   } catch (e) {
     const msg = e.response?.data?.detail?.message || '选课失败'
     app.showToast(msg, 'error')
@@ -38,9 +88,18 @@ async function handleEnroll(course) {
 }
 
 function goDetail(id) { router.push(`/student/courses/${id}`) }
+function goLesson(id, lesson) { router.push(`/student/courses/${id}/lessons/${lesson.id}`) }
 
-const cardColors = ['blue', 'green', 'orange', 'purple', 'cyan', 'pink']
-function colorFor(id) { return cardColors[id % cardColors.length] }
+function metaText(row) {
+  if (row.enrolled) return row.chapterTitle || row.course.description || '已加入课程'
+  return row.course.description || '尚未加入这门课程'
+}
+
+function nextText(row) {
+  if (!row.enrolled) return '加入课程后开始学习'
+  if (row.nextLesson) return `下一步：${row.nextLesson.title}`
+  return '本课程已全部完成'
+}
 
 onMounted(fetchCourses)
 </script>
@@ -48,319 +107,272 @@ onMounted(fetchCourses)
 <template>
   <AppLayout>
     <div class="page">
-      <!-- ── Header ─────────────────────────────────────────────────── -->
+      <!-- 页头 -->
       <header class="page-head">
         <div>
-          <h1 class="page-title">课程目录</h1>
-          <p class="page-sub">浏览本期可修读课程，点击卡片查看详情或选课</p>
+          <h1 class="page-title">我的课程</h1>
+          <p class="page-sub">查看课程进度，继续你的学习旅程</p>
         </div>
-        <div class="page-meta">
-          <div class="meta-pill">
-            <span class="pill-dot"></span>
-            <span>共 {{ total }} 门课程</span>
-          </div>
-        </div>
+        <div class="page-count">{{ rows.length }} 门课程</div>
       </header>
 
-      <!-- ── Loading ────────────────────────────────────────────────── -->
-      <div v-if="loading" class="grid-3">
-        <div v-for="i in 6" :key="i" class="skel-card">
-          <div class="skeleton skel-top"></div>
-          <div class="skel-body">
-            <div class="skeleton skel-line w-60"></div>
-            <div class="skeleton skel-line w-90"></div>
-            <div class="skeleton skel-line w-40"></div>
-            <div class="skeleton skel-btn"></div>
-          </div>
+      <!-- 标签页 + 搜索 -->
+      <div class="course-toolbar">
+        <div class="tabs" role="tablist" aria-label="课程状态">
+          <button
+            v-for="tab in [
+              { key: 'all', label: '全部课程' },
+              { key: 'active', label: '进行中' },
+              { key: 'done', label: '已完成' },
+            ]"
+            :key="tab.key"
+            type="button"
+            class="tab-btn"
+            :class="{ active: activeTab === tab.key }"
+            role="tab"
+            :aria-selected="activeTab === tab.key"
+            @click="activeTab = tab.key"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
+        <div class="search-box">
+          <span class="search-icon" aria-hidden="true"><AppIcon name="search" :size="16" /></span>
+          <input
+            v-model="query"
+            type="search"
+            class="search-input"
+            placeholder="搜索课程"
+            aria-label="搜索课程"
+          />
         </div>
       </div>
 
-      <!-- ── Empty ──────────────────────────────────────────────────── -->
-      <div v-else-if="courses.length === 0" class="empty-state">
-        <div class="empty-emoji">📭</div>
-        <p>本期尚无可修读课程</p>
-      </div>
+      <!-- 状态区 -->
+      <DashboardAsyncState
+        :loading="loading"
+        :error="error"
+        :empty="filteredRows.length === 0"
+        empty-title="暂无课程"
+        empty-body="没有符合条件的课程"
+        @retry="fetchCourses"
+      >
+        <!-- 课程行列表 -->
+        <div class="course-list">
+          <article v-for="row in filteredRows" :key="row.course.id" class="course-row">
+            <!-- 身份（约 34%） -->
+            <button type="button" class="course-row-link" @click="goDetail(row.course.id)">
+              <CourseIdentity :title="row.course.title" :meta="metaText(row)" />
+            </button>
 
-      <!-- ── Grid ───────────────────────────────────────────────────── -->
-      <div v-else class="grid-3">
-        <article
-          v-for="(c, i) in courses" :key="c.id"
-          class="course-card"
-          :class="'card-' + colorFor(i)"
-          @click="goDetail(c.id)"
-        >
-          <div class="card-top">
-            <div class="card-icon">{{ ['📘', '📗', '📙', '📓', '📔', '📕'][i % 6] }}</div>
-            <span class="badge" :class="'badge-' + statusBadge(PUBLISH_STATUS_MAP, c.status).color">
-              {{ statusBadge(PUBLISH_STATUS_MAP, c.status).label }}
-            </span>
-          </div>
-
-          <div class="card-body">
-            <div class="card-code">CRS-{{ String(c.id).padStart(4, '0') }}</div>
-            <h3 class="card-title">{{ c.title }}</h3>
-            <p class="card-desc">{{ c.description || '暂无简介。点击查看课程详情。' }}</p>
-
-            <div class="card-foot">
-              <div class="card-date">
-                <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
-                  <rect x="1.5" y="2.5" width="11" height="10" rx="1.5" stroke="currentColor" stroke-width="1.1"/>
-                  <path d="M1.5 5.5h11 M4 1v3 M10 1v3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
-                </svg>
-                <span>{{ formatDate(c.created_at) }}</span>
-              </div>
-              <button
-                class="btn-primary btn-sm enroll-btn"
-                @click.stop="handleEnroll(c)"
-              >
-                选课
-                <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
-                  <path d="M2 6h8 M6 2l4 4-4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </button>
+            <!-- 进度（约 22%） -->
+            <div class="course-row-progress">
+              <span class="progress-text">{{ row.enrolled ? `已学 ${row.progress}%` : '尚未加入' }}</span>
+              <UiProgress :value="row.progress" />
             </div>
-          </div>
-        </article>
-      </div>
 
-      <!-- ── Pagination ─────────────────────────────────────────────── -->
-      <nav v-if="total > pageSize" class="pagination">
-        <button class="pg-btn" :disabled="page <= 1" @click="page--; fetchCourses()">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          上一页
-        </button>
-        <div class="pg-meta">
-          <span class="pg-current">{{ page }}</span>
-          <span class="pg-sep">/</span>
-          <span class="pg-total">{{ Math.ceil(total / pageSize) }}</span>
+            <!-- 下一步 + 动作 -->
+            <div class="course-row-action">
+              <span class="action-next">{{ nextText(row) }}</span>
+              <div class="action-buttons">
+                <button
+                  v-if="!row.enrolled"
+                  type="button"
+                  class="btn-primary enroll-btn"
+                  @click="handleEnroll(row.course)"
+                >
+                  选课
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  class="btn-primary continue-btn"
+                  @click="row.nextLesson ? goLesson(row.course.id, row.nextLesson) : goDetail(row.course.id)"
+                >
+                  {{ row.nextLesson ? '继续学习' : '查看课程' }}
+                </button>
+                <button type="button" class="btn-outline detail-btn" @click="goDetail(row.course.id)">
+                  课程详情
+                </button>
+              </div>
+            </div>
+          </article>
         </div>
-        <button class="pg-btn" :disabled="page >= Math.ceil(total / pageSize)" @click="page++; fetchCourses()">
-          下一页
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
-      </nav>
+      </DashboardAsyncState>
     </div>
   </AppLayout>
 </template>
 
 <style scoped>
-/* ═══════════════════════════════════════════════════════════════════════
-   Course List — modern card grid
-   ═══════════════════════════════════════════════════════════════════════ */
-.page { display: flex; flex-direction: column; gap: 24px; }
+.page { display: flex; flex-direction: column; gap: 20px; }
 
-/* Header */
+/* ── 页头 ─────────────────────────────────────────────────────── */
 .page-head {
-  display: flex; justify-content: space-between; align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   gap: 16px;
 }
 .page-title {
-  font-size: 28px;
+  margin: 0 0 6px;
+  font-size: 30px;
   font-weight: 700;
   color: var(--ink);
   letter-spacing: -0.02em;
-  line-height: 1.15;
-  margin: 0 0 6px;
+  line-height: 1.2;
 }
 .page-sub {
-  font-size: 14px;
-  color: var(--text-secondary);
   margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
 }
-
-.meta-pill {
-  display: inline-flex; align-items: center; gap: 8px;
+.page-count {
+  flex-shrink: 0;
   padding: 7px 13px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-full);
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   font-weight: 500;
 }
-.pill-dot {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--success);
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
-}
 
-/* Skeleton */
-.skel-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-}
-.skel-top { height: 80px; border-radius: 0; }
-.skel-body { padding: 20px; }
-.skel-line { height: 12px; margin-bottom: 8px; border-radius: var(--radius-sm); }
-.skel-btn { height: 32px; width: 80px; margin-top: 14px; border-radius: var(--radius-md); }
-.w-40 { width: 40%; }
-.w-60 { width: 60%; }
-.w-90 { width: 90%; }
-
-/* Empty */
-.empty-emoji {
-  font-size: 48px;
-  margin-bottom: 8px;
-}
-.empty-state p {
-  font-size: 14px;
-  color: var(--text-secondary);
-}
-
-/* Course card */
-.course-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  cursor: pointer;
-  display: flex; flex-direction: column;
-  transition: border-color var(--duration-normal) var(--ease-out),
-              box-shadow var(--duration-normal) var(--ease-out),
-              transform var(--duration-fast) var(--ease-out);
-}
-.course-card:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-lg);
-  transform: translateY(-3px);
-}
-
-.card-top {
-  height: 80px;
-  display: flex; justify-content: space-between; align-items: flex-start;
-  padding: 14px 16px;
-  position: relative;
-  overflow: hidden;
-}
-.card-top::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  opacity: 0.85;
-  z-index: 0;
-}
-.card-blue   .card-top::before { background: linear-gradient(135deg, var(--primary-soft) 0%, var(--primary-light) 100%); }
-.card-green  .card-top::before { background: linear-gradient(135deg, var(--success-soft) 0%, var(--success-light) 100%); }
-.card-orange .card-top::before { background: linear-gradient(135deg, var(--accent-soft) 0%, var(--accent-light) 100%); }
-.card-purple .card-top::before { background: linear-gradient(135deg, var(--purple-soft) 0%, var(--purple-light) 100%); }
-.card-cyan   .card-top::before { background: linear-gradient(135deg, var(--info-soft) 0%, var(--info-light) 100%); }
-.card-pink   .card-top::before { background: linear-gradient(135deg, #FBCFE8 0%, #F9A8D4 100%); }
-
-.card-icon {
-  position: relative; z-index: 1;
-  width: 40px; height: 40px;
-  background: var(--surface);
-  border-radius: var(--radius-md);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 20px;
-  box-shadow: var(--shadow-sm);
-}
-.card-top .badge {
-  position: relative; z-index: 1;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(4px);
-}
-
-.card-body {
-  padding: 18px 20px 16px;
-  flex: 1;
-  display: flex; flex-direction: column;
-}
-.card-code {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  margin-bottom: 4px;
-}
-.card-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--ink);
-  letter-spacing: -0.01em;
-  line-height: 1.3;
-  margin: 0 0 8px;
-}
-.card-desc {
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.55;
-  margin: 0 0 16px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  flex: 1;
-}
-
-.card-foot {
-  display: flex; justify-content: space-between; align-items: center;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-  margin-top: auto;
-}
-.card-date {
-  display: flex; align-items: center; gap: 5px;
-  font-size: 11px;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-}
-.enroll-btn {
-  font-weight: 600;
-}
-.enroll-btn:hover:not(:disabled) {
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
-}
-
-/* Pagination */
-.pagination {
-  display: flex; align-items: center; justify-content: center;
+/* ── 工具栏 ───────────────────────────────────────────────────── */
+.course-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   gap: 16px;
-  padding: 16px 0 0;
+  flex-wrap: wrap;
 }
-.pg-btn {
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 8px 14px;
-  font-size: 13px;
+  border-radius: var(--radius-card);
+}
+.tab-btn {
+  padding: 8px 18px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-control);
+  font-size: var(--text-sm);
   font-weight: 500;
-  color: var(--ink);
+  color: var(--text-secondary);
   cursor: pointer;
-  display: inline-flex; align-items: center; gap: 6px;
-  transition: background var(--duration-fast) var(--ease-out),
-              border-color var(--duration-fast) var(--ease-out);
 }
-.pg-btn:hover:not(:disabled) {
-  background: var(--surface-raised);
-  border-color: var(--border-strong);
-}
-.pg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-.pg-meta {
-  display: flex; align-items: baseline; gap: 4px;
-  font-size: 13px;
-  font-family: var(--font-mono);
-  padding: 0 8px;
-}
-.pg-current {
+.tab-btn.active {
+  background: var(--primary-light);
   color: var(--primary);
-  font-weight: 700;
-  font-size: 15px;
+  font-weight: 600;
 }
-.pg-sep { color: var(--text-tertiary); }
-.pg-total { color: var(--text-secondary); }
 
-@media (max-width: 768px) {
-  .page-head { flex-direction: column; }
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  min-width: 240px;
+}
+.search-icon {
+  display: inline-flex;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+.search-input {
+  border: none;
+  background: transparent;
+  padding: 9px 0;
+  font-size: var(--text-sm);
+}
+.search-input:focus { outline: none; box-shadow: none; border-color: transparent; }
+
+/* ── 课程行（176–194px 高） ───────────────────────────────────── */
+.course-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.course-row {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  min-height: 180px;
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.course-row-link {
+  flex: 0 0 34%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.course-row-progress {
+  flex: 0 0 22%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.progress-text {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.course-row-action {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+.action-next {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  text-align: right;
+}
+.action-buttons {
+  display: flex;
+  gap: 10px;
+}
+.btn-outline {
+  padding: 9px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--primary);
+  cursor: pointer;
+}
+.btn-outline:hover { background: var(--primary-light); border-color: var(--primary-soft); }
+
+/* ── 响应式 ───────────────────────────────────────────────────── */
+@media (max-width: 1199px) {
+  .course-row { flex-wrap: wrap; }
+  .course-row-link { flex: 1 1 100%; }
+  .course-row-progress { flex: 1 1 40%; }
+  .course-row-action { flex: 1 1 50%; }
+}
+@media (max-width: 767.98px) {
   .page-title { font-size: 24px; }
+  .course-toolbar { flex-direction: column; align-items: stretch; }
+  .search-box { min-width: 0; }
+  .course-row { padding: 16px; gap: 16px; }
+  .course-row-progress, .course-row-action { flex: 1 1 100%; align-items: flex-start; }
+  .action-next { text-align: left; }
 }
 </style>

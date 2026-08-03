@@ -296,34 +296,56 @@ def test_p0_2_exam_functions_defined_at_module_level():
     assert callable(jw.enqueue_exam_answer)
 
 
-def test_p0_5_maybe_finalize_blocks_on_running():
+def test_p0_5_maybe_finalize_blocks_on_running(db_session_factory):
     """P0-5: finalize_if_ready 不应在存在 running 答案时汇总"""
-    from app.services.exam_grading import finalize_if_ready
+    from app.services.exam_grading import finalize_if_ready, FinalizeOutcome
+    from datetime import datetime, timezone
+    from app.models import Course, Exam, ExamAnswer, ExamQuestion, ExamSubmission, User
 
-    # 测试1: 存在 running 答案 → 不应汇总
-    db = MagicMock()
-    mock_sub = MagicMock()
-    mock_sub.status = "grading"
-    # scalar: submission, CodeGrade blocking, unfinished
-    db.scalar.side_effect = [mock_sub, None, MagicMock()]
+    with db_session_factory() as db:
+        teacher = User(username="p05_t", real_name="P05T", role="teacher", status="active",
+                       password_hash="x")
+        student = User(username="p05_s", real_name="P05S", role="student", status="active",
+                       password_hash="x")
+        db.add_all([teacher, student]); db.flush()
+        course = Course(title="P05C", status="published", teacher_id=teacher.id)
+        db.add(course); db.flush()
+        exam = Exam(course_id=course.id, title="P05E", status="published", duration_minutes=60)
+        db.add(exam); db.flush()
+        q1 = ExamQuestion(exam_id=exam.id, question_type="code", prompt="Q1",
+                          correct_answer={}, points=10, hidden_tests="assert True")
+        q2 = ExamQuestion(exam_id=exam.id, question_type="code", prompt="Q2",
+                          correct_answer={}, points=20, hidden_tests="assert True")
+        db.add_all([q1, q2]); db.flush()
+        sub = ExamSubmission(exam_id=exam.id, student_id=student.id, status="grading")
+        db.add(sub); db.flush()
+        ans1 = ExamAnswer(submission_id=sub.id, question_id=q1.id,
+                          code_answer="def a(): pass", grading_status="completed", score=10.0)
+        ans2 = ExamAnswer(submission_id=sub.id, question_id=q2.id,
+                          code_answer="def b(): pass", grading_status="running")
+        db.add_all([ans1, ans2]); db.commit()
+        sub_id = sub.id
 
-    finalize_if_ready(1, db)
+    # 测试1: 存在 running 答案 → waiting，不汇总
+    with db_session_factory() as db:
+        r = finalize_if_ready(sub_id, db)
+        assert r.outcome == FinalizeOutcome.WAITING, f"running 答案应 waiting: {r}"
+        sub_check = db.get(ExamSubmission, sub_id)
+        assert sub_check.status == "grading", "存在未完成答案时不应汇总"
 
-    assert db.scalar.call_count == 3, f"应该在发现未完成答案后立即返回，但调用了 {db.scalar.call_count} 次"
-    assert not db.commit.called, "存在未完成答案时不应提交汇总"
+    # 测试2: 全部完成 → 应汇总
+    with db_session_factory() as db:
+        ans2 = db.get(ExamAnswer, ans2.id)
+        ans2.grading_status = "completed"
+        ans2.score = 20.0
+        db.commit()
 
-    # 测试2: 全部完成 → 应该汇总
-    db2 = MagicMock()
-    mock_sub2 = MagicMock()
-    mock_sub2.status = "grading"
-    mock_sub2.exam_id = 1
-    mock_sub2.student_id = 1
-    # scalar: submission, unfinished=None, total=100.0, grade=None
-    db2.scalar.side_effect = [mock_sub2, None, None, 100.0, None]
-
-    finalize_if_ready(2, db2)
-    assert db2.scalar.call_count >= 5, "应该在确认无未完成后查询 total + grade"
-    assert db2.commit.called, "应该提交最终成绩"
+    with db_session_factory() as db:
+        r2 = finalize_if_ready(sub_id, db)
+        assert r2.outcome == FinalizeOutcome.GRADED
+        sub_check = db.get(ExamSubmission, sub_id)
+        assert sub_check.status == "graded"
+        assert sub_check.score == 30.0
 
 
 # ═══════════════════════════════════════════════════════════════

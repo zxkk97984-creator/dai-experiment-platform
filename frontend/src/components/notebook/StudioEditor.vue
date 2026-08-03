@@ -121,7 +121,7 @@ function handleMarkdownEdit(cellId) {
         v-else
         :cell="{ id: cell.id, type: 'code', source: cell.source, outputs: cell._previewOutputs || null, student_editable: cell.student_editable !== false }"
         :execution-count="cell._previewOutputs?.execution_count ?? null"
-        :disabled="store.runningCellId !== null && store.runningCellId !== cell.id"
+        :disabled="cell.source_hidden || (store.runningCellId !== null && store.runningCellId !== cell.id)"
         :readonly="store.studentPreview && cell.student_editable === false"
         :is-executing="store.runningCellId === cell.id"
         @execute="handleRun"

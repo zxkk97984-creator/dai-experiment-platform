@@ -1,13 +1,14 @@
 <script setup>
+import AppIcon from './components/ui/AppIcon.vue'
 import { useAppStore } from './stores/app.js'
 
 const app = useAppStore()
 
 const toastIcon = {
-  success: '✅',
-  error: '⚠️',
-  info: 'ℹ️',
-  warning: '🔔',
+  success: 'check',
+  error: 'close',
+  info: 'notification',
+  warning: 'warning',
 }
 </script>
 
@@ -20,7 +21,9 @@ const toastIcon = {
       role="status"
       aria-live="polite"
     >
-      <span class="toast-icon" aria-hidden="true">{{ toastIcon[app.toastType] || '💬' }}</span>
+      <span class="toast-icon" aria-hidden="true">
+        <AppIcon :name="toastIcon[app.toastType] || 'notification'" :size="16" />
+      </span>
       <span class="toast-text">{{ app.toastMessage }}</span>
     </div>
   </Transition>
@@ -46,10 +49,17 @@ const toastIcon = {
 }
 
 .toast-icon {
-  font-size: 16px;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
   flex-shrink: 0;
+  color: var(--primary);
 }
+
+/* 类型图标着色 */
+.toast-success .toast-icon { color: var(--success); }
+.toast-error   .toast-icon { color: var(--danger); }
+.toast-info    .toast-icon { color: var(--info); }
+.toast-warning .toast-icon { color: var(--warning); }
 
 .toast-text { line-height: 1.45; flex: 1; min-width: 0; }
 

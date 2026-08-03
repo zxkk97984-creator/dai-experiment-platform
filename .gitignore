@@ -38,6 +38,13 @@ Thumbs.db
 
 # Playwright / 自动化截图
 .playwright-mcp/
+
+# 临时/中间产物（Codex 等工作目录）
+.pt-*/
+.playwright-cli/
+tmp-*.js
+design-qa.md
+teacher-grading-detail-*.png
 *.png
 
 # 临时计划文件

@@ -11,60 +11,68 @@
 
 /* ── Design Tokens ──────────────────────────────────────────────────── */
 :root {
-  /* ── Core palette ── Sky blue + warm orange on light slate ──────── */
-  --ink:         #0F172A;   /* Slate 900 — primary ink */
-  --paper:       #F8FAFC;   /* Slate 50 — app background */
-  --surface:     #FFFFFF;   /* Pure white — cards, inputs */
+  /* ── Core palette ── 参考设计对齐：深墨蓝字 + 极浅蓝白底 ──────────── */
+  --ink:         #10213D;
+  --paper:       #F7F9FC;
+  --surface:     #FFFFFF;
 
-  --primary:        #2563EB;   /* Blue 600 — primary action */
-  --primary-dark:   #1D4ED8;   /* Blue 700 — hover */
-  --primary-light:  #EFF6FF;   /* Blue 50 — soft fill */
-  --primary-soft:   #DBEAFE;   /* Blue 100 — tag bg */
+  --primary:        #1463F3;
+  --primary-dark:   #0F52D6;
+  --primary-light:  #EDF4FF;
+  --primary-soft:   #DCEAFF;
 
-  --accent:         #F97316;   /* Orange 500 — warm CTA accent */
-  --accent-dark:    #EA580C;   /* Orange 600 */
-  --accent-light:   #FFF7ED;   /* Orange 50 */
-  --accent-soft:    #FED7AA;   /* Orange 200 */
+  /* 兼容别名：--accent 与新 --warning 橙色对齐（参考图无独立 accent） */
+  --accent:         var(--warning);
+  --accent-dark:    #D97A06;
+  --accent-light:   var(--warning-light);
+  --accent-soft:    #FDE2C4;
 
-  /* Status colors — modern, vivid */
-  --success:        #10B981;   /* Emerald 500 */
-  --success-light:  #ECFDF5;   /* Emerald 50 */
-  --success-soft:   #A7F3D0;   /* Emerald 200 */
-  --warning:        #F59E0B;   /* Amber 500 */
-  --warning-light:  #FFFBEB;   /* Amber 50 */
-  --warning-soft:   #FCD34D;   /* Amber 200 */
-  --danger:         #EF4444;   /* Red 500 */
-  --danger-light:   #FEF2F2;   /* Red 50 */
-  --danger-soft:    #FECACA;   /* Red 200 */
-  --info:           #06B6D4;   /* Cyan 500 */
-  --info-light:     #ECFEFF;   /* Cyan 50 */
-  --info-soft:      #A5F3FC;   /* Cyan 200 */
-  --purple:         #8B5CF6;   /* Violet 500 */
-  --purple-light:   #F5F3FF;
+  /* Status colors — 参考设计色调 */
+  --success:        #12A864;
+  --success-light:  #E9F8F0;
+  --success-soft:   #B8E6D0;
+  --warning:        #F58A07;
+  --warning-light:  #FFF5E8;
+  --warning-soft:   #FDE2C4;
+  --danger:         #F04438;
+  --danger-light:   #FFF0EF;
+  --danger-soft:    #FECDC9;
+  --info:           #06B6D4;
+  --info-light:     #ECFEFF;
+  --info-soft:      #A5F3FC;
+  --purple:         #7758E8;
+  --purple-light:   #F2EFFF;
   --purple-soft:    #DDD6FE;
 
   /* Semantic derivatives (kept for compatibility with old views) */
   --bg:           var(--paper);
   --bg-card:      var(--surface);
   --bg-header:    var(--surface);
-  --bg-sidebar:   #0F172A;   /* Deep slate sidebar — contrast anchor */
+  --bg-sidebar:   #0F172A;
   --text:         var(--ink);
-  --text-secondary: #64748B;   /* Slate 500 */
-  --text-tertiary:  #94A3B8;    /* Slate 400 */
+  --text-secondary: #66758D;
+  --text-tertiary:  #94A2B8;
   --text-sidebar: #94A3B8;
   --text-sidebar-active: #FFFFFF;
-  --border:       #E2E8F0;   /* Slate 200 */
-  --border-strong: #CBD5E1;   /* Slate 300 */
-  --rule:         #E2E8F0;   /* alias */
+  --border:       #DBE4F0;
+  --border-strong: #C7D4E5;
+  --rule:         var(--border);
   --accent-hover: var(--primary-dark);
+
+  /* ── 布局契约（参考几何） ────────────────────────────────────────── */
+  --sidebar-width:          264px;
+  --sidebar-collapsed-width: 64px;
+  --header-height:          64px;
+  --content-max:            1440px;
 
   /* Surfaces */
   --surface-raised: #F1F5F9;   /* Slate 100 */
   --surface-sunken: #F8FAFC;
 
   /* ── Typography ──────────────────────────────────────────────────── */
-  --font-display: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-body:    'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+  --font-body:    var(--font-display);
   --font-mono:    'JetBrains Mono', 'IBM Plex Mono', 'Consolas', 'Courier New', monospace;
 
   /* Type scale — modern SaaS (16px base) */
@@ -100,15 +108,21 @@
   --radius-2xl: 20px;
   --radius-full: 9999px;
 
+  /* 参考几何：卡片 12px、控件 7px（新 UI 使用） */
+  --radius-card: 12px;
+  --radius-control: 7px;
+
   /* Shadows — soft, layered, modern */
   --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 1px rgba(15, 23, 42, 0.03);
   --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
   --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
   --shadow-xl: 0 24px 48px rgba(15, 23, 42, 0.10), 0 4px 12px rgba(15, 23, 42, 0.05);
-  --shadow-glow-primary: 0 0 0 4px rgba(37, 99, 235, 0.15);
-  --shadow-glow-accent: 0 0 0 4px rgba(249, 115, 22, 0.18);
-  --shadow-glow-danger: 0 0 0 4px rgba(239, 68, 68, 0.15);
+  --shadow-glow-primary: 0 0 0 4px rgba(20, 99, 243, 0.15);
+  --shadow-glow-accent: 0 0 0 4px rgba(245, 138, 7, 0.18);
+  --shadow-glow-danger: 0 0 0 4px rgba(240, 68, 56, 0.15);
+  /* 参考设计卡片阴影：低、贴地、不悬浮 */
+  --shadow-card: 0 2px 8px rgba(31, 58, 94, 0.035);
 
   /* Hairlines (kept for compat) */
   --line:         1px solid var(--border);
@@ -189,7 +203,7 @@ button.btn-primary {
 button.btn-primary:hover:not(:disabled) {
   background: var(--primary-dark);
   border-color: var(--primary-dark);
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28);
+  box-shadow: 0 4px 12px rgba(20, 99, 243, 0.28);
 }
 button.btn-primary:focus-visible {
   outline: none;
@@ -234,7 +248,7 @@ button.btn-accent {
 button.btn-accent:hover:not(:disabled) {
   background: var(--accent-dark);
   border-color: var(--accent-dark);
-  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.32);
+  box-shadow: 0 4px 12px rgba(245, 138, 7, 0.32);
 }
 button.btn-accent:focus-visible {
   outline: none;

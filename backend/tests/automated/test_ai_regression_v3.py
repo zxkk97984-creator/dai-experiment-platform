@@ -129,17 +129,36 @@ def test_teacher_cannot_override_other_course(client, db_session_factory):
 
 # ── P0: exam finalize 阻止 active score=None ──
 
-def test_finalize_blocks_active_score_none():
-    """active 答案 score=None 时 finalize 返回 False"""
-    from unittest.mock import MagicMock
-    from app.services.exam_grading import finalize_if_ready
+def test_finalize_blocks_active_score_none(db_session_factory):
+    """active 答案 score=None（AI 分未落地）→ 父转 review_required，不按 0 分结算"""
+    from app.services.exam_grading import finalize_if_ready, FinalizeOutcome
+    from datetime import datetime, timezone
+    from app.models import Course, Exam, ExamAnswer, ExamQuestion, ExamSubmission, User
 
-    db = MagicMock()
-    mock_sub = MagicMock()
-    mock_sub.status = "grading"
-    # 新 scalar 调用顺序:
-    # 1) submission, 2) active_nulls_score check, 3) CodeGrade blocking, 4) unfinished check
-    db.scalar.side_effect = [mock_sub, True, None, None]
+    with db_session_factory() as db:
+        teacher = User(username="v3_t", real_name="V3T", role="teacher", status="active",
+                       password_hash="x")
+        student = User(username="v3_s", real_name="V3S", role="student", status="active",
+                       password_hash="x")
+        db.add_all([teacher, student]); db.flush()
+        course = Course(title="V3C", status="published", teacher_id=teacher.id)
+        db.add(course); db.flush()
+        exam = Exam(course_id=course.id, title="V3E", status="published", duration_minutes=60)
+        db.add(exam); db.flush()
+        eq = ExamQuestion(exam_id=exam.id, question_type="code", prompt="t",
+                          correct_answer={}, points=10, grading_mode="active")
+        db.add(eq); db.flush()
+        es = ExamSubmission(exam_id=exam.id, student_id=student.id, status="grading")
+        db.add(es); db.flush()
+        ea = ExamAnswer(submission_id=es.id, question_id=eq.id, code_answer="x",
+                        grading_status="completed", score=None)  # active 等 AI 分但已终止
+        db.add(ea); db.commit()
+        sub_id = es.id
 
-    result = finalize_if_ready(1, db)
-    assert result is False, "score=None 的 active 答案应阻止汇总"
+    with db_session_factory() as db:
+        result = finalize_if_ready(sub_id, db)
+        assert result.outcome == FinalizeOutcome.REVIEW_REQUIRED, \
+            f"score=None 的 active 答案应转 review_required: {result}"
+        es2 = db.get(ExamSubmission, sub_id)
+        assert es2.status == "review_required", "父应转 review_required"
+        assert es2.review_required_at is not None

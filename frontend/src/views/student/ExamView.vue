@@ -8,6 +8,7 @@ import { useAppStore } from '../../stores/app.js'
 const route = useRoute(); const app = useAppStore()
 const exam = ref(null); const questions = ref([]); const submission = ref(null)
 const started = ref(false); const submitted = ref(false); const graded = ref(false)
+const reviewRequired = ref(false)
 const timeLeft = ref(0); const answers = ref({}); const loading = ref(true)
 let timer = null
 
@@ -80,7 +81,12 @@ const answeredCount = computed(() => Object.keys(answers.value).filter(k => answ
 const totalPoints = computed(() => questions.value.reduce((s,q) => s + (q.points||0), 0))
 const progressPercent = computed(() => questions.value.length ? Math.round(answeredCount.value / questions.value.length * 100) : 0)
 const timeDisplay = computed(() => { const m = Math.floor(timeLeft.value / 60); const s = timeLeft.value % 60; return m + ':' + s.toString().padStart(2, '0') })
-const statusText = computed(() => { if (graded.value) return '已评分：' + (submission.value?.score ?? 0) + ' 分'; if (submitted.value) return '已交卷，等待评分'; return '' })
+const statusText = computed(() => {
+  if (graded.value) return '已评分：' + (submission.value?.score ?? 0) + ' 分'
+  if (reviewRequired.value) return '评分遇到系统问题，已转人工处理，不会按 0 分计入'
+  if (submitted.value) return '已交卷，等待评分'
+  return ''
+})
 const hasBreakdown = computed(() => (submission.value?.answers || []).some(a => a.grading_breakdown))
 
 // ── 生命周期 ─────────────────────────────────────────────────────────
@@ -93,6 +99,7 @@ async function load() {
       const gRes = await examsAPI.getMyGrade(route.params.id)
       submission.value = gRes.data
       if (gRes.data.status === 'graded') { graded.value = true; submitted.value = true }
+      else if (gRes.data.status === 'review_required') { reviewRequired.value = true; submitted.value = true }
       else if (gRes.data.status !== 'started') { submitted.value = true }
       else { started.value = true; timeLeft.value = Math.max(0, Math.floor((new Date(gRes.data.expires_at).getTime() - Date.now()) / 1000)); startTimer(); startFallbackTimer() }
     } catch { /* 首次进入无提交记录，正常情况 */ }
@@ -203,7 +210,10 @@ function isSelected(qId, optKey) { const ans = answers.value[qId]; return ans &&
       <!-- ── Submitted ─────────────────────────────────────────────────── -->
       <div v-else-if="submitted" class="card result-card">
         <div class="result-icon">&#10003;</div>
-        <p class="result-text">已交卷，等待评分...</p>
+        <p v-if="reviewRequired" class="result-text">
+          评分遇到系统问题，已转人工处理，不会按 0 分计入
+        </p>
+        <p v-else class="result-text">已交卷，等待评分...</p>
       </div>
 
       <!-- ── Start ─────────────────────────────────────────────────────── -->

@@ -182,6 +182,9 @@ class KernelManager:
         host_conn_path = self._docker_host_path(conn_path)
         host_work_dir = self._docker_host_path(work_dir)
 
+        # OpenBLAS 默认按宿主机核数创建线程（如 20 线程），与 ipykernel 自身线程、
+        # docker exec 进程竞争 pids-limit，曾导致 "pthread_create failed" 后容器
+        # 半死、exec 报 "procReady not received"。故限制 BLAS 线程数并放宽 PID 限额。
         cmd = [
             "docker", "run", "-d", "--name", container_name,
             "--network", "none",
@@ -189,7 +192,10 @@ class KernelManager:
             "--security-opt", "no-new-privileges",
             "--read-only",
             "--tmpfs", "/tmp:exec,size=64m",
-            "--cpus", "1", "--memory", "256m", "--pids-limit", "50",
+            "--cpus", "1", "--memory", "256m", "--pids-limit", "256",
+            "-e", "OPENBLAS_NUM_THREADS=4",
+            "-e", "OMP_NUM_THREADS=4",
+            "-e", "MKL_NUM_THREADS=4",
             "-l", f"dai.record_id={record_id}",
             "-v", f"{host_conn_path}:/tmp/conn.json:ro",
             "-v", f"{host_work_dir}:/work:rw",
@@ -213,6 +219,24 @@ class KernelManager:
             time.sleep(1)
         else:
             raise RuntimeError("Kernel 容器未存活")
+
+        # 容器 alive ≠ 容器可执行：ipykernel 启动（导入 numpy/pandas 等）期间
+        # docker exec 会报 "procReady not received"。轮询探测 exec 可用后再返回，
+        # runner 内部另有 wait_for_ready(10s) 等待 kernel 就绪。
+        for _ in range(15):
+            probe = subprocess.run(
+                ["docker", "exec", container_name, "python", "-c", "import os"],
+                capture_output=True, text=True,
+            )
+            if probe.returncode == 0:
+                break
+            time.sleep(1)
+        else:
+            subprocess.run(
+                ["docker", "rm", "-f", container_name],
+                capture_output=True,
+            )
+            raise RuntimeError("Kernel 容器 exec 探测超时")
 
         session = KernelSession(record_id, container_name, conn_info,
                                 lesson_storage_dir=lesson_storage_dir)

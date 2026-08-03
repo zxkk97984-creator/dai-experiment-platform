@@ -70,7 +70,11 @@ def fail_ai_grade(
     db: Session, redis_client: Redis, code_grade_id: int,
     error: str, *, retryable: bool, max_attempts: int = 3,
 ) -> None:
-    """处理失败：可重试→queued(重新入队)，否则→review_required。"""
+    """处理失败：可重试→queued(重新入队)，否则→review_required。
+
+    状态 CAS：只有仍为 running（当前 worker 认领）的 CodeGrade 才能被 fail——
+    避免旧 Worker 的失败覆盖新 Worker 已完成的评分。
+    """
     grade = db.get(CodeGrade, code_grade_id)
     if grade is None:
         return
@@ -79,25 +83,42 @@ def fail_ai_grade(
     now = datetime.now(timezone.utc)
 
     if retryable and current < max_attempts:
-        db.execute(
+        result = db.execute(
             update(CodeGrade)
-            .where(CodeGrade.id == code_grade_id)
+            .execution_options(synchronize_session=False)
+            .where(CodeGrade.id == code_grade_id, CodeGrade.status == "running")
             .values(status="queued", last_error=safe, queued_at=now)
         )
+        if result.rowcount == 0:
+            db.rollback()
+            return  # 已被并发 Worker 处理，不覆盖
         db.commit()
+        db.expire_all()
         msg = json.dumps({"type": "ai_grade", "id": code_grade_id, "attempt": current + 1})
         redis_client.rpush(_ai_queue_name(), msg)
     else:
-        db.execute(
+        result = db.execute(
             update(CodeGrade)
-            .where(CodeGrade.id == code_grade_id)
+            .execution_options(synchronize_session=False)
+            .where(CodeGrade.id == code_grade_id, CodeGrade.status == "running")
             .values(
                 status="review_required", needs_teacher_review=True,
                 review_reason=f"AI 评分失败（尝试 {current} 次）: {safe}",
                 last_error=safe,
             )
         )
+        if result.rowcount == 0:
+            db.rollback()
+            return  # 已被并发 Worker 处理，不覆盖
         db.commit()
+        db.expire_all()
+        # 考试 active CodeGrade：父级当场转 review_required（finalize 自身幂等/CAS）
+        if grade.exam_answer_id:
+            from app.models import ExamAnswer
+            ans = db.get(ExamAnswer, grade.exam_answer_id)
+            if ans:
+                from app.services.exam_grading import finalize_if_ready
+                finalize_if_ready(ans.submission_id, db)
 
 
 def recover_stale_ai_grades(db: Session, redis_client: Redis) -> dict[str, int]:
@@ -113,7 +134,7 @@ def recover_stale_ai_grades(db: Session, redis_client: Redis) -> dict[str, int]:
     now = datetime.now(timezone.utc)
     qname = _ai_queue_name()
 
-    # running 超时 → queued（先 commit 再 rpush，防止消费者 claim 失败）
+    # running 超时 → queued（CAS：仍 running 且 started_at 未变；先 commit 再 rpush）
     running_threshold = now - timedelta(seconds=STALE_RUNNING_SECONDS)
     stale_running = db.scalars(
         select(CodeGrade).where(
@@ -122,11 +143,19 @@ def recover_stale_ai_grades(db: Session, redis_client: Redis) -> dict[str, int]:
         )
     ).all()
     for grade in stale_running:
-        db.execute(
+        result = db.execute(
             update(CodeGrade)
-            .where(CodeGrade.id == grade.id)
+            .execution_options(synchronize_session=False)
+            .where(
+                CodeGrade.id == grade.id,
+                CodeGrade.status == "running",
+                CodeGrade.started_at == grade.started_at,
+            )
             .values(status="queued", last_error="Worker 超时未响应", queued_at=now)
         )
+        if result.rowcount == 0:
+            db.rollback()
+            continue  # 已被并发实例恢复
         db.commit()  # 先持久化状态变更
         try:
             msg = json.dumps({"type": "ai_grade", "id": grade.id, "attempt": grade.attempt_count})
@@ -135,7 +164,7 @@ def recover_stale_ai_grades(db: Session, redis_client: Redis) -> dict[str, int]:
             logger.warning("Redis 推送失败（running→queued），等待下次恢复: grade=%s", grade.id)
         recovered["running"] += 1
 
-    # queued 超时 → 重新推送（消息可能丢失）
+    # queued 超时 → 重新推送（CAS：仍 queued 且 queued_at 未变，防重复推送）
     queued_threshold = now - timedelta(seconds=300)
     stale_queued = db.scalars(
         select(CodeGrade).where(
@@ -144,9 +173,19 @@ def recover_stale_ai_grades(db: Session, redis_client: Redis) -> dict[str, int]:
         )
     ).all()
     for grade in stale_queued:
-        db.execute(
-            update(CodeGrade).where(CodeGrade.id == grade.id).values(queued_at=now)
+        result = db.execute(
+            update(CodeGrade)
+            .execution_options(synchronize_session=False)
+            .where(
+                CodeGrade.id == grade.id,
+                CodeGrade.status == "queued",
+                CodeGrade.queued_at == grade.queued_at,
+            )
+            .values(queued_at=now)
         )
+        if result.rowcount == 0:
+            db.rollback()
+            continue
         db.commit()  # 先持久化
         try:
             msg = json.dumps({"type": "ai_grade", "id": grade.id, "attempt": grade.attempt_count})
@@ -155,7 +194,7 @@ def recover_stale_ai_grades(db: Session, redis_client: Redis) -> dict[str, int]:
             logger.warning("Redis 推送失败（queued 重推），等待下次恢复: grade=%s", grade.id)
         recovered["queued"] += 1
 
-    # pending 超时 → 直接转为 queued 并入队（先 commit 再 rpush）
+    # pending 超时 → 转为 queued（CAS：仍 pending 且超时阈值）
     pending_threshold = now - timedelta(seconds=120)
     stale_pending = db.scalars(
         select(CodeGrade).where(
@@ -164,11 +203,19 @@ def recover_stale_ai_grades(db: Session, redis_client: Redis) -> dict[str, int]:
         )
     ).all()
     for grade in stale_pending:
-        db.execute(
+        result = db.execute(
             update(CodeGrade)
-            .where(CodeGrade.id == grade.id)
+            .execution_options(synchronize_session=False)
+            .where(
+                CodeGrade.id == grade.id,
+                CodeGrade.status == "pending",
+                CodeGrade.created_at < pending_threshold,
+            )
             .values(status="queued", queued_at=now)
         )
+        if result.rowcount == 0:
+            db.rollback()
+            continue  # 已被并发实例恢复
         db.commit()  # 先持久化状态变更
         try:
             msg = json.dumps({"type": "ai_grade", "id": grade.id, "attempt": grade.attempt_count})
