@@ -35,6 +35,7 @@ const routes = [
   { path: '/teacher/submissions/:id', name: 'TeacherExperimentSubmissionDetail', component: () => import('../views/teacher/ExperimentSubmissionDetailView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/ai-grading', name: 'TeacherAIGrading', component: () => import('../views/teacher/AIGradingReviewView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/ai-grading/:id', name: 'TeacherAIGradingDetail', component: () => import('../views/teacher/AIGradingReviewDetailView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/courses/:courseId/lessons/:lessonId/edit', name: 'TeacherLessonEdit', component: () => import('../views/teacher/LessonEditView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/courses/:id/studio/:lid', name: 'TeacherStudio', component: () => import('../views/teacher/StudioView.vue'), meta: { role: 'teacher' } },
 
   // Admin

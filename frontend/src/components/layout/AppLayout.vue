@@ -33,11 +33,13 @@ const app = useAppStore()
   display: flex;
   flex-direction: column;
   margin-left: var(--sidebar-width, 264px);
+  /* 弹窗遮罩的左侧起点：随侧栏宽度变化，保证 fixed 弹窗相对内容区居中 */
+  --modal-left: var(--sidebar-width, 264px);
   transition: margin-left var(--duration-slow) var(--ease-out);
   min-width: 0;
   background: var(--paper);
 }
-.main-area.collapsed { margin-left: var(--sidebar-collapsed-width, 64px); }
+.main-area.collapsed { margin-left: var(--sidebar-collapsed-width, 64px); --modal-left: var(--sidebar-collapsed-width, 64px); }
 
 /* 内容区：fluid，页面自身滚动，侧栏不滚动 */
 .content {
@@ -54,11 +56,11 @@ const app = useAppStore()
 
 /* ≤1199px：64px 折叠侧栏 + 单列内容 */
 @media (max-width: 1199px) {
-  .main-area { margin-left: var(--sidebar-collapsed-width, 64px); }
+  .main-area { margin-left: var(--sidebar-collapsed-width, 64px); --modal-left: var(--sidebar-collapsed-width, 64px); }
 }
 
 @media (max-width: 767.98px) {
   .content-inner { padding: 20px 16px 60px; }
-  .main-area { margin-left: var(--sidebar-collapsed-width, 64px); }
+  .main-area { margin-left: var(--sidebar-collapsed-width, 64px); --modal-left: var(--sidebar-collapsed-width, 64px); }
 }
 </style>

@@ -33,6 +33,8 @@ const SEMANTIC_KEYS = [
   'edit',
   'eye',
   'copy',
+  'back',
+  'video',
 ]
 
 describe('AppIcon', () => {

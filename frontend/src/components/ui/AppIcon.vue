@@ -39,6 +39,8 @@ import copy from '@iconify-icons/ri/file-copy-line'
 import chevronUp from '@iconify-icons/ri/arrow-up-s-line'
 import move from '@iconify-icons/ri/drag-move-2-line'
 import trash from '@iconify-icons/ri/delete-bin-line'
+import back from '@iconify-icons/ri/arrow-left-line'
+import video from '@iconify-icons/ri/video-line'
 
 // 语义键 → { data: 图标数据, set: 来源图标集 }；set 透传为 data-set 属性便于测试与排查
 const ICONS = {
@@ -75,6 +77,8 @@ const ICONS = {
   'chevron-up': { data: chevronUp, set: 'ri' },
   move: { data: move, set: 'ri' },
   trash: { data: trash, set: 'ri' },
+  back: { data: back, set: 'ri' },
+  video: { data: video, set: 'ri' },
 }
 
 const props = defineProps({

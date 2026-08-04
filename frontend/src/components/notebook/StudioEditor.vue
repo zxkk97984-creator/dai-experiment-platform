@@ -1,12 +1,19 @@
 <script setup>
-import { computed, ref } from 'vue'
-import { onBeforeRouteLeave } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import CodeCell from './CodeCell.vue'
 import MarkdownCell from './MarkdownCell.vue'
+import AppIcon from '../ui/AppIcon.vue'
+import ConfirmDialog from '../ui/ConfirmDialog.vue'
 import { useStudioStore } from '../../stores/studio.js'
 import { useAppStore } from '../../stores/app.js'
 
-const props = defineProps({ templateId: { type: [Number, String], required: true } })
+const props = defineProps({
+  templateId: { type: [Number, String], required: true },
+  /** 返回路径；不传时回退浏览器历史（开发者端兼容行为） */
+  backTo: { type: [String, Object], default: null },
+})
+const router = useRouter()
 const store = useStudioStore()
 const app = useAppStore()
 const loading = ref(true)
@@ -14,18 +21,75 @@ const history = ref([])
 const showHistory = ref(false)
 const editingMarkdownCell = ref(null)
 const markdownEditSource = ref('')
-const leaving = ref(false)
+// 未保存离开守卫：自定义确认弹窗（替代原 window.confirm）
+const showLeaveDialog = ref(false)
+let confirmedLeave = false
+let leaveResolver = null
 
 const visibleCells = computed(() => store.studentPreview ? store.sortedCells.filter(c => !c.source_hidden) : store.sortedCells)
 
-onBeforeRouteLeave(async (_to, _from) => {
-  if (leaving.value) return true
-  if (store.dirty && !store.conflict) {
-    if (!window.confirm('有未保存的修改，确定离开吗？')) return false
+onBeforeRouteLeave((_to, _from) => {
+  if (confirmedLeave || !(store.dirty && !store.conflict)) {
+    store.destroy()
+    return true
   }
-  store.destroy()
-  return true
+  return new Promise((resolve) => {
+    leaveResolver = resolve
+    showLeaveDialog.value = true
+  })
 })
+
+// goBack 路径的确认标志：router.back() 是原生历史导航，不经过路由守卫，
+// dirty 时需在按钮内手动弹确认框，确认后再 back
+let pendingBack = false
+
+function onConfirmLeave() {
+  const resolve = leaveResolver
+  leaveResolver = null
+  if (pendingBack) {
+    pendingBack = false
+    confirmedLeave = true
+    showLeaveDialog.value = false
+    store.destroy()
+    router.back()
+    return
+  }
+  if (!resolve) return
+  confirmedLeave = true
+  showLeaveDialog.value = false
+  store.destroy()
+  resolve(true)
+}
+
+function onCancelLeave() {
+  const resolve = leaveResolver
+  leaveResolver = null
+  pendingBack = false
+  showLeaveDialog.value = false
+  if (resolve) resolve(false)
+}
+
+// 浏览器刷新/关闭兜底：dirty 时触发系统级离开确认。
+// 注意：router.back() 走原生历史导航会触发 beforeunload ——
+// 已确认离开（confirmedLeave）后必须放行，避免自定义弹窗确认后再次弹浏览器对话框
+function onBeforeUnload(e) {
+  if (!confirmedLeave && store.dirty && !store.conflict) e.preventDefault()
+}
+onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
+onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
+
+function goBack() {
+  if (props.backTo) {
+    router.push(props.backTo)
+    return
+  }
+  if (store.dirty && !store.conflict) {
+    pendingBack = true
+    showLeaveDialog.value = true
+    return
+  }
+  router.back()
+}
 
 async function init() {
   loading.value = true
@@ -74,6 +138,9 @@ function handleMarkdownEdit(cellId) {
   <div v-else class="studio-editor">
     <div class="studio-toolbar">
       <div class="toolbar-left">
+        <button class="tb-btn" type="button" @click="goBack">
+          <AppIcon name="back" :size="14" /> 返回
+        </button>
         <h2 class="studio-name">{{ store.name || '未命名模板' }}</h2>
         <span class="revision-badge">rev {{ store.draftRevision }}</span>
       </div>
@@ -149,6 +216,17 @@ function handleMarkdownEdit(cellId) {
         </div>
       </div>
     </div>
+
+    <!-- 未保存离开确认（替代原 window.confirm，四页统一） -->
+    <ConfirmDialog
+      v-if="showLeaveDialog"
+      title="有未保存的修改"
+      message="确定离开吗？未保存的内容将丢失。"
+      confirm-text="离开"
+      cancel-text="取消"
+      @confirm="onConfirmLeave"
+      @cancel="onCancelLeave"
+    />
   </div>
 </template>
 <style scoped>
@@ -193,7 +271,7 @@ function handleMarkdownEdit(cellId) {
 .md-edit-hint { position: absolute; top: 4px; right: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1px 6px; font-size: 10px; color: var(--text-tertiary); cursor: pointer; }
 .studio-empty { text-align: center; padding: var(--space-12); color: var(--text-secondary); }
 .empty-actions { display: flex; gap: var(--space-2); justify-content: center; margin-top: var(--space-3); }
-.modal-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.3); display: flex; align-items: center; justify-content: center; }
+.modal-overlay { position: fixed; inset: 0 0 0 var(--modal-left, 0); z-index: 100; background: rgba(0,0,0,.3); display: flex; align-items: center; justify-content: center; }
 .modal-content { background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); max-width: 560px; width: 90vw; max-height: 80vh; overflow-y: auto; }
 .modal-header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-4); border-bottom: 1px solid var(--border); }
 .modal-header h3 { margin: 0; font-size: var(--text-md); }

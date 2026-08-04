@@ -45,6 +45,7 @@ vi.mock('../../../stores/app', () => ({
 }))
 
 import { coursesAPI } from '../../../api/courses.js'
+import { studioAPI } from '../../../api/studio.js'
 
 const courseData = { id: 1, title: '验收课程', status: 'published' }
 const chapterData = (lessons) => ({ id: 11, title: '第一章', order_index: 1, lessons: lessons || [] })
@@ -266,5 +267,174 @@ describe('课程管理页 ChapterManageView', () => {
     await flushPromises()
 
     expect(coursesAPI.updateLesson).toHaveBeenCalledWith(111, { chapter_id: 12, order_index: 0 })
+  })
+})
+
+// ── 添加课时两步弹窗（居中弹窗 → 选类型 → 填表单 → 跳转编辑页） ──
+describe('添加课时两步弹窗', () => {
+  async function mountWithLesson() {
+    coursesAPI.get.mockResolvedValue({ data: courseData })
+    coursesAPI.getChapters.mockResolvedValue({
+      data: [chapterData([lessonData(111, '第一课', 'published')])],
+    })
+    const wrapper = await mountPage()
+    await flushPromises()
+    return wrapper
+  }
+
+  async function openWizard(wrapper) {
+    const addBtn = wrapper.findAll('button').find((b) => b.text().includes('添加课时'))
+    expect(addBtn, '页面应有添加课时按钮').toBeDefined()
+    await addBtn.trigger('click')
+    await flushPromises()
+  }
+
+  async function pickType(wrapper, label) {
+    const card = wrapper.findAll('.create-type-card').find((c) => c.text().includes(label))
+    expect(card, `类型卡片应包含「${label}」`).toBeDefined()
+    await card.trigger('click')
+    await flushPromises()
+  }
+
+  it('第一步显示四类卡片，选择讲义进入第二步表单', async () => {
+    const wrapper = await mountWithLesson()
+    await openWizard(wrapper)
+
+    const cards = wrapper.findAll('.create-type-card')
+    expect(cards.length).toBe(4)
+    expect(wrapper.text()).toContain('讲义')
+    expect(wrapper.text()).toContain('Notebook 实验')
+    expect(wrapper.text()).toContain('普通实验')
+    expect(wrapper.text()).toContain('视频')
+
+    await pickType(wrapper, '讲义')
+    const form = wrapper.find('.create-form')
+    expect(form.exists()).toBe(true)
+    expect(wrapper.text()).toContain('课时名称')
+    expect(wrapper.text()).toContain('创建并编辑')
+  })
+
+  it('讲义：填标题+简介提交 → createLesson payload 正确并跳转编辑页', async () => {
+    coursesAPI.createLesson.mockResolvedValue({ data: { id: 555 } })
+    const wrapper = await mountWithLesson()
+    await openWizard(wrapper)
+    await pickType(wrapper, '讲义')
+    await wrapper.find('.create-form input').setValue('新讲义')
+    await wrapper.find('.create-form textarea').setValue('简介内容')
+    await wrapper.find('.create-form').trigger('submit')
+    await flushPromises()
+
+    expect(coursesAPI.createLesson).toHaveBeenCalledWith(11, {
+      title: '新讲义',
+      content_type: 'markdown',
+      content: '简介内容',
+      order_index: 0,
+    })
+    expect(push).toHaveBeenCalledWith('/teacher/courses/1/lessons/555/edit')
+  })
+
+  it('普通实验：content 按 # 实验任务 / # 提交要求 拼接', async () => {
+    coursesAPI.createLesson.mockResolvedValue({ data: { id: 556 } })
+    const wrapper = await mountWithLesson()
+    await openWizard(wrapper)
+    await pickType(wrapper, '普通实验')
+    await wrapper.find('.create-form input').setValue('实验课')
+    await wrapper.find('.create-form textarea').setValue('任务描述')
+    await wrapper.find('.create-form').trigger('submit')
+    await flushPromises()
+
+    expect(coursesAPI.createLesson).toHaveBeenCalledWith(11, {
+      title: '实验课',
+      content_type: 'experiment',
+      content: '# 实验任务\n\n任务描述\n\n# 提交要求\n\n',
+      order_index: 0,
+    })
+    expect(push).toHaveBeenCalledWith('/teacher/courses/1/lessons/556/edit')
+  })
+
+  it('视频：显示链接输入框，payload 含 video_url', async () => {
+    coursesAPI.createLesson.mockResolvedValue({ data: { id: 557 } })
+    const wrapper = await mountWithLesson()
+    await openWizard(wrapper)
+    await pickType(wrapper, '视频')
+    // 视频类型第二步有标题 + 链接两个输入框
+    const inputs = wrapper.findAll('.create-form input')
+    expect(inputs.length).toBe(2)
+    await inputs[0].setValue('视频课')
+    await inputs[1].setValue('https://v.example.com/x.mp4')
+    await wrapper.find('.create-form textarea').setValue('视频简介')
+    await wrapper.find('.create-form').trigger('submit')
+    await flushPromises()
+
+    expect(coursesAPI.createLesson).toHaveBeenCalledWith(11, {
+      title: '视频课',
+      content_type: 'video',
+      content: '视频简介',
+      video_url: 'https://v.example.com/x.mp4',
+      order_index: 0,
+    })
+    expect(push).toHaveBeenCalledWith('/teacher/courses/1/lessons/557/edit')
+  })
+
+  it('Notebook：创建课时后创建模板，push 编辑页带 ?template', async () => {
+    coursesAPI.createLesson.mockResolvedValue({ data: { id: 558 } })
+    studioAPI.createTemplate.mockResolvedValue({ data: { id: 666 } })
+    const wrapper = await mountWithLesson()
+    await openWizard(wrapper)
+    await pickType(wrapper, 'Notebook')
+    await wrapper.find('.create-form input').setValue('实验簿')
+    await wrapper.find('.create-form textarea').setValue('簿简介')
+    await wrapper.find('.create-form').trigger('submit')
+    await flushPromises()
+
+    expect(coursesAPI.createLesson).toHaveBeenCalledWith(11, {
+      title: '实验簿',
+      content_type: 'notebook',
+      order_index: 0,
+    })
+    expect(studioAPI.createTemplate).toHaveBeenCalledWith({
+      name: '实验簿',
+      description: '簿简介',
+      lesson_id: 558,
+    })
+    expect(push).toHaveBeenCalledWith('/teacher/courses/1/lessons/558/edit?template=666')
+  })
+
+  it('标题为空时提交禁用；上一步可返回类型选择', async () => {
+    const wrapper = await mountWithLesson()
+    await openWizard(wrapper)
+    await pickType(wrapper, '讲义')
+    const submit = wrapper.find('.create-form button[type="submit"]')
+    expect(submit.attributes('disabled')).toBeDefined()
+
+    await wrapper.findAll('.create-form button').find((b) => b.text() === '上一步').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.create-type-card').length).toBe(4)
+  })
+
+  it('关闭按钮 / 遮罩点击 / Escape 均可关闭弹窗', async () => {
+    const wrapper = await mountWithLesson()
+    // 关闭按钮
+    await openWizard(wrapper)
+    await wrapper.find('.create-close').trigger('click')
+    expect(wrapper.find('.create-panel').exists()).toBe(false)
+    // 遮罩 @click.self
+    await openWizard(wrapper)
+    await wrapper.find('.create-backdrop').trigger('click')
+    expect(wrapper.find('.create-panel').exists()).toBe(false)
+    // Escape
+    await openWizard(wrapper)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    expect(wrapper.find('.create-panel').exists()).toBe(false)
+  })
+
+  it('点课时行"编辑"统一跳转编辑页（原 notebook 特判被取代）', async () => {
+    const wrapper = await mountWithLesson()
+    const editBtn = wrapper.findAll('.row-action').find((b) => b.text().includes('编辑'))
+    expect(editBtn).toBeDefined()
+    await editBtn.trigger('click')
+    await flushPromises()
+    expect(push).toHaveBeenCalledWith('/teacher/courses/1/lessons/111/edit')
   })
 })

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { marked } from 'marked'
 import AppLayout from '../../components/layout/AppLayout.vue'
@@ -40,15 +40,13 @@ const loading = ref(true)
 
 const expanded = ref({})
 const openMenu = ref(null) // 'chapter:{id}' | 'lesson:{id}'
-const showChapterForm = ref(false)
+const chapterDialog = ref(false)
 const chapterTitle = ref('')
 
-const contentPicker = ref(null) // chapterId：选择添加课时内容类型
-const lessonForm = ref(null) // { chapterId, type, title, content, video_url }
-
-const editingLesson = ref(null)
-const editForm = ref({ title: '', content: '', video_url: '' })
-const savingEdit = ref(false)
+// 添加课时两步弹窗：{ chapterId, step, type, title, description, video_url }
+const createWizard = ref(null)
+const creatingLesson = ref(false)
+const titleInput = ref(null)
 
 // 编辑章节标题（抽屉）
 const editingChapter = ref(null)
@@ -136,10 +134,9 @@ function onDocumentClick(event) {
 function onKeydown(event) {
   if (event.key !== 'Escape') return
   openMenu.value = null
-  contentPicker.value = null
-  lessonForm.value = null
+  createWizard.value = null
+  chapterDialog.value = false
   previewLesson.value = null
-  editingLesson.value = null
   editingChapter.value = null
   movingLesson.value = null
   deleteTarget.value = null
@@ -194,12 +191,17 @@ function renderMarkdown(src) {
 }
 
 // ── 章节 ──────────────────────────────────────────────────────────────
+const chapterTitleInput = ref(null)
+watch(chapterDialog, (open) => {
+  if (open) nextTick(() => chapterTitleInput.value?.focus())
+})
+
 async function createChapter() {
   if (!chapterTitle.value.trim()) return
   try {
     await coursesAPI.createChapter(courseId.value, { title: chapterTitle.value.trim(), order_index: chapters.value.length })
     chapterTitle.value = ''
-    showChapterForm.value = false
+    chapterDialog.value = false
     await loadPage()
     app.showToast('章节已创建', 'success')
   } catch {
@@ -231,78 +233,104 @@ async function copyChapter(chapter) {
   }
 }
 
-// ── 添加课时（先选类型，再进入对应创建表单） ─────────────────────────
+// ── 添加课时（居中弹窗两步创建 → 跳转专属编辑页） ──────────────────
+const TYPE_ICONS = { markdown: 'book', notebook: 'cube', experiment: 'experiment', video: 'video' }
+
 function openAddLesson(chapterId) {
-  contentPicker.value = chapterId
-  lessonForm.value = null
   closeMenus()
+  createWizard.value = { chapterId, step: 1, type: null, title: '', description: '', video_url: '' }
 }
 
-function chooseContent(chapterId, type) {
-  contentPicker.value = null
-  lessonForm.value = { chapterId, type, title: '', content: '', video_url: '' }
+function chooseType(type) {
+  if (!createWizard.value) return
+  createWizard.value.type = type
+  createWizard.value.step = 2
 }
+
+function backToTypePicker() {
+  if (createWizard.value) createWizard.value.step = 1
+}
+
+// 进入第二步时聚焦课时名称输入框（v-if 切换后 autofocus 属性不生效）
+watch(
+  () => createWizard.value?.step,
+  async (step) => {
+    if (step === 2) {
+      await nextTick()
+      titleInput.value?.focus()
+    }
+  },
+)
 
 async function createLesson() {
-  if (!lessonForm.value?.title.trim()) return
-  const form = lessonForm.value
+  const wizard = createWizard.value
+  if (!wizard?.title.trim() || creatingLesson.value) return
+  creatingLesson.value = true
   try {
-    const payload = {
-      title: form.title.trim(),
-      content_type: form.type === 'experiment' ? 'experiment' : form.type,
-      content: form.content || undefined,
-      order_index: 0,
+    let payload
+    switch (wizard.type) {
+      case 'experiment':
+        payload = {
+          title: wizard.title.trim(),
+          content_type: 'experiment',
+          content: `# 实验任务\n\n${wizard.description.trim()}\n\n# 提交要求\n\n`,
+          order_index: 0,
+        }
+        break
+      case 'video':
+        payload = {
+          title: wizard.title.trim(),
+          content_type: 'video',
+          content: wizard.description.trim() || undefined,
+          video_url: wizard.video_url.trim() || undefined,
+          order_index: 0,
+        }
+        break
+      case 'notebook':
+        // 简介不写入 content，随模板创建传入 description
+        payload = {
+          title: wizard.title.trim(),
+          content_type: 'notebook',
+          order_index: 0,
+        }
+        break
+      default: // markdown 讲义
+        payload = {
+          title: wizard.title.trim(),
+          content_type: 'markdown',
+          content: wizard.description.trim() || undefined,
+          order_index: 0,
+        }
+        break
     }
-    if (form.type === 'video') payload.video_url = form.video_url || undefined
-    const response = await coursesAPI.createLesson(form.chapterId, payload)
-    if (form.type === 'notebook') {
-      const template = await studioAPI.createTemplate({ name: form.title.trim(), lesson_id: response.data.id })
-      router.push(`/teacher/courses/${courseId.value}/studio/${template.data.id}`)
-      return
+    const response = await coursesAPI.createLesson(wizard.chapterId, payload)
+    const lessonId = response.data?.id ?? response.id
+    let target = `/teacher/courses/${courseId.value}/lessons/${lessonId}/edit`
+    if (wizard.type === 'notebook') {
+      // 创建模板并绑定课时；编辑页凭 ?template 直接进入 Studio
+      const template = await studioAPI.createTemplate({
+        name: wizard.title.trim(),
+        description: wizard.description.trim() || undefined,
+        lesson_id: lessonId,
+      })
+      const templateId = template.data?.id ?? template.id
+      target += `?template=${templateId}`
     }
-    lessonForm.value = null
-    expanded.value[form.chapterId] = true
-    await loadPage()
-    app.showToast('课时已创建', 'success')
-  } catch {
+    createWizard.value = null
+    router.push(target)
+  } catch (err) {
     app.showToast('创建课时失败', 'error')
+    console.error('[ChapterManageView] 创建课时失败', err)
+  } finally {
+    creatingLesson.value = false
   }
 }
 
 // ── 课时操作 ──────────────────────────────────────────────────────────
 function openEditLesson(lesson) {
   closeMenus()
-  if (lesson.content_type === 'notebook' && lesson.template_id) {
-    router.push(`/teacher/courses/${courseId.value}/studio/${lesson.template_id}`)
-    return
-  }
-  editingLesson.value = lesson
-  editForm.value = {
-    title: lesson.title || '',
-    content: lesson.content || '',
-    video_url: lesson.video_url || '',
-  }
-}
-
-async function saveEditLesson() {
-  if (!editingLesson.value || !editForm.value.title.trim()) return
-  savingEdit.value = true
-  try {
-    const payload = { title: editForm.value.title.trim() }
-    if (editingLesson.value.content_type === 'video') {
-      payload.video_url = editForm.value.video_url || null
-    } else {
-      payload.content = editForm.value.content
-    }
-    await coursesAPI.updateLesson(editingLesson.value.id, payload)
-    editingLesson.value = null
-    await loadPage()
-    app.showToast('课时已保存', 'success')
-  } catch {
-    app.showToast('保存课时失败', 'error')
-  } finally {
-    savingEdit.value = false
-  }
+  // 统一跳转专属编辑页（Notebook 模板解析由编辑页负责，不再依赖 template_id）
+  router.push(`/teacher/courses/${courseId.value}/lessons/${lesson.id}/edit`)
 }
 
 function openPreview(lesson) {
@@ -504,8 +532,8 @@ onBeforeUnmount(() => {
           <button class="button button-secondary" type="button" @click="settingsOpen = true">
             <AppIcon name="settings" :size="16" /> 课程设置
           </button>
-          <button class="button button-primary" type="button" @click="showChapterForm = !showChapterForm">
-            <AppIcon name="plus" :size="16" /> {{ showChapterForm ? '取消' : '添加章节' }}
+          <button class="button button-primary" type="button" @click="chapterDialog = true">
+            <AppIcon name="plus" :size="16" /> 添加章节
           </button>
         </div>
       </section>
@@ -518,20 +546,14 @@ onBeforeUnmount(() => {
         </article>
       </section>
 
-      <!-- 添加章节 -->
-      <form v-if="showChapterForm" class="inline-form" @submit.prevent="createChapter">
-        <label for="chapter-title">新章节名称</label>
-        <input id="chapter-title" v-model="chapterTitle" placeholder="例如：Python 基础" autofocus />
-        <button class="button button-primary" type="submit">创建章节</button>
-      </form>
-
+      <!-- 章节列表（空状态/卡片见下） -->
       <div v-if="loading" class="loading-card">正在加载课程目录…</div>
 
       <!-- 课程空状态 -->
       <section v-else-if="chapters.length === 0" class="empty-card">
         <h2>尚未创建课程章节</h2>
         <p>创建章节后，可以在章节中添加讲义、Notebook 和实验内容。</p>
-        <button class="button button-primary" type="button" @click="showChapterForm = true">创建第一个章节</button>
+        <button class="button button-primary" type="button" @click="chapterDialog = true">创建第一个章节</button>
       </section>
 
       <!-- 章节卡片 -->
@@ -596,47 +618,6 @@ onBeforeUnmount(() => {
           </header>
 
           <div v-if="expanded[chapter.id]" class="chapter-body">
-            <!-- 选择内容类型 -->
-            <div v-if="contentPicker === chapter.id" class="content-picker">
-              <div class="picker-heading">
-                <strong>添加课时</strong>
-                <button class="close-button" type="button" aria-label="关闭" @click="contentPicker = null">
-                  <AppIcon name="close" :size="16" />
-                </button>
-              </div>
-              <button
-                v-for="item in CONTENT_TYPES"
-                :key="item.type"
-                type="button"
-                @click="chooseContent(chapter.id, item.type)"
-              >
-                <strong>{{ item.label }}</strong>
-                <span>{{ item.desc }}</span>
-              </button>
-            </div>
-
-            <!-- 创建课时表单 -->
-            <form v-if="lessonForm?.chapterId === chapter.id" class="lesson-form" @submit.prevent="createLesson">
-              <div class="picker-heading">
-                <strong>新建{{ CONTENT_TYPES.find((i) => i.type === lessonForm.type)?.label || lessonForm.type }}</strong>
-                <button class="close-button" type="button" aria-label="关闭" @click="lessonForm = null">
-                  <AppIcon name="close" :size="16" />
-                </button>
-              </div>
-              <input v-model="lessonForm.title" placeholder="课时标题" autofocus />
-              <textarea
-                v-if="lessonForm.type !== 'video'"
-                v-model="lessonForm.content"
-                rows="4"
-                placeholder="内容（可选）"
-              ></textarea>
-              <input v-if="lessonForm.type === 'video'" v-model="lessonForm.video_url" placeholder="视频链接 URL" />
-              <div class="form-actions">
-                <button class="button button-secondary" type="button" @click="lessonForm = null">取消</button>
-                <button class="button button-primary" type="submit">创建课时</button>
-              </div>
-            </form>
-
             <!-- 课时列表 -->
             <div v-if="chapter.lessons?.length" class="lesson-table">
               <div class="lesson-row lesson-head">
@@ -781,35 +762,73 @@ onBeforeUnmount(() => {
       </form>
     </div>
 
-    <!-- 编辑课时抽屉 -->
-    <div v-if="editingLesson" class="modal-backdrop" @click.self="editingLesson = null">
-      <form class="side-panel" @submit.prevent="saveEditLesson">
-        <div class="panel-header">
-          <div>
-            <p class="panel-eyebrow">编辑课时</p>
-            <h2>{{ editingLesson.title }}</h2>
-          </div>
-          <button class="icon-button" type="button" aria-label="关闭" @click="editingLesson = null">
-            <AppIcon name="close" :size="18" />
+    <!-- 添加课时两步弹窗 -->
+    <div v-if="createWizard" class="modal-backdrop create-backdrop" @click.self="createWizard = null">
+      <div class="create-panel" role="dialog" aria-modal="true" aria-label="添加课时">
+        <header class="create-heading">
+          <strong>添加课时</strong>
+          <button class="create-close" type="button" aria-label="关闭" @click="createWizard = null">
+            <AppIcon name="close" :size="16" />
+          </button>
+        </header>
+
+        <!-- 第一步：选择类型 -->
+        <div v-if="createWizard.step === 1" class="create-types">
+          <button
+            v-for="item in CONTENT_TYPES"
+            :key="item.type"
+            class="create-type-card"
+            type="button"
+            @click="chooseType(item.type)"
+          >
+            <AppIcon :name="TYPE_ICONS[item.type]" :size="22" />
+            <strong>{{ item.label }}</strong>
+            <span>{{ item.desc }}</span>
           </button>
         </div>
-        <label>
-          课时标题
-          <input v-model="editForm.title" />
-        </label>
-        <label v-if="editingLesson.content_type === 'video'">
-          视频链接
-          <input v-model="editForm.video_url" placeholder="视频链接 URL" />
-        </label>
-        <label v-else>
-          内容
-          <textarea v-model="editForm.content" rows="12" placeholder="Markdown 内容"></textarea>
-        </label>
-        <div class="form-actions">
-          <button class="button button-secondary" type="button" @click="editingLesson = null">取消</button>
-          <button class="button button-primary" type="submit" :disabled="savingEdit">
-            {{ savingEdit ? '保存中…' : '保存课时' }}
+
+        <!-- 第二步：课时名称 + 简介 -->
+        <form v-else class="create-form" @submit.prevent="createLesson">
+          <label class="create-field">
+            <span>课时名称</span>
+            <input ref="titleInput" v-model="createWizard.title" placeholder="例如：变量与数据类型" />
+          </label>
+          <label class="create-field">
+            <span>课时简介（可选）</span>
+            <textarea v-model="createWizard.description" rows="4" placeholder="课程简介（可选）"></textarea>
+          </label>
+          <label v-if="createWizard.type === 'video'" class="create-field">
+            <span>视频链接 URL（可选）</span>
+            <input v-model="createWizard.video_url" placeholder="https://…" />
+          </label>
+          <div class="create-actions">
+            <button class="button button-secondary" type="button" @click="backToTypePicker">上一步</button>
+            <button class="button button-primary" type="submit" :disabled="!createWizard.title.trim() || creatingLesson">
+              {{ creatingLesson ? '创建中…' : '创建并编辑' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 添加章节弹窗 -->
+    <div v-if="chapterDialog" class="modal-backdrop create-backdrop" @click.self="chapterDialog = false">
+      <form class="create-panel" role="dialog" aria-modal="true" aria-label="添加章节" @submit.prevent="createChapter">
+        <header class="create-heading">
+          <strong>添加章节</strong>
+          <button class="create-close" type="button" aria-label="关闭" @click="chapterDialog = false">
+            <AppIcon name="close" :size="16" />
           </button>
+        </header>
+        <div class="create-form">
+          <label class="create-field">
+            <span>章节名称</span>
+            <input ref="chapterTitleInput" v-model="chapterTitle" placeholder="例如：Python 基础" />
+          </label>
+          <div class="create-actions">
+            <button class="button button-secondary" type="button" @click="chapterDialog = false">取消</button>
+            <button class="button button-primary" type="submit" :disabled="!chapterTitle.trim()">创建章节</button>
+          </div>
         </div>
       </form>
     </div>
@@ -1199,29 +1218,31 @@ onBeforeUnmount(() => {
 .row-action.more { color: var(--text-muted); padding: 6px 8px; }
 .row-action.more:hover { color: var(--text-primary); }
 
-/* ── 添加课时选择 / 创建表单 ───────────────────────────────────────── */
-.content-picker,
-.lesson-form {
-  margin: 16px 0;
-  padding: 16px;
+.form-actions { display: flex; align-items: center; gap: 8px; }
+
+/* ── 添加课时两步弹窗 ─────────────────────────────────────────────── */
+/* 注意：双类选择器必须压过基础 .modal-backdrop 的 justify-content: flex-end
+   （基础样式定义在后面，单类 .create-backdrop 会被覆盖导致弹窗偏右） */
+.modal-backdrop.create-backdrop {
+  justify-content: center;
+  align-items: center;
+}
+.create-panel {
+  width: min(520px, calc(100% - 32px));
+  padding: 24px;
+  border-radius: 14px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--hover-bg);
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
 }
-.content-picker {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-}
-.picker-heading {
-  grid-column: 1 / -1;
+.create-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: var(--text-primary);
-  font-size: 14px;
+  margin-bottom: 16px;
 }
-.close-button {
+.create-heading strong { font-size: 17px; color: var(--text-primary); }
+.create-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1233,26 +1254,35 @@ onBeforeUnmount(() => {
   color: var(--text-muted);
   border-radius: 7px;
 }
-.close-button:hover { background: #fff; color: var(--text-primary); border-color: transparent; }
-.content-picker button {
-  min-height: 74px;
+.create-close:hover { background: var(--hover-bg); color: var(--text-primary); border-color: transparent; }
+.create-types {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.create-type-card {
+  min-height: 96px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
-  padding: 12px;
+  gap: 6px;
+  padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
   text-align: left;
   font-weight: 500;
 }
-.content-picker button:hover { border-color: #93c5fd; background: #eff6ff; }
-.content-picker button span { color: var(--text-muted); font-size: 12px; line-height: 1.4; }
-
-.lesson-form { display: grid; gap: 12px; }
-.lesson-form .form-actions { justify-content: flex-end; }
-.form-actions { display: flex; align-items: center; gap: 8px; }
+.create-type-card:hover { border-color: #93c5fd; background: #eff6ff; }
+.create-type-card .app-icon { color: var(--primary); }
+.create-type-card strong { color: var(--text-primary); font-size: 14px; }
+.create-type-card span { color: var(--text-muted); font-size: 12px; line-height: 1.4; }
+.create-form { display: grid; gap: 14px; }
+.create-field { display: grid; gap: 6px; }
+.create-field > span { color: var(--text-secondary); font-size: 13px; font-weight: 600; }
+.create-field input,
+.create-field textarea { border-radius: 8px; }
+.create-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
 /* ── 章节空状态 / 折叠摘要 / 加载 / 课程空状态 ─────────────────────── */
 .chapter-empty {
@@ -1272,7 +1302,6 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
-.inline-form,
 .loading-card,
 .empty-card {
   border: 1px solid var(--border);
@@ -1280,15 +1309,6 @@ onBeforeUnmount(() => {
   background: #fff;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
-.inline-form {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px;
-  margin-bottom: 16px;
-}
-.inline-form label { white-space: nowrap; font-size: 14px; font-weight: 600; }
-.inline-form input { flex: 1; border-radius: 8px; }
 .loading-card,
 .empty-card { padding: 48px 24px; text-align: center; }
 .empty-card h2 { margin: 0 0 8px; font-size: 18px; color: var(--text-primary); }
@@ -1298,7 +1318,9 @@ onBeforeUnmount(() => {
 .modal-backdrop {
   position: fixed;
   z-index: 40;
-  inset: 0;
+  /* left 随侧栏宽度（--modal-left 由 AppLayout 按收起状态提供），
+     弹窗以内容区为基准居中，而不是整个视口 */
+  inset: 0 0 0 var(--modal-left, 0);
   display: flex;
   justify-content: flex-end;
   background: rgba(15, 23, 42, 0.25);
@@ -1441,17 +1463,13 @@ onBeforeUnmount(() => {
   .lesson-row > :nth-child(6) { grid-column: 3; grid-row: 2; justify-self: end; }
   .duration-inline { display: inline; }
 
-  .content-picker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .inline-form { align-items: stretch; flex-wrap: wrap; }
-  .inline-form label { width: 100%; }
-  .inline-form input { min-width: 180px; }
+  .create-types { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 520px) {
   .course-overview h1 { font-size: 26px; }
   .stats-grid { gap: 8px; }
   .stat-card { padding: 14px; }
-  .content-picker { grid-template-columns: 1fr; }
   .side-panel { padding: 20px; }
   .settings-grid { grid-template-columns: 1fr; }
   .preview-body { padding: 16px; }
