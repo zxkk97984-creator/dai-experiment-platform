@@ -17,6 +17,10 @@ export const useStudioStore = defineStore('studio', () => {
   const lessonId = ref(null)
   const moduleId = ref(null)
   const ownerId = ref(null)
+  // ── 草稿环境绑定（Phase 4：教师选择） ─────────────────────
+  const environmentVersionId = ref(null)
+  const importPolicyMode = ref('unrestricted')
+  const allowedImports = ref([])
 
   const dirty = ref(false)
   const saving = ref(false)
@@ -46,11 +50,14 @@ export const useStudioStore = defineStore('studio', () => {
     status.value = d.status
     draftRevision.value = d.draft_revision
     draftRevisionSaved.value = d.draft_revision
-    cells.value = (d.draft_cells || []).map(c => ({ ...c }))
+    cells.value = (d.draft_cells || []).map(c => ({ ...c })).sort((a, b) => a.order - b.order)
     currentVersionId.value = d.current_version_id
     lessonId.value = d.lesson_id
     moduleId.value = d.module_id
     ownerId.value = d.owner_id
+    environmentVersionId.value = d.draft_environment_version_id ?? null
+    importPolicyMode.value = d.draft_import_policy_mode || 'unrestricted'
+    allowedImports.value = [...(d.draft_allowed_imports || [])]
     dirty.value = false
     saved.value = true
     conflict.value = false
@@ -58,20 +65,25 @@ export const useStudioStore = defineStore('studio', () => {
     studentPreview.value = false
   }
 
-  // 空白创建
+  // 空白创建（Phase 4：携带草稿环境三件套）
   async function create(payload) {
     const res = await studioAPI.createTemplate(payload)
     await open(res.data.id)
     return res.data
   }
 
-  // 导入创建
-  async function importNew(name, desc, file, lessonIdVal, moduleIdVal) {
+  // 导入创建（Phase 4：环境字段以 FormData 传输）
+  async function importNew(name, desc, file, lessonIdVal, moduleIdVal, env) {
     const fd = new FormData()
     fd.append('name', name)
     if (desc) fd.append('description', desc)
     if (lessonIdVal) fd.append('lesson_id', String(lessonIdVal))
     if (moduleIdVal) fd.append('module_id', String(moduleIdVal))
+    if (env) {
+      if (env.environment_version_id) fd.append('environment_version_id', String(env.environment_version_id))
+      if (env.import_policy_mode) fd.append('import_policy_mode', env.import_policy_mode)
+      if (env.allowed_imports?.length) fd.append('allowed_imports_json', JSON.stringify(env.allowed_imports))
+    }
     fd.append('file', file)
     const res = await studioAPI.importNew(fd)
     await open(res.data.id)
@@ -103,31 +115,37 @@ export const useStudioStore = defineStore('studio', () => {
   }
 
   // Cell 操作
-  function addCell(type, afterIndex) {
+  function addCell(type, afterCellId) {
+    const arr = [...sortedCells.value]
+    const anchorIndex = afterCellId == null ? -1 : arr.findIndex(c => c.id === afterCellId)
+    const insertIndex = anchorIndex >= 0 ? anchorIndex + 1 : arr.length
     const id = _genId()
     const newCell = {
       id,
       type,
       source: '',
-      order: afterIndex != null ? afterIndex + 1 : cells.value.length,
+      order: insertIndex,
       student_editable: type === 'code',
       source_hidden: false,
     }
-    cells.value = rebaseOrders([...cells.value, newCell])
+    arr.splice(insertIndex, 0, newCell)
+    cells.value = rebaseOrders(arr)
     dirty.value = true
     saved.value = false
   }
 
   function duplicateCell(cellId) {
-    const idx = cells.value.findIndex(c => c.id === cellId)
+    const arr = [...sortedCells.value]
+    const idx = arr.findIndex(c => c.id === cellId)
     if (idx < 0) return
-    const src = cells.value[idx]
+    const src = arr[idx]
     const newCell = {
       ...src,
       id: _genId(),
-      order: src.order + 1,
+      order: idx + 1,
     }
-    cells.value = rebaseOrders([...cells.value, newCell])
+    arr.splice(idx + 1, 0, newCell)
+    cells.value = rebaseOrders(arr)
     dirty.value = true
     saved.value = false
   }
@@ -139,12 +157,30 @@ export const useStudioStore = defineStore('studio', () => {
   }
 
   function moveCell(cellId, direction) {
-    const idx = cells.value.findIndex(c => c.id === cellId)
+    // 基于按 order 排序后的视图操作（此前在原始数组上交换会被 rebaseOrders 按 order 排序抵消，导致移动无效）
+    const sorted = sortedCells.value
+    const idx = sorted.findIndex(c => c.id === cellId)
     if (idx < 0) return
     const target = direction === 'up' ? idx - 1 : idx + 1
-    if (target < 0 || target >= cells.value.length) return
-    const arr = [...cells.value]
+    if (target < 0 || target >= sorted.length) return
+    const arr = [...sorted]
     ;[arr[idx], arr[target]] = [arr[target], arr[idx]]
+    cells.value = rebaseOrders(arr)
+    dirty.value = true
+    saved.value = false
+  }
+
+  /** 拖拽排序：把 cell 移动到 targetIndex 位置（排序后视图下标；targetIndex === length 表示末尾） */
+  function moveCellTo(cellId, targetIndex) {
+    const sorted = sortedCells.value
+    const idx = sorted.findIndex(c => c.id === cellId)
+    if (idx < 0) return
+    // 原地（含拖到自身紧邻后方，splice 后实际位置不变）
+    if (targetIndex === idx || targetIndex === idx + 1) return
+    if (targetIndex < 0 || targetIndex > sorted.length) return
+    const arr = [...sorted]
+    const [cell] = arr.splice(idx, 1)
+    arr.splice(targetIndex, 0, cell)
     cells.value = rebaseOrders(arr)
     dirty.value = true
     saved.value = false
@@ -175,11 +211,11 @@ export const useStudioStore = defineStore('studio', () => {
   }
 
   function rebaseOrders(arr) {
-    const sorted = [...arr].sort((a, b) => a.order - b.order)
-    return sorted.map((c, i) => ({ ...c, order: i }))
+    // 把当前数组顺序固化为 order 0..n-1（数组顺序即意图顺序）
+    return arr.map((c, i) => ({ ...c, order: i }))
   }
 
-  // 保存草稿
+  // 保存草稿（Phase 4：环境三件套与 cells 同一 revision 提交）
   async function saveDraft() {
     if (conflict.value) return false
     saving.value = true
@@ -195,6 +231,9 @@ export const useStudioStore = defineStore('studio', () => {
           student_editable: c.student_editable !== false,
           source_hidden: c.source_hidden === true,
         })),
+        environment_version_id: environmentVersionId.value,
+        import_policy_mode: importPolicyMode.value,
+        allowed_imports: [...allowedImports.value],
       }
       const res = await studioAPI.saveDraft(templateId.value, payload)
       _updateFromRead(res.data)
@@ -318,11 +357,32 @@ export const useStudioStore = defineStore('studio', () => {
       draftRevision.value = data.draft_revision
       draftRevisionSaved.value = data.draft_revision
     }
-    if (data.draft_cells) cells.value = data.draft_cells.map(c => ({ ...c }))
+    if (data.draft_cells) cells.value = data.draft_cells.map(c => ({ ...c })).sort((a, b) => a.order - b.order)
     if (data.current_version_id != null) currentVersionId.value = data.current_version_id
     status.value = data.status || 'draft'
     name.value = data.name
     description.value = data.description || ''
+    if ('draft_environment_version_id' in data) {
+      environmentVersionId.value = data.draft_environment_version_id ?? null
+      importPolicyMode.value = data.draft_import_policy_mode || 'unrestricted'
+      allowedImports.value = [...(data.draft_allowed_imports || [])]
+    }
+  }
+
+  // ── 环境设置（Phase 4）：修改后纳入 dirty，随草稿保存 ──────
+  function setEnvironment(envId, mode = null, allowed = null) {
+    environmentVersionId.value = envId ?? null
+    if (mode !== null) importPolicyMode.value = mode
+    if (allowed !== null) allowedImports.value = [...allowed]
+    dirty.value = true
+    saved.value = false
+  }
+
+  function setImportPolicy(mode, allowed = []) {
+    importPolicyMode.value = mode
+    allowedImports.value = [...allowed]
+    dirty.value = true
+    saved.value = false
   }
 
   function destroy() {
@@ -332,11 +392,13 @@ export const useStudioStore = defineStore('studio', () => {
   return {
     templateId, name, description, status, draftRevision, draftRevisionSaved,
     cells, sortedCells, currentVersionId, lessonId, moduleId, ownerId,
+    environmentVersionId, importPolicyMode, allowedImports,
     dirty, saving, saved, conflict, conflictMessage, error, studentPreview,
     executingCellId, runningCellId,
     open, create, importNew, importExisting, updateMetadata, bind,
-    addCell, duplicateCell, deleteCell, moveCell,
+    addCell, duplicateCell, deleteCell, moveCell, moveCellTo,
     updateCellSource, setCellEditable, setCellHidden,
+    setEnvironment, setImportPolicy,
     saveDraft, publish, exportDraft, exportVersion,
     previewRun, previewInterrupt, previewReset,
     destroy,

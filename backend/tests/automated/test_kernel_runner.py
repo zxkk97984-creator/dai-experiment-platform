@@ -372,7 +372,8 @@ def test_restart_preserves_existing_course_mount_by_default():
          patch.object(km, "create_session", return_value=MagicMock()) as create:
         km.restart(1)
 
-    create.assert_called_once_with(1, "C:/course-assets")
+    # Phase 5：restart 沿用现有 session 的环境身份（digest/环境版本从 session 继承）
+    create.assert_called_once_with(1, "C:/course-assets", image_ref=None, environment_version_id=None)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -394,6 +395,11 @@ def test_recover_empty_redis_via_label_and_conn_file():
                 return MagicMock(returncode=0, stdout='/dai-kernel-rec-42')
             if 'dai.record_id' in cmd_str:
                 return MagicMock(returncode=0, stdout='42')
+            # Phase 5：恢复必须校验环境 label
+            if 'dai.environment_version_id' in cmd_str:
+                return MagicMock(returncode=0, stdout='7')
+            if 'dai.image_digest' in cmd_str:
+                return MagicMock(returncode=0, stdout='sha256:' + 'b' * 64)
         if 'docker exec' in cmd_str and 'cat' in cmd_str:
             return MagicMock(returncode=0, stdout='{"shell_port":1,"ip":"127.0.0.1"}')
         return MagicMock(returncode=0, stdout='')

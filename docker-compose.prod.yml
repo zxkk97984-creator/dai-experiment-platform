@@ -36,11 +36,20 @@ services:
       DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
       DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
       DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
+      # 环境档位基础镜像——生产校验强制带 @sha256: digest（config.py 拒绝可变标签）
+      DAI_ENV_BASE_IMAGE: "${DAI_ENV_BASE_IMAGE:?DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的 python:3.12-slim 引用}"
       DAI_STUDIO_STORAGE_DIR: /app/storage/studio
       DAI_JUDGE_WORK_DIR: /judge-work
       # 宿主机侧判题工作目录绝对路径——Worker 将此路径传给 Docker daemon 做 bind mount
       # 开发环境无需设置（自动回退到 DAI_JUDGE_WORK_DIR）
       DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须是宿主机判题目录的绝对路径}
+      # ── 教师上传视频 ──
+      DAI_VIDEO_STORAGE_DIR: /app/storage/videos
+      DAI_VIDEO_MAX_UPLOAD_BYTES: ${DAI_VIDEO_MAX_UPLOAD_BYTES:-524288000}
+      DAI_VIDEO_PLAYBACK_URL_TTL_SECONDS: ${DAI_VIDEO_PLAYBACK_URL_TTL_SECONDS:-3600}
+      # ── 课程封面 ──
+      DAI_COVER_STORAGE_DIR: /app/storage/covers
+      DAI_COVER_MAX_UPLOAD_BYTES: ${DAI_COVER_MAX_UPLOAD_BYTES:-5242880}
       # ── AI 智能代码评分 ──
       DAI_AI_ENABLED: ${DAI_AI_ENABLED:-true}
       DAI_AI_BASE_URL: ${DAI_AI_BASE_URL:-https://aihub.codingpython.cn}
@@ -61,6 +70,8 @@ services:
       - "${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须设置}:/judge-work"
       - ./backend/alembic/versions:/app/alembic/versions:ro
       - studio_data:/app/storage/studio
+      - video_data:/app/storage/videos
+      - cover_data:/app/storage/covers
 
   worker:
     build: ./backend
@@ -71,6 +82,7 @@ services:
       DAI_REDIS_URL: redis://redis:6379/0
       DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
       DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
+      DAI_ENV_BASE_IMAGE: "${DAI_ENV_BASE_IMAGE:?DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的 python:3.12-slim 引用}"
       DAI_STUDIO_STORAGE_DIR: /app/storage/studio
       DAI_JUDGE_WORK_DIR: /judge-work
       DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须是宿主机判题目录的绝对路径}
@@ -96,6 +108,34 @@ services:
       - ./backend/alembic/versions:/app/alembic/versions:ro
       - studio_data:/app/storage/studio
 
+  # 环境档位构建 Worker（Phase 6）——单副本、单并发、低频管理任务
+  # DB 是构建任务事实源，Redis list 只负责唤醒；构建由宿主机 Docker daemon 执行
+  environment-builder:
+    build: ./backend
+    command: python -m app.worker.environment_builder_worker
+    environment:
+      DAI_ENVIRONMENT: ${DAI_ENVIRONMENT:-production}
+      DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
+      DAI_REDIS_URL: redis://redis:6379/0
+      DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
+      DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
+      # 环境构建控制面——生产必须使用带 sha256 digest 的基础镜像引用（config.py 校验强制）
+      DAI_ENV_BASE_IMAGE: "${DAI_ENV_BASE_IMAGE:?DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的 python:3.12-slim 引用}"
+      DAI_ENV_BUILD_QUEUE_NAME: ${DAI_ENV_BUILD_QUEUE_NAME:-environment:build:queue}
+      DAI_ENV_BUILD_TIMEOUT_SECONDS: ${DAI_ENV_BUILD_TIMEOUT_SECONDS:-3600}
+      DAI_ENV_IMAGE_REPOSITORY: ${DAI_ENV_IMAGE_REPOSITORY:-dai-env}
+      DAI_ENV_BUILD_LOG_MAX_BYTES: ${DAI_ENV_BUILD_LOG_MAX_BYTES:-61440}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+    volumes:
+      # 只挂载 Docker socket——构建镜像由宿主机 daemon 执行；不挂载学生工作目录
+      - /var/run/docker.sock:/var/run/docker.sock
+
   frontend:
     build: ./frontend
     ports:
@@ -108,6 +148,10 @@ services:
 volumes:
   mysql_data:
   studio_data:
+  # 教师上传视频持久卷——容器重建后视频仍存在，备份任务必须包含此卷
+  video_data:
+  # 课程封面持久卷——必须纳入生产备份
+  cover_data:
 
 networks:
   internal:

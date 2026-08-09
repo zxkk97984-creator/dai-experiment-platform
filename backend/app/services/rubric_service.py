@@ -14,6 +14,11 @@ from app.models import ExamQuestion, JudgeQuestion, QuestionRubric
 from app.schemas.ai_grading import RubricDocument
 from app.services.ai_client import AIServiceError, DeepSeekClient
 from app.services.ai_prompts import build_rubric_messages
+from pydantic import ValidationError
+
+
+class RubricGenerationError(Exception):
+    """AI 生成的 Rubric 结构不合规（可读错误，不产生 500）"""
 
 logger = logging.getLogger("dai.rubric")
 
@@ -86,7 +91,18 @@ def generate_rubric(
     raw_response = client.chat_json(messages)
     raw_json_str = json.dumps(raw_response, ensure_ascii=False)
 
-    rubric_doc = RubricDocument.model_validate(raw_response)
+    try:
+        rubric_doc = RubricDocument.model_validate(raw_response)
+    except ValidationError as exc:
+        # 2026-08-09：AI 输出结构漂移（如 criteria 多带字段/缺字段、分值合计不符）
+        # 必须转为可读错误而非 500——生成端点据此返回 502 并附具体字段问题。
+        errors = [
+            f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}"
+            for e in exc.errors()
+        ]
+        raise RubricGenerationError(
+            f"AI 生成的 Rubric 不符合格式规范：{'；'.join(errors[:5])}"
+        ) from exc
 
     rubric = QuestionRubric(
         **{col_name: question_id},

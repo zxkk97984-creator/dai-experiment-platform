@@ -36,6 +36,8 @@ const course = {
   description: '监督学习与模型评估',
   status: 'published',
   teacher_id: 5,
+  is_enrolled: true,
+  can_enroll: false,
 }
 
 const chapters = [
@@ -183,27 +185,62 @@ describe('课程概览 CourseDetailView（参考图 03）', () => {
     expect(wrapper.text()).toContain('暂无反馈')
   })
 
-  it('403 未选课展示选课动作并触发选课', async () => {
+  it('403 视为无权访问或课程不可见，不误报为“尚未选课”', async () => {
     coursesMock.get.mockRejectedValueOnce(Object.assign(new Error('forbidden'), { response: { status: 403 } }))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.text()).toContain('无权访问或课程不可见')
+    expect(wrapper.text()).not.toContain('还未选这门课')
+    // 未拿到元数据时不发内容请求
+    expect(coursesMock.getChapters).not.toHaveBeenCalled()
+    expect(assignmentsMock.list).not.toHaveBeenCalled()
+    expect(examsMock.list).not.toHaveBeenCalled()
+    await wrapper.get('.back-list-btn').trigger('click')
+    expect(routerState.push).toHaveBeenCalledWith('/student/courses')
+  })
+
+  it('is_enrolled=false 展示课程元数据与选课 CTA，不请求内容', async () => {
+    coursesMock.get.mockResolvedValue({
+      data: { ...course, is_enrolled: false, can_enroll: true },
+    })
+    coursesMock.enroll.mockResolvedValue({})
+    const wrapper = mountView()
+    await flushPromises()
+    // 展示 hero 元数据与选课按钮
+    expect(wrapper.text()).toContain('机器学习导论')
+    expect(wrapper.text()).toContain('监督学习与模型评估')
+    expect(wrapper.text()).toContain('还未选这门课')
+    expect(wrapper.get('.hero-enroll-btn').exists()).toBe(true)
+    // 未选课不请求章节/作业/考试/dashboard
+    expect(coursesMock.getChapters).not.toHaveBeenCalled()
+    expect(assignmentsMock.list).not.toHaveBeenCalled()
+    expect(examsMock.list).not.toHaveBeenCalled()
+    expect(dashboardMock.student).not.toHaveBeenCalled()
+  })
+
+  it('选课成功后重新加载并进入已选状态', async () => {
+    coursesMock.get
+      .mockResolvedValueOnce({ data: { ...course, is_enrolled: false, can_enroll: true } })
+      .mockResolvedValue({ data: course })
     coursesMock.getChapters.mockResolvedValue({ data: { items: chapters } })
-    assignmentsMock.list.mockResolvedValue({ data: { items: [] } })
-    examsMock.list.mockResolvedValue({ data: { items: [] } })
+    assignmentsMock.list.mockResolvedValue({ data: { items: assignments } })
+    examsMock.list.mockResolvedValue({ data: { items: exams } })
     dashboardMock.student.mockResolvedValue({ data: dashboardData() })
     coursesMock.enroll.mockResolvedValue({})
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.text()).toContain('还未选这门课')
+    expect(wrapper.get('.hero-enroll-btn').exists()).toBe(true)
     await wrapper.get('.hero-enroll-btn').trigger('click')
     await flushPromises()
     expect(coursesMock.enroll).toHaveBeenCalledWith('7')
+    // 重新 fetchAll 后进入已选状态，渲染内容
+    expect(wrapper.text()).toContain('继续学习')
+    expect(coursesMock.getChapters).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('线性回归作业')
   })
 
   it('404 展示课程不存在并保留返回动作', async () => {
     coursesMock.get.mockRejectedValueOnce(Object.assign(new Error('not found'), { response: { status: 404 } }))
-    coursesMock.getChapters.mockResolvedValue({ data: { items: [] } })
-    assignmentsMock.list.mockResolvedValue({ data: { items: [] } })
-    examsMock.list.mockResolvedValue({ data: { items: [] } })
-    dashboardMock.student.mockResolvedValue({ data: dashboardData() })
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.text()).toContain('课程不存在')

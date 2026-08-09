@@ -16,7 +16,7 @@ def _setup_exam(client, db_sf):
     t_tok, _ = login(client, "tzt")
     s_tok, _ = login(client, "szt")
     c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "TZC", "status": "published"})
+                    json={"title": "TZC", "status": "published", "visibility": "public"})
     cid = c.json()["id"]
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
 
@@ -87,7 +87,7 @@ def test_exam_not_started_yet(client, db_session_factory):
     t_tok, _ = login(client, "fut_t")
     s_tok, _ = login(client, "fut_s")
     c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "FC", "status": "published"})
+                    json={"title": "FC", "status": "published", "visibility": "public"})
     cid = c.json()["id"]
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
 
@@ -118,7 +118,7 @@ def test_exam_ended_no_submit(client, db_session_factory):
     t_tok, _ = login(client, "end_t")
     s_tok, _ = login(client, "end_s")
     c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "EC", "status": "published"})
+                    json={"title": "EC", "status": "published", "visibility": "public"})
     cid = c.json()["id"]
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
 
@@ -157,7 +157,7 @@ def test_exam_no_time_window_allowed(client, db_session_factory):
     t_tok, _ = login(client, "ntw_t")
     s_tok, _ = login(client, "ntw_s")
     c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "NW", "status": "published"})
+                    json={"title": "NW", "status": "published", "visibility": "public"})
     cid = c.json()["id"]
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
     e = client.post(f"{API}/exams", headers=auth_header(t_tok), json={

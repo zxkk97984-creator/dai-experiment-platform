@@ -16,7 +16,7 @@ def _setup_submission(client, db_sf):
     s_tok, _ = login(client, "erv_s")
 
     c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "RVC", "status": "published"})
+                    json={"title": "RVC", "status": "published", "visibility": "public"})
     cid = c.json()["id"]
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
     ch = client.post(f"{API}/courses/{cid}/chapters", headers=auth_header(t_tok),

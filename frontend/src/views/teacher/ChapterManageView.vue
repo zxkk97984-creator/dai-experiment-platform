@@ -4,8 +4,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { marked } from 'marked'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
+import CourseCoverUploader from '../../components/teacher/CourseCoverUploader.vue'
+import CourseWhitelistManager from '../../components/teacher/CourseWhitelistManager.vue'
 import { coursesAPI } from '../../api/courses.js'
 import { studioAPI } from '../../api/studio.js'
+import EnvironmentProfilePicker from '../../components/common/EnvironmentProfilePicker.vue'
 import { useAppStore } from '../../stores/app.js'
 import { sanitizeHtml } from '../../utils/sanitize.js'
 
@@ -43,7 +46,7 @@ const openMenu = ref(null) // 'chapter:{id}' | 'lesson:{id}'
 const chapterDialog = ref(false)
 const chapterTitle = ref('')
 
-// 添加课时两步弹窗：{ chapterId, step, type, title, description, video_url }
+// 添加课时两步弹窗：{ chapterId, step, type, title, description }
 const createWizard = ref(null)
 const creatingLesson = ref(false)
 const titleInput = ref(null)
@@ -64,10 +67,16 @@ const deleting = ref(false)
 
 const previewLesson = ref(null)
 const previewHtml = ref('')
+// 学生视角预览：本地视频的签名播放地址（外链直接使用 video_url）
+const previewVideoUrl = ref('')
+const previewVideoLoading = ref(false)
+const previewVideoError = ref('')
 
 const settingsOpen = ref(false)
 const savingSettings = ref(false)
 const settings = ref({})
+// 封面上传/移除期间禁用保存按钮，避免与普通设置提交互相覆盖
+const coverBusy = ref(false)
 
 const courseId = computed(() => route.params.courseId || route.params.id)
 const lessons = computed(() => chapters.value.flatMap((chapter) => chapter.lessons || []))
@@ -96,6 +105,10 @@ async function loadPage() {
       title: course.value.title || '',
       description: course.value.description || '',
       status: course.value.status || 'draft',
+      // datetime-local 只需 YYYY-MM-DDTHH:mm，截掉秒与时区
+      start_time: (course.value.start_time || '').slice(0, 16),
+      visibility: course.value.visibility || 'private',
+      default_score: course.value.default_score ?? 100,
     }
     restoreExpandedState()
   } catch {
@@ -236,9 +249,52 @@ async function copyChapter(chapter) {
 // ── 添加课时（居中弹窗两步创建 → 跳转专属编辑页） ──────────────────
 const TYPE_ICONS = { markdown: 'book', notebook: 'cube', experiment: 'experiment', video: 'video' }
 
+// ── Notebook 创建的环境选择（Phase 4） ─────────────────────────────
+const notebookEnvOptions = ref([])
+const notebookEnvId = ref(null)
+const notebookPolicy = ref('unrestricted')
+const notebookAllowedImports = ref([])
+
+function onNotebookEnvLoaded(options) {
+  notebookEnvOptions.value = options
+  if (options.length && !notebookEnvId.value) {
+    notebookEnvId.value = options[0].environment_version_id
+  }
+}
+
+const selectedNotebookEnv = computed(
+  () => notebookEnvOptions.value.find((o) => o.environment_version_id === notebookEnvId.value) || null,
+)
+const notebookImportCandidates = computed(() => {
+  if (!selectedNotebookEnv.value) return []
+  const seen = new Set()
+  const names = []
+  for (const p of selectedNotebookEnv.value.packages || []) {
+    for (const name of p.import_names || []) {
+      if (!seen.has(name)) { seen.add(name); names.push(name) }
+    }
+  }
+  return names
+})
+const notebookMismatch = computed(() => {
+  if (notebookPolicy.value !== 'restricted' || notebookAllowedImports.value.length === 0) return ''
+  const installed = new Set(notebookImportCandidates.value)
+  const missing = notebookAllowedImports.value.filter((name) => !installed.has(name))
+  return missing.length ? `注意：${missing.join('、')} 未在当前环境安装` : ''
+})
+
+function toggleNotebookImport(name) {
+  const idx = notebookAllowedImports.value.indexOf(name)
+  if (idx >= 0) notebookAllowedImports.value.splice(idx, 1)
+  else notebookAllowedImports.value.push(name)
+}
+
 function openAddLesson(chapterId) {
   closeMenus()
-  createWizard.value = { chapterId, step: 1, type: null, title: '', description: '', video_url: '' }
+  createWizard.value = { chapterId, step: 1, type: null, title: '', description: '' }
+  notebookEnvId.value = null
+  notebookPolicy.value = 'unrestricted'
+  notebookAllowedImports.value = []
 }
 
 function chooseType(type) {
@@ -282,7 +338,6 @@ async function createLesson() {
           title: wizard.title.trim(),
           content_type: 'video',
           content: wizard.description.trim() || undefined,
-          video_url: wizard.video_url.trim() || undefined,
           order_index: 0,
         }
         break
@@ -307,11 +362,14 @@ async function createLesson() {
     const lessonId = response.data?.id ?? response.id
     let target = `/teacher/courses/${courseId.value}/lessons/${lessonId}/edit`
     if (wizard.type === 'notebook') {
-      // 创建模板并绑定课时；编辑页凭 ?template 直接进入 Studio
+      // 创建模板并绑定课时（Phase 4：携带教师选择的环境与白名单）；编辑页凭 ?template 进入 Studio
       const template = await studioAPI.createTemplate({
         name: wizard.title.trim(),
         description: wizard.description.trim() || undefined,
         lesson_id: lessonId,
+        environment_version_id: notebookEnvId.value,
+        import_policy_mode: notebookPolicy.value,
+        allowed_imports: notebookPolicy.value === 'restricted' ? [...notebookAllowedImports.value] : [],
       })
       const templateId = template.data?.id ?? template.id
       target += `?template=${templateId}`
@@ -337,6 +395,26 @@ function openPreview(lesson) {
   closeMenus()
   previewLesson.value = lesson
   previewHtml.value = lesson.content_type === 'video' ? '' : renderMarkdown(lesson.content)
+  // 本地视频来源：请求签名播放地址（外链来源不需要）
+  previewVideoUrl.value = ''
+  previewVideoError.value = ''
+  if (lesson.content_type === 'video' && (lesson.video_source === 'upload' || lesson.video_filename)) {
+    fetchPreviewVideoUrl(lesson.id)
+  }
+}
+
+async function fetchPreviewVideoUrl(lessonId) {
+  previewVideoLoading.value = true
+  previewVideoError.value = ''
+  try {
+    const res = await coursesAPI.getLessonVideoPlaybackUrl(lessonId)
+    previewVideoUrl.value = res.data.url
+  } catch (err) {
+    previewVideoError.value = '视频预览加载失败，请稍后重试'
+    console.error('[ChapterManageView] 获取预览播放地址失败', err)
+  } finally {
+    previewVideoLoading.value = false
+  }
 }
 
 function openStudioForPreview(lesson) {
@@ -496,8 +574,24 @@ async function confirmMoveLesson() {
 async function saveSettings() {
   savingSettings.value = true
   try {
-    await coursesAPI.update(courseId.value, settings.value)
-    course.value = { ...course.value, ...settings.value }
+    // 归一化：空值语义对齐后端（start_time 可空清空；default_score 回退满分）
+    // 封面由上传组件独立提交，即使误入 settings 也在此显式排除，
+    // 避免保存普通设置时覆盖已上传的封面
+    const { cover: _ignoredCover, ...payload } = settings.value
+    payload.start_time = payload.start_time ? payload.start_time.slice(0, 16) : null
+    payload.default_score =
+      payload.default_score === '' || payload.default_score == null
+        ? 100
+        : Number(payload.default_score)
+    const res = await coursesAPI.update(courseId.value, payload)
+    // 以 API 响应更新课程，接收规范化字段（含 visibility）
+    course.value = res.data
+    settings.value = {
+      ...settings.value,
+      ...payload,
+      visibility: res.data.visibility ?? payload.visibility,
+      default_score: res.data.default_score ?? payload.default_score,
+    }
     settingsOpen.value = false
     app.showToast('课程设置已保存', 'success')
   } catch {
@@ -505,6 +599,11 @@ async function saveSettings() {
   } finally {
     savingSettings.value = false
   }
+}
+
+// 封面上传/移除完成：用 API 返回的课程更新当前课程，无需重新加载整个章节列表
+function handleCoverUpdated(updatedCourse) {
+  course.value = updatedCourse
 }
 
 onMounted(() => {
@@ -672,7 +771,7 @@ onBeforeUnmount(() => {
                       <template v-if="API_CAPS.lessonPublish">
                         <div class="menu-divider"></div>
                         <button type="button" @click="toggleLessonPublish(lesson)">
-                          <AppIcon name="eye-off" :size="15" />
+                          <AppIcon :name="isPublished(lesson) ? 'eye-off' : 'eye'" :size="15" />
                           {{ isPublished(lesson) ? '设为草稿' : '发布课时' }}
                         </button>
                       </template>
@@ -730,32 +829,53 @@ onBeforeUnmount(() => {
             <option value="archived">已归档</option>
           </select>
         </label>
+        <CourseCoverUploader
+          v-if="course"
+          :course-id="courseId"
+          :course="course"
+          @updated="handleCoverUpdated"
+          @busy-change="coverBusy = $event"
+        />
         <div class="settings-grid">
           <label>
-            课程封面
-            <input disabled placeholder="暂未开放" />
-          </label>
-          <label>
             开课时间
-            <input disabled type="datetime-local" />
+            <input v-model="settings.start_time" type="datetime-local" />
           </label>
           <label>
             课程可见范围
-            <select disabled>
-              <option>仅自己可见</option>
+            <select v-model="settings.visibility">
+              <option value="private">仅自己可见</option>
+              <option value="public">公开浏览</option>
+              <option value="whitelist">指定学生可见</option>
             </select>
           </label>
           <label>
             默认评分设置
-            <input disabled type="number" placeholder="100" />
+            <input v-model.number="settings.default_score" type="number" placeholder="100" min="0" />
           </label>
         </div>
-        <p class="settings-note">
-          课程封面、开课时间、可见范围与默认评分设置暂未接入后端，保存不会生效，已禁用。
-        </p>
+        <div
+          v-if="settings.visibility === 'private'"
+          class="settings-note"
+        >
+          仅教师及存量已选学生访问，学生无法自行发现或选课。
+        </div>
+        <div
+          v-else-if="settings.visibility === 'public'"
+          class="settings-note"
+        >
+          所有学生可发现并选课。
+        </div>
+        <div v-else class="settings-note">
+          只有指定学生可发现并选课；切换离开本范围不会删除已有名单。
+        </div>
+        <CourseWhitelistManager
+          v-if="settings.visibility === 'whitelist'"
+          :course-id="courseId"
+        />
         <div class="form-actions">
           <button class="button button-secondary" type="button" @click="settingsOpen = false">取消</button>
-          <button class="button button-primary" type="submit" :disabled="savingSettings">
+          <button class="button button-primary" type="submit" :disabled="savingSettings || coverBusy">
             {{ savingSettings ? '保存中…' : '保存设置' }}
           </button>
         </div>
@@ -797,10 +917,34 @@ onBeforeUnmount(() => {
             <span>课时简介（可选）</span>
             <textarea v-model="createWizard.description" rows="4" placeholder="课程简介（可选）"></textarea>
           </label>
-          <label v-if="createWizard.type === 'video'" class="create-field">
-            <span>视频链接 URL（可选）</span>
-            <input v-model="createWizard.video_url" placeholder="https://…" />
-          </label>
+          <p v-if="createWizard.type === 'video'" class="create-hint create-hint-video">
+            视频可在创建后进入编辑页上传。
+          </p>
+          <!-- Notebook 环境选择（Phase 4：教师选择） -->
+          <template v-if="createWizard.type === 'notebook'">
+            <EnvironmentProfilePicker
+              v-model="notebookEnvId"
+              show-memory
+              label="运行环境"
+              @loaded="onNotebookEnvLoaded"
+            />
+            <p v-if="!notebookEnvOptions.length" class="create-hint env-warn">暂无可用环境，请联系管理员</p>
+            <label class="create-field">
+              <span>导入规则</span>
+              <select v-model="notebookPolicy" class="import-policy-select">
+                <option value="unrestricted">不限制</option>
+                <option value="restricted">限定白名单</option>
+              </select>
+            </label>
+            <div v-if="notebookPolicy === 'restricted'" class="import-candidates">
+              <label v-for="name in notebookImportCandidates" :key="name" class="import-chip">
+                <input type="checkbox" :checked="notebookAllowedImports.includes(name)" @change="toggleNotebookImport(name)" />
+                {{ name }}
+              </label>
+              <p v-if="!notebookImportCandidates.length" class="create-hint">当前环境未提供教学库，可留空白名单</p>
+            </div>
+            <p v-if="notebookMismatch" class="create-hint env-warn">{{ notebookMismatch }}</p>
+          </template>
           <div class="create-actions">
             <button class="button button-secondary" type="button" @click="backToTypePicker">上一步</button>
             <button class="button button-primary" type="submit" :disabled="!createWizard.title.trim() || creatingLesson">
@@ -853,7 +997,25 @@ onBeforeUnmount(() => {
           </button>
         </header>
         <div v-if="previewLesson.content_type === 'video'" class="preview-body">
-          <p v-if="previewLesson.video_url">
+          <!-- 本地视频：内嵌播放器 -->
+          <template v-if="previewLesson.video_source === 'upload' || previewLesson.video_filename">
+            <p v-if="previewVideoLoading" class="preview-video-state">视频加载中…</p>
+            <p v-else-if="previewVideoError" class="preview-video-state preview-video-error">
+              {{ previewVideoError }}
+              <button class="button button-secondary retry-btn" type="button" @click="fetchPreviewVideoUrl(previewLesson.id)">重试</button>
+            </p>
+            <video
+              v-else-if="previewVideoUrl"
+              controls
+              playsinline
+              preload="metadata"
+              class="preview-video"
+              :src="previewVideoUrl"
+            ></video>
+            <p v-else class="preview-video-state">该课时尚未上传视频。</p>
+          </template>
+          <!-- 外链视频：打开视频 -->
+          <p v-else-if="previewLesson.video_url">
             视频地址：
             <a :href="previewLesson.video_url" target="_blank" rel="noopener noreferrer">{{ previewLesson.video_url }}</a>
           </p>
@@ -1275,6 +1437,35 @@ onBeforeUnmount(() => {
 }
 .create-type-card:hover { border-color: #93c5fd; background: #eff6ff; }
 .create-type-card .app-icon { color: var(--primary); }
+/* ── Phase 4：Notebook 环境选择 ─────────────────────────────────── */
+.import-policy-select {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control, 7px);
+  background: var(--surface, #fff);
+  color: var(--ink, #223);
+  font-family: inherit;
+  font-size: var(--text-sm, 13px);
+}
+.env-warn { color: var(--warning, #b7791f); }
+.import-candidates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.import-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-raised, #f4f6f8);
+  font-size: var(--text-sm, 13px);
+  cursor: pointer;
+}
+.import-chip input { margin: 0; }
 .create-type-card strong { color: var(--text-primary); font-size: 14px; }
 .create-type-card span { color: var(--text-muted); font-size: 12px; line-height: 1.4; }
 .create-form { display: grid; gap: 14px; }
@@ -1282,6 +1473,17 @@ onBeforeUnmount(() => {
 .create-field > span { color: var(--text-secondary); font-size: 13px; font-weight: 600; }
 .create-field input,
 .create-field textarea { border-radius: 8px; }
+.create-hint { margin: 0; color: var(--text-muted); font-size: 12px; }
+.create-hint-video {
+  margin: -6px 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--surface-raised);
+  border: 1px dashed var(--border-strong);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
 .create-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
 /* ── 章节空状态 / 折叠摘要 / 加载 / 课程空状态 ─────────────────────── */
@@ -1395,6 +1597,16 @@ onBeforeUnmount(() => {
 .preview-meta { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; color: var(--text-muted); font-size: 13px; }
 .preview-body { padding: 24px; color: #334155; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
 .preview-footer { padding: 12px 24px 20px; }
+.preview-video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  background: #000;
+}
+.preview-video-state { margin: 0; color: var(--text-muted); font-size: 13px; }
+.preview-video-error { display: flex; align-items: center; gap: 8px; color: var(--danger, #dc2626); }
+.retry-btn { flex: none; }
 .lesson-content :deep(p) { margin: 0 0 12px; }
 .lesson-content :deep(h1),
 .lesson-content :deep(h2),

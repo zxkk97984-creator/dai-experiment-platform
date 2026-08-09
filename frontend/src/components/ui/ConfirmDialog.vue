@@ -14,6 +14,8 @@ defineProps({
   cancelText: { type: String, default: '取消' },
   /** 确认按钮是否使用红色危险样式 */
   danger: { type: Boolean, default: false },
+  /** 确认操作进行中：禁用确认按钮（发布确认场景） */
+  busy: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['confirm', 'cancel'])
@@ -27,19 +29,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div class="modal-backdrop" @click.self="emit('cancel')">
+  <div class="modal-backdrop confirm-backdrop" @click.self="emit('cancel')">
     <div class="confirm-panel" role="dialog" aria-modal="true" :aria-label="title">
       <h2>{{ title }}</h2>
       <p v-if="message">{{ message }}</p>
       <div class="confirm-actions">
-        <button type="button" class="btn-ghost" @click="emit('cancel')">{{ cancelText }}</button>
+        <button type="button" class="btn-ghost" :disabled="busy" @click="emit('cancel')">{{ cancelText }}</button>
         <button
           type="button"
           class="btn-primary"
           :class="{ 'btn-danger': danger }"
+          :disabled="busy"
           @click="emit('confirm')"
         >
-          {{ confirmText }}
+          {{ busy ? '处理中…' : confirmText }}
         </button>
       </div>
     </div>
@@ -49,7 +52,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 <style scoped>
 /* 遮罩与面板对齐全局 .modal-backdrop / .confirm-panel 视觉；
    按钮依赖全局 button.btn-primary / .btn-danger / .btn-ghost，此处不复用任何视图 scoped 类 */
-.modal-backdrop {
+/* 双类 confirm-backdrop 提特异性（0-3-0）：压过各页面 scoped 的
+   .modal-backdrop[data-v-x]（0-2-0，如 AssignmentManageView/ChapterManageView
+   的 justify-content: flex-end 基础样式），保证 ConfirmDialog 恒居中——
+   2026-08-09 修复「删除/取消发布确认弹窗贴右」 */
+.modal-backdrop.confirm-backdrop {
   position: fixed;
   z-index: 60; /* 高于页面级弹窗，确保编辑页守卫弹窗在最上层 */
   /* left 随侧栏宽度（--modal-left 由 AppLayout 提供），相对内容区居中 */

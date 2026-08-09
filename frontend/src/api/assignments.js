@@ -6,6 +6,10 @@ export const assignmentsAPI = {
   get(id) { return client.get(`/assignments/${id}`) },
   update(id, data) { return client.patch(`/assignments/${id}`, data) },
   publish(id) { return client.post(`/assignments/${id}/publish`) },
+  deleteAssignment(id) { return client.delete(`/assignments/${id}`) },
+  unpublishAssignment(id) { return client.post(`/assignments/${id}/unpublish`) },
   getQuestions(assignmentId) { return client.get(`/assignments/${assignmentId}/questions`) },
   createQuestion(assignmentId, data) { return client.post(`/assignments/${assignmentId}/questions`, data) },
+  // Phase 4：题目编辑（环境覆盖/import 策略在 QuestionEditView 使用）
+  updateQuestion(assignmentId, questionId, data) { return client.patch(`/assignments/${assignmentId}/questions/${questionId}`, data) },
 }

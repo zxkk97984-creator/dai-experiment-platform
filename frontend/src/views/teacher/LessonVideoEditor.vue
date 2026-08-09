@@ -1,8 +1,10 @@
 <script setup>
-// 视频编辑页：标题 + 视频链接 URL + 简介，底部预览外链（对齐管理页预览弹窗写法）
-import { computed, onMounted, ref } from 'vue'
+// 视频编辑页：标题 + 视频来源（外链 / 本地上传）+ 简介
+// 外链来源：URL 输入 + 外链预览；上传来源：拖拽/选择上传 + 进度 + 本地播放器
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
+import { coursesAPI } from '../../api/courses.js'
 import { useLessonEditor } from '../../composables/useLessonEditor.js'
 
 const props = defineProps({
@@ -16,6 +18,25 @@ const videoUrl = ref('')
 const content = ref('')
 const snapshot = ref(null)
 
+// ── 视频来源状态：external（外链）/ upload（本地上传） ──
+const sourceMode = ref('external')
+const selectedFile = ref(null)
+const uploading = ref(false)
+const uploadProgress = ref(null) // 0~100，无进度事件时为 null（不确定进度）
+const uploadError = ref('')
+const uploadCancelled = ref(false)
+const playbackUrl = ref('')
+const previewError = ref('')
+const uploadController = ref(null)
+const showSwitchConfirm = ref(false)
+const pendingExternalSave = ref(false)
+const dragOver = ref(false)
+
+// 前端快速校验（后端仍执行权威校验）
+const MAX_UPLOAD_BYTES = 500 * 1024 * 1024
+const ALLOWED_EXTS = ['.mp4', '.webm', '.mov']
+const ALLOWED_MIMES = ['video/mp4', 'video/webm', 'video/quicktime']
+
 function isDirty() {
   if (!snapshot.value) return false
   return title.value !== snapshot.value.title
@@ -24,8 +45,8 @@ function isDirty() {
 }
 
 const {
-  lesson, loading, loadError, saving, saveState, showLeaveDialog,
-  load, save, goBack, onConfirmLeave, onCancelLeave,
+  lesson, loading, loadError, saving, publishing, saveState, showLeaveDialog,
+  load, save, publish, goBack, onConfirmLeave, onCancelLeave,
 } = useLessonEditor({
   courseId: props.courseId,
   lessonId: props.lessonId,
@@ -39,24 +60,199 @@ const {
   }),
 })
 
+async function fetchPlaybackUrl() {
+  if (!lesson.value) return
+  previewError.value = ''
+  try {
+    const res = await coursesAPI.getLessonVideoPlaybackUrl(props.lessonId)
+    playbackUrl.value = res.data.url
+  } catch (err) {
+    previewError.value = '视频预览加载失败，请重试'
+    playbackUrl.value = ''
+    console.error('[LessonVideoEditor] 获取播放地址失败', err)
+  }
+}
+
 async function initForm() {
   await load()
   if (lesson.value) {
     title.value = lesson.value.title || ''
-    videoUrl.value = lesson.value.video_url || ''
     content.value = lesson.value.content || ''
+    // 兼容缺少 video_source 的旧响应：视为 external
+    if (lesson.value.video_source === 'upload') {
+      sourceMode.value = 'upload'
+      videoUrl.value = ''
+      await fetchPlaybackUrl()
+    } else {
+      sourceMode.value = 'external'
+      videoUrl.value = lesson.value.video_url || ''
+    }
     snapshot.value = { title: title.value, videoUrl: videoUrl.value, content: content.value }
   }
 }
 onMounted(initForm)
 
+// 卸载时取消进行中的上传
+onBeforeUnmount(() => {
+  if (uploadController.value) uploadController.value.abort()
+})
+
+// ── 上传模式 ─────────────────────────────────────────────────────
+function formatBytes(bytes) {
+  if (!bytes && bytes !== 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function validateFile(file) {
+  const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+  if (!ALLOWED_EXTS.includes(ext)) return '仅支持 .mp4 / .webm / .mov 视频文件'
+  if (!ALLOWED_MIMES.includes(file.type)) return '该文件类型不受支持'
+  if (file.size > MAX_UPLOAD_BYTES) return '视频超过 500 MiB 大小限制'
+  return ''
+}
+
+function errorMessage(err) {
+  if (err.code === 'ERR_CANCELED') return '上传已取消'
+  if (err.code === 'ECONNABORTED') return '上传超时，请检查网络后重试'
+  const status = err.response?.status
+  if (status === 413) return '视频超过 500 MiB 大小限制'
+  if (status === 415) {
+    const code = err.response?.data?.detail?.code
+    if (code === 'VIDEO_CONTENT_INVALID') return '视频文件内容格式校验失败'
+    return '文件扩展名、MIME 或内容不受支持'
+  }
+  if (status === 403) return '无权修改该课程的视频'
+  if (status === 404) return '课时已不存在'
+  const detailMessage = err.response?.data?.detail?.message
+  return detailMessage || '视频上传失败，请重试'
+}
+
+async function uploadFile(file) {
+  const invalid = validateFile(file)
+  if (invalid) {
+    uploadError.value = invalid
+    return
+  }
+  selectedFile.value = file
+  uploading.value = true
+  uploadError.value = ''
+  uploadCancelled.value = false
+  uploadProgress.value = null
+  uploadController.value = new AbortController()
+  try {
+    const res = await coursesAPI.uploadLessonVideo(props.lessonId, file, {
+      onUploadProgress: (e) => {
+        if (e.total) uploadProgress.value = Math.round((e.loaded / e.total) * 100)
+        else uploadProgress.value = null
+      },
+      signal: uploadController.value.signal,
+    })
+    // 上传成功：更新课时状态、来源与播放器地址
+    lesson.value = res.data.lesson
+    sourceMode.value = 'upload'
+    videoUrl.value = ''
+    playbackUrl.value = res.data.playback_url
+    previewError.value = ''
+    uploadProgress.value = 100
+    snapshot.value = { title: title.value, videoUrl: videoUrl.value, content: content.value }
+  } catch (err) {
+    if (err.code === 'ERR_CANCELED') {
+      uploadCancelled.value = true
+      uploadError.value = ''
+    } else {
+      uploadError.value = errorMessage(err)
+    }
+    // 失败保留服务器上原视频，不清空现有预览
+  } finally {
+    uploading.value = false
+    uploadController.value = null
+  }
+}
+
+function onFileChange(e) {
+  const file = e.target.files?.[0]
+  if (file) uploadFile(file)
+  e.target.value = ''
+}
+
+function onDrop(e) {
+  dragOver.value = false
+  const file = e.dataTransfer?.files?.[0]
+  if (file) uploadFile(file)
+}
+
+function cancelUpload() {
+  if (uploadController.value) uploadController.value.abort()
+}
+
+// ── 移除本地视频 ─────────────────────────────────────────────────
+async function removeVideo() {
+  uploadError.value = ''
+  try {
+    await coursesAPI.deleteLessonVideo(props.lessonId)
+    sourceMode.value = 'external'
+    playbackUrl.value = ''
+    selectedFile.value = null
+    uploadProgress.value = null
+    lesson.value = { ...lesson.value, video_source: 'external', video_filename: null, video_content_type: null, video_size: null }
+    snapshot.value = { title: title.value, videoUrl: videoUrl.value, content: content.value }
+  } catch (err) {
+    uploadError.value = errorMessage(err)
+  }
+}
+
+// ── 保存（外链切换需确认） ───────────────────────────────────────
 async function handleSave() {
+  // 课时已有本地视频且填写了外链：保存会切换来源并删除已上传文件，先确认
+  if (lesson.value?.video_filename && videoUrl.value.trim()) {
+    pendingExternalSave.value = true
+    showSwitchConfirm.value = true
+    return
+  }
+  await doSave()
+}
+
+async function doSave() {
   const ok = await save()
   if (ok) snapshot.value = { title: title.value, videoUrl: videoUrl.value, content: content.value }
 }
 
+async function confirmSwitchToExternal() {
+  showSwitchConfirm.value = false
+  const ok = await save()
+  if (ok) {
+    // 保存成功：来源已切换为外链，清空本地视频状态
+    sourceMode.value = 'external'
+    playbackUrl.value = ''
+    if (lesson.value) {
+      lesson.value = { ...lesson.value, video_source: 'external', video_filename: null, video_content_type: null, video_size: null }
+    }
+    snapshot.value = { title: title.value, videoUrl: videoUrl.value, content: content.value }
+  }
+  pendingExternalSave.value = false
+}
+
+function cancelSwitchToExternal() {
+  showSwitchConfirm.value = false
+  pendingExternalSave.value = false
+}
+
 const charCount = computed(() => content.value.length)
-const canSave = computed(() => !saving.value && title.value.trim().length > 0)
+const canSave = computed(() => !saving.value && title.value.trim().length > 0 && !uploading.value)
+const canUpload = computed(() => !uploading.value)
+
+// 发布状态判断：兼容后端旧字段 published 布尔值（与 ChapterManageView 一致）
+const isPublished = computed(() =>
+  lesson.value?.status === 'published' || lesson.value?.published === true
+)
+
+// 发布/转为草稿：一次 PATCH 提交当前内容 + status，成功后重置快照
+async function handlePublish() {
+  const ok = await publish(isPublished.value ? 'draft' : 'published')
+  if (ok) snapshot.value = { title: title.value, videoUrl: videoUrl.value, content: content.value }
+}
 </script>
 
 <template>
@@ -70,6 +266,13 @@ const canSave = computed(() => !saving.value && title.value.trim().length > 0)
       <input v-model="title" class="title-input" placeholder="课时标题" aria-label="课时标题" />
       <span class="save-state" :class="{ dirty: isDirty() }">{{ saveState }}</span>
       <button class="btn-primary save-btn" type="button" :disabled="!canSave" @click="handleSave">保存</button>
+      <button
+        v-if="lesson"
+        class="btn-outline publish-btn"
+        type="button"
+        :disabled="publishing || saving || loading"
+        @click="handlePublish"
+      >{{ isPublished ? '转为草稿' : '发布' }}</button>
     </header>
 
     <div v-if="loading" class="editor-body">
@@ -84,15 +287,91 @@ const canSave = computed(() => !saving.value && title.value.trim().length > 0)
     </div>
 
     <div v-else class="editor-body">
-      <label class="field-label" for="video-url">视频链接 URL</label>
-      <input
-        id="video-url"
-        v-model="videoUrl"
-        class="video-url-input"
-        type="url"
-        placeholder="https://example.com/video.mp4"
-        aria-label="视频链接 URL"
-      />
+      <!-- 来源切换 -->
+      <div class="source-tabs" role="tablist" aria-label="视频来源">
+        <button
+          type="button"
+          class="source-tab"
+          :class="{ active: sourceMode === 'external' }"
+          :disabled="uploading"
+          @click="sourceMode = 'external'"
+        >视频链接</button>
+        <button
+          type="button"
+          class="source-tab"
+          :class="{ active: sourceMode === 'upload' }"
+          :disabled="uploading"
+          @click="sourceMode = 'upload'"
+        >上传视频文件</button>
+      </div>
+
+      <!-- 外链模式 -->
+      <template v-if="sourceMode === 'external'">
+        <label class="field-label" for="video-url">视频链接 URL</label>
+        <input
+          id="video-url"
+          v-model="videoUrl"
+          class="video-url-input"
+          type="url"
+          placeholder="https://example.com/video.mp4"
+          aria-label="视频链接 URL"
+        />
+      </template>
+
+      <!-- 上传模式 -->
+      <template v-else>
+        <div
+          class="dropzone"
+          :class="{ dragging: dragOver, disabled: uploading }"
+          @dragover.prevent="dragOver = true"
+          @dragleave.prevent="dragOver = false"
+          @drop.prevent="onDrop"
+        >
+          <input
+            id="video-file"
+            type="file"
+            accept=".mp4,.webm,.mov,video/mp4,video/webm,video/quicktime"
+            class="file-input"
+            :disabled="!canUpload"
+            @change="onFileChange"
+          />
+          <label class="dropzone-inner" for="video-file">
+            <AppIcon name="video" :size="22" />
+            <p v-if="uploading" class="dropzone-title">正在上传…</p>
+            <p v-else class="dropzone-title">点击选择或拖拽视频文件到此处</p>
+            <p class="dropzone-hint">支持 .mp4 / .webm / .mov，单文件不超过 500 MiB</p>
+            <p class="dropzone-hint">推荐 H.264/AAC MP4 或 VP9/Opus WebM（浏览器兼容最佳）</p>
+          </label>
+        </div>
+
+        <!-- 上传进度 -->
+        <div v-if="uploading || uploadProgress !== null || uploadCancelled" class="upload-status">
+          <p v-if="selectedFile" class="upload-file">
+            {{ selectedFile.name }}（{{ formatBytes(selectedFile.size) }}）
+          </p>
+          <div v-if="uploading" class="progress-row">
+            <div class="progress-track" aria-label="上传进度">
+              <div class="progress-fill" :style="{ width: uploadProgress !== null ? uploadProgress + '%' : '100%' }" :class="{ indeterminate: uploadProgress === null }"></div>
+            </div>
+            <span class="progress-text">{{ uploadProgress !== null ? uploadProgress + '%' : '上传中…' }}</span>
+            <button type="button" class="btn-ghost cancel-btn" @click="cancelUpload">取消</button>
+          </div>
+          <p v-else-if="uploadCancelled" class="upload-cancelled">上传已取消</p>
+        </div>
+
+        <p v-if="uploadError" class="upload-error" role="alert">{{ uploadError }}</p>
+
+        <!-- 当前本地视频 -->
+        <section v-if="lesson && lesson.video_filename" class="current-file">
+          <p class="field-label">已上传文件</p>
+          <p class="file-meta">
+            {{ lesson.video_filename }}
+            <span v-if="lesson.video_size">（{{ formatBytes(lesson.video_size) }}）</span>
+          </p>
+          <button type="button" class="btn-ghost remove-btn" @click="removeVideo">移除已上传视频</button>
+        </section>
+      </template>
+
       <label class="field-label" for="video-desc">简介</label>
       <textarea
         id="video-desc"
@@ -104,14 +383,33 @@ const canSave = computed(() => !saving.value && title.value.trim().length > 0)
       ></textarea>
       <p class="char-count">{{ charCount }} 字</p>
 
-      <!-- 预览区：显示外链（对齐管理页预览弹窗写法） -->
+      <!-- 预览区 -->
       <section class="preview-pane">
         <p class="pane-title">预览</p>
-        <p v-if="videoUrl.trim()">
-          视频地址：
-          <a :href="videoUrl.trim()" target="_blank" rel="noopener noreferrer">{{ videoUrl.trim() }}</a>
-        </p>
-        <p v-else>该课时尚未设置视频地址。</p>
+        <!-- 外链预览 -->
+        <template v-if="sourceMode === 'external'">
+          <p v-if="videoUrl.trim()">
+            视频地址：
+            <a :href="videoUrl.trim()" target="_blank" rel="noopener noreferrer">{{ videoUrl.trim() }}</a>
+          </p>
+          <p v-else>该课时尚未设置视频地址。</p>
+        </template>
+        <!-- 本地视频预览 -->
+        <template v-else>
+          <p v-if="previewError" class="preview-error">
+            {{ previewError }}
+            <button type="button" class="btn-ghost retry-btn" @click="fetchPlaybackUrl">重试</button>
+          </p>
+          <video
+            v-else-if="playbackUrl"
+            controls
+            playsinline
+            preload="metadata"
+            class="video-player"
+            :src="playbackUrl"
+          ></video>
+          <p v-else>本地视频上传后在此预览。</p>
+        </template>
       </section>
     </div>
 
@@ -124,6 +422,16 @@ const canSave = computed(() => !saving.value && title.value.trim().length > 0)
       cancel-text="取消"
       @confirm="onConfirmLeave"
       @cancel="onCancelLeave"
+    />
+    <!-- 外链切换确认：切换后将删除已上传文件 -->
+    <ConfirmDialog
+      v-if="showSwitchConfirm"
+      title="切换为视频链接"
+      message="切换后将删除已上传文件，确定继续吗？"
+      confirm-text="确定切换"
+      cancel-text="取消"
+      @confirm="confirmSwitchToExternal"
+      @cancel="cancelSwitchToExternal"
     />
   </div>
 </template>
@@ -179,6 +487,17 @@ const canSave = computed(() => !saving.value && title.value.trim().length > 0)
 .save-state { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
 .save-state.dirty { color: var(--warning); }
 .save-btn { flex: none; }
+.publish-btn {
+  flex: none;
+  border: 1px solid var(--primary);
+  color: var(--primary);
+  background: var(--surface);
+  font-weight: 500;
+}
+.publish-btn:hover:not(:disabled) {
+  background: var(--primary-light);
+  border-color: var(--primary);
+}
 
 /* ── 正文区 ───────────────────────────────────────────────────────── */
 .editor-body { min-height: 200px; }
@@ -200,7 +519,99 @@ const canSave = computed(() => !saving.value && title.value.trim().length > 0)
 }
 .char-count { margin: 8px 0 0; color: var(--text-tertiary); font-size: 12px; text-align: right; }
 
-/* ── 预览区（对齐管理页预览弹窗的链接写法） ──────────────────────── */
+/* ── 来源切换 ─────────────────────────────────────────────────────── */
+.source-tabs {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 18px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+}
+.source-tab {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.source-tab.active { background: var(--primary); color: #fff; }
+.source-tab:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── 上传区 ───────────────────────────────────────────────────────── */
+.dropzone {
+  position: relative;
+  margin-bottom: 18px;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  transition: border-color 0.15s, background 0.15s;
+}
+.dropzone.dragging { border-color: var(--primary); background: var(--primary-soft, #eff6ff); }
+.dropzone.disabled { opacity: 0.6; }
+.file-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.dropzone-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 28px 16px;
+  text-align: center;
+  cursor: pointer;
+}
+.dropzone-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.dropzone-hint { margin: 0; font-size: 12px; color: var(--text-tertiary); }
+
+/* ── 上传进度与错误 ───────────────────────────────────────────────── */
+.upload-status { margin: 4px 0 14px; }
+.upload-file { margin: 0 0 8px; font-size: 13px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.progress-row { display: flex; align-items: center; gap: 10px; }
+.progress-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--primary);
+  transition: width 0.2s;
+}
+.progress-fill.indeterminate { animation: indeterminate 1.2s linear infinite; background: var(--primary); }
+@keyframes indeterminate {
+  0% { width: 20%; margin-left: -20%; }
+  100% { width: 20%; margin-left: 100%; }
+}
+.progress-text { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.cancel-btn { flex: none; }
+.upload-cancelled { margin: 0; font-size: 13px; color: var(--text-secondary); }
+.upload-error {
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--danger-soft, #fecaca);
+  border-radius: 8px;
+  background: var(--danger-bg, #fef2f2);
+  color: var(--danger);
+  font-size: 13px;
+}
+.current-file { margin-bottom: 18px; }
+.file-meta { margin: 0 0 8px; font-size: 13px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.remove-btn { border-color: var(--danger-soft, #fecaca); color: var(--danger); }
+
+/* ── 预览区 ───────────────────────────────────────────────────────── */
 .preview-pane {
   margin-top: 20px;
   padding: 14px 16px;
@@ -213,6 +624,15 @@ const canSave = computed(() => !saving.value && title.value.trim().length > 0)
 }
 .pane-title { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--text-tertiary); }
 .preview-pane a { color: var(--primary); }
+.preview-error { margin: 0; display: flex; align-items: center; gap: 8px; color: var(--danger); }
+.retry-btn { flex: none; }
+.video-player {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  background: #000;
+}
 
 /* ── 错误态 ───────────────────────────────────────────────────────── */
 .error-card {

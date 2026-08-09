@@ -6,12 +6,20 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.courses import can_view_course
+from app.api.courses import can_access_course_content
 from app.config import Settings, get_settings
 from app.dependencies import get_current_user, get_db, get_redis_client
 from app.errors import api_error
 from app.models import Assignment, CodeGrade, Course, CourseEnrollment, JudgeQuestion, Submission, User
-from app.schemas import PaginatedResponse, SampleRunResponse, SubmissionCreate, SubmissionRead
+from app.schemas import ImportDiagnosticRead, PaginatedResponse, SampleRunResponse, SubmissionCreate, SubmissionRead
+from app.services.environment_service import (
+    installed_imports_for_version,
+    public_environment_summary,
+    require_available_version,
+    resolve_effective_policy,
+    resolve_run_image_ref,
+)
+from app.services.import_policy import classify_imports
 from app.worker.judge_worker import _get_timeout, _run_docker_pytest, _status_from_pytest
 from app.services.student_ai_results import build_student_grading_breakdown
 
@@ -57,7 +65,7 @@ def create_submission(
     if not assignment or assignment.status != "published":
         raise api_error(400, "ASSIGNMENT_NOT_AVAILABLE", "作业不可提交")
     course = db.get(Course, assignment.course_id)
-    if not course or not can_view_course(course, current_user, db):
+    if not course or not can_access_course_content(course, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限提交该题目")
     # check max attempts
     if question.max_attempts is not None:
@@ -69,7 +77,13 @@ def create_submission(
         ) or 0
         if count >= question.max_attempts:
             raise api_error(400, "MAX_ATTEMPTS_REACHED", f"已达到最大提交次数（{question.max_attempts}次）")
-    # 先持久化 DB，grading_status=pending（初始状态）
+    # Phase 5（计划 8.2）：入队前冻结实际使用的环境版本与 import 策略快照。
+    # 题目覆盖优先，否则作业默认环境；策略 inherit → 作业策略。
+    env_id = question.environment_version_id or assignment.environment_version_id
+    policy = resolve_effective_policy(assignment, question)
+    if env_id is not None:
+        # 校验版本 available 且 digest 非空（VERSION_NOT_AVAILABLE），快照后才允许入队
+        require_available_version(db, env_id)
     submission = Submission(
         question_id=payload.question_id,
         student_id=current_user.id,
@@ -77,6 +91,9 @@ def create_submission(
         status="queued",
         grading_status="pending",
         attempt_count=0,
+        environment_version_id=env_id,
+        import_policy_mode_snapshot=policy.mode,
+        allowed_imports_snapshot=sorted(policy.allowed_imports),
     )
     db.add(submission)
     db.commit()
@@ -126,7 +143,7 @@ def get_submission(
     submission = require_submission(submission_id, db)
     if not can_view_submission(submission, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限查看该提交")
-    return submission
+    return _with_diagnostic(submission)
 
 
 @router.get("/submissions/{submission_id}/result", response_model=SubmissionRead)
@@ -151,7 +168,19 @@ def get_submission_result(
         if cg and cg.ai_result:
             submission.grading_breakdown = build_student_grading_breakdown(cg)
 
-    return submission
+    return _with_diagnostic(submission)
+
+
+def _with_diagnostic(submission: Submission) -> SubmissionRead:
+    """把 result_details 中的结构化 diagnostic 提升为顶层字段（学生 API 安全中文信息）。"""
+    data = SubmissionRead.model_validate(submission)
+    diag = (submission.result_details or {}).get("diagnostic")
+    if isinstance(diag, dict) and diag.get("code"):
+        try:
+            data.diagnostic = ImportDiagnosticRead.model_validate(diag)
+        except Exception:
+            data.diagnostic = None
+    return data
 
 @router.post("/questions/{question_id}/sample-run", response_model=SampleRunResponse)
 def sample_run(
@@ -191,6 +220,35 @@ def sample_run(
     if not public_cases:
         return SampleRunResponse(output="", status="no_public_cases", execution_time_ms=0)
 
+    # Phase 5（计划 8.3）：解析题目有效环境（题目覆盖优先，否则作业默认），
+    # sample-run 与正式判题使用同一 digest 镜像，不再默认 settings.judge_image。
+    env_id = question.environment_version_id or assignment.environment_version_id
+    policy = resolve_effective_policy(assignment, question)
+    image_ref = None
+    installed: set[str] = set()
+    if env_id is not None:
+        try:
+            image_ref = resolve_run_image_ref(db, env_id)
+        except Exception:
+            raise api_error(503, "ENVIRONMENT_IMAGE_MISSING",
+                            "运行环境暂不可用，本次提交不会扣分，请稍后重试")
+        installed = installed_imports_for_version(db, env_id)
+
+    # import 预检：IMPORT_NOT_ALLOWED 直接拦截（不跑 Docker）；IMPORT_NOT_INSTALLED 平台配置问题
+    if policy.restricted:
+        diagnostics = classify_imports(payload.code, policy, installed)
+        if diagnostics:
+            diagnostic = diagnostics[0]
+            if diagnostic.code == "IMPORT_NOT_ALLOWED":
+                return SampleRunResponse(
+                    output="", status="import_not_allowed", execution_time_ms=0,
+                    diagnostic=diagnostic,
+                )
+            return SampleRunResponse(
+                output="", status="import_not_installed", execution_time_ms=0,
+                diagnostic=diagnostic,
+            )
+
     # 仅用公开样例构建测试文件
     test_code = f"{payload.code}\n\n"
     test_code += "def test_public_cases():\n"
@@ -208,6 +266,7 @@ def sample_run(
         try:
             stdout, stderr, returncode, elapsed_ms = _run_docker_pytest(
                 workdir, settings, timeout_seconds, memory_mb, test_filename="test_sample.py",
+                image_ref=image_ref,
             )
         except FileNotFoundError:
             raise api_error(503, "JUDGE_UNAVAILABLE", "判题服务不可用（Docker 未就绪）")

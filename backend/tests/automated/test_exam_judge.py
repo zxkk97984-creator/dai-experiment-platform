@@ -10,7 +10,7 @@ def _h(tok): return auth_header(tok)
 def _setup(client, db_sf):
     create_user(db_sf, "ejt", "teacher"); create_user(db_sf, "ejs", "student")
     t_tok, _ = login(client, "ejt"); s_tok, _ = login(client, "ejs")
-    c = client.post(f"{API}/courses", headers=_h(t_tok), json={"title":"EC","status":"published"})
+    c = client.post(f"{API}/courses", headers=_h(t_tok), json={"title":"EC","status":"published","visibility":"public"})
     cid = c.json()["id"]
     client.post(f"{API}/courses/{cid}/enroll", headers=_h(s_tok))
     now = datetime.datetime.now(timezone.utc)

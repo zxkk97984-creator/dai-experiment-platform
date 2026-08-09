@@ -54,7 +54,7 @@ def test_ensure_record_validation(client, db_session_factory):
     s_tok, _ = login(client, "student_s")
 
     c = client.post("/api/v1/courses", headers=auth_header(t_tok), json={
-        "title": "Test", "status": "published",
+        "title": "Test", "status": "published", "visibility": "public",
     })
     ch = client.post(f"/api/v1/courses/{c.json()['id']}/chapters", headers=auth_header(t_tok), json={
         "title": "Ch1",
@@ -88,7 +88,7 @@ def test_p0_4_teacher_submission_isolation(client, db_session_factory):
 
     # 教师 A 创建课程、章节、课时
     c_a = client.post("/api/v1/courses", headers=auth_header(t_a_tok), json={
-        "title": "教师A的课程", "status": "published",
+        "title": "教师A的课程", "status": "published", "visibility": "public",
     })
     cid_a = c_a.json()["id"]
     client.post(f"/api/v1/courses/{cid_a}/enroll", headers=auth_header(s_a_tok))

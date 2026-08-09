@@ -272,6 +272,45 @@ volumes:
   - ./judge-work:/judge-work  # bind mount，两边路径对应
 ```
 
+## 数据库迁移与回滚
+
+### 升级
+
+运行 `alembic upgrade head` 即可，升级前无需备份或手工操作。
+
+### 回滚（生产环境）
+
+迁移 `f2a3b4c5d678`（add course whitelist）的 downgrade 会：
+1. 将 `courses.visibility` 中所有 `public` / `whitelist` 课程归一化为 `private`；
+2. 删除 `course_whitelist_students` 表（含索引与外键）。
+
+**回滚到旧版本前必须先导出备份**，否则白名单关系与可见性设置不可恢复：
+
+```bash
+# 1. 白名单关系表全量备份（downgrade 会删表，此备份需含建表语句）
+mysqldump -u<用户> -p <库名> course_whitelist_students > whitelist_bak_<日期>.sql
+
+# 2. 可见性原值备份（--replace 便于回滚后按 id 回写）
+mysqldump -u<用户> -p <库名> --no-create-info --replace courses \
+  --where="visibility IN ('public','whitelist')" > visibility_bak_<日期>.sql
+```
+
+执行回滚：
+
+```bash
+.venv\Scripts\python.exe -m alembic downgrade e1f2a3b4c567
+```
+
+回滚后按需恢复：
+
+```bash
+# 3. 重建白名单表并导入备份
+mysql -u<用户> -p <库名> < whitelist_bak_<日期>.sql
+
+# 4. 恢复可见性原值（REPLACE 按 id 回写）
+mysql -u<用户> -p <库名> < visibility_bak_<日期>.sql
+```
+
 ## 技术栈
 
 | 层面 | 技术 |

@@ -90,6 +90,7 @@ export function normalizeExamTask(item, courseMap, now) {
     courseId: item?.course_id ?? null,
     courseTitle: courseTitleOf(courseMap, item?.course_id),
     dueAt: parseDate(item?.ends_at ?? item?.starts_at),
+    submitted: !!item?.is_submitted,
     status: item?.status ?? null,
     route: id == null ? null : `/student/exams/${id}`,
   }
@@ -117,7 +118,8 @@ export function normalizeExperimentTask(item, courseMap, now) {
  */
 export function taskStatus(item, now) {
   if (!item) return 'pending'
-  if (item.submitted || item.status === 'submitted' || item.status === 'accepted') return 'submitted'
+  // 作业：submitted 布尔（后端 is_submitted）；考试/实验：状态机值（实验 started/submitted/graded）
+  if (item.submitted || item.status === 'submitted' || item.status === 'accepted' || item.status === 'graded') return 'submitted'
   if (item.dueAt != null && now != null) {
     const due = new Date(item.dueAt).getTime()
     const t = new Date(now).getTime()

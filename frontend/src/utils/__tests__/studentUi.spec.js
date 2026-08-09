@@ -90,6 +90,15 @@ describe('normalizeAssignmentTask', () => {
     expect(t.dueAt).toBeNull()
     expect(t.title).toBe('')
   })
+  it('is_submitted 映射到 submitted 且 taskStatus 返回 submitted（任务中心已交作业）', () => {
+    const t = normalizeAssignmentTask(
+      { id: 7, title: '作业一', course_id: 5, due_at: iso(2026, 6, 31), is_submitted: true },
+      COURSES,
+      NOW,
+    )
+    expect(t.submitted).toBe(true)
+    expect(taskStatus(t, NOW)).toBe('submitted')
+  })
   it('缺少 id 时路由保持为空而非非法链接', () => {
     const t = normalizeAssignmentTask({ title: 'x' }, COURSES, NOW)
     expect(t.route).toBeNull()
@@ -144,6 +153,10 @@ describe('taskStatus', () => {
   it('坏日期或缺失日期不抛异常且视为 pending', () => {
     expect(taskStatus({ submitted: false, dueAt: null }, NOW)).toBe('pending')
     expect(taskStatus({ submitted: false, dueAt: 'junk' }, NOW)).toBe('pending')
+  })
+  it('实验记录 submitted/graded 均视为已提交', () => {
+    expect(taskStatus({ status: 'submitted', dueAt: null }, NOW)).toBe('submitted')
+    expect(taskStatus({ status: 'graded', dueAt: null }, NOW)).toBe('submitted')
   })
 })
 

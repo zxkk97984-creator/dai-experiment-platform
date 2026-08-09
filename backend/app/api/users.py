@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db, require_roles
@@ -59,6 +59,34 @@ def create_user(
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.get("/students", response_model=PaginatedResponse)
+def list_students(
+    q: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("teacher", "admin")),
+):
+    """学生候选列表——教师选择白名单学生用，只暴露 active student"""
+    page_size = max(1, min(page_size, 100))
+    filters = (User.role == "student", User.status == "active")
+    query = select(User).where(*filters)
+    count_query = select(func.count()).select_from(User).where(*filters)
+    if q:
+        like = f"%{q}%"
+        name_match = or_(User.username.ilike(like), User.real_name.ilike(like))
+        query = query.where(name_match)
+        count_query = count_query.where(name_match)
+    total = db.scalar(count_query) or 0
+    users = db.scalars(
+        query.order_by(User.id).offset((page - 1) * page_size).limit(page_size)
+    ).all()
+    return PaginatedResponse(
+        items=[UserRead.model_validate(user) for user in users],
+        page=page, page_size=page_size, total=total,
+    )
 
 
 @router.get("/{user_id}", response_model=UserRead)

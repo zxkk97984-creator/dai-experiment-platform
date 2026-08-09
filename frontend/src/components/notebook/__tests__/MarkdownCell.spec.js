@@ -39,4 +39,28 @@ describe('MarkdownCell', () => {
     expect(html).toContain('Hello')
     expect(html).toContain('bold')
   })
+
+  it('renders fenced code blocks', () => {
+    const wrapper = mount(MarkdownCell, {
+      props: {
+        cell: { id: 'm4', type: 'markdown', source: '```python\nprint("hi")\n```' },
+      },
+    })
+    const pre = wrapper.find('.cell-body pre')
+    expect(pre.exists()).toBe(true)
+    expect(pre.text()).toContain('print("hi")')
+  })
+
+  it('sanitizes XSS attempts inside fenced code', () => {
+    const wrapper = mount(MarkdownCell, {
+      props: {
+        cell: { id: 'm5', type: 'markdown', source: '```html\n<script>alert(1)</script>\n<img src=x onerror=alert(1)>\n```' },
+      },
+    })
+    const html = wrapper.find('.cell-body').html()
+    // 围栏内容必须被转义为纯文本展示：不得出现可执行的 <script>/<img> 标签或事件属性
+    // （marked 会把围栏内 HTML 转义为 &lt;...&gt;，因此「真实标签」才会被此断言拦下）
+    expect(html).not.toMatch(/<(script|img)\b[^>]*>/i)
+    expect(html).not.toMatch(/<[^>]*\son\w+=/i)
+  })
 })

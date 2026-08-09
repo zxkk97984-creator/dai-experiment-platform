@@ -26,16 +26,24 @@ RUNNER_PATH = "/.dai/kernel_runner.py"
 
 
 class KernelSession:
-    """单个 kernel session 的运行时状态"""
+    """单个 kernel session 的运行时状态
+
+    Phase 5：增加 environment_version_id / image_ref，Redis 元数据与 Docker label
+    均持久化环境身份，恢复时校验；环境不匹配即销毁重建（计划 9.3）。
+    """
 
     def __init__(self, record_id: int, container_name: str, conn_info: dict,
                  lesson_storage_dir: str = "",
-                 initialized_template_version_id: int | None = None):
+                 initialized_template_version_id: int | None = None,
+                 environment_version_id: int | None = None,
+                 image_ref: str | None = None):
         self.record_id = record_id
         self.container_name = container_name
         self.conn_info = conn_info
         self.lesson_storage_dir = lesson_storage_dir
         self.initialized_template_version_id = initialized_template_version_id
+        self.environment_version_id = environment_version_id
+        self.image_ref = image_ref
         self.last_active_at = time.time()
 
     @property
@@ -46,12 +54,29 @@ class KernelSession:
         )
         return bool(result.stdout.strip())
 
+    def matches_environment(self, image_ref: str | None,
+                            environment_version_id: int | None) -> bool:
+        """环境身份是否与期望一致。
+
+        期望值 None 表示「未绑定环境版本」的存量兼容路径——不强制匹配（旧 session 可复用）；
+        期望值非 None 时，session 记录缺失（旧格式）或不一致 → 不匹配，需重建。
+        """
+        if environment_version_id is not None:
+            if self.environment_version_id != environment_version_id:
+                return False
+        if image_ref is not None:
+            if self.image_ref != image_ref:
+                return False
+        return True
+
     def to_redis_dict(self) -> dict:
         return {
             "container_name": self.container_name,
             "conn_info": self.conn_info,
             "lesson_storage_dir": self.lesson_storage_dir,
             "initialized_template_version_id": self.initialized_template_version_id,
+            "environment_version_id": self.environment_version_id,
+            "image_ref": self.image_ref,
         }
 
     @classmethod
@@ -62,6 +87,8 @@ class KernelSession:
             conn_info=data["conn_info"],
             lesson_storage_dir=data.get("lesson_storage_dir", ""),
             initialized_template_version_id=data.get("initialized_template_version_id"),
+            environment_version_id=data.get("environment_version_id"),
+            image_ref=data.get("image_ref"),
         )
 
 
@@ -171,7 +198,20 @@ class KernelManager:
                 logger.warning("Redis 删除 kernel init 标记 %d 失败", record_id, exc_info=True)
             raise RuntimeError(f"Kernel 初始化标记持久化失败: {exc}") from exc
 
-    def create_session(self, record_id: int, lesson_storage_dir: str) -> KernelSession:
+    def create_session(self, record_id: int,
+                       lesson_storage_dir: str = "",
+                       *,
+                       image_ref: str | None = None,
+                       environment_version_id: int | None = None) -> KernelSession:
+        """创建 Kernel 容器（Phase 5：镜像参数使用环境 digest）。
+
+        - 位置参数保持旧签名兼容：create_session(record_id, lesson_storage_dir)。
+        - image_ref：环境版本不可变镜像引用；None 仅用于未绑定环境版本的存量兼容
+          路径（回退 settings.kernel_image），与 exam 判题路径同一原则。
+        - environment_version_id：持久化到 Redis 元数据与 Docker label，供恢复校验。
+        - 安全参数全部保留：--network none / --cap-drop ALL / no-new-privileges /
+          --read-only / tmpfs / pids / cpu / 内存限制——只改镜像，不放松安全。
+        """
         container_name = self._make_container_name(record_id)
         subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
 
@@ -183,8 +223,9 @@ class KernelManager:
         host_work_dir = self._docker_host_path(work_dir)
 
         # OpenBLAS 默认按宿主机核数创建线程（如 20 线程），与 ipykernel 自身线程、
-        # docker exec 进程竞争 pids-limit，曾导致 "pthread_create failed" 后容器
-        # 半死、exec 报 "procReady not received"。故限制 BLAS 线程数并放宽 PID 限额。
+        # docker exec 进程竞争 pids 配额，曾导致 "pthread_create failed" 后容器
+        # 半死、exec 报 "procReady not received"。限制 BLAS 线程数后，
+        # pids-limit 保持安全基线 50 即可满足沙箱内线程需求。
         cmd = [
             "docker", "run", "-d", "--name", container_name,
             "--network", "none",
@@ -192,17 +233,24 @@ class KernelManager:
             "--security-opt", "no-new-privileges",
             "--read-only",
             "--tmpfs", "/tmp:exec,size=64m",
-            "--cpus", "1", "--memory", "256m", "--pids-limit", "256",
+            "--cpus", "1", "--memory", "256m", "--pids-limit", "50",
             "-e", "OPENBLAS_NUM_THREADS=4",
             "-e", "OMP_NUM_THREADS=4",
             "-e", "MKL_NUM_THREADS=4",
             "-l", f"dai.record_id={record_id}",
+        ]
+        if environment_version_id is not None:
+            cmd.extend(["-l", f"dai.environment_version_id={environment_version_id}"])
+        if image_ref:
+            cmd.extend(["-l", f"dai.image_digest={image_ref}"])
+        cmd.extend([
             "-v", f"{host_conn_path}:/tmp/conn.json:ro",
             "-v", f"{host_work_dir}:/work:rw",
-        ]
+        ])
         if os.path.isdir(lesson_storage_dir):
             cmd.extend(["-v", f"{lesson_storage_dir}:/course:ro"])
-        cmd.extend(["dai-kernel-python:latest", "python", "-m", "ipykernel_launcher", "-f", "/tmp/conn.json"])
+        cmd.extend([image_ref or self.settings.kernel_image,
+                    "python", "-m", "ipykernel_launcher", "-f", "/tmp/conn.json"])
 
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
@@ -224,22 +272,39 @@ class KernelManager:
         # docker exec 会报 "procReady not received"。轮询探测 exec 可用后再返回，
         # runner 内部另有 wait_for_ready(10s) 等待 kernel 就绪。
         for _ in range(15):
-            probe = subprocess.run(
-                ["docker", "exec", container_name, "python", "-c", "import os"],
-                capture_output=True, text=True,
-            )
-            if probe.returncode == 0:
+            try:
+                probe = subprocess.run(
+                    ["docker", "exec", container_name, "python", "-c", "import os"],
+                    capture_output=True, text=True,
+                )
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                # 探测异常（如超时销毁重建场景）视为暂不可用，继续重试
+                logger.warning("Kernel 容器 exec 探测异常 record_id=%d: %s", record_id, exc)
+                probe = None
+            if probe is not None and probe.returncode == 0:
                 break
             time.sleep(1)
         else:
-            subprocess.run(
-                ["docker", "rm", "-f", container_name],
-                capture_output=True,
+            # 探测始终未通过：容器已死则销毁并报错；容器仍存活则降级继续
+            # （runner 内部 wait_for_ready 兜底），避免超时销毁重建路径丢失 session
+            alive = subprocess.run(
+                ["docker", "ps", "-q", "-f", f"name={container_name}"],
+                capture_output=True, text=True,
             )
-            raise RuntimeError("Kernel 容器 exec 探测超时")
+            if not alive.stdout.strip():
+                subprocess.run(
+                    ["docker", "rm", "-f", container_name],
+                    capture_output=True,
+                )
+                raise RuntimeError("Kernel 容器 exec 探测超时")
+            logger.warning(
+                "Kernel 容器 exec 探测未就绪，降级继续 record_id=%d", record_id
+            )
 
         session = KernelSession(record_id, container_name, conn_info,
-                                lesson_storage_dir=lesson_storage_dir)
+                                lesson_storage_dir=lesson_storage_dir,
+                                environment_version_id=environment_version_id,
+                                image_ref=image_ref or self.settings.kernel_image)
         try:
             self._write_session_redis(record_id, session)
         except Exception:
@@ -251,11 +316,28 @@ class KernelManager:
         self._sessions[record_id] = session
         return session
 
-    def get_or_create_session(self, record_id: int, lesson_storage_dir: str = "") -> KernelSession:
+    def get_or_create_session(self, record_id: int,
+                              lesson_storage_dir: str = "",
+                              *,
+                              image_ref: str | None = None,
+                              environment_version_id: int | None = None) -> KernelSession:
+        """获取或创建 Kernel session（计划 9.3 重建策略）。
+
+        位置参数保持旧签名兼容：get_or_create_session(record_id, lesson_storage_dir)。
+
+        同一 record 期望的环境与内存/Redis/Docker label 记录不一致时，
+        销毁旧容器后按新 digest 重建；环境 profile 新增 v2 不主动重建任何旧 record
+        （期望环境未变时仍复用）；900 秒空闲清理策略保持不变。
+        """
         session = self._sessions.get(record_id)
         if session and session.is_alive:
-            session.last_active_at = time.time()
-            return session
+            if session.matches_environment(image_ref, environment_version_id):
+                session.last_active_at = time.time()
+                return session
+            # 环境不匹配：销毁旧容器，走重建
+            logger.info("Kernel session %d 环境不匹配，销毁重建（期望 env=%s）",
+                        record_id, environment_version_id)
+            self.destroy(record_id)
 
         session = self._read_session_redis(record_id)
         if session:
@@ -264,8 +346,12 @@ class KernelManager:
                 capture_output=True, text=True,
             )
             if alive.stdout.strip():
-                self._sessions[record_id] = session
-                return session
+                if session.matches_environment(image_ref, environment_version_id):
+                    self._sessions[record_id] = session
+                    return session
+                # Redis 记录的环境与期望不一致（含旧格式无环境字段）：销毁重建
+                logger.info("Kernel session %d Redis 记录环境不匹配，销毁重建", record_id)
+                self.destroy(record_id)
             else:
                 try:
                     import redis
@@ -274,7 +360,9 @@ class KernelManager:
                 except Exception:
                     logger.warning("Redis 删除旧 kernel session %d 失败", record_id, exc_info=True)
 
-        return self.create_session(record_id, lesson_storage_dir)
+        return self.create_session(record_id, image_ref=image_ref,
+                                   environment_version_id=environment_version_id,
+                                   lesson_storage_dir=lesson_storage_dir)
 
     def execute(self, record_id: int, code: str) -> dict:
         """通过 docker exec + trusted runner 在持久 ipykernel 中执行代码"""
@@ -368,13 +456,27 @@ class KernelManager:
                 capture_output=True,
             )
 
-    def restart(self, record_id: int, lesson_storage_dir: str = "") -> KernelSession:
+    def restart(self, record_id: int,
+                lesson_storage_dir: str = "",
+                *,
+                image_ref: str | None = None,
+                environment_version_id: int | None = None) -> KernelSession:
         if not lesson_storage_dir:
             existing = self._sessions.get(record_id)
             if existing:
                 lesson_storage_dir = existing.lesson_storage_dir
+        # 未显式传入环境时沿用现有 session 的环境身份（重建不丢环境）
+        if image_ref is None or environment_version_id is None:
+            existing = self._sessions.get(record_id)
+            if existing:
+                if image_ref is None:
+                    image_ref = existing.image_ref
+                if environment_version_id is None:
+                    environment_version_id = existing.environment_version_id
         self.destroy(record_id)
-        return self.create_session(record_id, lesson_storage_dir)
+        return self.create_session(record_id, lesson_storage_dir,
+                                   image_ref=image_ref,
+                                   environment_version_id=environment_version_id)
 
     def destroy(self, record_id: int):
         session = self._sessions.pop(record_id, None)
@@ -425,6 +527,31 @@ class KernelManager:
                 except ValueError:
                     continue
 
+                # Phase 5（计划 9.3）：校验环境 label——缺失环境身份的旧容器不复用
+                env_label_result = subprocess.run(
+                    ["docker", "inspect", "-f", '{{index .Config.Labels "dai.environment_version_id"}}', cid],
+                    capture_output=True, text=True,
+                )
+                digest_label_result = subprocess.run(
+                    ["docker", "inspect", "-f", '{{index .Config.Labels "dai.image_digest"}}', cid],
+                    capture_output=True, text=True,
+                )
+                env_label = env_label_result.stdout.strip()
+                digest_label = digest_label_result.stdout.strip()
+                try:
+                    env_version_id = int(env_label) if env_label else None
+                except ValueError:
+                    env_version_id = None
+                image_ref = digest_label or None
+                if env_label and env_version_id is None:
+                    # 环境 label 存在但非法：视为无环境身份，不复用
+                    logger.warning("Kernel 容器 %s 环境 label 非法，不复用", cid)
+                    continue
+                if not env_label or not digest_label:
+                    # 旧版本部署的容器（无环境 label）：不复用（get_or_create 会重建）
+                    logger.info("Kernel 容器 %s 缺少环境 label，跳过恢复", cid)
+                    continue
+
                 if record_id in self._sessions:
                     continue
 
@@ -447,7 +574,11 @@ class KernelManager:
                         conn_info = session.conn_info
 
                 if conn_info:
-                    session = KernelSession(record_id, container_name, conn_info)
+                    session = KernelSession(
+                        record_id, container_name, conn_info,
+                        environment_version_id=env_version_id,
+                        image_ref=image_ref,
+                    )
                     self._sessions[record_id] = session
                     # 重建 Redis 元数据
                     try:

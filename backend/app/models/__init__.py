@@ -1,10 +1,34 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, ForeignKeyConstraint, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, CHAR, CheckConstraint, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.database import Base
+
+# 控制面主键：MySQL 使用 BIGINT（计划 4.x），SQLite 测试库回退 INTEGER（rowid 别名，可自增）
+BIGINT_PK = BigInteger().with_variant(Integer, "sqlite")
+
+
+def resolve_basic_env_version_id(context) -> int | None:
+    """业务记录未显式指定环境时，惰性绑定 basic 档位当前可用版本（Phase 3）。
+
+    - 与迁移 B（c5d6e7f8a901）的校验条件一致：slug=basic、status=available、
+      image_digest 非空、版本号最大。
+    - 无可用版本（测试库未 seed）返回 None：模型层可空，Phase 4 服务层接管后
+      创建路径必须显式提供 environment_version_id。
+    - 迁移 B 部署后生产库必存在 basic 可用版本，NOT NULL 约束由该默认值满足。
+    """
+    return context.connection.execute(
+        text(
+            "SELECT ev.id FROM environment_versions ev"
+            " JOIN environment_profiles ep ON ep.id = ev.profile_id"
+            " WHERE ep.slug = 'basic'"
+            "   AND ev.status = 'available'"
+            "   AND ev.image_digest IS NOT NULL"
+            " ORDER BY ev.version_number DESC LIMIT 1"
+        )
+    ).scalar()
 
 
 class TimestampMixin:
@@ -41,12 +65,22 @@ class Course(TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
     teacher_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # ── 课程设置 ──────────────────────────────────────────────
+    cover: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    visibility: Mapped[str] = mapped_column(String(20), default="private", server_default="private", nullable=False)
+    default_score: Mapped[float] = mapped_column(Float, default=100.0, server_default="100")
 
     teacher: Mapped[User | None] = relationship()
     chapters: Mapped[list["Chapter"]] = relationship(
         back_populates="course",
         cascade="all, delete-orphan",
         order_by="Chapter.order_index",
+    )
+    whitelist_entries: Mapped[list["CourseWhitelistStudent"]] = relationship(
+        back_populates="course",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
@@ -77,6 +111,14 @@ class Lesson(TimestampMixin, Base):
     template_id: Mapped[int | None] = mapped_column(ForeignKey("notebook_templates.id"), nullable=True)
     notebook_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     video_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # 视频来源：external（外链，使用 video_url）/ upload（本地上传，使用 storage key）
+    video_source: Mapped[str] = mapped_column(
+        String(20), default="external", server_default="external", nullable=False
+    )
+    video_storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)  # 仅服务端使用，不暴露给客户端
+    video_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)  # 安全化后的原文件名
+    video_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    video_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, default=0)
     # 发布状态：draft（草稿）/ published（已发布）/ pending（待发布）
     status: Mapped[str] = mapped_column(String(20), default="draft", server_default="published", nullable=False)
@@ -101,6 +143,26 @@ class CourseEnrollment(TimestampMixin, Base):
     student: Mapped[User] = relationship()
 
 
+class CourseWhitelistStudent(TimestampMixin, Base):
+    """课程白名单——教师指定可见的学生（与选课关系相互独立）"""
+    __tablename__ = "course_whitelist_students"
+    __table_args__ = (
+        UniqueConstraint("course_id", "student_id", name="uq_course_whitelist_student"),
+        Index("ix_course_whitelist_students_student_course", "student_id", "course_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    course_id: Mapped[int] = mapped_column(
+        ForeignKey("courses.id", ondelete="CASCADE"), nullable=False
+    )
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+
+    course: Mapped[Course] = relationship(back_populates="whitelist_entries")
+    student: Mapped[User] = relationship()
+
+
 # ── 作业与判题 ───────────────────────────────────────────────
 
 
@@ -114,6 +176,16 @@ class Assignment(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # ── 环境档位绑定（Phase 3：迁移 B） ────────────────────────
+    # 作业默认环境；发布后不可直接修改（Phase 4 门禁），历史提交保留自己的快照
+    environment_version_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), nullable=True,
+        default=resolve_basic_env_version_id, index=True,
+    )
+    import_policy_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="unrestricted"
+    )  # unrestricted | restricted
+    allowed_imports: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
     course: Mapped[Course] = relationship()
     questions: Mapped[list["JudgeQuestion"]] = relationship(
@@ -143,6 +215,18 @@ class JudgeQuestion(TimestampMixin, Base):
     reference_solution: Mapped[str | None] = mapped_column(Text, nullable=True)
     test_groups: Mapped[list] = mapped_column(JSON, default=list)
     score_cap_rules: Mapped[list] = mapped_column(JSON, default=list)
+    # ── 环境档位绑定（Phase 3：迁移 B） ────────────────────────
+    # 题目覆盖环境；NULL 语义为继承作业默认（回填阶段统一绑定 basic）。
+    # Phase 4：不设 SQLAlchemy default——Python-side default 在值为 None 时也会被调用，
+    # 会破坏「NULL = 继承作业」语义；题目环境由服务层/API 层显式传参。
+    environment_version_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), nullable=True,
+        index=True,
+    )
+    import_policy_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="inherit"
+    )  # inherit | unrestricted | restricted
+    allowed_imports: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
     assignment: Mapped[Assignment] = relationship(back_populates="questions")
 
@@ -169,6 +253,16 @@ class Submission(TimestampMixin, Base):
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     result_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     execution_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # ── 环境档位快照（Phase 3：迁移 B） ────────────────────────
+    # 入队前冻结实际使用的环境版本与 import 策略，历史重判不受作业重新发布影响
+    environment_version_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), nullable=True,
+        default=resolve_basic_env_version_id, index=True,
+    )
+    import_policy_mode_snapshot: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="unrestricted"
+    )
+    allowed_imports_snapshot: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
     question: Mapped[JudgeQuestion] = relationship()
     student: Mapped[User] = relationship()
@@ -345,6 +439,16 @@ class NotebookTemplate(TimestampMixin, Base):
     draft_revision: Mapped[int] = mapped_column(Integer, default=1)
     draft_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
     draft_assets_dir: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # ── 草稿环境绑定（Phase 3：迁移 B） ────────────────────────
+    # 发布时复制到新的 NotebookTemplateVersion，历史版本不更新
+    draft_environment_version_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), nullable=True,
+        default=resolve_basic_env_version_id, index=True,
+    )
+    draft_import_policy_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="unrestricted"
+    )  # unrestricted | restricted
+    draft_allowed_imports: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
     owner: Mapped[User] = relationship(foreign_keys=[owner_id])
     versions: Mapped[list["NotebookTemplateVersion"]] = relationship(
@@ -376,6 +480,16 @@ class NotebookTemplateVersion(Base):
     assets_dir: Mapped[str | None] = mapped_column(String(500), nullable=True)  # 相对路径
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     published_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    # ── 发布环境快照（Phase 3：迁移 B） ────────────────────────
+    # 从草稿复制，发布后不可变；已开始实验的记录不随新版本自动升级
+    environment_version_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), nullable=True,
+        default=resolve_basic_env_version_id, index=True,
+    )
+    import_policy_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="unrestricted"
+    )
+    allowed_imports: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
     template: Mapped[NotebookTemplate] = relationship(
         back_populates="versions",
@@ -429,6 +543,12 @@ class ExperimentRecord(TimestampMixin, Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # ── 环境快照（Phase 3：迁移 B） ────────────────────────────
+    # 创建记录时从 NotebookTemplateVersion 复制；已存在记录不随模板新版本自动升级
+    environment_version_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), nullable=True,
+        default=resolve_basic_env_version_id, index=True,
+    )
 
     lesson: Mapped[Lesson | None] = relationship(foreign_keys=[lesson_id])
     module: Mapped[ExperimentModule | None] = relationship(foreign_keys=[module_id])
@@ -599,4 +719,166 @@ class AnnouncementRead(Base):
     )
     read_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+# ── 环境档位控制面（Phase 1：迁移 A） ─────────────────────────
+
+
+class PackageCatalog(TimestampMixin, Base):
+    """受控包目录——供应链输入唯一事实源。
+
+    - 已被环境版本引用的条目不可原地修改包名/版本/import 名/来源；
+      "编辑"创建新条目并通过 supersedes_id 关联旧条目。
+    - "删除"统一实现为停用（status=inactive），不物理删除历史条目。
+    """
+
+    __tablename__ = "package_catalog"
+    __table_args__ = (
+        UniqueConstraint("normalized_name", "locked_version", "source_key", name="uq_pkg_name_version_source"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
+    normalized_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    pip_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    locked_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    import_names: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    category_tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    source_key: Mapped[str] = mapped_column(String(32), nullable=False)  # pypi | pytorch_cpu
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")  # active | inactive
+    supersedes_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("package_catalog.id"), nullable=True
+    )
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    supersedes: Mapped["PackageCatalog | None"] = relationship(
+        remote_side="PackageCatalog.id", foreign_keys=[supersedes_id]
+    )
+    version_links: Mapped[list["ProfileVersionPackage"]] = relationship(back_populates="package")
+
+
+class EnvironmentProfile(TimestampMixin, Base):
+    """环境档位——教师选择的环境维度；当前版本按最大版本号 available 计算。"""
+
+    __tablename__ = "environment_profiles"
+    __table_args__ = (
+        UniqueConstraint("slug", name="uq_env_profile_slug"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(80), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")  # active | inactive
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    versions: Mapped[list["EnvironmentVersion"]] = relationship(
+        back_populates="profile",
+        order_by="EnvironmentVersion.version_number",
+    )
+
+
+class EnvironmentVersion(TimestampMixin, Base):
+    """不可变环境版本——进入 available 后包集合/基础镜像/资源参数/digest 全部冻结。
+
+    status: draft | queued | building | available | failed | inactive
+    停用只改变状态，不删除镜像或关联数据。
+    """
+
+    __tablename__ = "environment_versions"
+    __table_args__ = (
+        UniqueConstraint("profile_id", "version_number", name="uq_env_version_per_profile"),
+        UniqueConstraint("image_tag", name="uq_env_version_image_tag"),
+        UniqueConstraint("image_digest", name="uq_env_version_image_digest"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
+    profile_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("environment_profiles.id"), nullable=False, index=True
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_version_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft", index=True)
+    # draft | queued | building | available | failed | inactive
+    base_image_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    image_tag: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    image_digest: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    python_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    minimum_memory_mb: Mapped[int] = mapped_column(Integer, nullable=False)
+    manifest_sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    dockerfile_sha256: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
+    resolved_packages: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    available_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    profile: Mapped[EnvironmentProfile] = relationship(back_populates="versions")
+    source_version: Mapped["EnvironmentVersion | None"] = relationship(
+        remote_side="EnvironmentVersion.id", foreign_keys=[source_version_id]
+    )
+    package_links: Mapped[list["ProfileVersionPackage"]] = relationship(
+        back_populates="version",
+        order_by="ProfileVersionPackage.display_order",
+    )
+
+
+class ProfileVersionPackage(Base):
+    """版本 × 包 关联——包集合必须关联版本，不可直接关联 profile。
+
+    否则 v2 新增/升级包会污染 v1 的历史包集合。
+    """
+
+    __tablename__ = "profile_version_packages"
+
+    environment_version_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), primary_key=True
+    )
+    package_catalog_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("package_catalog.id"), primary_key=True
+    )
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    version: Mapped[EnvironmentVersion] = relationship(back_populates="package_links")
+    package: Mapped[PackageCatalog] = relationship(back_populates="version_links")
+
+
+class EnvironmentBuildJob(TimestampMixin, Base):
+    """环境构建任务——DB 是任务事实源，Redis list 只负责唤醒。
+
+    状态机：queued → building → succeeded
+                              ↘ failed
+                              ↘ timed_out
+    """
+
+    __tablename__ = "environment_build_jobs"
+    __table_args__ = (
+        Index("ix_env_build_jobs_status_created", "status", "created_at"),
+        Index("ix_env_build_jobs_version_id", "environment_version_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
+    environment_version_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
+    # queued | building | succeeded | failed | timed_out
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    retry_of_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("environment_build_jobs.id"), nullable=True
+    )
+    worker_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    log_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    version: Mapped[EnvironmentVersion] = relationship()
+    retry_of: Mapped["EnvironmentBuildJob | None"] = relationship(
+        remote_side="EnvironmentBuildJob.id", foreign_keys=[retry_of_id]
     )

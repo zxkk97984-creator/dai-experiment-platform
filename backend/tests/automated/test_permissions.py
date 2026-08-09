@@ -15,7 +15,7 @@ def _setup_full(client, db_session_factory, course_status="published"):
     s_no_tok, _ = login(client, "s_no")
 
     c = client.post(f"{API}/courses", headers=auth_header(t_tok), json={
-        "title": "PermTest", "status": course_status,
+        "title": "PermTest", "status": course_status, "visibility": "public",
     })
     cid = c.json()["id"]
     if course_status == "published":
@@ -84,9 +84,11 @@ def test_enrolled_student_access_all_succeeds(client, db_session_factory):
 def test_unenrolled_student_rejected_all_content(client, db_session_factory):
     d = _setup_full(client, db_session_factory)
     tok = d["s_no_tok"]
-    for path in [f"/courses/{d['cid']}", f"/courses/{d['cid']}/chapters"]:
-        r = client.get(f"{API}{path}", headers=auth_header(tok))
-        assert r.status_code == 403, f"un-enrolled GET {path}: {r.status_code}"
+    # public 未选学生可浏览课程元数据，但内容权限全部拒绝
+    r = client.get(f"{API}/courses/{d['cid']}", headers=auth_header(tok))
+    assert r.status_code == 200, f"un-enrolled GET course meta: {r.status_code}"
+    r = client.get(f"{API}/courses/{d['cid']}/chapters", headers=auth_header(tok))
+    assert r.status_code == 403, f"un-enrolled GET chapters: {r.status_code}"
     r = client.get(f"{API}/assignments?course_id={d['cid']}", headers=auth_header(tok))
     assert r.status_code == 200
     assert len(r.json()["items"]) == 0  # un-enrolled sees empty list
@@ -111,9 +113,11 @@ def test_dropped_student_rejected_all(client, db_session_factory):
     assert r.status_code == 200
     # 退课
     client.delete(f"{API}/courses/{d['cid']}/enroll", headers=auth_header(tok))
-    # 全拒绝
+    # 内容权限全拒绝；public 课程元数据退课后仍可见
     r = client.get(f"{API}/courses/{d['cid']}", headers=auth_header(tok))
-    assert r.status_code == 403, f"dropped: {r.status_code}"
+    assert r.status_code == 200, f"dropped meta: {r.status_code}"
+    r = client.get(f"{API}/courses/{d['cid']}/chapters", headers=auth_header(tok))
+    assert r.status_code == 403, f"dropped chapters: {r.status_code}"
     r = client.post(f"{API}/judge/submissions", headers=auth_header(tok), json={
         "question_id": d["qid"], "code": "def f(): pass",
     })
@@ -265,7 +269,7 @@ def test_error_developer_has_no_course_access(client, db_session_factory):
     admin_tok, _ = login(client, "admin_x2")
 
     c = client.post(f"{API}/courses", headers=auth_header(t_tok), json={
-        "title": "DevBlocked2", "status": "published",
+        "title": "DevBlocked2", "status": "published", "visibility": "public",
     })
     cid = c.json()["id"]
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))

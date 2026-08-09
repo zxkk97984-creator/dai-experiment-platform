@@ -7,6 +7,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
 import StudioEditor from '../../components/notebook/StudioEditor.vue'
+import EnvironmentProfilePicker from '../../components/common/EnvironmentProfilePicker.vue'
 import LessonMarkdownEditor from './LessonMarkdownEditor.vue'
 import LessonExperimentEditor from './LessonExperimentEditor.vue'
 import LessonVideoEditor from './LessonVideoEditor.vue'
@@ -31,6 +32,46 @@ const resolvingTemplate = ref(false)
 const templateId = ref(null)
 const noTemplate = ref(false)
 const creatingTemplate = ref(false)
+
+// ── Phase 4：兜底创建的环境选择（避免静默创建错误环境） ─────────
+const fallbackEnvOptions = ref([])
+const fallbackEnvId = ref(null)
+const fallbackPolicy = ref('unrestricted')
+const fallbackAllowedImports = ref([])
+
+function onFallbackEnvLoaded(options) {
+  fallbackEnvOptions.value = options
+  if (options.length && !fallbackEnvId.value) {
+    fallbackEnvId.value = options[0].environment_version_id
+  }
+}
+
+const selectedFallbackEnv = computed(
+  () => fallbackEnvOptions.value.find((o) => o.environment_version_id === fallbackEnvId.value) || null,
+)
+const fallbackImportCandidates = computed(() => {
+  if (!selectedFallbackEnv.value) return []
+  const seen = new Set()
+  const names = []
+  for (const p of selectedFallbackEnv.value.packages || []) {
+    for (const name of p.import_names || []) {
+      if (!seen.has(name)) { seen.add(name); names.push(name) }
+    }
+  }
+  return names
+})
+const fallbackMismatch = computed(() => {
+  if (fallbackPolicy.value !== 'restricted' || fallbackAllowedImports.value.length === 0) return ''
+  const installed = new Set(fallbackImportCandidates.value)
+  const missing = fallbackAllowedImports.value.filter((name) => !installed.has(name))
+  return missing.length ? `注意：${missing.join('、')} 未在当前环境安装` : ''
+})
+
+function toggleFallbackImport(name) {
+  const idx = fallbackAllowedImports.value.indexOf(name)
+  if (idx >= 0) fallbackAllowedImports.value.splice(idx, 1)
+  else fallbackAllowedImports.value.push(name)
+}
 
 async function loadLesson() {
   loading.value = true
@@ -98,6 +139,9 @@ async function createTemplateAndEnter() {
       name: lesson.value.title || '未命名实验',
       description: lesson.value.content || undefined,
       lesson_id: lesson.value.id,
+      environment_version_id: fallbackEnvId.value,
+      import_policy_mode: fallbackPolicy.value,
+      allowed_imports: fallbackPolicy.value === 'restricted' ? [...fallbackAllowedImports.value] : [],
     })
     const template = res.data || res
     // 同路由 query 变化不会重新挂载组件，需同步更新本地状态立即进入 Studio；
@@ -140,10 +184,34 @@ onMounted(loadLesson)
         <div v-for="i in 3" :key="i" class="skeleton skeleton-line"></div>
       </div>
 
-      <!-- notebook 未关联模板 → 兜底卡片 -->
+      <!-- notebook 未关联模板 → 兜底卡片（Phase 4：选择环境后创建，避免静默错误环境） -->
       <div v-else-if="noTemplate" class="error-card">
         <h2>该 Notebook 课时尚未关联模板</h2>
-        <p>创建模板后可进入 Studio 编辑实验内容。</p>
+        <p>创建模板后可进入 Studio 编辑实验内容，请选择运行环境。</p>
+        <div class="fallback-env">
+          <EnvironmentProfilePicker
+            v-model="fallbackEnvId"
+            show-memory
+            label="运行环境"
+            @loaded="onFallbackEnvLoaded"
+          />
+          <p v-if="!fallbackEnvOptions.length" class="fallback-hint env-warn">暂无可用环境，请联系管理员</p>
+          <label class="fallback-field">
+            <span>导入规则</span>
+            <select v-model="fallbackPolicy" class="fallback-select">
+              <option value="unrestricted">不限制</option>
+              <option value="restricted">限定白名单</option>
+            </select>
+          </label>
+          <div v-if="fallbackPolicy === 'restricted'" class="fallback-chips">
+            <label v-for="name in fallbackImportCandidates" :key="name" class="fallback-chip">
+              <input type="checkbox" :checked="fallbackAllowedImports.includes(name)" @change="toggleFallbackImport(name)" />
+              {{ name }}
+            </label>
+            <p v-if="!fallbackImportCandidates.length" class="fallback-hint">当前环境未提供教学库，可留空白名单</p>
+          </div>
+          <p v-if="fallbackMismatch" class="fallback-hint env-warn">{{ fallbackMismatch }}</p>
+        </div>
         <div class="fallback-actions">
           <button class="btn-secondary" type="button" @click="goBack">返回</button>
           <button class="btn-primary" type="button" :disabled="creatingTemplate" @click="createTemplateAndEnter">
@@ -204,4 +272,38 @@ onMounted(loadLesson)
 .error-card h2 { margin: 0 0 8px; font-size: 18px; color: var(--text); }
 .error-card p { margin: 0 0 20px; color: var(--text-secondary); font-size: 14px; }
 .fallback-actions { display: flex; justify-content: center; gap: 8px; }
+/* ── Phase 4：兜底创建环境选择 ─────────────────────────────────── */
+.fallback-env {
+  max-width: 420px;
+  margin: 0 auto 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+}
+.fallback-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.fallback-select {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control, 7px);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--text-sm, 13px);
+}
+.fallback-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.fallback-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-raised, #f4f6f8);
+  font-size: var(--text-sm, 13px);
+  cursor: pointer;
+}
+.fallback-chip input { margin: 0; }
+.fallback-hint { margin: 0; font-size: var(--text-xs, 12px); color: var(--text-tertiary, #9aa); }
+.env-warn { color: var(--warning, #b7791f); }
 </style>

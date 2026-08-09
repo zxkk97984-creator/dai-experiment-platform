@@ -155,7 +155,7 @@ def build_student_dashboard(db: Session, user: User, now: datetime | None = None
             .join(Course, Course.id == Chapter.course_id)
             .where(
                 ExperimentRecord.student_id == user.id,
-                ExperimentRecord.status != "completed",
+                ExperimentRecord.status == "started",
                 ExperimentRecord.lesson_id.is_not(None),
                 Course.id.in_(enrolled_ids),
             )
@@ -166,7 +166,7 @@ def build_student_dashboard(db: Session, user: User, now: datetime | None = None
             .join(ExperimentModule, ExperimentModule.id == ExperimentRecord.module_id)
             .where(
                 ExperimentRecord.student_id == user.id,
-                ExperimentRecord.status != "completed",
+                ExperimentRecord.status == "started",
                 ExperimentRecord.module_id.is_not(None),
             )
             .order_by(ExperimentRecord.updated_at.desc())

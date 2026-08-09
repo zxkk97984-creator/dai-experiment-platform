@@ -49,7 +49,7 @@ async function handleCopy() {
 </script>
 
 <template>
-  <div class="code-block">
+  <div class="code-block" data-code-theme="light">
     <div class="cb-toolbar">
       <div class="cb-toolbar-left">
         <span class="cb-filename">{{ filename }}</span>
@@ -78,20 +78,21 @@ async function handleCopy() {
 
 <style scoped>
 .code-block {
-  border: 1px solid #334155;
-  border-left: 3px solid var(--accent);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
   border-radius: var(--radius-md);
   overflow: hidden;
-  background: #0F172A;
+  background: var(--surface);
   margin: 20px 0;
   max-width: 100%;
+  box-shadow: var(--shadow-xs);
 }
 
 .cb-toolbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border);
 }
 
 .cb-toolbar-left {
@@ -100,13 +101,13 @@ async function handleCopy() {
 
 .cb-filename {
   font-size: 11px; font-weight: 500;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-secondary);
   font-family: var(--font-mono);
 }
 
 .cb-lang {
   font-size: 11px; font-weight: 600;
-  color: var(--accent);
+  color: var(--primary);
   text-transform: uppercase; letter-spacing: 0.05em;
   font-family: var(--font-mono);
 }
@@ -114,23 +115,24 @@ async function handleCopy() {
 .cb-copy {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 4px 10px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-secondary);
   font-size: 11px; font-weight: 500;
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
   flex-shrink: 0;
 }
 .cb-copy:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.8);
+  background: var(--primary-light);
+  border-color: var(--primary-soft);
+  color: var(--primary);
 }
 .cb-copy.copied {
   color: var(--success);
-  border-color: rgba(16, 185, 129, 0.3);
-  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(18, 168, 100, 0.3);
+  background: var(--success-light);
 }
 
 .cb-body {
@@ -143,9 +145,10 @@ async function handleCopy() {
   width: 44px; flex-shrink: 0;
   padding: 16px 12px;
   text-align: right;
-  color: rgba(255, 255, 255, 0.28);
+  color: var(--text-tertiary);
   user-select: none;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  border-right: 1px solid var(--border);
+  background: var(--surface-sunken);
   font-family: 'JetBrains Mono', var(--font-mono);
   font-size: 13px; line-height: 1.7;
 }
@@ -156,7 +159,7 @@ async function handleCopy() {
   padding: 16px 20px;
   font-family: 'JetBrains Mono', var(--font-mono);
   font-size: 13px; line-height: 1.7;
-  color: #E2E8F0;
+  color: var(--ink);
   white-space: pre;
   overflow-x: auto;
   tab-size: 4;

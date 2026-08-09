@@ -1,3 +1,4 @@
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -29,10 +30,25 @@ class Settings(BaseSettings):
     judge_timeout_seconds: int = 10
     judge_memory_limit_mb: int = 256
     judge_cpu_limit: float = 1.0
+    # ── Kernel 镜像（Phase 5） ────────────────────────────────
+    # 已绑定环境版本的实验记录用环境 digest 启动；该配置仅用于未绑定环境版本的
+    # 存量兼容路径与开发环境。安全参数不在此处放松。
+    kernel_image: str = "dai-kernel-python:latest"
     jupyter_enabled: bool = False
     studio_storage_dir: str = str(
         Path(__file__).resolve().parents[1] / "storage" / "studio"
     )
+    # 教师上传视频存储目录——生产必须挂载持久卷，不能依赖容器可写层
+    video_storage_dir: str = str(
+        Path(__file__).resolve().parents[1] / "storage" / "videos"
+    )
+    video_max_upload_bytes: int = Field(default=500 * 1024 * 1024, gt=0)
+    video_playback_url_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
+    # 课程封面存储目录——生产必须挂载持久卷（cover_data），与视频目录同规则
+    cover_storage_dir: str = str(
+        Path(__file__).resolve().parents[1] / "storage" / "covers"
+    )
+    cover_max_upload_bytes: int = Field(default=5 * 1024 * 1024, gt=0)
     # 判题临时文件目录——Docker Compose 下必须与 judge 容器挂载相同路径
     judge_work_dir: str = ""
     # 宿主机侧判题工作目录——DoD 模式下传给 Docker daemon 的宿主机绝对路径
@@ -88,6 +104,15 @@ class Settings(BaseSettings):
                 "DAI_JUDGE_HOST_WORK_DIR 未设置，生产环境判题容器无法挂载宿主机工作目录"
             )
 
+        # 环境档位基础镜像——生产必须使用带 digest 的引用（供应链可复现，拒绝可变标签）
+        if not re.fullmatch(
+            r"[^\s@]+@sha256:[0-9a-f]{64}", self.env_base_image
+        ):
+            errors.append(
+                "DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的基础镜像引用"
+                f"（当前: {self.env_base_image}），拒绝可变标签"
+            )
+
         if errors:
             raise ValueError("生产环境配置校验失败:\n  - " + "\n  - ".join(errors))
         return self
@@ -99,6 +124,21 @@ class Settings(BaseSettings):
     @property
     def studio_storage_path(self) -> Path:
         return Path(self.studio_storage_dir).resolve()
+
+    @property
+    def video_storage_path(self) -> Path:
+        return Path(self.video_storage_dir).resolve()
+
+    @property
+    def cover_storage_path(self) -> Path:
+        return Path(self.cover_storage_dir).resolve()
+
+    # ── 环境档位控制面（Phase 1） ──────────────────────────────
+    env_build_queue_name: str = "environment:build:queue"
+    env_build_timeout_seconds: int = Field(default=3600, ge=60, le=86400)
+    env_image_repository: str = "dai-env"
+    env_base_image: str = "python:3.12-slim"
+    env_build_log_max_bytes: int = Field(default=60 * 1024, ge=1024, le=1024 * 1024)
 
 
 @lru_cache

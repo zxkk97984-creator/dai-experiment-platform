@@ -38,6 +38,7 @@ import eyeOff from '@iconify-icons/ri/eye-off-line'
 import copy from '@iconify-icons/ri/file-copy-line'
 import chevronUp from '@iconify-icons/ri/arrow-up-s-line'
 import move from '@iconify-icons/ri/drag-move-2-line'
+import dragHandle from '@iconify-icons/ri/menu-line'
 import trash from '@iconify-icons/ri/delete-bin-line'
 import back from '@iconify-icons/ri/arrow-left-line'
 import video from '@iconify-icons/ri/video-line'
@@ -76,6 +77,7 @@ const ICONS = {
   copy: { data: copy, set: 'ri' },
   'chevron-up': { data: chevronUp, set: 'ri' },
   move: { data: move, set: 'ri' },
+  drag: { data: dragHandle, set: 'ri' },
   trash: { data: trash, set: 'ri' },
   back: { data: back, set: 'ri' },
   video: { data: video, set: 'ri' },
@@ -102,6 +104,7 @@ if (import.meta.env.DEV && !icon.value) {
     v-if="icon"
     :icon="icon.data"
     :data-set="icon.set"
+    :data-icon="name"
     :width="size"
     :height="size"
     class="app-icon"

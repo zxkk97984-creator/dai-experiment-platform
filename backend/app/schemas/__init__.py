@@ -2,7 +2,9 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.schemas.environments import EnvironmentSummaryRead, ImportDiagnosticRead
 
 
 class PaginatedResponse(BaseModel):
@@ -65,16 +67,39 @@ class StatusUpdate(BaseModel):
     status: str
 
 
+CourseVisibility = Literal["private", "public", "whitelist"]
+
+
 class CourseCreate(BaseModel):
     title: str
     description: str | None = None
     status: str = "draft"
+    cover: str | None = None
+    start_time: datetime | None = None
+    visibility: CourseVisibility = "private"  # 可见范围：仅自己 / 公开 / 指定学生
+    default_score: float = 100.0  # 默认评分（满分制）
 
 
 class CourseUpdate(BaseModel):
+    """更新课程：全部字段可选，仅更新传入字段"""
     title: str | None = None
     description: str | None = None
     status: str | None = None
+    cover: str | None = None
+    start_time: datetime | None = None
+    visibility: CourseVisibility | None = None
+    default_score: float | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_null_settings(cls, data: Any) -> Any:
+        """可见范围与默认评分为非空字段，显式传 null 直接 422（而非落库 500）"""
+        if isinstance(data, dict):
+            if "visibility" in data and data["visibility"] is None:
+                raise ValueError("visibility 不能为 null")
+            if "default_score" in data and data["default_score"] is None:
+                raise ValueError("default_score 不能为 null")
+        return data
 
 
 class CourseRead(BaseModel):
@@ -85,6 +110,35 @@ class CourseRead(BaseModel):
     description: str | None = None
     status: str
     teacher_id: int | None = None
+    cover: str | None = None
+    start_time: datetime | None = None
+    visibility: CourseVisibility = "private"
+    default_score: float = 100.0
+    # 学生视角选课状态（教师/管理员返回 false 默认值）
+    is_enrolled: bool = False
+    can_enroll: bool = False
+
+
+# ── 课程白名单 ─────────────────────────────────────────────────
+
+
+class CourseWhitelistCreate(BaseModel):
+    student_id: int
+
+
+class CourseWhitelistEntryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    course_id: int
+    student: UserRead
+    created_at: datetime
+
+
+class CourseWhitelistListRead(BaseModel):
+    items: list[CourseWhitelistEntryRead] = Field(default_factory=list)
+    page: int = 1
+    page_size: int = 20
+    total: int = 0
 
 
 class ChapterCreate(BaseModel):
@@ -98,6 +152,20 @@ class ChapterUpdate(BaseModel):
     order_index: int | None = None
 
 
+def normalize_video_url(v: str | None) -> str | None:
+    """归一化并校验外链地址：空白归一为 None，非空只允许 http(s)，长度上限 500。"""
+    if v is None:
+        return None
+    v = v.strip()
+    if not v:
+        return None
+    if len(v) > 500:
+        raise ValueError("video_url 长度不能超过 500 字符")
+    if not (v.startswith("http://") or v.startswith("https://")):
+        raise ValueError("video_url 只允许 http:// 或 https:// 地址")
+    return v
+
+
 class LessonCreate(BaseModel):
     title: str
     content_type: str = "markdown"
@@ -106,6 +174,12 @@ class LessonCreate(BaseModel):
     video_url: str | None = None
     order_index: int = 0
     status: str = "draft"
+
+    @field_validator("video_url")
+    @classmethod
+    def _normalize_video_url(cls, v: str | None) -> str | None:
+        """外链校验：空白归一为 None，只允许 http(s) 地址，拒绝 javascript:/data:/本地路径/无 scheme"""
+        return normalize_video_url(v)
 
 
 class LessonUpdate(BaseModel):
@@ -119,6 +193,12 @@ class LessonUpdate(BaseModel):
     chapter_id: int | None = None
     status: str | None = None
 
+    @field_validator("video_url")
+    @classmethod
+    def _normalize_video_url(cls, v: str | None) -> str | None:
+        """外链校验：空白归一为 None，只允许 http(s) 地址，拒绝 javascript:/data:/本地路径/无 scheme"""
+        return normalize_video_url(v)
+
 
 class LessonRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -130,8 +210,26 @@ class LessonRead(BaseModel):
     content: str | None = None
     notebook_path: str | None = None
     video_url: str | None = None
+    # 视频来源：external（外链）/ upload（本地上传）；storage_key 仅服务端使用，不返回
+    video_source: str = "external"
+    video_filename: str | None = None
+    video_content_type: str | None = None
+    video_size: int | None = None
     order_index: int
     status: str = "published"
+
+
+class LessonVideoPlaybackRead(BaseModel):
+    """已签名短期播放地址"""
+    url: str
+    expires_at: datetime
+
+
+class LessonVideoUploadRead(BaseModel):
+    """上传成功响应：课时最新状态 + 可直接播放的签名地址"""
+    lesson: LessonRead
+    playback_url: str
+    expires_at: datetime
 
 
 class ChapterRead(BaseModel):
@@ -159,6 +257,18 @@ class AssignmentCreate(BaseModel):
     description: str | None = None
     status: str = "draft"
     due_at: datetime | None = None
+    # ── 环境档位绑定（Phase 4：教师选择） ─────────────────────
+    # 教师显式选择 available 环境版本；省略时服务层解析 basic 当前可用版本。
+    environment_version_id: int | None = None
+    import_policy_mode: Literal["unrestricted", "restricted"] = "unrestricted"
+    allowed_imports: list[str] = Field(default_factory=list)
+
+    @field_validator("allowed_imports")
+    @classmethod
+    def _check_allowed_imports(cls, v: list[str]) -> list[str]:
+        from app.services.import_policy import validate_import_names
+
+        return validate_import_names(v)
 
 
 class AssignmentUpdate(BaseModel):
@@ -166,6 +276,19 @@ class AssignmentUpdate(BaseModel):
     description: str | None = None
     status: str | None = None
     due_at: datetime | None = None
+    # 环境字段仅在作业 draft 状态可修改（API 层门禁）；exclude_unset 区分未传与显式 null
+    environment_version_id: int | None = None
+    import_policy_mode: Literal["unrestricted", "restricted"] | None = None
+    allowed_imports: list[str] | None = None
+
+    @field_validator("allowed_imports")
+    @classmethod
+    def _check_allowed_imports(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        from app.services.import_policy import validate_import_names
+
+        return validate_import_names(v)
 
 
 class AssignmentRead(BaseModel):
@@ -177,6 +300,15 @@ class AssignmentRead(BaseModel):
     description: str | None = None
     status: str
     due_at: datetime | None = None
+    # 作业默认环境与 import 教学策略（教师读响应返回；学生端摘要由 Phase 5 提供）
+    environment_version_id: int | None = None
+    import_policy_mode: str = "unrestricted"
+    allowed_imports: list[str] = Field(default_factory=list)
+    # Phase 5：学生可见环境摘要（不含 digest/tag/构建日志）；未绑定或不可用时为 None
+    environment_summary: EnvironmentSummaryRead | None = None
+    # 当前学生对作业的提交状态：全部题目都有提交记录才算已交（与 dashboard 待办语义互补）。
+    # 仅学生作业列表接口计算该值；教师/管理员视图与详情接口保持默认 False。
+    is_submitted: bool = False
 
 
 class PublicCase(BaseModel):
@@ -228,6 +360,19 @@ class JudgeQuestionCreate(BaseModel):
     time_limit_ms: int = 10000
     memory_limit_mb: int = 256
     grading_mode: Literal["legacy", "shadow", "active"] | None = None
+    # ── 环境档位绑定（Phase 4：题目覆盖） ─────────────────────
+    # environment_version_id 为 None 表示继承作业默认环境；
+    # import_policy_mode：inherit 继承作业 / unrestricted 不限制 / restricted 自定义白名单。
+    environment_version_id: int | None = None
+    import_policy_mode: Literal["inherit", "unrestricted", "restricted"] = "inherit"
+    allowed_imports: list[str] = Field(default_factory=list)
+
+    @field_validator("allowed_imports")
+    @classmethod
+    def _check_allowed_imports(cls, v: list[str]) -> list[str]:
+        from app.services.import_policy import validate_import_names
+
+        return validate_import_names(v)
 
 
 class JudgeQuestionRead(BaseModel):
@@ -244,6 +389,11 @@ class JudgeQuestionRead(BaseModel):
     time_limit_ms: int
     memory_limit_mb: int
     grading_mode: Literal["legacy", "shadow", "active"]
+    environment_version_id: int | None = None
+    import_policy_mode: str = "inherit"
+    allowed_imports: list[str] = Field(default_factory=list)
+    # Phase 5：题目 effective environment summary（覆盖时显示题目环境，否则作业默认）
+    environment_summary: EnvironmentSummaryRead | None = None
 
 
 class JudgeQuestionUpdate(BaseModel):
@@ -258,6 +408,18 @@ class JudgeQuestionUpdate(BaseModel):
     time_limit_ms: int | None = None
     memory_limit_mb: int | None = None
     grading_mode: Literal["legacy", "shadow", "active"] | None = None
+    environment_version_id: int | None = None
+    import_policy_mode: Literal["inherit", "unrestricted", "restricted"] | None = None
+    allowed_imports: list[str] | None = None
+
+    @field_validator("allowed_imports")
+    @classmethod
+    def _check_allowed_imports(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        from app.services.import_policy import validate_import_names
+
+        return validate_import_names(v)
 
 
 class SubmissionCreate(BaseModel):
@@ -279,6 +441,8 @@ class SubmissionRead(BaseModel):
     result_details: dict | None = None
     execution_time_ms: int | None = None
     grading_breakdown: dict | None = None  # 仅 active 模式学生可见
+    # Phase 5：结构化 import/环境诊断——学生 API 只返回安全中文信息，不含裸 traceback
+    diagnostic: ImportDiagnosticRead | None = None
 
 
 class SampleRunResponse(BaseModel):
@@ -286,6 +450,8 @@ class SampleRunResponse(BaseModel):
     output: str = ""
     status: str = ""
     execution_time_ms: int = 0
+    # Phase 5：结构化 import 诊断（IMPORT_NOT_ALLOWED 等），None 表示无诊断
+    diagnostic: ImportDiagnosticRead | None = None
 
 
 class ExamCreate(BaseModel):
@@ -315,6 +481,9 @@ class ExamRead(BaseModel):
     duration_minutes: int
     start_at: datetime | None = None
     end_at: datetime | None = None
+    # 当前学生对考试的已交状态：存在 submitted/grading/graded 任一状态的提交记录即视为已考
+    # （与 dashboard 待办语义一致）。仅学生考试列表接口计算该值；教师/管理员视图与详情接口保持默认 False。
+    is_submitted: bool = False
 
 
 class ExamSubmitRequest(BaseModel):
@@ -477,6 +646,8 @@ class ExperimentCellExecuteResponse(BaseModel):
     outputs: list[dict] = Field(default_factory=list)
     execution_time_ms: int | None = None
     execution_count: int = 0
+    # Phase 5：Kernel 输出中的 ModuleNotFoundError 兜底归类诊断（无裸 traceback）
+    diagnostic: ImportDiagnosticRead | None = None
 
 
 class ExperimentCellOut(BaseModel):
@@ -559,6 +730,8 @@ class ExperimentRecordDetailResponse(BaseModel):
     entry_description: str | None = None
     cells: list[ExperimentCellOut] = Field(default_factory=list)
     execution_count: int = 0
+    # Phase 5：学生可见环境摘要（NotebookPlayer 标题下提示用，不含 digest/tag）
+    environment_summary: EnvironmentSummaryRead | None = None
 
 
 # ── Jupyter（旧）──────────────────────────────────────────────

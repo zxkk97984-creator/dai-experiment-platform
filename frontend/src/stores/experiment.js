@@ -12,6 +12,8 @@ export const useExperimentStore = defineStore('experiment', () => {
   const cells = ref([])
   const entryName = ref('')
   const entryDescription = ref('')
+  // Phase 5：学生可见环境摘要（NotebookPlayer 标题下提示；不含 digest/tag）
+  const environmentSummary = ref(null)
 
   const dirty = ref(false)
   const saving = ref(false)
@@ -96,6 +98,7 @@ export const useExperimentStore = defineStore('experiment', () => {
       cells.value = raw
       entryName.value = d.entry_name || ''
       entryDescription.value = d.entry_description || ''
+      environmentSummary.value = d.environment_summary || null
       if (context.value) context.value.title = entryName.value
       if (d.record_revision != null) recordRevision.value = d.record_revision
       saved.value = true
@@ -228,6 +231,16 @@ export const useExperimentStore = defineStore('experiment', () => {
   }
 
   // ── 执行 ──
+  // Phase 5：import 类 API 错误（IMPORT_NOT_ALLOWED → 422 / IMPORT_NOT_INSTALLED → 500）
+  // 捕获后为当前 cell 写入无裸 traceback 的合成 error output（计划 12 Notebook）
+  function _writeImportDiagnosticOutput(cell, message) {
+    cell.outputs = {
+      outputs: [{ msg_type: 'error', content: { text: message } }],
+      execution_time_ms: null,
+      execution_count: (cell.outputs?.execution_count ?? 0) + 1,
+    }
+  }
+
   async function executeCell(cellId) {
     const cell = cells.value.find(c => c.id === cellId)
     if (!cell || cell.type !== 'code') return
@@ -240,7 +253,11 @@ export const useExperimentStore = defineStore('experiment', () => {
         execution_count: res.data.execution_count,
       }
     } catch (e) {
-      if (e.response?.status === 409) app.showToast('Kernel 正忙，请等待', 'warning')
+      const code = e.response?.data?.detail?.code
+      const message = e.response?.data?.detail?.message
+      if (code === 'IMPORT_NOT_ALLOWED' || code === 'IMPORT_NOT_INSTALLED' || code === 'ENVIRONMENT_IMAGE_MISSING') {
+        _writeImportDiagnosticOutput(cell, message || '导入受限，请检查代码')
+      } else if (e.response?.status === 409) app.showToast('Kernel 正忙，请等待', 'warning')
       else app.showToast('执行失败', 'error')
     } finally {
       executingCellId.value = null
@@ -342,6 +359,7 @@ export const useExperimentStore = defineStore('experiment', () => {
 
   return {
     context, recordId, recordRevision, cells, entryName, entryDescription,
+    environmentSummary,
     dirty, saving, saved, error, conflict, executingCellId,
     submitting, lastSubmitTime, submitAttemptCount, submissions, currentClientRequestId,
     openLesson, openModule,

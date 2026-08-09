@@ -111,6 +111,42 @@ describe('AppSidebar 角色首页导航', () => {
   })
 })
 
+describe('AppSidebar admin 菜单', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.resetAllMocks()
+    setActivePinia(createPinia())
+  })
+
+  it('管理员侧栏包含环境档位入口并指向 /admin/environments', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const auth = useAuthStore()
+    auth.setUser({ id: 2, username: 'admin', real_name: 'Admin', role: 'admin' })
+    const wrapper = mount(AppSidebar, { global: { plugins: [pinia] } })
+    const labels = wrapper.findAll('.nav-item').map((i) => i.attributes('aria-label'))
+    expect(labels).toContain('环境档位')
+    const envItem = wrapper.findAll('.nav-item').find(
+      (i) => i.attributes('aria-label') === '环境档位',
+    )
+    await envItem.trigger('click')
+    expect(routerState.push).toHaveBeenCalledWith('/admin/environments')
+  })
+
+  it('/admin/environments 子路由高亮环境档位项', () => {
+    routerState.path = '/admin/environments'
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const auth = useAuthStore()
+    auth.setUser({ id: 2, username: 'admin', real_name: 'Admin', role: 'admin' })
+    const wrapper = mount(AppSidebar, { global: { plugins: [pinia] } })
+    const envItem = wrapper.findAll('.nav-item').find(
+      (i) => i.attributes('aria-label') === '环境档位',
+    )
+    expect(envItem.classes()).toContain('active')
+  })
+})
+
 describe('AppSidebar developer navigation', () => {
   beforeEach(() => {
     localStorage.clear()

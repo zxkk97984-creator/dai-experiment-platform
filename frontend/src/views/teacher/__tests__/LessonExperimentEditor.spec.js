@@ -99,4 +99,71 @@ describe('LessonExperimentEditor', () => {
     expect(html).toContain('任务A')
     expect(html).toContain('提交要求')
   })
+
+  it('草稿课时显示「发布」，点击提交内容+status 并 toast', async () => {
+    coursesAPI.getChapters.mockResolvedValue({
+      data: [{ id: 11, lessons: [{ id: 2, title: '实验一课', content_type: 'experiment', content: '# 实验任务\n\n任务A\n\n# 提交要求\n\n要求A', status: 'draft' }] }],
+    })
+    coursesAPI.updateLesson.mockResolvedValue({})
+    const wrapper = await mountEditor()
+    const publishBtn = wrapper.find('.publish-btn')
+    expect(publishBtn.exists()).toBe(true)
+    expect(publishBtn.text()).toBe('发布')
+    await publishBtn.trigger('click')
+    await flushPromises()
+    expect(coursesAPI.updateLesson).toHaveBeenCalledWith('2', {
+      title: '实验一课',
+      content: '# 实验任务\n\n任务A\n\n# 提交要求\n\n要求A',
+      status: 'published',
+    })
+    expect(appState.showToast).toHaveBeenCalledWith('课时已发布', 'success')
+    expect(wrapper.find('.publish-btn').text()).toBe('转为草稿')
+  })
+
+  it('已发布课时显示「转为草稿」，点击提交 status:draft', async () => {
+    coursesAPI.getChapters.mockResolvedValue({
+      data: [{ id: 11, lessons: [{ id: 2, title: '实验一课', content_type: 'experiment', content: '正文', status: 'published' }] }],
+    })
+    coursesAPI.updateLesson.mockResolvedValue({})
+    const wrapper = await mountEditor()
+    expect(wrapper.find('.publish-btn').text()).toBe('转为草稿')
+    await wrapper.find('.publish-btn').trigger('click')
+    await flushPromises()
+    expect(coursesAPI.updateLesson).toHaveBeenCalledWith('2', {
+      title: '实验一课',
+      content: '# 实验任务\n\n正文\n\n# 提交要求\n\n',
+      status: 'draft',
+    })
+    expect(appState.showToast).toHaveBeenCalledWith('课时已转为草稿', 'success')
+  })
+
+  it('有未保存修改时发布：内容一并提交且快照重置', async () => {
+    coursesAPI.getChapters.mockResolvedValue({ data: chapterWith('# 实验任务\n\n原任务\n\n# 提交要求\n\n原要求') })
+    coursesAPI.updateLesson.mockResolvedValue({})
+    const wrapper = await mountEditor()
+    await wrapper.find('#experiment-task').setValue('新任务')
+    expect(wrapper.find('.save-state').text()).toBe('未保存')
+    await wrapper.find('.publish-btn').trigger('click')
+    await flushPromises()
+    expect(coursesAPI.updateLesson).toHaveBeenCalledWith('2', {
+      title: '实验一课',
+      content: '# 实验任务\n\n新任务\n\n# 提交要求\n\n原要求',
+      status: 'published',
+    })
+    // 发布成功：快照重置，未保存状态消失
+    expect(wrapper.find('.save-state').text()).toBe('已保存')
+    expect(routerState.leaveHook({}, {})).toBe(true)
+  })
+
+  it('发布失败 toast 错误且快照不重置', async () => {
+    coursesAPI.getChapters.mockResolvedValue({ data: chapterWith('正文') })
+    coursesAPI.updateLesson.mockRejectedValue({})
+    const wrapper = await mountEditor()
+    await wrapper.find('#experiment-task').setValue('改动')
+    await wrapper.find('.publish-btn').trigger('click')
+    await flushPromises()
+    expect(appState.showToast).toHaveBeenCalledWith('发布失败，请重试', 'error')
+    expect(wrapper.find('.save-state').text()).toBe('未保存')
+    expect(wrapper.find('.publish-btn').text()).toBe('发布')
+  })
 })

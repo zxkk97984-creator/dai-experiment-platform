@@ -18,6 +18,11 @@ from app.database import SessionLocal
 from app.models import (
     CodeGrade, ExamAnswer, ExamQuestion, ExamSubmission, JudgeQuestion, QuestionRubric, Submission,
 )
+from app.services.environment_service import (
+    installed_imports_for_version,
+    resolve_run_image_ref,
+)
+from app.services.import_policy import ImportPolicy, classify_imports
 
 logger = logging.getLogger("dai.worker")
 
@@ -83,7 +88,15 @@ def enqueue_exam_answer(submission_id: int, answer_id: int, question: ExamQuesti
 def _run_docker_pytest(workdir: Path, settings: Settings, timeout_seconds: int,
                        memory_limit_mb: int = 256, test_filename: str = "test_user_code.py",
                        host_workdir: Path | None = None,
-                       extra_args: list[str] | None = None) -> tuple[str, str, int, int]:
+                       extra_args: list[str] | None = None,
+                       image_ref: str | None = None) -> tuple[str, str, int, int]:
+    """在隔离 Docker 沙箱中运行 pytest（Phase 5：镜像参数使用环境 digest）。
+
+    - image_ref：环境版本不可变镜像引用（image ID 或 repository@sha256 形式）；
+      None 仅用于未绑定环境版本的存量兼容路径（exam 路径显式不传，保持旧配置镜像）。
+    - 安全参数全部保留：--network none / --cap-drop ALL / no-new-privileges /
+      --read-only / tmpfs / pids / cpu / 内存限制 / 非 root UID 1000——只改镜像，不放松安全。
+    """
     host_path = host_workdir if host_workdir is not None else workdir
     container_name = f"dai-judge-{secrets.token_hex(8)}"
     cmd = [
@@ -94,7 +107,7 @@ def _run_docker_pytest(workdir: Path, settings: Settings, timeout_seconds: int,
         "--memory", f"{memory_limit_mb}m",
         "--pids-limit", "50", "--user", "1000:1000",
         "-v", f"{host_path}:/work:ro", "-w", "/work",
-        settings.judge_image,
+        image_ref or settings.judge_image,
         "python", "-m", "pytest", "-q", "-p", "no:cacheprovider",
     ]
     if extra_args:
@@ -149,10 +162,92 @@ def _parse_result_json(output: str) -> dict | None:
 # 结构化测试组评分
 # ═══════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════
+# Phase 5：运行环境上下文（digest 镜像 + import 诊断）
+# ═══════════════════════════════════════════════════════════════
+
+class EnvironmentUnavailableError(Exception):
+    """绑定环境版本无可用镜像——fail closed 为 system_error，不扣分。"""
+
+    def __init__(self, message: str = "运行环境暂不可用，本次提交不会扣分，请稍后重试"):
+        super().__init__(message)
+        self.diagnostic_code = "ENVIRONMENT_IMAGE_MISSING"
+        self.message = message
+
+
+def _submission_env_context(db: Session, submission: Submission) -> tuple[str | None, ImportPolicy | None, set[str]]:
+    """从提交快照解析运行环境上下文（计划 8.3）。
+
+    返回 (image_ref, policy, installed_imports)：
+    - 未绑定环境版本（存量兼容路径）→ (None, None, None)，判题使用 settings.judge_image；
+    - 已绑定但版本无 digest / 不可用 → 抛 EnvironmentUnavailableError（fail closed）。
+    历史提交重判：环境取自 Submission 快照字段，不受作业重新发布影响。
+    """
+    env_id = submission.environment_version_id
+    if env_id is None:
+        return None, None, None
+    try:
+        image_ref = resolve_run_image_ref(db, env_id)
+    except Exception as exc:
+        code = getattr(exc, "code", None)
+        message = getattr(exc, "message", None) or str(exc)
+        raise EnvironmentUnavailableError(message) from exc
+    policy = ImportPolicy.from_mode(
+        submission.import_policy_mode_snapshot or "unrestricted",
+        list(submission.allowed_imports_snapshot or []),
+    )
+    installed = installed_imports_for_version(db, env_id)
+    return image_ref, policy, installed
+
+
+def _diagnose_submission(submission: Submission, policy: ImportPolicy | None,
+                         installed_imports: set[str]):
+    """判题前的 import 预检——只分析学生源代码（计划 8.3）。
+
+    返回第一个诊断 ImportDiagnosticRead 或 None（unrestricted / 无违规时不诊断）。
+    语法错误返回 None——不伪装成 import 错误，交给原判题输出。
+    """
+    if policy is None or not policy.restricted:
+        return None
+    diagnostics = classify_imports(submission.code, policy, installed_imports)
+    return diagnostics[0] if diagnostics else None
+
+
+def _handle_import_diagnostic(db, submission, diag, fail_job) -> Submission | None:
+    """按诊断类型落终态。返回终态 submission；None 表示继续正常判题。"""
+    if diag is None:
+        return None
+    details = dict(submission.result_details or {})
+    details["diagnostic"] = {
+        "code": diag.code, "module": diag.module, "message": diag.message,
+    }
+    if diag.code == "IMPORT_NOT_ALLOWED":
+        # 学生错误：不跑 Docker、不计基础设施重试、明确扣分
+        fail_job(db, job_type="assignment", object_id=submission.id,
+                 error=f"学生代码使用了不允许的导入: {diag.module}", retryable=False)
+        submission.status = "runtime_error"
+        submission.score = 0
+        submission.result_details = details
+        submission.stdout = ""
+        submission.stderr = diag.message
+        db.commit()
+        return submission
+    # IMPORT_NOT_INSTALLED / ENVIRONMENT_DRIFT：平台配置问题，不扣分，按系统错误策略可重试
+    fail_job(db, job_type="assignment", object_id=submission.id,
+             error=f"运行环境缺少允许导入的模块: {diag.module}", retryable=True)
+    submission.status = "system_error"
+    submission.score = None
+    submission.result_details = details
+    submission.stderr = diag.message
+    db.commit()
+    return submission
+
+
 def run_test_groups(
     workdir: Path, host_workdir: Path, code: str,
     test_groups: list[dict], settings: Settings,
     timeout_seconds: int, memory_limit_mb: int,
+    image_ref: str | None = None,
 ) -> dict:
     results = {}
     system_errors = []
@@ -174,6 +269,7 @@ def run_test_groups(
                 workdir, settings, timeout_seconds, memory_limit_mb,
                 test_filename="test_group.py", host_workdir=host_workdir,
                 extra_args=["-p", "dai_result_plugin"],
+                image_ref=image_ref,
             )
         except Exception as exc:
             system_errors.append(f"测试组 {gid} Docker 执行异常: {exc}")
@@ -233,10 +329,31 @@ def _legacy_judge_submission(db, redis_client, settings, submission, question, w
         submission.score = None  # 系统错误不扣分
         db.commit()
         return submission
+    # Phase 5：解析提交快照环境（digest 镜像 + import 策略），fail closed
+    try:
+        image_ref, policy, installed = _submission_env_context(db, submission)
+    except EnvironmentUnavailableError as exc:
+        fail_job(db, job_type="assignment", object_id=submission.id,
+                 error=exc.message, retryable=True)
+        submission.status = "system_error"
+        submission.score = None  # 系统错误不扣分
+        submission.result_details = {
+            "diagnostic": {"code": "ENVIRONMENT_IMAGE_MISSING",
+                           "module": "", "message": exc.message},
+        }
+        db.commit()
+        return submission
+    # import 预检：只分析学生源代码；IMPORT_NOT_ALLOWED 学生错误，IMPORT_NOT_INSTALLED 平台配置
+    terminal = _handle_import_diagnostic(db, submission,
+                                         _diagnose_submission(submission, policy, installed),
+                                         fail_job)
+    if terminal is not None:
+        return terminal
     _write_submission_files(workdir, submission, question)
     try:
         stdout, stderr, returncode, elapsed = _run_docker_pytest(
-            workdir, settings, timeout_s, mem_mb, host_workdir=host_workdir)
+            workdir, settings, timeout_s, mem_mb, host_workdir=host_workdir,
+            image_ref=image_ref)
     except Exception as e:
         fail_job(db, job_type="assignment", object_id=submission.id,
                  error=f"Docker 判题失败: {e}", retryable=True)
@@ -320,8 +437,29 @@ def _v1_judge_submission(db, redis_client, settings, submission, question, workd
         db.commit()
         return submission
 
+    # Phase 5：解析提交快照环境（digest 镜像 + import 策略），fail closed
+    try:
+        image_ref, policy, installed = _submission_env_context(db, submission)
+    except EnvironmentUnavailableError as exc:
+        fail_job(db, job_type="assignment", object_id=submission.id,
+                 error=exc.message, retryable=True)
+        submission.status = "system_error"
+        submission.score = None  # 系统错误不扣分
+        submission.result_details = {
+            "diagnostic": {"code": "ENVIRONMENT_IMAGE_MISSING",
+                           "module": "", "message": exc.message},
+        }
+        db.commit()
+        return submission
+    # import 预检：只分析学生源代码；IMPORT_NOT_ALLOWED 学生错误，IMPORT_NOT_INSTALLED 平台配置
+    terminal = _handle_import_diagnostic(db, submission,
+                                         _diagnose_submission(submission, policy, installed),
+                                         fail_job)
+    if terminal is not None:
+        return terminal
+
     result = run_test_groups(workdir, host_workdir, submission.code, test_groups,
-                             settings, timeout_s, mem_mb)
+                             settings, timeout_s, mem_mb, image_ref=image_ref)
     all_errs = list(result["system_errors"])
     f_score, r_score, details = _calc_fr_scores(test_groups, result["results"], all_errs)
 
@@ -340,7 +478,8 @@ def _v1_judge_submission(db, redis_client, settings, submission, question, workd
         _write_submission_files(workdir, submission, question)
         try:
             stdout, stderr, returncode, elapsed = _run_docker_pytest(
-                workdir, settings, timeout_s, mem_mb, host_workdir=host_workdir)
+                workdir, settings, timeout_s, mem_mb, host_workdir=host_workdir,
+                image_ref=image_ref)
         except Exception as e:
             fail_job(db, job_type="assignment", object_id=submission.id,
                      error=f"Docker 判题失败: {e}", retryable=True)

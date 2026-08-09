@@ -26,6 +26,7 @@ const sections = [
   { num: '01', label: '用户管理',   sub: 'Users',        desc: '创建、编辑、管理用户账号与角色权限',  path: '/admin/users',        icon: '👥', color: 'blue' },
   { num: '02', label: '课程维护',   sub: 'Courses',      desc: '审视与维护全部课程资源',              path: '/admin/courses',      icon: '📚', color: 'green' },
   { num: '03', label: '实验配置',   sub: 'Experiments',  desc: '配置与维护实验模块、镜像与数据集',    path: '/admin/experiments',  icon: '🧪', color: 'orange' },
+  { num: '04', label: '环境档位',   sub: 'Environments', desc: '维护受控包目录与不可变判题/实验环境',  path: '/admin/environments', icon: '🐳', color: 'purple' },
 ]
 
 function go(p) { router.push(p) }

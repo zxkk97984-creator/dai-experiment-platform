@@ -178,4 +178,30 @@ describe('NotebookPlayer', () => {
 
     wrapper.unmount()
   })
+  it('shows environment hint under the title (Phase 5)', async () => {
+    experimentsAPI.getRecordDetail.mockResolvedValue(detailResponse({
+      environment_summary: {
+        display_name: '数据分析',
+        version_label: 'v1',
+        python_version: '3.12',
+        imports: ['numpy', 'pandas', 'sklearn'],
+        import_policy_mode: 'restricted',
+        allowed_imports: ['numpy'],
+      },
+    }))
+    const wrapper = await mountPlayer()
+    const env = wrapper.find('.player-env')
+    expect(env.exists()).toBe(true)
+    expect(env.text()).toContain('数据分析')
+    expect(env.text()).toContain('v1')
+    expect(env.text()).toContain('numpy · pandas · sklearn')
+    expect(env.text()).toContain('允许导入：numpy')
+    wrapper.unmount()
+  })
+
+  it('hides environment hint when no summary (Phase 5)', async () => {
+    const wrapper = await mountPlayer()
+    expect(wrapper.find('.player-env').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })

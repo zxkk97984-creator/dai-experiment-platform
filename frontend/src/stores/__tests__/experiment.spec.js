@@ -315,3 +315,70 @@ describe('useExperimentStore', () => {
     expect(store.submitting).toBe(false)
   })
 })
+
+// ═══════════════════════════════════════════════════════════════
+// Phase 5：学生端环境提示与 import 诊断
+// ═══════════════════════════════════════════════════════════════
+
+describe('Phase 5: environment summary and import diagnostics', () => {
+  let store
+  const envDetailResponse = {
+    data: {
+      ...detailResponse.data,
+      environment_summary: {
+        display_name: '数据分析',
+        version_label: 'v1',
+        python_version: '3.12',
+        imports: ['numpy', 'pandas'],
+        import_policy_mode: 'restricted',
+        allowed_imports: ['numpy'],
+      },
+    },
+  }
+
+  beforeEach(async () => {
+    store = useExperimentStore()
+    experimentsAPI.ensureForLesson.mockResolvedValue(ensureResponse)
+    experimentsAPI.getRecordDetail.mockResolvedValue(envDetailResponse)
+    experimentsAPI.listSubmissions.mockResolvedValue({ data: { items: [] } })
+    await store.openLesson(20, 99)
+  })
+
+  it('loads environment summary from record detail', () => {
+    expect(store.environmentSummary).toEqual({
+      display_name: '数据分析',
+      version_label: 'v1',
+      python_version: '3.12',
+      imports: ['numpy', 'pandas'],
+      import_policy_mode: 'restricted',
+      allowed_imports: ['numpy'],
+    })
+  })
+
+  it('writes synthetic Chinese error output for IMPORT_NOT_ALLOWED without traceback', async () => {
+    experimentsAPI.executeCell.mockRejectedValue({
+      response: {
+        status: 422,
+        data: { detail: { code: 'IMPORT_NOT_ALLOWED', message: 'numpy 未在本实验允许范围内' } },
+      },
+    })
+    await store.executeCell('editable')
+    const out = store.cells.find(c => c.id === 'editable').outputs
+    expect(out.outputs[0].msg_type).toBe('error')
+    expect(out.outputs[0].content.text).toBe('numpy 未在本实验允许范围内')
+    expect(out.outputs[0].content.text).not.toMatch(/Traceback/)
+  })
+
+  it('writes synthetic Chinese error output for IMPORT_NOT_INSTALLED without traceback', async () => {
+    experimentsAPI.executeCell.mockRejectedValue({
+      response: {
+        status: 500,
+        data: { detail: { code: 'IMPORT_NOT_INSTALLED', message: '环境配置错误：本实验允许 numpy，但当前环境未安装' } },
+      },
+    })
+    await store.executeCell('editable')
+    const out = store.cells.find(c => c.id === 'editable').outputs
+    expect(out.outputs[0].content.text).toBe('环境配置错误：本实验允许 numpy，但当前环境未安装')
+    expect(out.outputs[0].content.text).not.toMatch(/Traceback|ModuleNotFoundError/)
+  })
+})

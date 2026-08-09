@@ -18,7 +18,7 @@ def _setup_experiment(client, db_sf):
     s_tok, _ = login(client, "esub_s")
 
     c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "ESubC", "status": "published"})
+                    json={"title": "ESubC", "status": "published", "visibility": "public"})
     cid = c.json()["id"]
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
 

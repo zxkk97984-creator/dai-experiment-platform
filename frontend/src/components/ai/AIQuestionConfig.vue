@@ -9,72 +9,38 @@
     <div v-else-if="error" class="error">{{ error }}</div>
 
     <template v-else>
-      <!-- 评分模式 -->
-      <div class="form-group">
-        <label>评分模式</label>
-        <select v-model="config.grading_mode" @change="dirty = true">
-          <option value="legacy">legacy — 传统判题（仅通过/不通过）</option>
-          <option value="shadow">shadow — AI 评分仅教师可见，正式分用旧规则</option>
-          <option value="active">active — AI 评分计入正式成绩</option>
-        </select>
+      <!-- Rubric 门禁前置提示：shadow/active 且无可锁定 Rubric 时提前告知（后端 503 仍兜底） -->
+      <div v-if="rubricGateMsg" class="gate-warn" role="alert">
+        <p class="gate-warn-text">⚠ {{ rubricGateMsg }}</p>
       </div>
 
-      <!-- 测试组（F/R） -->
-      <div class="section">
-        <div class="section-header">
-          <h5>功能/鲁棒性测试组 (F + R = 70)</h5>
-          <button class="btn-sm btn-outline" @click="addGroup">+ 添加测试组</button>
-        </div>
-        <div v-if="!config.test_groups?.length" class="hint">暂无测试组。F 组满分总计 60，R 组满分总计 10。</div>
-        <div v-for="(g, i) in config.test_groups" :key="i" class="group-card">
-          <div class="group-row">
-            <input v-model="g.id" placeholder="ID (如 F1)" class="input-sm" @change="dirty = true" />
-            <input v-model="g.name" placeholder="名称" class="input-sm" @change="dirty = true" />
-            <select v-model="g.dimension" class="input-sm" @change="dirty = true">
-              <option value="F">F 功能 (满分合计 60)</option>
-              <option value="R">R 鲁棒性 (满分合计 10)</option>
-            </select>
-            <input v-model.number="g.max_score" type="number" placeholder="满分" class="input-sm input-num" @change="dirty = true" />
-            <button class="btn-sm btn-danger-text" @click="removeGroup(i)">删除</button>
-          </div>
-          <textarea v-model="g.tests" rows="4" class="code-editor" placeholder="pytest 测试代码..." @change="dirty = true"></textarea>
-        </div>
-        <div v-if="validationMsg" :class="validationMsg.ok ? 'hint-ok' : 'hint-err'">{{ validationMsg.text }}</div>
+      <!-- 纯表单层：读写配置数据；保存/Rubric/AI 生成由本容器负责 -->
+      <AiConfigForm
+        :key="formKey"
+        :model-value="config"
+        :generating="generating"
+        @update:model-value="onFormUpdate"
+        @generate-test-groups="onGenerateTestGroups"
+      />
+
+      <!-- 测试组生成状态：成功提示回填；失败保留旧草稿并展示逐项问题 -->
+      <div v-if="generateMsg" :class="generateOk ? 'gen-success' : 'gen-error'" role="status">
+        <p class="gen-msg">{{ generateMsg }}</p>
+        <ul v-if="generateIssues.length" class="gen-issues">
+          <li v-for="(issue, i) in generateIssues" :key="i">{{ issue }}</li>
+        </ul>
       </div>
 
-      <!-- 教师约束 -->
-      <div class="form-group">
-        <label>教师硬性要求 (JSON，可选)</label>
-        <textarea v-model="constraintsStr" rows="3" class="code-editor" placeholder='{"required_algorithm": "二分查找", "required_complexity": "O(log n)"}' @change="dirty = true"></textarea>
-      </div>
-
-      <!-- 参考答案 -->
-      <div class="form-group">
-        <label>参考答案 (可选，仅供 AI 理解题目)</label>
-        <textarea v-model="config.reference_solution" rows="6" class="code-editor" placeholder="# 参考实现..." @change="dirty = true"></textarea>
-      </div>
-
-      <!-- 上限规则 -->
-      <div class="section">
-        <div class="section-header">
-          <h5>分数上限规则</h5>
-          <button class="btn-sm btn-outline" @click="addCapRule">+ 添加上限</button>
-        </div>
-        <div v-if="!config.score_cap_rules?.length" class="hint">无上限规则。</div>
-        <div v-for="(r, i) in config.score_cap_rules" :key="i" class="cap-row">
-          <input v-model="r.id" placeholder="ID" class="input-sm" @change="dirty = true" />
-          <select v-model="r.condition_code" class="input-sm" @change="dirty = true">
-            <option value="off_topic">偏题</option>
-            <option value="hardcoded_public_examples">硬编码样例</option>
-            <option value="required_algorithm_missing">缺失要求算法</option>
-            <option value="required_complexity_missing">复杂度不达标</option>
-            <option value="dangerous_operation">危险操作</option>
-          </select>
-          <input v-model="r.description" placeholder="描述（必填）" class="input-sm" @change="dirty = true" style="width:120px" />
-          <input v-model.number="r.cap" type="number" placeholder="上限分" class="input-sm input-num" @change="dirty = true" />
-          <button class="btn-sm btn-danger-text" @click="removeCapRule(i)">删除</button>
-        </div>
-      </div>
+      <!-- 覆盖确认：已有草稿时先确认，默认取消；不提供自动合并 -->
+      <ConfirmDialog
+        v-if="showOverwriteDialog"
+        title="覆盖当前测试组草稿？"
+        message="生成结果将覆盖当前测试组草稿，且不会自动保存。确认后原草稿将被替换。"
+        confirm-text="确认生成"
+        cancel-text="取消"
+        @confirm="onConfirmOverwrite"
+        @cancel="showOverwriteDialog = false"
+      />
 
       <!-- Rubric -->
       <div class="section">
@@ -104,8 +70,13 @@
 </template>
 
 <script setup>
-import { ref, watch, computed } from 'vue'
+// AIQuestionConfig：AI 评分配置「持久化容器层」——已有题目（questionId 必填）的
+// 远程配置编辑器：GET 加载 / PUT 保存 / Rubric 生成与锁定。
+// 表单编辑能力委托给 AiConfigForm（纯表单层），本层只管数据加载与落库。
+import { ref, watch, computed, nextTick } from 'vue'
 import { aiGradingAPI } from '../../api/aiGrading.js'
+import AiConfigForm from './AiConfigForm.vue'
+import ConfirmDialog from '../ui/ConfirmDialog.vue'
 
 const props = defineProps({
   kind: { type: String, required: true },  // 'assignment' | 'exam'
@@ -116,29 +87,43 @@ const props = defineProps({
 defineEmits(['close'])
 
 const config = ref({ grading_mode: 'active', teacher_constraints: {}, reference_solution: null, test_groups: [], score_cap_rules: [] })
-const constraintsStr = ref('')
 const loading = ref(false)
 const saving = ref(false)
-const dirty = ref(false)
 const saveMsg = ref('')
 const saveOk = ref(false)
 const error = ref('')
 const rubrics = ref([])
 const rubricLoading = ref(false)
+const formKey = ref(0)  // 表单层重挂 key：加载/切换题目后按最新配置重新初始化
 
-const validationMsg = computed(() => {
-  const groups = config.value.test_groups || []
-  if (!groups.length) return null
-  const fSum = groups.filter(g => g.dimension === 'F').reduce((s, g) => s + (Number(g.max_score) || 0), 0)
-  const rSum = groups.filter(g => g.dimension === 'R').reduce((s, g) => s + (Number(g.max_score) || 0), 0)
-  const fOk = Math.abs(fSum - 60) < 1e-6
-  const rOk = Math.abs(rSum - 10) < 1e-6
-  if (fOk && rOk) return { ok: true, text: `✓ F 总计 ${fSum}/60, R 总计 ${rSum}/10` }
-  return { ok: false, text: `⚠ F 总计 ${fSum}/60 (需=60), R 总计 ${rSum}/10 (需=10)` }
+// AI 生成测试组状态（请求/通知/回填由本容器管理，表单层只上抛事件）
+const generating = ref(false)
+const generateMsg = ref('')
+const generateOk = ref(false)
+const generateIssues = ref([])
+const showOverwriteDialog = ref(false)
+let requestSeq = 0  // 请求序号：切题/关闭后自增，使迟到响应失效
+
+// 脏标记：当前值与「已加载/已保存基线」不同即为有未保存修改
+const initialSnapshot = ref('')
+const snapshot = () => JSON.stringify(config.value)
+const dirty = computed(() => snapshot() !== initialSnapshot.value)
+
+// Rubric 门禁：shadow/active 必须先生成并锁定 Rubric 才能发布
+const rubricGateMsg = computed(() => {
+  if (config.value.grading_mode === 'legacy') return ''
+  if (rubrics.value.some((r) => r.status === 'locked')) return ''
+  return `当前为 ${config.value.grading_mode} 模式，尚无可发布的 Rubric，请先生成并锁定`
 })
 
 async function load() {
   loading.value = true; error.value = ''
+  // 切换题目：作废在途生成请求并清空生成状态，禁止迟到响应污染新题目
+  requestSeq++
+  generating.value = false
+  generateMsg.value = ''
+  generateIssues.value = []
+  showOverwriteDialog.value = false
   try {
     const [cfgRes, rubRes] = await Promise.all([
       aiGradingAPI.getConfig(props.kind, props.questionId),
@@ -151,57 +136,29 @@ async function load() {
       test_groups: cfgRes.data.test_groups || [],
       score_cap_rules: cfgRes.data.score_cap_rules || [],
     }
-    constraintsStr.value = JSON.stringify(config.value.teacher_constraints, null, 2)
     rubrics.value = rubRes.data.items || []
+    formKey.value++  // 按最新配置重新初始化表单层
+    initialSnapshot.value = snapshot()  // 加载值视为干净基线
   } catch (e) {
     error.value = e.response?.data?.detail?.message || e.message || '加载失败'
   } finally { loading.value = false }
 }
 
-function addGroup() {
-  if (!config.value.test_groups) config.value.test_groups = []
-  config.value.test_groups.push({ id: '', name: '', dimension: 'F', max_score: 0, tests: '' })
-  dirty.value = true
-}
-
-function removeGroup(i) {
-  config.value.test_groups.splice(i, 1)
-  dirty.value = true
-}
-
-function addCapRule() {
-  if (!config.value.score_cap_rules) config.value.score_cap_rules = []
-  config.value.score_cap_rules.push({ id: '', description: '', condition_code: 'off_topic', cap: 0 })
-  dirty.value = true
-}
-
-function removeCapRule(i) {
-  config.value.score_cap_rules.splice(i, 1)
-  dirty.value = true
-}
+// 表单层编辑结果上抛：直接接管配置数据（脏标记经快照比较自动置位）
+function onFormUpdate(v) { config.value = v }
 
 async function save() {
   saving.value = true; saveMsg.value = ''
   try {
-    // 解析约束 JSON：空字符串→{}，非法 JSON→阻止保存
-    let constraints = {}
-    const raw = (constraintsStr.value || '').trim()
-    if (raw) {
-      try { constraints = JSON.parse(raw) }
-      catch {
-        saveMsg.value = '教师约束 JSON 格式错误，请修正后重试'
-        saveOk.value = false
-        return
-      }
-    }
     await aiGradingAPI.updateConfig(props.kind, props.questionId, {
       grading_mode: config.value.grading_mode,
-      teacher_constraints: constraints,
+      teacher_constraints: config.value.teacher_constraints || {},
       reference_solution: config.value.reference_solution || null,
       test_groups: config.value.test_groups,
       score_cap_rules: config.value.score_cap_rules,
     })
-    saveOk.value = true; saveMsg.value = '保存成功'; dirty.value = false
+    saveOk.value = true; saveMsg.value = '保存成功'
+    initialSnapshot.value = snapshot()  // 保存成功视为干净基线
   } catch (e) {
     saveOk.value = false; saveMsg.value = e.response?.data?.detail?.message || e.message || '保存失败'
   } finally { saving.value = false }
@@ -239,7 +196,62 @@ async function lockRubricAction(id) {
   }
 }
 
+// ── AI 生成测试组（只生成、不保存；结果回填草稿并标记 dirty） ──
+
+function onGenerateTestGroups() {
+  if (generating.value) return  // 生成中禁用防重复
+  generateMsg.value = ''
+  generateIssues.value = []
+  // 已有草稿先确认覆盖（默认取消，不提供自动合并）
+  if (config.value.test_groups?.length) {
+    showOverwriteDialog.value = true
+  } else {
+    startGenerate()
+  }
+}
+
+function onConfirmOverwrite() {
+  showOverwriteDialog.value = false
+  startGenerate()
+}
+
+async function startGenerate() {
+  generating.value = true
+  generateMsg.value = ''
+  generateIssues.value = []
+  const seq = ++requestSeq
+  const myKind = props.kind
+  const myQuestionId = props.questionId
+  try {
+    const res = await aiGradingAPI.generateTestGroups(props.kind, props.questionId, {
+      teacher_constraints: config.value.teacher_constraints || {},
+      reference_solution: config.value.reference_solution || null,
+    })
+    // 迟到响应保护：期间已切题则丢弃，禁止回填到新题目
+    if (seq !== requestSeq || myKind !== props.kind || myQuestionId !== props.questionId) return
+    // 整体替换草稿（不做自动合并），dirty 经快照比较自然置位；不触发 PUT
+    config.value = { ...config.value, test_groups: res.data.test_groups }
+    formKey.value++  // 表单层按新测试组重新初始化
+    generateOk.value = true
+    generateMsg.value = '已回填草稿，请检查并保存'
+    await nextTick()
+    document.getElementById('test-groups-section')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  } catch (e) {
+    if (seq !== requestSeq) return
+    const detail = e.response?.data?.detail
+    generateOk.value = false
+    generateMsg.value = detail?.message || e.message || '生成失败'
+    generateIssues.value = detail?.fields?.issues || []
+  } finally {
+    if (seq === requestSeq) generating.value = false
+  }
+}
+
 watch(() => props.expanded, (val) => { if (val) load() }, { immediate: true })
+// 右侧栏单实例复用：切换题目（questionId 变化）时重新加载该题配置；
+// 切换本身使在途生成请求的序号失效（迟到响应在 startGenerate 中被丢弃）
+watch(() => props.questionId, () => { if (props.expanded) load() })
 </script>
 
 <style scoped>
@@ -252,23 +264,7 @@ watch(() => props.expanded, (val) => { if (val) load() }, { immediate: true })
 .section { margin: 16px 0; }
 .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .section-header h5 { margin: 0; font-size: 13px; font-weight: 600; color: #475569; }
-.form-group { margin: 12px 0; }
-.form-group label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; color: #475569; }
-.form-group select { width: 100%; padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; }
-.group-card { border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; margin: 8px 0; background: #fff; }
-.group-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.cap-row { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
 .rubric-row { display: flex; gap: 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid #eee; }
-.input-sm { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; }
-.input-num { width: 70px; }
-.code-editor {
-  width: 100%; background: #0F172A; color: #E2E8F0; border: 1px solid #1E293B;
-  border-radius: 4px; padding: 8px; font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 12px; line-height: 1.5; resize: vertical; margin-top: 4px;
-}
-.hint { color: #94a3b8; font-size: 12px; }
-.hint-ok { color: #16a34a; font-size: 12px; margin-top: 4px; }
-.hint-err { color: #dc2626; font-size: 12px; margin-top: 4px; }
 .badge-sm { padding: 1px 6px; border-radius: 10px; font-size: 11px; }
 .badge-draft { background: #fef3c7; color: #92400e; }
 .badge-locked { background: #d1fae5; color: #065f46; }
@@ -278,10 +274,24 @@ watch(() => props.expanded, (val) => { if (val) load() }, { immediate: true })
 .btn-primary { padding: 6px 16px; background: #3b82f6; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-outline { border: 1px solid #3b82f6; color: #3b82f6; background: #fff; }
-.btn-danger-text { border: none; background: none; color: #dc2626; cursor: pointer; }
 .loading { color: #666; }
 .error { color: #dc3545; font-size: 13px; }
 .success { color: #16a34a; font-size: 13px; }
 .text-sm { font-size: 12px; }
 .text-secondary { color: #94a3b8; }
+/* 测试组生成状态：成功绿 / 失败红（保留旧草稿，展示逐项问题） */
+.gen-success { margin: 10px 0; padding: 8px 12px; border: 1px solid #86efac; border-radius: 6px; background: #f0fdf4; }
+.gen-error { margin: 10px 0; padding: 8px 12px; border: 1px solid #fca5a5; border-radius: 6px; background: #fef2f2; }
+.gen-msg { margin: 0; font-size: 12.5px; font-weight: 600; }
+.gen-success .gen-msg { color: #15803d; }
+.gen-error .gen-msg { color: #b91c1c; }
+.gen-issues { margin: 6px 0 0; padding-left: 18px; }
+.gen-issues li { font-size: 12px; color: #991b1b; line-height: 1.6; }
+/* Rubric 门禁前置提示（浅橙警告卡，与 QuestionEditView 的 qe-warn-card 一致） */
+.gate-warn {
+  margin: 0 0 12px; padding: 10px 12px;
+  border: 1px solid rgba(245, 138, 7, 0.35); border-radius: 8px;
+  background: #fffbeb;
+}
+.gate-warn-text { margin: 0; font-size: 12.5px; font-weight: 600; color: #b45309; line-height: 1.5; }
 </style>

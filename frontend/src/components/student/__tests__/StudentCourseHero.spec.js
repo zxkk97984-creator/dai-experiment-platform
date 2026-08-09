@@ -66,3 +66,52 @@ describe('StudentCourseHero', () => {
     expect(chip.classes()).toContain('hero-chip')
   })
 })
+
+describe('StudentCourseHero 课程封面', () => {
+  it('受管封面 key 渲染为公开媒体 URL', () => {
+    const wrapper = mountHero({ course: { ...course, cover: 'covers/7/abc.webp' } })
+    const img = wrapper.find('.hero-cover__img')
+    expect(img.exists()).toBe(true)
+    expect(img.attributes('src')).toBe('/api/v1/media/course-covers/7?v=covers%2F7%2Fabc.webp')
+    expect(img.attributes('alt')).toBe('机器学习导论课程封面')
+  })
+
+  it('历史 HTTP(S) URL 原样渲染', () => {
+    const legacy = 'https://legacy.example.com/course-cover.jpg'
+    const wrapper = mountHero({ course: { ...course, cover: legacy } })
+    expect(wrapper.find('.hero-cover__img').attributes('src')).toBe(legacy)
+  })
+
+  it('无封面时显示纯色占位块', () => {
+    const wrapper = mountHero()
+    expect(wrapper.find('.hero-cover__img').exists()).toBe(false)
+    expect(wrapper.find('.hero-cover').exists()).toBe(true)
+  })
+
+  it('图片加载失败后回退占位块', async () => {
+    const wrapper = mountHero({ course: { ...course, cover: 'covers/7/abc.webp' } })
+    await wrapper.find('.hero-cover__img').trigger('error')
+    expect(wrapper.find('.hero-cover__img').exists()).toBe(false)
+    expect(wrapper.find('.hero-cover').exists()).toBe(true)
+  })
+
+  it('未选课时同样显示封面', () => {
+    const wrapper = mountHero({
+      enrolled: false,
+      course: { ...course, cover: 'covers/7/abc.png' },
+    })
+    expect(wrapper.find('.hero-cover__img').exists()).toBe(true)
+    expect(wrapper.get('.hero-enroll-btn').text()).toContain('选课')
+  })
+
+  it('封面变化时重置加载失败状态', async () => {
+    const wrapper = mountHero({ course: { ...course, cover: 'covers/7/broken.png' } })
+    await wrapper.find('.hero-cover__img').trigger('error')
+    expect(wrapper.find('.hero-cover__img').exists()).toBe(false)
+
+    await wrapper.setProps({ course: { ...course, cover: 'covers/7/new.png' } })
+    const img = wrapper.find('.hero-cover__img')
+    expect(img.exists()).toBe(true)
+    expect(img.attributes('src')).toBe('/api/v1/media/course-covers/7?v=covers%2F7%2Fnew.png')
+  })
+})

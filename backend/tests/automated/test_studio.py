@@ -504,7 +504,8 @@ class FakeKernelManager:
         self.initialized = {}
         self.fail_source = None
 
-    def get_or_create_session(self, record_id, lesson_storage_dir=""):
+    def get_or_create_session(self, record_id, image_ref=None,
+                              environment_version_id=None, lesson_storage_dir=""):
         self.events.append(("session", record_id))
         self.alive.add(record_id)
         return object()

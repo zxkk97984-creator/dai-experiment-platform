@@ -59,5 +59,11 @@ judge-work/
 # 运行时代码样本（不纳入版本控制）
 backend/storage/exec*.json
 
+# 教师上传视频运行时文件（目录由服务首次上传时创建，不提交 .gitkeep 或示例视频）
+backend/storage/videos/
+
+# 课程封面运行时文件（目录由服务首次上传时创建，不提交 .gitkeep 或示例图片）
+backend/storage/covers/
+
 # 本地启动脚本
 start.bat

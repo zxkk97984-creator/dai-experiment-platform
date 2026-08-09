@@ -11,7 +11,7 @@ def test_exam_submission_and_grade_visibility(client, db_session_factory):
     course_id = client.post(
         "/api/v1/courses",
         headers=auth_header(teacher_token),
-        json={"title": "深度学习", "status": "published"},
+        json={"title": "深度学习", "status": "published", "visibility": "public"},
     ).json()["id"]
     client.post(f"/api/v1/courses/{course_id}/enroll", headers=auth_header(student_token))
 

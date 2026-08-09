@@ -1,6 +1,8 @@
 """AI 评分 API——题目配置、Rubric 管理、教师复核、重评"""
 from __future__ import annotations
 
+import logging
+import tempfile
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
@@ -16,12 +18,21 @@ from app.models import (
     ExamSubmission, GradeOverride, JudgeQuestion, QuestionRubric, Submission, User,
 )
 from app.schemas import PaginatedResponse
-from app.schemas.ai_grading import AIQuestionConfigUpdate, GradeOverrideCreate, RubricDocument
-from app.services.ai_client import DeepSeekClient
-from app.services.rubric_service import (
-    build_question_snapshot, generate_rubric, get_latest_locked_rubric,
-    lock_rubric, update_draft_rubric,
+from app.schemas.ai_grading import (
+    AIQuestionConfigUpdate, GradeOverrideCreate, RubricDocument,
+    TestGroupsGenerateRequest, TestGroupsGenerateResponse,
 )
+from app.services.ai_client import AIServiceError, DeepSeekClient
+from app.services.ai_prompts import build_test_group_snapshot
+from app.services.rubric_service import (
+    RubricGenerationError, build_question_snapshot, generate_rubric,
+    get_latest_locked_rubric, lock_rubric, update_draft_rubric,
+)
+from app.services.test_group_generator import (
+    PreflightUnavailableError, TestGroupValidationError, generate_test_groups,
+)
+
+logger = logging.getLogger("dai.ai_grading")
 from app.services.ai_grading_queue import enqueue_ai_grade
 from app.services.score_merger import merge_scores
 
@@ -220,9 +231,121 @@ def generate_rubric_endpoint(
     )
 
     client = DeepSeekClient(settings)
-    rubric = generate_rubric(db, client, kind=kind, question_id=question_id, snapshot=snapshot)
+    try:
+        rubric = generate_rubric(db, client, kind=kind, question_id=question_id, snapshot=snapshot)
+    except RubricGenerationError as exc:
+        # AI 输出结构不合规：可读错误 + 可重试，而非 500
+        raise api_error(502, "AI_GENERATION_INVALID", str(exc), fields={"retryable": True})
     db.commit()
     return {"id": rubric.id, "version": rubric.version, "status": rubric.status, "rubric_json": rubric.rubric_json}
+
+
+@router.post(
+    "/questions/{kind}/{question_id}/test-groups/generate",
+    response_model=TestGroupsGenerateResponse,
+)
+def generate_test_groups_endpoint(
+    kind: str, question_id: int,
+    data: TestGroupsGenerateRequest | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+    redis_client=Depends(get_redis_client),
+):
+    """AI 生成 F/R 测试组——只生成、不保存。
+
+    教师草稿字段（teacher_constraints / reference_solution）未传时读取
+    数据库配置；hidden_tests、题干等权威数据一律取自服务端，不接受
+    客户端伪造。响应与错误日志均不含 hidden_tests 原文。
+    """
+    _teacher_or_admin(current_user)
+    course_id = _get_course_id_for_question(db, kind, question_id)
+    _ensure_course_teacher(db, course_id, current_user)
+
+    if not settings.ai_ready:
+        raise api_error(503, "AI_NOT_READY", "AI 服务未配置 API Key")
+
+    # 限流：每用户每题目 60 秒内最多 5 次（redis 故障不阻断生成）
+    limit_key = f"ai:testgroups:gen:{current_user.id}:{kind}:{question_id}"
+    try:
+        count = redis_client.incr(limit_key)
+        if count == 1:
+            redis_client.expire(limit_key, 60)
+    except Exception:
+        count = 0
+    if count > 5:
+        raise api_error(429, "AI_RATE_LIMITED", "生成过于频繁，请稍后再试")
+
+    if kind == "assignment":
+        q = db.get(JudgeQuestion, question_id)
+    else:
+        q = db.get(ExamQuestion, question_id)
+    if q is None:
+        raise api_error(404, "NOT_FOUND", "题目不存在")
+
+    teacher_constraints = (
+        data.teacher_constraints
+        if data is not None and data.teacher_constraints is not None
+        else q.teacher_constraints
+    )
+    reference_solution = (
+        data.reference_solution
+        if data is not None and data.reference_solution is not None
+        else q.reference_solution
+    )
+
+    snapshot = build_test_group_snapshot(
+        title=getattr(q, "title", None) or getattr(q, "prompt", ""),
+        description=(
+            getattr(q, "description", None)
+            if hasattr(q, "description") else getattr(q, "prompt", None)
+        ),
+        function_name=getattr(q, "function_name", None),
+        signature=getattr(q, "signature", None),
+        starter_code=getattr(q, "starter_code", None),
+        hidden_tests=getattr(q, "hidden_tests", None),
+        reference_solution=reference_solution,
+        teacher_constraints=teacher_constraints,
+    )
+
+    client = DeepSeekClient(settings)
+    try:
+        with tempfile.TemporaryDirectory(prefix="dai-testgen-") as tmp:
+            result = generate_test_groups(
+                client, snapshot, settings,
+                workdir=tmp,
+                host_workdir=settings.judge_host_work_dir or None,
+            )
+    except TestGroupValidationError as exc:
+        # 生成的 issues 只描述生成结果的缺陷，不含 hidden_tests 原文
+        raise api_error(
+            502, "AI_GENERATION_INVALID",
+            "AI 生成测试组不合规，请重新生成或手动修改",
+            fields={"issues": exc.issues, "retryable": True},
+        )
+    except PreflightUnavailableError as exc:
+        raise api_error(503, "JUDGE_UNAVAILABLE", str(exc))
+    except AIServiceError as exc:
+        if exc.code == "timeout":
+            raise api_error(504, "AI_GENERATION_TIMEOUT", "AI 生成超时，请稍后重试")
+        if exc.code == "http_429":
+            raise api_error(429, "AI_RATE_LIMITED", "AI 服务限流，请稍后重试")
+        if exc.retryable:
+            raise api_error(502, "AI_GENERATION_INVALID", f"AI 服务暂时不可用: {exc}", fields={"retryable": True})
+        raise api_error(502, "AI_GENERATION_INVALID", f"AI 生成失败: {exc}", fields={"retryable": False})
+
+    logger.info(
+        "test_groups_generated",
+        extra={
+            "generation_id": result.generation_id,
+            "kind": kind, "question_id": question_id, "user_id": current_user.id,
+            "group_count": result.validation.group_count,
+            "f_group_count": result.validation.f_group_count,
+            "r_group_count": result.validation.r_group_count,
+            "warnings": result.warnings,
+        },
+    )
+    return result
 
 
 @router.patch("/rubrics/{rubric_id}")

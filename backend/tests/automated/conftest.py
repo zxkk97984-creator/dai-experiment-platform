@@ -36,6 +36,13 @@ def test_settings(tmp_path):
         judge_use_docker=False,
         judge_timeout_seconds=5,
         studio_storage_dir=str(tmp_path / "studio"),
+        # 测试视频目录指向临时目录，绝不写入真实 backend/storage/videos/
+        video_storage_dir=str(tmp_path / "videos"),
+        video_max_upload_bytes=500 * 1024 * 1024,
+        video_playback_url_ttl_seconds=3600,
+        # 测试封面目录指向临时目录，绝不写入真实 backend/storage/covers/
+        cover_storage_dir=str(tmp_path / "covers"),
+        cover_max_upload_bytes=5 * 1024 * 1024,
     )
 
 

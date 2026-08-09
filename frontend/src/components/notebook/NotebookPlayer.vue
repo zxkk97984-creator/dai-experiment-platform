@@ -173,6 +173,21 @@ function handleUpdateSource(cellId, source) {
 
     <p v-if="store.entryDescription" class="player-desc">{{ store.entryDescription }}</p>
 
+    <!-- Phase 5：环境提示（学生无需选择/切换/确认，只读展示） -->
+    <div v-if="store.environmentSummary" class="player-env">
+      <span class="env-dot"></span>
+      <span class="env-name">{{ store.environmentSummary.display_name }} {{ store.environmentSummary.version_label }}</span>
+      <span v-if="store.environmentSummary.imports?.length" class="env-imports">
+        可用库：{{ store.environmentSummary.imports.join(' · ') }}
+      </span>
+      <span
+        v-if="store.environmentSummary.import_policy_mode === 'restricted' && store.environmentSummary.allowed_imports?.length"
+        class="env-imports"
+      >
+        允许导入：{{ store.environmentSummary.allowed_imports.join(' · ') }}
+      </span>
+    </div>
+
     <!-- 提交状态栏 -->
     <div v-if="store.submitAttemptCount > 0 || store.submitting" class="submit-bar">
       <span v-if="store.submitting" class="submit-status submitting">📤 正在提交...</span>
@@ -250,7 +265,7 @@ function handleUpdateSource(cellId, source) {
 
 .save-status { display: flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--text-secondary); white-space: nowrap; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
-.save-status.dirty .status-dot { background: var(--warning); }
+.save-status.dirty .status-dot { background: var(--primary); }
 .save-status.saving .status-dot { animation: pulse 0.8s infinite; }
 .save-status.conflict .status-dot { background: var(--error); }
 .save-status.saved .status-dot { background: var(--success); }
@@ -275,7 +290,7 @@ function handleUpdateSource(cellId, source) {
 .menu-item:hover { background: var(--surface-raised); }
 .menu-item:disabled { opacity: .4; cursor: not-allowed; }
 .menu-divider { border-top: 1px solid var(--border); margin: 4px 0; }
-.menu-submit { color: var(--accent); font-weight: 500; }
+.menu-submit { color: var(--primary); font-weight: 500; }
 
 .submit-bar {
   display: flex; align-items: center; gap: 8px;
@@ -284,11 +299,23 @@ function handleUpdateSource(cellId, source) {
   font-size: var(--text-xs); color: var(--text-secondary);
   flex-wrap: wrap;
 }
-.submit-status.submitting { color: var(--warning); }
+.submit-status.submitting { color: var(--primary); }
 .submit-status.submitted { color: var(--success); }
 .submit-history-hint { opacity: 0.7; }
 
 .player-desc { font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--space-4); }
+
+/* Phase 5：学生端环境提示条 */
+.player-env {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px; margin-bottom: var(--space-3);
+  background: var(--surface-raised); border: 1px solid var(--border);
+  border-left: 3px solid var(--primary); border-radius: var(--radius-md);
+  font-size: var(--text-xs); color: var(--text-secondary);
+}
+.env-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); flex-shrink: 0; }
+.env-name { color: var(--ink); font-weight: 600; white-space: nowrap; }
+.env-imports { font-family: var(--font-mono); opacity: 0.85; }
 .player-empty { text-align: center; padding: var(--space-12); color: var(--text-secondary); }
 .cell-wrapper { margin-bottom: var(--space-3); }
 

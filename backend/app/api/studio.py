@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Annotated, Literal
 
 from fastapi import (
@@ -43,12 +44,28 @@ def _import_create_form(
     description: Annotated[str | None, Form()] = None,
     lesson_id: Annotated[int | None, Form()] = None,
     module_id: Annotated[int | None, Form()] = None,
+    environment_version_id: Annotated[int | None, Form()] = None,
+    import_policy_mode: Annotated[str | None, Form()] = None,
+    allowed_imports_json: Annotated[str | None, Form()] = None,
 ) -> StudioImportCreate:
+    """导入创建表单——环境字段可选；allowed_imports 以 JSON 数组字符串传输。"""
+    allowed_imports: list[str] = []
+    if allowed_imports_json:
+        try:
+            parsed = json.loads(allowed_imports_json)
+        except ValueError:
+            raise api_error(422, "IMPORT_INVALID_ALLOWED_IMPORTS", "allowed_imports 必须是 JSON 数组")
+        if not isinstance(parsed, list) or not all(isinstance(x, str) for x in parsed):
+            raise api_error(422, "IMPORT_INVALID_ALLOWED_IMPORTS", "allowed_imports 必须是字符串数组")
+        allowed_imports = parsed
     return StudioImportCreate(
         name=name,
         description=description,
         lesson_id=lesson_id,
         module_id=module_id,
+        environment_version_id=environment_version_id,
+        import_policy_mode=import_policy_mode or "unrestricted",
+        allowed_imports=allowed_imports,
     )
 
 
@@ -103,6 +120,9 @@ async def import_new_template(
         description=payload.description,
         lesson_id=payload.lesson_id,
         module_id=payload.module_id,
+        environment_version_id=payload.environment_version_id,
+        import_policy_mode=payload.import_policy_mode,
+        allowed_imports=payload.allowed_imports,
         imported=imported,
     )
     return studio_service.template_read(db, template)
@@ -275,7 +295,7 @@ def run_preview(
 ):
     template = studio_service.get_managed_template(db, template_id, current_user)
     result = studio_service.preview_run(
-        template, current_user, payload.cell_id, get_kernel_manager()
+        template, current_user, payload.cell_id, get_kernel_manager(), db
     )
     return StudioPreviewRunResponse(**result)
 

@@ -1,10 +1,11 @@
 <script setup>
-// StudentCourseHero：课程概览英雄卡（164–168px 高）。
-// 面包屑 + 课程身份 + 低对比元数据 chips + 进度 + CTA。
+// StudentCourseHero：课程概览英雄卡。
+// 面包屑 + 课程封面（或占位）+ 课程身份 + 低对比元数据 chips + 进度 + CTA。
 
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppIcon from '../ui/AppIcon.vue'
 import UiProgress from '../ui/UiProgress.vue'
+import { getCourseCoverUrl } from '../../utils/courseCover.js'
 import { clampProgress } from '../../utils/studentUi.js'
 
 const props = defineProps({
@@ -14,11 +15,17 @@ const props = defineProps({
   completedLessons: { type: Number, default: 0 },
   totalChapters: { type: Number, default: 0 },
   enrolled: { type: Boolean, default: false },
+  enrolling: { type: Boolean, default: false },
 })
 
 defineEmits(['continue', 'enroll', 'back'])
 
 const safeProgress = computed(() => clampProgress(props.progress))
+
+const coverUrl = computed(() => getCourseCoverUrl(props.course))
+const coverFailed = ref(false)
+// 封面变化（替换/移除）时重置加载失败状态，新 URL 重新尝试
+watch(() => props.course?.cover, () => { coverFailed.value = false })
 </script>
 
 <template>
@@ -30,6 +37,18 @@ const safeProgress = computed(() => clampProgress(props.progress))
     </div>
 
     <div class="hero-body">
+      <!-- 封面：无封面或加载失败时显示纯色占位块，不循环重试损坏 URL -->
+      <div class="hero-cover">
+        <img
+          v-if="coverUrl && !coverFailed"
+          class="hero-cover__img"
+          :src="coverUrl"
+          :alt="`${course.title}课程封面`"
+          @error="coverFailed = true"
+        />
+        <AppIcon v-else name="image" :size="28" />
+      </div>
+
       <div class="hero-identity">
         <h1 class="hero-title">{{ course.title }}</h1>
         <p class="hero-desc" v-if="course.description">{{ course.description }}</p>
@@ -55,8 +74,14 @@ const safeProgress = computed(() => clampProgress(props.progress))
         >
           继续学习
         </button>
-        <button v-else type="button" class="btn-primary hero-enroll-btn" @click="$emit('enroll')">
-          立即选课
+        <button
+          v-else
+          type="button"
+          class="btn-primary hero-enroll-btn"
+          :disabled="enrolling"
+          @click="$emit('enroll')"
+        >
+          {{ enrolling ? '选课中…' : '立即选课' }}
         </button>
       </div>
     </div>
@@ -68,7 +93,8 @@ const safeProgress = computed(() => clampProgress(props.progress))
   display: flex;
   flex-direction: column;
   gap: 12px;
-  height: 166px;
+  /* 最小高度容纳封面（16:9），内容更高时自然撑开 */
+  min-height: 166px;
   padding: 18px 24px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -107,6 +133,27 @@ const safeProgress = computed(() => clampProgress(props.progress))
   align-items: center;
   gap: 24px;
   min-width: 0;
+}
+
+/* 封面 16:9 固定比例，flex-shrink: 0 保证不挤压进度与 CTA */
+.hero-cover {
+  flex-shrink: 0;
+  width: 168px;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-control);
+  overflow: hidden;
+  background: var(--surface-raised, #f1f5f9);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary, #94a3b8);
+}
+.hero-cover__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .hero-identity {
@@ -176,8 +223,10 @@ const safeProgress = computed(() => clampProgress(props.progress))
 }
 
 @media (max-width: 767.98px) {
-  .course-hero { height: auto; padding: 16px; }
+  .course-hero { padding: 16px; }
   .hero-body { flex-direction: column; align-items: stretch; gap: 14px; }
+  /* 移动端封面全宽，保持稳定 16:9 区域 */
+  .hero-cover { width: 100%; }
   .hero-cta { align-self: stretch; }
   .hero-cta .btn-primary { width: 100%; }
 }

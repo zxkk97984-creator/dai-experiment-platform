@@ -107,3 +107,296 @@ describe('useStudioStore previewRun', () => {
     expect(mocks.saveDraft).not.toHaveBeenCalled()
   })
 })
+
+describe('useStudioStore 新增 Cell', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+  })
+
+  const mk = (id, order) => ({
+    id,
+    type: 'markdown',
+    source: id,
+    order,
+    student_editable: false,
+    source_hidden: false,
+  })
+
+  it('在中间 Cell 后新增代码时插入其后，而不是追加到末尾', () => {
+    const store = useStudioStore()
+    store.cells = [mk('A', 0), mk('B', 1), mk('C', 2)]
+
+    store.addCell('code', 'B')
+
+    const result = store.sortedCells
+    expect(result.map((cell) => cell.id)).toEqual([
+      'A',
+      'B',
+      expect.stringMatching(/^cell-/),
+      'C',
+    ])
+    expect(result.map((cell) => cell.order)).toEqual([0, 1, 2, 3])
+    expect(result[2]).toMatchObject({ type: 'code', student_editable: true })
+  })
+
+  it('复制中间 Cell 时把副本插入原 Cell 后，而不是追加到末尾', () => {
+    const store = useStudioStore()
+    store.cells = [mk('A', 0), mk('B', 1), mk('C', 2)]
+
+    store.duplicateCell('B')
+
+    const result = store.sortedCells
+    expect(result.map((cell) => cell.id)).toEqual([
+      'A',
+      'B',
+      expect.stringMatching(/^cell-/),
+      'C',
+    ])
+    expect(result.map((cell) => cell.order)).toEqual([0, 1, 2, 3])
+    expect(result[2]).toMatchObject({ type: 'markdown', source: 'B' })
+  })
+
+  it('在中间 Cell 后新增讲解时保留讲解类型与只读默认值', () => {
+    const store = useStudioStore()
+    store.cells = [mk('A', 0), mk('B', 1), mk('C', 2)]
+
+    store.addCell('markdown', 'B')
+
+    const result = store.sortedCells
+    expect(result.map((cell) => cell.id)).toEqual([
+      'A',
+      'B',
+      expect.stringMatching(/^cell-/),
+      'C',
+    ])
+    expect(result[2]).toMatchObject({ type: 'markdown', student_editable: false })
+  })
+
+  it('以末尾 Cell 为锚点时追加到末尾', () => {
+    const store = useStudioStore()
+    store.cells = [mk('A', 0), mk('B', 1), mk('C', 2)]
+
+    store.addCell('code', 'C')
+
+    expect(store.sortedCells.map((cell) => cell.id)).toEqual([
+      'A',
+      'B',
+      'C',
+      expect.stringMatching(/^cell-/),
+    ])
+  })
+
+  it('未提供锚点时保持原有的末尾追加行为', () => {
+    const store = useStudioStore()
+    store.cells = [mk('A', 0), mk('B', 1)]
+
+    store.addCell('code')
+
+    expect(store.sortedCells.map((cell) => cell.id)).toEqual([
+      'A',
+      'B',
+      expect.stringMatching(/^cell-/),
+    ])
+  })
+
+  it('原始数组乱序时仍按 order 找到锚点并插入', () => {
+    const store = useStudioStore()
+    store.cells = [mk('C', 2), mk('A', 0), mk('B', 1)]
+
+    store.addCell('code', 'B')
+
+    expect(store.sortedCells.map((cell) => cell.id)).toEqual([
+      'A',
+      'B',
+      expect.stringMatching(/^cell-/),
+      'C',
+    ])
+    expect(store.sortedCells.map((cell) => cell.order)).toEqual([0, 1, 2, 3])
+  })
+
+  it('保存草稿时按插入后的顺序提交连续 order，并按响应顺序回填', async () => {
+    const store = useStudioStore()
+    store.templateId = 20
+    store.draftRevision = 1
+    store.cells = [mk('A', 0), mk('B', 1), mk('C', 2)]
+    store.addCell('markdown', 'B')
+    mocks.saveDraft.mockImplementation(async (_templateId, payload) => ({
+      data: {
+        name: '测试模板',
+        status: 'draft',
+        draft_revision: 2,
+        draft_cells: payload.cells,
+      },
+    }))
+
+    await store.saveDraft()
+
+    const payload = mocks.saveDraft.mock.calls[0][1]
+    expect(payload.cells.map((cell) => cell.id)).toEqual([
+      'A',
+      'B',
+      expect.stringMatching(/^cell-/),
+      'C',
+    ])
+    expect(payload.cells.map((cell) => cell.order)).toEqual([0, 1, 2, 3])
+    expect(store.sortedCells.map((cell) => cell.id)).toEqual(payload.cells.map((cell) => cell.id))
+  })
+})
+
+describe('useStudioStore 排序操作（moveCell / moveCellTo）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+  })
+
+  const mk = (id, order) => ({ id, type: 'markdown', source: '', order, student_editable: true, source_hidden: false })
+  // 有序数组
+  const ordered = () => [mk('A', 0), mk('B', 1), mk('C', 2)]
+  // 数组乱序但 order 正确（模拟加载未排序的极端情况）
+  const shuffled = () => [mk('C', 2), mk('A', 0), mk('B', 1)]
+
+  it('上移有效：B 上移后到第一位', () => {
+    const store = useStudioStore()
+    store.cells = ordered()
+    store.moveCell('B', 'up')
+    expect(store.sortedCells.map(c => c.id)).toEqual(['B', 'A', 'C'])
+    expect(store.sortedCells.map(c => c.order)).toEqual([0, 1, 2])
+    expect(store.dirty).toBe(true)
+  })
+
+  it('下移有效：A 下移后到第二位', () => {
+    const store = useStudioStore()
+    store.cells = ordered()
+    store.moveCell('A', 'down')
+    expect(store.sortedCells.map(c => c.id)).toEqual(['B', 'A', 'C'])
+    expect(store.dirty).toBe(true)
+  })
+
+  it('边界：首位上移、末位下移不生效也不置脏', () => {
+    const store = useStudioStore()
+    store.cells = ordered()
+    store.dirty = false
+    store.moveCell('A', 'up')
+    store.moveCell('C', 'down')
+    expect(store.sortedCells.map(c => c.id)).toEqual(['A', 'B', 'C'])
+    expect(store.dirty).toBe(false)
+  })
+
+  it('数组乱序时移动仍按 order 语义生效', () => {
+    const store = useStudioStore()
+    store.cells = shuffled()
+    store.moveCell('B', 'up')
+    expect(store.sortedCells.map(c => c.id)).toEqual(['B', 'A', 'C'])
+    store.moveCell('C', 'up')
+    expect(store.sortedCells.map(c => c.id)).toEqual(['B', 'C', 'A'])
+  })
+
+  it('moveCellTo：A 拖到第 3 位', () => {
+    const store = useStudioStore()
+    store.cells = ordered()
+    store.moveCellTo('A', 2)
+    expect(store.sortedCells.map(c => c.id)).toEqual(['B', 'C', 'A'])
+    expect(store.dirty).toBe(true)
+  })
+
+  it('moveCellTo：C 拖到第 1 位', () => {
+    const store = useStudioStore()
+    store.cells = ordered()
+    store.moveCellTo('C', 0)
+    expect(store.sortedCells.map(c => c.id)).toEqual(['C', 'A', 'B'])
+  })
+
+  it('moveCellTo：拖到末尾（index = length）', () => {
+    const store = useStudioStore()
+    store.cells = ordered()
+    store.moveCellTo('A', 3)
+    expect(store.sortedCells.map(c => c.id)).toEqual(['B', 'C', 'A'])
+  })
+
+  it('moveCellTo：原地（idx 或 idx+1）不生效也不置脏', () => {
+    const store = useStudioStore()
+    store.cells = ordered()
+    store.dirty = false
+    store.moveCellTo('B', 1)
+    store.moveCellTo('B', 2)
+    expect(store.sortedCells.map(c => c.id)).toEqual(['A', 'B', 'C'])
+    expect(store.dirty).toBe(false)
+  })
+
+  it('moveCellTo：非法 id / 越界下标直接忽略', () => {
+    const store = useStudioStore()
+    store.cells = ordered()
+    store.moveCellTo('NOPE', 1)
+    store.moveCellTo('A', -1)
+    store.moveCellTo('A', 99)
+    expect(store.sortedCells.map(c => c.id)).toEqual(['A', 'B', 'C'])
+  })
+})
+
+describe('useStudioStore Phase 4 草稿环境绑定', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+  })
+
+  it('open 回填草稿环境三件套', async () => {
+    mocks.getTemplate.mockResolvedValue({
+      data: {
+        id: 9, name: 'T', status: 'draft', draft_revision: 3, draft_cells: [],
+        current_version_id: null, lesson_id: 1, module_id: null, owner_id: 2,
+        draft_environment_version_id: 22, draft_import_policy_mode: 'restricted',
+        draft_allowed_imports: ['numpy', 'pandas'],
+      },
+    })
+    const store = useStudioStore()
+    await store.open(9)
+    expect(store.environmentVersionId).toBe(22)
+    expect(store.importPolicyMode).toBe('restricted')
+    expect(store.allowedImports).toEqual(['numpy', 'pandas'])
+  })
+
+  it('saveDraft payload 携带环境三件套，与 cells 同一 revision 提交', async () => {
+    const store = useStudioStore()
+    store.templateId = 20
+    store.draftRevision = 1
+    store.cells = [codeCell()]
+    store.environmentVersionId = 11
+    store.importPolicyMode = 'restricted'
+    store.allowedImports = ['pytest']
+    mocks.saveDraft.mockResolvedValue({
+      data: {
+        name: 'T', status: 'draft', draft_revision: 2, draft_cells: [codeCell()],
+        draft_environment_version_id: 11, draft_import_policy_mode: 'restricted',
+        draft_allowed_imports: ['pytest'],
+      },
+    })
+
+    await store.saveDraft()
+
+    const payload = mocks.saveDraft.mock.calls[0][1]
+    expect(payload.environment_version_id).toBe(11)
+    expect(payload.import_policy_mode).toBe('restricted')
+    expect(payload.allowed_imports).toEqual(['pytest'])
+    expect(payload.draft_revision).toBe(1)
+    expect(store.draftRevision).toBe(2)
+  })
+
+  it('setEnvironment 修改环境后纳入 dirty，保存后生效', async () => {
+    const store = useStudioStore()
+    store.dirty = false
+    store.setEnvironment(22, 'unrestricted', [])
+    expect(store.environmentVersionId).toBe(22)
+    expect(store.importPolicyMode).toBe('unrestricted')
+    expect(store.dirty).toBe(true)
+  })
+
+  it('setImportPolicy 切换 restricted 并写入白名单', async () => {
+    const store = useStudioStore()
+    store.dirty = false
+    store.setImportPolicy('restricted', ['numpy'])
+    expect(store.importPolicyMode).toBe('restricted')
+    expect(store.allowedImports).toEqual(['numpy'])
+    expect(store.dirty).toBe(true)
+  })
+})

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.courses import can_view_course, ensure_course_manager, require_course
+from app.api.courses import can_access_course_content, ensure_course_manager, require_course
 from app.config import Settings, get_settings
 from app.dependencies import get_current_user, get_db, require_roles
 from app.errors import api_error
@@ -20,6 +20,26 @@ def require_exam(exam_id: int, db: Session) -> Exam:
     if not exam:
         raise api_error(404, "EXAM_NOT_FOUND", "考试不存在")
     return exam
+
+
+def _submitted_ids(db: Session, exams: list[Exam], student_id: int) -> set[int]:
+    """批量计算学生已提交的考试 id 集合，避免逐考试 N+1 查询。
+
+    语义与 dashboard 待办判定一致：存在 submitted/grading/graded 任一状态的
+    提交记录即视为已考。
+    """
+    if not exams:
+        return set()
+    exam_ids = [e.id for e in exams]
+    return set(
+        db.scalars(
+            select(ExamSubmission.exam_id).where(
+                ExamSubmission.exam_id.in_(exam_ids),
+                ExamSubmission.student_id == student_id,
+                ExamSubmission.status.in_(("submitted", "grading", "graded")),
+            )
+        ).all()
+    )
 
 
 @router.get("", response_model=PaginatedResponse)
@@ -57,7 +77,15 @@ def list_exams(
         count_query = count_query.where(Exam.id == -1)
     total = db.scalar(count_query) or 0
     exams = db.scalars(query.order_by(Exam.id).offset((page - 1) * page_size).limit(page_size)).all()
-    return PaginatedResponse(items=[ExamRead.model_validate(exam) for exam in exams], page=page, page_size=page_size, total=total)
+    # 仅学生视角计算已交状态，供任务中心区分已交/待办（教师/管理员保持默认 False）
+    submitted_ids = _submitted_ids(db, exams, current_user.id) if current_user.role == "student" else set()
+    items = []
+    for exam in exams:
+        data = ExamRead.model_validate(exam).model_dump()
+        if current_user.role == "student":
+            data["is_submitted"] = exam.id in submitted_ids
+        items.append(data)
+    return PaginatedResponse(items=items, page=page, page_size=page_size, total=total)
 
 
 @router.post("", response_model=ExamRead, status_code=status.HTTP_201_CREATED)
@@ -83,7 +111,7 @@ def create_exam(
 @router.get("/{exam_id}", response_model=ExamRead)
 def get_exam(exam_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     exam = require_exam(exam_id, db)
-    if not can_view_course(exam.course, current_user, db):
+    if not can_access_course_content(exam.course, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限查看该考试")
     if current_user.role == "student" and exam.status != "published":
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
@@ -136,7 +164,7 @@ def start_exam(
 ):
     exam = require_exam(exam_id, db)
     course = db.get(Course, exam.course_id)
-    if not course or not can_view_course(course, current_user, db):
+    if not course or not can_access_course_content(course, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限参加该考试")
     if exam.status != "published":
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
@@ -160,7 +188,7 @@ def submit_exam(
 ):
     exam = require_exam(exam_id, db)
     course = db.get(Course, exam.course_id)
-    if not course or not can_view_course(course, current_user, db):
+    if not course or not can_access_course_content(course, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限提交该考试")
     if exam.status != "published":
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
@@ -218,7 +246,7 @@ def get_questions(exam_id: int, db: Session = Depends(get_db), current_user: Use
         # 学生必须已选课且考试已发布
         if exam.status != "published":
             raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
-        if not can_view_course(exam.course, current_user, db):
+        if not can_access_course_content(exam.course, current_user, db):
             raise api_error(403, "FORBIDDEN", "请先选课")
         # 学生必须已开始考试
         sub = db.scalar(

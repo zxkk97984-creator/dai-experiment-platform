@@ -1,8 +1,30 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import CodeCell from '../CodeCell.vue'
 
+// 哨兵：只要组件仍 import oneDark（任何属性访问即抛错），CodeMirror 就无法加载、
+// waitForCodeMirror 超时 → 本文件测试全部失败，从而保证组件不再依赖深色主题。
+vi.mock('@codemirror/theme-one-dark', () => new Proxy({}, {
+  get: () => { throw new Error('oneDark 不应再被 CodeCell 使用') },
+}))
+
 const wrappers = []
+const originalRangeGetClientRects = Range.prototype.getClientRects
+
+beforeAll(() => {
+  if (!originalRangeGetClientRects) {
+    Object.defineProperty(Range.prototype, 'getClientRects', {
+      configurable: true,
+      value: () => [],
+    })
+  }
+})
+
+afterAll(() => {
+  if (!originalRangeGetClientRects) {
+    delete Range.prototype.getClientRects
+  }
+})
 
 function makeCell(overrides = {}) {
   return {
@@ -38,6 +60,25 @@ afterEach(() => {
 })
 
 describe('CodeCell', () => {
+  it('marks the cell with the light theme marker', () => {
+    const wrapper = mountCell()
+    expect(wrapper.attributes('data-code-theme')).toBe('light')
+  })
+
+  it('keeps the light theme marker while CodeMirror is loaded', async () => {
+    const wrapper = mountCell()
+    await waitForCodeMirror(wrapper)
+    expect(wrapper.attributes('data-code-theme')).toBe('light')
+    expect(wrapper.find('.cm-editor').exists()).toBe(true)
+  })
+
+  it('installs the CodeMirror cursor drawing layer for editable cells', async () => {
+    const wrapper = mountCell()
+    await waitForCodeMirror(wrapper)
+
+    expect(wrapper.find('.cm-cursorLayer').exists()).toBe(true)
+  })
+
   it('emits editable textarea changes with the cell id', async () => {
     const wrapper = mountCell()
     const textarea = wrapper.get('textarea')

@@ -61,7 +61,7 @@ def _setup_lesson_with_template(client, db_session_factory, course_status="publi
     tid, vid = _create_template_with_version(db_session_factory)
 
     c = client.post("/api/v1/courses", headers=auth_header(t_tok), json={
-        "title": "测试课程", "status": course_status,
+        "title": "测试课程", "status": course_status, "visibility": "public",
     })
     cid = c.json()["id"]
 
@@ -408,7 +408,7 @@ def test_notebooks_get_returns_template_not_found_with_deprecation(client, db_se
     s_tok, _ = login(client, "snb")
 
     c = client.post("/api/v1/courses", headers=auth_header(t_tok), json={
-        "title": "NB Course", "status": "published",
+        "title": "NB Course", "status": "published", "visibility": "public",
     })
     cid = c.json()["id"]
     ch = client.post(f"/api/v1/courses/{cid}/chapters", headers=auth_header(t_tok), json={"title": "Ch"})
@@ -450,6 +450,10 @@ def test_experiments_py_has_exact_user_comment():
 # 问题 9: 迁移 downgrade 到上一 revision 再 upgrade head
 # ═══════════════════════════════════════════════════════════════
 
+# 迁移 B（c5d6e7f8a901）前置校验：basic 档位必须存在 available 且带 image_digest 的版本
+REVISION_A = "b4c5d6e7f890"
+
+
 def _alembic_env(tmp_path, db_name):
     db_path = tmp_path / db_name
     env = dict(__import__("os").environ)
@@ -458,15 +462,49 @@ def _alembic_env(tmp_path, db_name):
     return env
 
 
+def _upgrade_head_seeded(env):
+    """分段升级到 head：迁移 A → 插入 basic v1 种子 → head（迁移 B 前置校验）。"""
+    import sqlalchemy as sa
+
+    db_path = env["DAI_DATABASE_URL"].removeprefix("sqlite:///")
+    r1 = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", REVISION_A],
+        cwd=BACKEND_ROOT, capture_output=True, text=True, timeout=30, env=env,
+    )
+    assert r1.returncode == 0, f"upgrade 迁移 A failed:\n{r1.stderr}\n{r1.stdout}"
+
+    engine = sa.create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    "INSERT INTO environment_profiles (id, slug, display_name, status)"
+                    " VALUES (1, 'basic', 'Python 基础', 'active')"
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "INSERT INTO environment_versions (id, profile_id, version_number, status,"
+                    " base_image_ref, image_digest, minimum_memory_mb, manifest_sha256)"
+                    " VALUES (1, 1, 1, 'available', 'python:3.12-slim@sha256:0000',"
+                    " :digest, 256, 'm' * 64)"
+                ).bindparams(digest="sha256:" + "a" * 64)
+            )
+    finally:
+        engine.dispose()
+
+    r2 = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=BACKEND_ROOT, capture_output=True, text=True, timeout=30, env=env,
+    )
+    assert r2.returncode == 0, f"upgrade head 失败:\n{r2.stderr}\n{r2.stdout}"
+
+
 def test_migration_downgrade_one_step_then_upgrade_head(tmp_path):
     """downgrade -1 再 upgrade head"""
     env = _alembic_env(tmp_path, "step.db")
 
-    r1 = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
-        cwd=BACKEND_ROOT, capture_output=True, text=True, timeout=30, env=env,
-    )
-    assert r1.returncode == 0, f"upgrade failed: {r1.stderr}\n{r1.stdout}"
+    _upgrade_head_seeded(env)
 
     r2 = subprocess.run(
         [sys.executable, "-m", "alembic", "downgrade", "-1"],
@@ -474,6 +512,7 @@ def test_migration_downgrade_one_step_then_upgrade_head(tmp_path):
     )
     assert r2.returncode == 0, f"downgrade -1 failed: {r2.stderr}\n{r2.stdout}"
 
+    # downgrade -1（迁移 B 降级）只删绑定列，basic 种子数据保留，可直接 upgrade head
     r3 = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=BACKEND_ROOT, capture_output=True, text=True, timeout=30, env=env,

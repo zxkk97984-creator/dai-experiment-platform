@@ -8,8 +8,9 @@ import { useAppStore } from '../stores/app.js'
  * beforeunload 浏览器刷新守卫。
  *
  * 用法（编辑页组件内）：
- *   const { lesson, loading, loadError, saving, saveState, showLeaveDialog,
- *           load, save, goBack, onConfirmLeave, onCancelLeave } =
+ *   const { lesson, loading, loadError, saving, publishing, saveState,
+ *           showLeaveDialog, load, save, publish, goBack,
+ *           onConfirmLeave, onCancelLeave } =
  *     useLessonEditor({ courseId, lessonId, backPath, isDirty, buildPayload })
  *
  * 组件负责：表单双向绑定 lesson 字段、isDirty 快照对比、
@@ -30,6 +31,7 @@ export function useLessonEditor({ courseId, lessonId, backPath, isDirty, buildPa
   const loading = ref(true)
   const loadError = ref('')
   const saving = ref(false)
+  const publishing = ref(false)
   const showLeaveDialog = ref(false)
 
   // 保存状态文字：保存中… / 未保存 / 已保存（加载完成前固定"已保存"占位，不闪动）
@@ -110,6 +112,34 @@ export function useLessonEditor({ courseId, lessonId, backPath, isDirty, buildPa
     }
   }
 
+  /**
+   * 发布 / 转为草稿：一次 PATCH 提交当前内容与目标状态
+   * （buildPayload 返回值 + status，若 buildPayload 已含 status 则覆盖）。
+   * 与 save 互斥；成功后同步本地 lesson.status。
+   * @param {'published'|'draft'} desiredStatus 目标状态
+   * @returns {Promise<boolean>} 是否成功（组件据此决定是否重置 dirty 快照）
+   */
+  async function publish(desiredStatus) {
+    if (!lesson.value || saving.value || publishing.value) return false
+    const published = desiredStatus === 'published'
+    publishing.value = true
+    try {
+      await coursesAPI.updateLesson(lessonId, {
+        ...buildPayload(lesson.value),
+        status: desiredStatus,
+      })
+      lesson.value = { ...lesson.value, status: desiredStatus }
+      app.showToast(published ? '课时已发布' : '课时已转为草稿', 'success')
+      return true
+    } catch (err) {
+      app.showToast('发布失败，请重试', 'error')
+      console.error('[useLessonEditor] 发布课时失败', err)
+      return false
+    } finally {
+      publishing.value = false
+    }
+  }
+
   function goBack() {
     router.push(backPath)
   }
@@ -126,10 +156,12 @@ export function useLessonEditor({ courseId, lessonId, backPath, isDirty, buildPa
     loading,
     loadError,
     saving,
+    publishing,
     saveState,
     showLeaveDialog,
     load,
     save,
+    publish,
     goBack,
     onConfirmLeave,
     onCancelLeave,

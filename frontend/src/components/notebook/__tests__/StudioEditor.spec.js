@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { nextTick } from 'vue'
 import StudioEditor from '../StudioEditor.vue'
 
 const routerState = vi.hoisted(() => ({
@@ -24,6 +25,10 @@ const storeState = vi.hoisted(() => ({
   sortedCells: [],
   cells: [],
   runningCellId: null,
+  // Phase 4：环境状态（环境面板与发布确认使用）
+  environmentVersionId: null,
+  importPolicyMode: 'unrestricted',
+  allowedImports: [],
   open: vi.fn().mockResolvedValue(),
   destroy: vi.fn(),
   saveDraft: vi.fn(),
@@ -35,10 +40,13 @@ const storeState = vi.hoisted(() => ({
   updateCellSource: vi.fn(),
   addCell: vi.fn(),
   moveCell: vi.fn(),
+  moveCellTo: vi.fn(),
   duplicateCell: vi.fn(),
   deleteCell: vi.fn(),
   setCellEditable: vi.fn(),
   setCellHidden: vi.fn(),
+  setEnvironment: vi.fn(),
+  setImportPolicy: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -54,6 +62,11 @@ vi.mock('../../../stores/studio.js', () => ({
 
 vi.mock('../../../stores/app.js', () => ({
   useAppStore: () => appState,
+}))
+
+// Phase 4：环境 API mock——避免真实 client.js → router 依赖链
+vi.mock('../../../api/environments.js', () => ({
+  environmentsAPI: { listAvailable: vi.fn().mockResolvedValue({ data: [] }) },
 }))
 
 const CellStubs = {
@@ -188,6 +201,352 @@ describe('StudioEditor', () => {
       await flushPromises()
       expect(routerState.back).not.toHaveBeenCalled()
       expect(storeState.destroy).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('按当前位置新增 Cell', () => {
+    const cells = [
+      { id: 'c1', type: 'markdown', source: '', order: 0, student_editable: false, source_hidden: false },
+      { id: 'c2', type: 'code', source: 'x = 1', order: 1, student_editable: true, source_hidden: false },
+      { id: 'c3', type: 'markdown', source: '', order: 2, student_editable: false, source_hidden: false },
+    ]
+
+    beforeEach(() => {
+      storeState.sortedCells = cells
+    })
+
+    afterEach(() => {
+      storeState.sortedCells = []
+    })
+
+    it('在第二个 Cell 点击 +代码时将当前 Cell ID 作为插入锚点', async () => {
+      const wrapper = await mountEditor()
+      const secondCell = wrapper.get('[data-cell-id="c2"]')
+
+      await secondCell.findAll('button').find((button) => button.text() === '+代码').trigger('click')
+
+      expect(storeState.addCell).toHaveBeenCalledWith('code', 'c2')
+    })
+
+    it('在第二个 Cell 点击 +讲解时将当前 Cell ID 作为插入锚点', async () => {
+      const wrapper = await mountEditor()
+      const secondCell = wrapper.get('[data-cell-id="c2"]')
+
+      await secondCell.findAll('button').find((button) => button.text() === '+讲解').trigger('click')
+
+      expect(storeState.addCell).toHaveBeenCalledWith('markdown', 'c2')
+    })
+  })
+
+  describe('拖拽排序', () => {
+    const twoCells = [
+      { id: 'c1', type: 'markdown', source: '', order: 0, student_editable: true, source_hidden: false },
+      { id: 'c2', type: 'code', source: 'x = 1', order: 1, student_editable: true, source_hidden: false },
+    ]
+    // 自动滚动用例：4 个模块，静态位置 50/160/270/380（高 100，间距 110）
+    const fourCells = [
+      { id: 'c1', type: 'markdown', source: '', order: 0, student_editable: true, source_hidden: false },
+      { id: 'c2', type: 'code', source: 'x = 1', order: 1, student_editable: true, source_hidden: false },
+      { id: 'c3', type: 'markdown', source: '', order: 2, student_editable: true, source_hidden: false },
+      { id: 'c4', type: 'code', source: 'x = 2', order: 3, student_editable: true, source_hidden: false },
+    ]
+    // 各模块静态位置（含间距）：c1 顶部 50 高 100（中心 100），c2 顶部 160 高 100（中心 210）
+    const cellRects = {
+      c1: { top: 50, height: 100 },
+      c2: { top: 160, height: 100 },
+    }
+    const rectSpy = () =>
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+        const r = cellRects[this.dataset?.cellId] || { top: 0, height: 0 }
+        return { top: r.top, height: r.height, bottom: r.top + r.height, left: 0, right: 200, width: 200, x: 0, y: r.top, toJSON: () => ({}) }
+      })
+
+    /**
+     * mock 滚动容器（.studio-editor，jsdom 下 closest('.content') 为 null，
+     * 由 closest('.studio-editor') 分支命中）的矩形与滚动属性。
+     * 返回 scrollState，其 scrollTop 即容器当前滚动位置（动态 rect 用例据此联动）
+     */
+    const mockScroller = (wrapper, { top = 0, bottom = 800, clientHeight = 800, scrollHeight = 2000, initialScrollTop = 0 } = {}) => {
+      const scroller = wrapper.get('.studio-editor').element
+      const scrollState = { scrollTop: initialScrollTop }
+      Object.defineProperty(scroller, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({ top, bottom, height: bottom - top, left: 0, right: 200, width: 200, x: 0, y: top, toJSON: () => ({}) }),
+      })
+      Object.defineProperty(scroller, 'scrollTop', {
+        configurable: true,
+        get: () => scrollState.scrollTop,
+        set: (v) => { scrollState.scrollTop = v },
+      })
+      Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => clientHeight })
+      Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => scrollHeight })
+      return scrollState
+    }
+
+    /** 等待一帧 rAF（落位后的 transform 清理在下一帧执行） */
+    const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve))
+
+    /**
+     * 按下手柄：原生 dispatchEvent 构造 PointerEvent（vue-test-utils 的 trigger
+     * 无法给 jsdom 只读的 clientY 赋值），返回 nextTick 以便断言响应式 class
+     */
+    const pressHandle = (handle, clientY = 60) => {
+      handle.element.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, clientY, bubbles: true }))
+      return nextTick()
+    }
+
+    beforeEach(() => {
+      storeState.sortedCells = twoCells
+    })
+    afterEach(() => {
+      storeState.sortedCells = []
+      vi.restoreAllMocks()
+    })
+
+    it('每个模块渲染三杠拖拽手柄', async () => {
+      const wrapper = await mountEditor()
+      expect(wrapper.findAll('.cell-drag-handle')).toHaveLength(2)
+    })
+
+    it('studentPreview 模式下不渲染手柄', async () => {
+      storeState.studentPreview = true
+      const wrapper = await mountEditor()
+      expect(wrapper.findAll('.cell-drag-handle')).toHaveLength(0)
+      storeState.studentPreview = false
+    })
+
+    it('按下立即进入预备态（手柄高亮提示可拖）', async () => {
+      const wrapper = await mountEditor()
+      const handle = wrapper.findAll('.cell-drag-handle')[0]
+      expect(handle.classes()).not.toContain('armed')
+      await pressHandle(handle)
+      expect(handle.classes()).toContain('armed')
+      expect(wrapper.get('[data-cell-id="c1"]').classes()).toContain('armed')
+      // 未越过阈值前不进入拖拽态
+      expect(document.body.classList.contains('dragging-cells')).toBe(false)
+    })
+
+    it('短按（无移动）松手不触发拖拽', async () => {
+      const wrapper = await mountEditor()
+      const handle = wrapper.findAll('.cell-drag-handle')[0]
+      await pressHandle(handle)
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
+      await nextTick()
+      expect(storeState.moveCellTo).not.toHaveBeenCalled()
+      expect(document.body.classList.contains('dragging-cells')).toBe(false)
+      expect(handle.classes()).not.toContain('armed')
+    })
+
+    it('微小移动（不足 5px）不激活', async () => {
+      const wrapper = await mountEditor()
+      const handle = wrapper.findAll('.cell-drag-handle')[0]
+      await pressHandle(handle)
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 63 }))
+      await nextTick()
+      expect(document.body.classList.contains('dragging-cells')).toBe(false)
+      expect(wrapper.get('[data-cell-id="c1"]').classes()).not.toContain('dragging')
+    })
+
+    it('移动超过阈值激活：模块跟随指针，其余模块实时让位', async () => {
+      const wrapper = await mountEditor()
+      rectSpy()
+      const handle = wrapper.findAll('.cell-drag-handle')[0]
+      await pressHandle(handle)
+      // 向下拖 400px：c1 视觉中心 500 越过 c2 中心 210 → 落位末尾，c2 上移让位
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 460 }))
+      await nextTick()
+      expect(document.body.classList.contains('dragging-cells')).toBe(true)
+      const c1 = wrapper.get('[data-cell-id="c1"]')
+      const c2 = wrapper.get('[data-cell-id="c2"]')
+      expect(c1.classes()).toContain('dragging')
+      expect(c1.element.style.transform).toBe('translate3d(0px, 400px, 0px)')
+      // c2 上移一格：160 → 50，位移 -110
+      expect(c2.element.style.transform).toBe('translate3d(0px, -110px, 0px)')
+    })
+
+    it('松手落位：调用 moveCellTo 并清除拖拽样式', async () => {
+      const wrapper = await mountEditor()
+      rectSpy()
+      const handle = wrapper.findAll('.cell-drag-handle')[0]
+      await pressHandle(handle)
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 460 }))
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
+      expect(storeState.moveCellTo).toHaveBeenCalledWith('c1', 2)
+      await flushPromises()
+      await nextFrame()
+      await nextTick()
+      expect(wrapper.get('[data-cell-id="c1"]').classes()).not.toContain('dragging')
+      expect(wrapper.get('[data-cell-id="c1"]').element.style.transform).toBe('')
+      expect(wrapper.get('[data-cell-id="c2"]').element.style.transform).toBe('')
+      expect(document.body.classList.contains('dragging-cells')).toBe(false)
+    })
+
+    it('向上拖：上方模块下移让位，落位到目标下标', async () => {
+      const wrapper = await mountEditor()
+      rectSpy()
+      const handle = wrapper.findAll('.cell-drag-handle')[1]
+      await pressHandle(handle)
+      // 向上拖 400px：c2 视觉中心 -190 越过 c1 中心 100 → 落位 0，c1 下移让位
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: -340 }))
+      await nextTick()
+      const c1 = wrapper.get('[data-cell-id="c1"]')
+      expect(c1.classes()).not.toContain('dragging')
+      expect(c1.element.style.transform).toBe('translate3d(0px, 110px, 0px)')
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
+      expect(storeState.moveCellTo).toHaveBeenCalledWith('c2', 0)
+    })
+
+    it('首尾不越界：拖到最上方仍落位在 0', async () => {
+      const wrapper = await mountEditor()
+      rectSpy()
+      const handle = wrapper.findAll('.cell-drag-handle')[1]
+      await pressHandle(handle)
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: -10000 }))
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
+      expect(storeState.moveCellTo).toHaveBeenCalledWith('c2', 0)
+    })
+
+    it('拖拽中按 Esc 取消：不落位、状态复位、transform 归位', async () => {
+      const wrapper = await mountEditor()
+      rectSpy()
+      const handle = wrapper.findAll('.cell-drag-handle')[0]
+      await pressHandle(handle)
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 460 }))
+      expect(document.body.classList.contains('dragging-cells')).toBe(true)
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      expect(storeState.moveCellTo).not.toHaveBeenCalled()
+      expect(document.body.classList.contains('dragging-cells')).toBe(false)
+      expect(wrapper.get('[data-cell-id="c1"]').classes()).not.toContain('dragging')
+      expect(wrapper.get('[data-cell-id="c1"]').element.style.transform).toBe('')
+      expect(wrapper.get('[data-cell-id="c2"]').element.style.transform).toBe('')
+    })
+
+    // ── 拖拽自动滚动：指针压到滚动容器视口边缘时跟随滚动（见计划 notebook-drag-autoscroll.md）──
+
+    it('拖到视口底部触发带：滚动容器向下滚动', async () => {
+      const wrapper = await mountEditor()
+      rectSpy()
+      // 可视区 0~800：底部触发带为 740~800
+      const scrollState = mockScroller(wrapper, { bottom: 800 })
+      const handle = wrapper.findAll('.cell-drag-handle')[0]
+      await pressHandle(handle)
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 780 }))
+      await nextFrame() // 等一帧 rAF：滚动发生在帧回调内
+      expect(scrollState.scrollTop).toBeGreaterThan(0)
+    })
+
+    it('拖到视口顶部触发带：滚动容器向上滚动', async () => {
+      const wrapper = await mountEditor()
+      rectSpy()
+      // 顶部触发带为 0~60，内容已向下滚过 500px（scrollTop > 0 才可向上滚）
+      const scrollState = mockScroller(wrapper, { bottom: 800, initialScrollTop: 500 })
+      const handle = wrapper.findAll('.cell-drag-handle')[0]
+      await pressHandle(handle)
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 20 }))
+      await nextFrame()
+      expect(scrollState.scrollTop).toBeLessThan(500)
+    })
+
+    it('已到滚动末尾时不再滚动', async () => {
+      const wrapper = await mountEditor()
+      rectSpy()
+      // clientHeight === scrollHeight：scrollTop + clientHeight >= scrollHeight，已无下滚空间
+      const scrollState = mockScroller(wrapper, { bottom: 800, scrollHeight: 800 })
+      const handle = wrapper.findAll('.cell-drag-handle')[0]
+      await pressHandle(handle)
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 780 }))
+      await nextFrame()
+      expect(scrollState.scrollTop).toBe(0)
+    })
+
+    it('滚动发生后 dropIndex 重新校准：落位基于滚动后的静态位置', async () => {
+      storeState.sortedCells = fourCells
+      const wrapper = await mountEditor()
+      // 4 个模块的视口坐标随滚动上移（真实浏览器滚动后的布局效果），可视区 0~300（触发带 240~300）
+      const baseTops = { c1: 50, c2: 160, c3: 270, c4: 380 }
+      const scrollState = mockScroller(wrapper, { bottom: 300, clientHeight: 300 })
+      for (const id of Object.keys(baseTops)) {
+        const el = wrapper.get(`[data-cell-id="${id}"]`).element
+        Object.defineProperty(el, 'getBoundingClientRect', {
+          configurable: true,
+          value: () => {
+            const top = baseTops[id] - scrollState.scrollTop
+            return { top, height: 100, bottom: top + 100, left: 0, right: 200, width: 200, x: 0, y: top, toJSON: () => ({}) }
+          },
+        })
+      }
+      const handle = wrapper.findAll('.cell-drag-handle')[0]
+      await pressHandle(handle)
+      // 拖到视口底部：越过 c2、c3 中心 → 目标应在 c4 前（下标 3）
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 290 }))
+      await nextFrame() // 滚动一步，下方模块进入视野
+      expect(scrollState.scrollTop).toBeGreaterThan(0)
+      // 滚动后再移动：dropIndex 必须基于滚动后的坐标重算，松手落位仍正确
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 290 }))
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
+      expect(storeState.moveCellTo).toHaveBeenCalledWith('c1', 3)
+    })
+
+    it('armed 未激活阶段不触发滚动', async () => {
+      const wrapper = await mountEditor()
+      rectSpy()
+      const scrollState = mockScroller(wrapper, { bottom: 800 })
+      const handle = wrapper.findAll('.cell-drag-handle')[0]
+      // 指针起点就在底部触发带内，但移动不足 5px 阈值，未激活
+      await pressHandle(handle, 780)
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 782 }))
+      await nextFrame()
+      expect(scrollState.scrollTop).toBe(0)
+    })
+
+    // ── 缺陷修复回归（2026-08-05 用户反馈：自动滚动时被拖模块相对指针漂移）──
+    // 根因：transform 纯指针位移未补偿滚动增量，容器滚动 N px 时模块随内容上移 N px，
+    // 却仍用旧位移，导致模块向上漂移。修复后位移 = 指针位移 + scrollDelta
+
+    it('自动滚动时被拖模块 transform 补偿滚动增量（不漂移）', async () => {
+      const wrapper = await mountEditor()
+      rectSpy()
+      const scrollState = mockScroller(wrapper, { bottom: 800 })
+      const handle = wrapper.findAll('.cell-drag-handle')[0]
+      await pressHandle(handle)
+      // 拖到视口底部触发带并激活：指针位移 = 780 - 60 = 720
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 780 }))
+      await nextFrame() // 滚动一步：初始 scrollTop 0 且单向向下滚，scrollDelta === scrollTop
+      expect(scrollState.scrollTop).toBeGreaterThan(0)
+      // 滚动后再次移动：位移必须 = 指针位移 + 滚动补偿，模块始终贴在指针下方
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 780 }))
+      const c1 = wrapper.get('[data-cell-id="c1"]')
+      expect(c1.element.style.transform).toBe(`translate3d(0px, ${720 + scrollState.scrollTop}px, 0px)`)
+    })
+
+    it('自动滚动时被拖模块视觉中心保持跟手（相对指针不漂移）', async () => {
+      storeState.sortedCells = fourCells
+      const wrapper = await mountEditor()
+      // 4 个模块视口坐标随滚动上移，可视区 0~300（触发带 240~300）
+      const baseTops = { c1: 50, c2: 160, c3: 270, c4: 380 }
+      const scrollState = mockScroller(wrapper, { bottom: 300, clientHeight: 300 })
+      for (const id of Object.keys(baseTops)) {
+        const el = wrapper.get(`[data-cell-id="${id}"]`).element
+        Object.defineProperty(el, 'getBoundingClientRect', {
+          configurable: true,
+          value: () => {
+            const top = baseTops[id] - scrollState.scrollTop
+            return { top, height: 100, bottom: top + 100, left: 0, right: 200, width: 200, x: 0, y: top, toJSON: () => ({}) }
+          },
+        })
+      }
+      const handle = wrapper.findAll('.cell-drag-handle')[0]
+      await pressHandle(handle)
+      // 拖到视口底部触发带：滚动前跟手位移 230px
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 290 }))
+      const c1 = wrapper.get('[data-cell-id="c1"]')
+      expect(c1.element.style.transform).toBe('translate3d(0px, 230px, 0px)')
+      await nextFrame() // 滚动一步
+      expect(scrollState.scrollTop).toBeGreaterThan(0)
+      // 滚动后再次移动：位移 = 230 + scrollDelta，模块视口中心 = 50 - scrollDelta + (230 + scrollDelta) + 50 = 330 不变
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 290 }))
+      expect(c1.element.style.transform).toBe(`translate3d(0px, ${230 + scrollState.scrollTop}px, 0px)`)
     })
   })
 })

@@ -28,8 +28,8 @@ import CourseListView from '../CourseListView.vue'
 
 const coursesData = () => ({
   items: [
-    { id: 1, title: 'Python 编程基础', description: '从零开始的 Python 入门课', status: 'published', teacher_id: 4 },
-    { id: 2, title: '机器学习导论', description: '监督学习与模型评估', status: 'published', teacher_id: 5 },
+    { id: 1, title: 'Python 编程基础', description: '从零开始的 Python 入门课', status: 'published', teacher_id: 4, is_enrolled: true, can_enroll: false },
+    { id: 2, title: '机器学习导论', description: '监督学习与模型评估', status: 'published', teacher_id: 5, is_enrolled: false, can_enroll: true },
   ],
   total: 2,
 })
@@ -40,10 +40,9 @@ const chaptersFor = (id) => ({
 
 // 默认按课程 id 返回各自的章节，避免不同课程共用同一份章节数据
 function mockChaptersPerCourse() {
-  coursesMock.getChapters.mockImplementation((courseId) => {
-    if (courseId === 2) return Promise.reject(Object.assign(new Error('forbidden'), { response: { status: 403 } }))
-    return Promise.resolve({ data: chaptersFor(courseId) })
-  })
+  coursesMock.getChapters.mockImplementation((courseId) =>
+    Promise.resolve({ data: chaptersFor(courseId) }),
+  )
 }
 
 function mountView() {
@@ -121,21 +120,62 @@ describe('我的课程 CourseListView（参考图 02）', () => {
     expect(wrapper.text()).toContain('Python 编程基础')
   })
 
-  it('章节请求 403 视为未选课：保留选课动作且进度为 0', async () => {
+  it('未选课程（is_enrolled=false）不发章节请求：显示选课按钮且进度为 0', async () => {
     coursesMock.list.mockResolvedValue({ data: coursesData() })
-    coursesMock.getChapters
-      .mockResolvedValueOnce({ data: chaptersFor(1) })
-      .mockRejectedValueOnce(Object.assign(new Error('forbidden'), { response: { status: 403 } }))
+    coursesMock.getChapters.mockResolvedValue({ data: chaptersFor(1) })
     coursesMock.enroll.mockResolvedValue({})
     const wrapper = mountView()
     await flushPromises()
+    // 只对已选课程（id=1）请求章节
+    expect(coursesMock.getChapters).toHaveBeenCalledTimes(1)
+    expect(coursesMock.getChapters).toHaveBeenCalledWith(1)
     const rows = wrapper.findAll('.course-row')
     expect(rows.length).toBe(2)
     const unenrolled = rows[1]
     expect(unenrolled.text()).toContain('选课')
-    await unenrolled.get('.enroll-btn').trigger('click')
+    expect(unenrolled.text()).toContain('尚未加入')
+  })
+
+  it('选课成功后重新拉取课程列表（以服务端 is_enrolled 为准）', async () => {
+    coursesMock.list
+      .mockResolvedValueOnce({ data: coursesData() })
+      .mockResolvedValueOnce({
+        data: {
+          items: [
+            { id: 1, title: 'Python 编程基础', is_enrolled: true, can_enroll: false },
+            { id: 2, title: '机器学习导论', is_enrolled: true, can_enroll: false },
+          ],
+          total: 2,
+        },
+      })
+    coursesMock.getChapters.mockResolvedValue({ data: chaptersFor(1) })
+    coursesMock.enroll.mockResolvedValue({})
+    const wrapper = mountView()
+    await flushPromises()
+    const rows = wrapper.findAll('.course-row')
+    expect(rows[1].text()).toContain('选课')
+    await rows[1].get('.enroll-btn').trigger('click')
     await flushPromises()
     expect(coursesMock.enroll).toHaveBeenCalledWith(2)
+    // 重新拉取列表后再抓取章节
+    expect(coursesMock.list).toHaveBeenCalledTimes(2)
+    expect(coursesMock.getChapters).toHaveBeenCalledWith(2)
+    expect(wrapper.findAll('.course-row')[1].text()).not.toContain('选课')
+  })
+
+  it('选课被拒绝显示服务端错误且保留当前列表', async () => {
+    coursesMock.list.mockResolvedValue({ data: coursesData() })
+    coursesMock.getChapters.mockResolvedValue({ data: chaptersFor(1) })
+    coursesMock.enroll.mockRejectedValue(
+      Object.assign(new Error('forbidden'), { response: { status: 403, data: { detail: { message: '你已被移出白名单' } } } }),
+    )
+    const wrapper = mountView()
+    await flushPromises()
+    const rows = wrapper.findAll('.course-row')
+    await rows[1].get('.enroll-btn').trigger('click')
+    await flushPromises()
+    expect(toastMock.showToast).toHaveBeenCalledWith('你已被移出白名单', 'error')
+    expect(wrapper.findAll('.course-row').length).toBe(2)
   })
 
   it('“进行中”标签页只显示有真实进度的课程', async () => {
@@ -198,5 +238,47 @@ describe('我的课程 CourseListView（参考图 02）', () => {
     await flushPromises()
     expect(wrapper.findAll('.course-row').length).toBe(2)
     expect(wrapper.text()).not.toContain('加载失败')
+  })
+
+  it('受管封面 key 渲染为公开媒体 URL，无封面课程保留图标占位', async () => {
+    coursesMock.list.mockResolvedValue({
+      data: {
+        items: [
+          { id: 1, title: 'Python 编程基础', description: 'x', status: 'published', teacher_id: 4, is_enrolled: true, can_enroll: false, cover: 'covers/1/abc.webp' },
+          { id: 2, title: '机器学习导论', description: 'y', status: 'published', teacher_id: 5, is_enrolled: false, can_enroll: true },
+        ],
+        total: 2,
+      },
+    })
+    mockChaptersPerCourse()
+    const wrapper = mountView()
+    await flushPromises()
+
+    const imgs = wrapper.findAll('.course-identity__cover')
+    expect(imgs.length).toBe(1)
+    expect(imgs[0].attributes('src')).toBe('/api/v1/media/course-covers/1?v=covers%2F1%2Fabc.webp')
+    expect(imgs[0].attributes('alt')).toBe('Python 编程基础课程封面')
+    // 无封面课程保留语义图标占位
+    expect(wrapper.findAll('.course-identity__icon').length).toBe(1)
+  })
+
+  it('未选课课程也能显示公开封面', async () => {
+    coursesMock.list.mockResolvedValue({
+      data: {
+        items: [
+          { id: 2, title: '机器学习导论', description: 'y', status: 'published', teacher_id: 5, is_enrolled: false, can_enroll: true, cover: 'covers/2/def.png' },
+        ],
+        total: 1,
+      },
+    })
+    coursesMock.getChapters.mockResolvedValue({ data: { items: [] } })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const row = wrapper.get('.course-row')
+    expect(row.text()).toContain('选课')
+    const img = row.find('.course-identity__cover')
+    expect(img.exists()).toBe(true)
+    expect(img.attributes('src')).toBe('/api/v1/media/course-covers/2?v=covers%2F2%2Fdef.png')
   })
 })

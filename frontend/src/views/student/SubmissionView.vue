@@ -71,6 +71,12 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
           </div>
         </div>
 
+        <!-- ── Phase 5：结构化 import 诊断（安全中文文案，不展示裸 traceback） ── -->
+        <div v-if="submission.diagnostic" class="card diagnostic-card">
+          <span class="diag-icon">⚠</span>
+          {{ submission.diagnostic.message }}
+        </div>
+
         <!-- ── Polling ──────────────────────────────────────────────────── -->
         <div v-if="polling" class="polling-hint">
           <span class="spinner-sm"></span>
@@ -134,6 +140,18 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
   margin: 0;
 }
 .output-error { color: #F5A3AB; }
+
+/* ── Phase 5：结构化诊断（无裸 traceback） ──────────────────────────── */
+.diagnostic-card {
+  padding: 16px 20px;
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface-raised);
+  border: 1px dashed var(--warning, #d97706);
+  border-radius: var(--radius-md);
+  color: var(--warning, #d97706);
+  font-size: var(--text-sm); line-height: 1.5;
+}
+.diag-icon { font-size: 14px; flex-shrink: 0; }
 
 /* ── Polling ────────────────────────────────────────────────────────── */
 .polling-hint {

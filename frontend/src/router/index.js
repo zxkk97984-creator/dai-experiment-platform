@@ -44,6 +44,7 @@ const routes = [
   { path: '/admin/users/:id/edit', name: 'AdminUserEdit', component: () => import('../views/admin/UserEditView.vue'), meta: { role: 'admin' } },
   { path: '/admin/courses', name: 'AdminCourses', component: () => import('../views/teacher/CourseManageView.vue'), meta: { role: 'admin' } },
   { path: '/admin/experiments', name: 'AdminExperiments', component: () => import('../views/admin/ExperimentManageView.vue'), meta: { role: 'admin' } },
+  { path: '/admin/environments', name: 'AdminEnvironments', component: () => import('../views/admin/EnvironmentManageView.vue'), meta: { role: 'admin' } },
   { path: '/admin/submissions', name: 'AdminExperimentSubmissions', component: () => import('../views/teacher/ExperimentSubmissionsView.vue'), meta: { role: 'admin' } },
   { path: '/admin/submissions/:id', name: 'AdminExperimentSubmissionDetail', component: () => import('../views/teacher/ExperimentSubmissionDetailView.vue'), meta: { role: 'admin' } },
   { path: '/admin/ai-grading', name: 'AdminAIGrading', component: () => import('../views/teacher/AIGradingReviewView.vue'), meta: { role: 'admin' } },

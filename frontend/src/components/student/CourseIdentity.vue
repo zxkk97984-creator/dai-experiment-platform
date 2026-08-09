@@ -1,14 +1,20 @@
 <script setup>
-// CourseIdentity：课程身份块——92–96px 浅色图标 tile + 标题 + 元信息插槽。
+// CourseIdentity：课程身份块——92–96px 浅色图标 tile（或课程封面图）+ 标题 + 元信息插槽。
 // Python 类课程用 Python 品牌图标（Logos 集）；其余按稳定标题关键词选库图标。
+// 有封面 URL 且未加载失败时优先显示封面，否则回退语义图标与纯色背景。
 
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppIcon from '../ui/AppIcon.vue'
 
 const props = defineProps({
   title: { type: String, default: '' },
   meta: { type: String, default: '' },
+  coverUrl: { type: String, default: '' },
 })
+
+const coverFailed = ref(false)
+// 封面地址变化时重置失败状态（替换封面后新 URL 重新尝试）
+watch(() => props.coverUrl, () => { coverFailed.value = false })
 
 // 稳定关键词 → 语义图标（顺序优先，命中即选）
 const KEYWORD_ICONS = [
@@ -42,7 +48,14 @@ const tileTone = computed(() => TILE_TONES[iconName.value] || 'tone-blue')
 
 <template>
   <div class="course-identity">
-    <span class="course-identity__icon" :class="tileTone" aria-hidden="true">
+    <img
+      v-if="coverUrl && !coverFailed"
+      class="course-identity__cover"
+      :src="coverUrl"
+      :alt="`${title}课程封面`"
+      @error="coverFailed = true"
+    />
+    <span v-else class="course-identity__icon" :class="tileTone" aria-hidden="true">
       <AppIcon :name="iconName" :size="28" />
     </span>
     <div class="course-identity__text">
@@ -62,16 +75,27 @@ const tileTone = computed(() => TILE_TONES[iconName.value] || 'tone-blue')
   min-width: 0;
 }
 
-.course-identity__icon {
+/* 封面与图标占位同尺寸，加载失败回退不产生布局跳动 */
+.course-identity__icon,
+.course-identity__cover {
   flex-shrink: 0;
   width: 94px;
   height: 94px;
   border-radius: var(--radius-control, 7px);
+}
+
+.course-identity__icon {
   background: var(--primary-light);
   color: var(--primary);
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.course-identity__cover {
+  display: block;
+  object-fit: cover;
+  background: var(--surface-raised, #f1f5f9);
 }
 
 /* 浅色 tile 色调（非渐变） */

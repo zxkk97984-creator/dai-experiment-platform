@@ -218,6 +218,11 @@ def test_recover_from_docker_uses_label_and_recovers_without_redis():
                 return MagicMock(returncode=0, stdout='/dai-kernel-rec-42')
             if 'dai.record_id' in cmd_str:
                 return MagicMock(returncode=0, stdout='42')
+            # Phase 5：恢复必须校验环境 label（缺失环境身份的旧容器不复用）
+            if 'dai.environment_version_id' in cmd_str:
+                return MagicMock(returncode=0, stdout='7')
+            if 'dai.image_digest' in cmd_str:
+                return MagicMock(returncode=0, stdout='sha256:' + 'a' * 64)
         if 'docker exec' in cmd_str and 'cat' in cmd_str:
             return MagicMock(returncode=0, stdout='{"shell_port":1,"ip":"127.0.0.1"}')
         return MagicMock(returncode=0, stdout='')
@@ -227,6 +232,8 @@ def test_recover_from_docker_uses_label_and_recovers_without_redis():
         km.recover_from_docker()
 
     assert 42 in km._sessions, "record_id=42 应从 label 恢复"
+    assert km._sessions[42].environment_version_id == 7, "恢复应带环境版本 label"
+    assert km._sessions[42].image_ref == 'sha256:' + 'a' * 64, "恢复应带镜像 digest label"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -311,7 +318,7 @@ def test_teacher_a_cannot_see_teacher_b_submissions(client, db_session_factory):
     s_tok, _ = login(client, 'stu1')
 
     ca = client.post('/api/v1/courses', headers=auth_header(ta_tok), json={
-        'title': 'TA Course', 'status': 'published',
+        'title': 'TA Course', 'status': 'published', 'visibility': 'public',
     })
     caid = ca.json()['id']
     client.post(f'/api/v1/courses/{caid}/enroll', headers=auth_header(s_tok))
@@ -369,7 +376,7 @@ def test_student_b_cannot_access_student_a_record(client, db_session_factory):
         tid, vid = tmpl.id, ver.id
 
     c = client.post('/api/v1/courses', headers=auth_header(t_tok), json={
-        'title': 'Rec Course', 'status': 'published',
+        'title': 'Rec Course', 'status': 'published', 'visibility': 'public',
     })
     cid = c.json()['id']
     ch = client.post(f'/api/v1/courses/{cid}/chapters', headers=auth_header(t_tok), json={'title':'Ch'})

@@ -298,27 +298,62 @@ def _alembic_env(tmp_path, db_name: str) -> dict:
     return env
 
 
-def test_clean_migration_upgrade_head(tmp_path):
-    """全新数据库 alembic upgrade head 无报错"""
-    env = _alembic_env(tmp_path, "clean.db")
-    result = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
-        cwd=BACKEND_ROOT,
-        capture_output=True, text=True, timeout=30,
-        env=env,
+# 迁移 B（c5d6e7f8a901）前置校验：basic 档位必须存在 available 且带 image_digest 的版本
+REVISION_A = "b4c5d6e7f890"
+
+
+def _upgrade_head_seeded(env: dict) -> None:
+    """分段升级到 head：迁移 A → 插入 basic v1 种子 → head（迁移 B）。
+
+    与真实部署顺序一致（plan 5「迁移 B」）：先跑迁移 A + seed build，
+    再部署迁移 B；迁移 B 不满足前置时主动失败。
+    """
+    import sqlalchemy as sa
+
+    db_path = env["DAI_DATABASE_URL"].removeprefix("sqlite:///")
+    r1 = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", REVISION_A],
+        cwd=BACKEND_ROOT, capture_output=True, text=True, timeout=30, env=env,
     )
-    assert result.returncode == 0, f"upgrade failed:\nSTDERR:\n{result.stderr}\nSTDOUT:\n{result.stdout}"
+    assert r1.returncode == 0, f"upgrade 迁移 A failed:\n{r1.stderr}\n{r1.stdout}"
+
+    engine = sa.create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    "INSERT INTO environment_profiles (id, slug, display_name, status)"
+                    " VALUES (1, 'basic', 'Python 基础', 'active')"
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "INSERT INTO environment_versions (id, profile_id, version_number, status,"
+                    " base_image_ref, image_digest, minimum_memory_mb, manifest_sha256)"
+                    " VALUES (1, 1, 1, 'available', 'python:3.12-slim@sha256:0000',"
+                    " :digest, 256, 'm' * 64)"
+                ).bindparams(digest="sha256:" + "a" * 64)
+            )
+    finally:
+        engine.dispose()
+
+    r2 = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=BACKEND_ROOT, capture_output=True, text=True, timeout=30, env=env,
+    )
+    assert r2.returncode == 0, f"upgrade head 失败:\n{r2.stderr}\n{r2.stdout}"
+
+
+def test_clean_migration_upgrade_head(tmp_path):
+    """全新数据库 alembic upgrade head（分段：迁移 A → seed → 迁移 B）无报错"""
+    env = _alembic_env(tmp_path, "clean.db")
+    _upgrade_head_seeded(env)
 
 
 def test_migration_downgrade_upgrade_roundtrip(tmp_path):
     """downgrade → upgrade roundtrip 完整无报错"""
     env = _alembic_env(tmp_path, "roundtrip.db")
-
-    r1 = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
-        cwd=BACKEND_ROOT, capture_output=True, text=True, timeout=30, env=env,
-    )
-    assert r1.returncode == 0, f"first upgrade failed:\n{r1.stderr}\n{r1.stdout}"
+    _upgrade_head_seeded(env)
 
     r2 = subprocess.run(
         [sys.executable, "-m", "alembic", "downgrade", "base"],
@@ -326,11 +361,8 @@ def test_migration_downgrade_upgrade_roundtrip(tmp_path):
     )
     assert r2.returncode == 0, f"downgrade failed:\n{r2.stderr}\n{r2.stdout}"
 
-    r3 = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
-        cwd=BACKEND_ROOT, capture_output=True, text=True, timeout=30, env=env,
-    )
-    assert r3.returncode == 0, f"re-upgrade failed:\n{r3.stderr}\n{r3.stdout}"
+    # downgrade base 已清空全部数据，重新走完整分段升级
+    _upgrade_head_seeded(env)
 
 
 def _assert_only_automated_tests_collected(cwd: Path, result: subprocess.CompletedProcess) -> None:
@@ -426,6 +458,8 @@ def test_p1_6_production_cors_accepts_real_domains():
         secret_key="a-very-secure-key-32chars!",
         database_url="mysql+pymysql://safe:pass@localhost/db",
         cors_origins="https://myapp.example.com",
+        # Phase 6：生产校验要求环境基础镜像带 digest
+        env_base_image="python:3.12-slim@sha256:" + "0" * 64,
     )
     assert s.cors_origin_list == ["https://myapp.example.com"]
 

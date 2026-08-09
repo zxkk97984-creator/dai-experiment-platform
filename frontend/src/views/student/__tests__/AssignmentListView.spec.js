@@ -39,7 +39,8 @@ function mockSources({ failAssignment = false, failExam = false, failExperiment 
       : Promise.resolve({
           data: {
             items: [
-              { id: 1, title: '线性回归作业', course_id: 5, status: 'published', due_at: future(3) },
+              // 作业1 已全部提交（后端 list_assignments 返回 is_submitted），任务中心应显示「已提交」
+              { id: 1, title: '线性回归作业', course_id: 5, status: 'published', due_at: future(3), is_submitted: true },
               { id: 2, title: '决策树作业', course_id: 6, status: 'published', due_at: past(1) },
             ],
           },
@@ -99,9 +100,20 @@ describe('任务中心 AssignmentListView（参考图 05）', () => {
     mockSources()
     const wrapper = mountView()
     await flushPromises()
-    // 开放任务 = 未提交任务（作业2 逾期 + 作业1 待办 + 考试 + 实验 = 4）
+    // 全部任务 = 作业1（已提交）+ 作业2（逾期）+ 考试 + 实验 = 4
     expect(wrapper.get('.task-count').text()).toContain('4')
     expect(wrapper.get('.nearest-deadline').text()).toBeTruthy()
+  })
+
+  it('已全部提交的作业显示「已提交」而非「待办」', async () => {
+    mockSources()
+    const wrapper = mountView()
+    await flushPromises()
+    const row = wrapper.findAll('.task-row').find((r) => r.text().includes('线性回归作业'))
+    expect(row.text()).toContain('已提交')
+    const tabs = wrapper.findAll('.status-tab')
+    // 「已完成」标签计数为 1（仅作业1）
+    expect(tabs[3].text()).toContain('1')
   })
 
   it('状态标签页显示计数且可切换', async () => {

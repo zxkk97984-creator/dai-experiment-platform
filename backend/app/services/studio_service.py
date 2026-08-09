@@ -103,6 +103,9 @@ def _version_read(version: NotebookTemplateVersion) -> StudioVersionRead:
         assets_dir=version.assets_dir,
         published_at=version.published_at,
         published_by_id=version.published_by_id,
+        environment_version_id=version.environment_version_id,
+        import_policy_mode=version.import_policy_mode,
+        allowed_imports=list(version.allowed_imports or []),
     )
 
 
@@ -136,6 +139,9 @@ def template_read(db: Session, template: NotebookTemplate) -> StudioTemplateRead
         draft_revision=template.draft_revision,
         draft_metadata=template.draft_metadata or {},
         draft_assets_dir=template.draft_assets_dir,
+        draft_environment_version_id=template.draft_environment_version_id,
+        draft_import_policy_mode=template.draft_import_policy_mode,
+        draft_allowed_imports=list(template.draft_allowed_imports or []),
         lesson_id=lesson_id,
         module_id=module_id,
         current_version=current,
@@ -232,6 +238,33 @@ def _bind(
         target.template_id = template.id
 
 
+def _resolve_draft_environment(
+    db: Session,
+    environment_version_id: int | None,
+    import_policy_mode: str,
+    allowed_imports: list[str],
+) -> dict:
+    """创建路径的环境解析（Phase 4）——显式选择必须 available；省略时解析 basic 当前可用版本。
+
+    返回 draft_environment_version_id / draft_import_policy_mode / draft_allowed_imports 三件套。
+    """
+    from app.services.environment_service import (
+        resolve_basic_available_version,
+        validate_environment_selection,
+    )
+
+    validate_environment_selection(db, environment_version_id)
+    env_id = environment_version_id
+    if env_id is None:
+        basic = resolve_basic_available_version(db)
+        env_id = basic.id if basic else None
+    return {
+        "draft_environment_version_id": env_id,
+        "draft_import_policy_mode": import_policy_mode,
+        "draft_allowed_imports": list(allowed_imports or []),
+    }
+
+
 def create_template(
     db: Session, payload: StudioTemplateCreate, user: User
 ) -> NotebookTemplate:
@@ -250,6 +283,12 @@ def create_template(
         draft_cells=[],
         draft_revision=1,
         draft_metadata={},
+        **_resolve_draft_environment(
+            db,
+            payload.environment_version_id,
+            payload.import_policy_mode,
+            payload.allowed_imports,
+        ),
     )
     try:
         db.add(template)
@@ -336,7 +375,13 @@ def atomic_replace_draft(
     *,
     metadata: dict | None = None,
     assets_dir: str | None | object = ...,
+    environment: dict | None = None,
 ) -> NotebookTemplate:
+    """草稿原子替换——cells 与草稿环境（Phase 4）在同一 revision 内更新，避免内容成功而环境失败。
+
+    environment 为 draft_environment_version_id/draft_import_policy_mode/draft_allowed_imports 三件套；
+    为 None 表示不更新环境（兼容旧调用）。
+    """
     values = {
         "draft_cells": copy.deepcopy(cells),
         "draft_revision": expected_revision + 1,
@@ -346,6 +391,8 @@ def atomic_replace_draft(
         values["draft_metadata"] = copy.deepcopy(metadata)
     if assets_dir is not ...:
         values["draft_assets_dir"] = assets_dir
+    if environment is not None:
+        values.update(environment)
     result = db.execute(
         update(NotebookTemplate)
         .where(
@@ -370,11 +417,37 @@ def save_draft(
     template: NotebookTemplate,
     payload: StudioDraftUpdate,
 ) -> NotebookTemplate:
+    environment = None
+    updates = payload.model_dump(exclude_unset=True)
+    env_fields = {
+        k: v
+        for k, v in updates.items()
+        if k in ("environment_version_id", "import_policy_mode", "allowed_imports")
+    }
+    if env_fields:
+        # 显式选择的环境必须 available（省略时保留草稿已有环境，不重新解析）
+        from app.services.environment_service import validate_environment_selection
+
+        validate_environment_selection(db, env_fields.get("environment_version_id"))
+        environment = {
+            "draft_environment_version_id": env_fields.get(
+                "environment_version_id", template.draft_environment_version_id
+            ),
+            "draft_import_policy_mode": env_fields.get(
+                "import_policy_mode", template.draft_import_policy_mode
+            ),
+            "draft_allowed_imports": list(
+                env_fields.get(
+                    "allowed_imports", list(template.draft_allowed_imports or [])
+                )
+            ),
+        }
     return atomic_replace_draft(
         db,
         template,
         payload.draft_revision,
         normalize_cells(payload.cells),
+        environment=environment,
     )
 
 
@@ -577,6 +650,9 @@ def create_imported_template(
     description: str | None,
     lesson_id: int | None,
     module_id: int | None,
+    environment_version_id: int | None = None,
+    import_policy_mode: str = "unrestricted",
+    allowed_imports: list[str] | None = None,
     imported: ImportedNotebook,
 ) -> NotebookTemplate:
     _authorize_context(
@@ -590,6 +666,12 @@ def create_imported_template(
         draft_cells=copy.deepcopy(imported.cells),
         draft_revision=1,
         draft_metadata=copy.deepcopy(imported.metadata),
+        **_resolve_draft_environment(
+            db,
+            environment_version_id,
+            import_policy_mode,
+            list(allowed_imports or []),
+        ),
     )
     generated_path = None
     try:
@@ -704,6 +786,10 @@ def publish_template(
     if not template:
         raise api_error(404, "TEMPLATE_NOT_FOUND", "Notebook 模板不存在")
     require_manager(template, user)
+    # Phase 4 发布门禁：草稿环境必须 available（发布后绑定不可变，历史版本不更新）
+    from app.services.environment_service import validate_environment_selection
+
+    validate_environment_selection(db, template.draft_environment_version_id)
     latest = db.scalar(
         select(func.max(NotebookTemplateVersion.version_number)).where(
             NotebookTemplateVersion.template_id == template.id
@@ -730,6 +816,10 @@ def publish_template(
             notebook_metadata=metadata,
             assets_dir=assets_dir,
             published_by_id=user.id,
+            # 从草稿复制不可变环境快照；已发布版本与已开始实验不随新发布自动升级
+            environment_version_id=template.draft_environment_version_id,
+            import_policy_mode=template.draft_import_policy_mode,
+            allowed_imports=list(template.draft_allowed_imports or []),
         )
         db.add(version)
         db.flush()
@@ -799,7 +889,8 @@ def export_notebook(cells: list[dict], metadata: dict) -> bytes:
     return nbformat.writes(notebook).encode("utf-8")
 
 
-def preview_run(template: NotebookTemplate, user: User, cell_id: str, manager):
+def preview_run(template: NotebookTemplate, user: User, cell_id: str, manager,
+                db: Session | None = None):
     cells = _normalize_cells(template.draft_cells)
     requested = next(
         (
@@ -817,9 +908,21 @@ def preview_run(template: NotebookTemplate, user: User, cell_id: str, manager):
             "CELL_NOT_FOUND",
             "可见的代码 Cell 不存在（草稿可能尚未保存，请先保存草稿后重试）",
         )
+    # Phase 5（计划 9.3）：草稿环境切换时 preview session 检测不一致并重建——
+    # 传草稿环境的 digest 与环境版本，get_or_create_session 比对 Redis/内存记录自动重建。
+    env_id = template.draft_environment_version_id
+    image_ref = None
+    if env_id is not None and db is not None:
+        from app.services.environment_service import resolve_run_image_ref
+
+        try:
+            image_ref = resolve_run_image_ref(db, env_id)
+        except Exception:
+            raise api_error(503, "ENVIRONMENT_IMAGE_MISSING", "运行环境暂不可用，请稍后重试")
     session_id = preview_session_key(template.id, user.id)
     try:
-        manager.get_or_create_session(session_id)
+        manager.get_or_create_session(session_id, image_ref=image_ref,
+                                      environment_version_id=env_id)
     except Exception as exc:
         raise api_error(500, "KERNEL_ERROR", f"预览 Kernel 创建失败：{exc}")
 

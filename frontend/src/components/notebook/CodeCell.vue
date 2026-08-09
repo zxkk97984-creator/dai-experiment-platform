@@ -61,21 +61,72 @@ watch(() => props.cell.source, (val) => {
 async function initCodeMirror() {
   try {
     const [
-      { EditorView, keymap, lineNumbers, highlightActiveLine },
+      { EditorView, drawSelection, keymap, lineNumbers, highlightActiveLine },
       { EditorState },
       { python },
-      { oneDark },
+      { HighlightStyle, syntaxHighlighting },
+      { tags: t },
       { defaultKeymap, indentWithTab },
     ] = await Promise.all([
       import('@codemirror/view'),
       import('@codemirror/state'),
       import('@codemirror/lang-python'),
-      import('@codemirror/theme-one-dark'),
+      import('@codemirror/language'),
+      import('@lezer/highlight'),
       import('@codemirror/commands'),
     ])
 
     await nextTick()
     if (!editorEl.value) return
+
+    // ── DAI 浅色编辑主题：白底、主蓝光标/选区、浅灰蓝行号栏（不再是 oneDark 深色）──
+    const daiLightTheme = EditorView.theme({
+      '&': {
+        backgroundColor: 'var(--surface)',
+        color: 'var(--ink)',
+      },
+      '.cm-content': { caretColor: 'var(--primary)' },
+      '.cm-cursor, .cm-dropCursor': {
+        borderLeftColor: 'var(--primary)',
+        borderLeftWidth: '2px',
+      },
+      '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
+        backgroundColor: 'rgba(20, 99, 243, 0.18)',
+      },
+      '&.cm-focused': { outline: 'none' },
+      '.cm-gutters': {
+        backgroundColor: 'var(--surface-sunken)',
+        color: 'var(--text-tertiary)',
+        border: 'none',
+        borderRight: '1px solid var(--border)',
+      },
+      '.cm-activeLine': { backgroundColor: 'var(--primary-light)' },
+      '.cm-activeLineGutter': {
+        backgroundColor: 'var(--primary-soft)',
+        color: 'var(--primary)',
+      },
+      '.cm-selectionMatch': { backgroundColor: 'rgba(20, 99, 243, 0.18)' },
+    }, { dark: false })
+
+    // ── 冷色浅色语法高亮：蓝/紫/青/绿/灰，无橙黄主导 ──
+    const daiLightHighlight = HighlightStyle.define([
+      { tag: t.comment, color: 'var(--text-secondary)', fontStyle: 'italic' },
+      { tag: [t.keyword, t.modifier], color: 'var(--primary-dark)', fontWeight: '600' },
+      { tag: [t.string, t.special(t.string), t.regexp], color: '#0E7490' },
+      { tag: [t.number, t.bool, t.null, t.atom], color: '#0F766E' },
+      { tag: [t.function(t.variableName), t.function(t.propertyName)], color: '#6D28D9' },
+      { tag: [t.className, t.typeName], color: '#7C3AED' },
+      { tag: [t.propertyName, t.attributeName], color: '#1D4ED8' },
+      { tag: [t.operator, t.punctuation, t.bracket], color: '#334155' },
+      { tag: [t.variableName, t.self], color: 'var(--ink)' },
+      { tag: [t.meta, t.docComment], color: '#64748B' },
+      { tag: t.heading, color: 'var(--primary)', fontWeight: '600' },
+      { tag: t.emphasis, fontStyle: 'italic' },
+      { tag: t.strong, fontWeight: '600' },
+      { tag: t.deleted, color: 'var(--danger)' },
+      { tag: t.inserted, color: 'var(--success)' },
+      { tag: t.invalid, color: 'var(--danger)' },
+    ])
 
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
@@ -88,8 +139,10 @@ async function initCodeMirror() {
       extensions: [
         lineNumbers(),
         highlightActiveLine(),
+        drawSelection(),
         python(),
-        oneDark,
+        daiLightTheme,
+        syntaxHighlighting(daiLightHighlight),
         keymap.of([...defaultKeymap, indentWithTab]),
         updateListener,
         EditorView.editable.of(!props.readonly),
@@ -153,7 +206,7 @@ watch(() => props.readonly, () => {
 </script>
 
 <template>
-  <div class="code-cell" :class="{ executing: isExecuting }">
+  <div class="code-cell" :class="{ executing: isExecuting }" data-code-theme="light">
     <!-- 标签 -->
     <div class="cell-indicator">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
@@ -217,15 +270,16 @@ watch(() => props.readonly, () => {
 .code-cell {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--primary);
   border-radius: var(--radius-md);
   margin-bottom: var(--space-4);
   overflow: hidden;
+  box-shadow: var(--shadow-xs);
 }
 
 .code-cell.executing {
-  border-left-color: var(--warning);
-  box-shadow: 0 0 0 1px var(--warning);
+  border-left-color: var(--primary-dark);
+  box-shadow: var(--shadow-glow-primary);
 }
 
 .cell-indicator {
@@ -235,7 +289,7 @@ watch(() => props.readonly, () => {
   padding: var(--space-3) var(--space-5);
   background: var(--surface-raised);
   border-bottom: 1px solid var(--border);
-  color: var(--accent);
+  color: var(--primary);
   font-size: var(--text-xs);
   font-weight: 600;
   text-transform: uppercase;
@@ -257,7 +311,7 @@ watch(() => props.readonly, () => {
   min-height: 48px;
 }
 
-/* ── CodeMirror 样式 ── */
+/* ── CodeMirror 样式（颜色全部由扩展层浅色主题管理，这里只保留布局） ── */
 .editor-wrap :deep(.cm-editor) {
   font-family: var(--font-mono);
   font-size: 13px;
@@ -267,20 +321,11 @@ watch(() => props.readonly, () => {
   padding: var(--space-3) var(--space-3) var(--space-3) 0;
 }
 
-.editor-wrap :deep(.cm-editor .cm-cursor) {
-  border-left-color: #60A5FA !important;
-  border-left-width: 2px;
-}
-
-.editor-wrap :deep(.cm-editor .cm-selectionBackground) {
-  background: rgba(96, 165, 250, 0.3) !important;
-}
-
 .editor-wrap :deep(.cm-editor .cm-scroller) {
   cursor: text;
 }
 
-/* ── Textarea fallback ── */
+/* ── Textarea fallback（浅色语义与主题一致） ── */
 .code-textarea {
   width: 100%;
   min-height: 80px;
@@ -288,9 +333,9 @@ watch(() => props.readonly, () => {
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.6;
-  background: #0F172A;
-  color: #E2E8F0;
-  caret-color: #60A5FA;
+  background: var(--surface);
+  color: var(--ink);
+  caret-color: var(--primary);
   border: none;
   outline: none;
   resize: vertical;
@@ -298,14 +343,14 @@ watch(() => props.readonly, () => {
 }
 
 .code-textarea::placeholder {
-  color: rgba(148, 163, 184, 0.4);
+  color: var(--text-tertiary);
   font-style: italic;
 }
 
 .code-textarea:focus {
-  outline: 2px solid #60A5FA;
+  outline: 2px solid var(--primary);
   outline-offset: -2px;
-  box-shadow: 0 0 8px rgba(96, 165, 250, 0.3);
+  box-shadow: var(--shadow-glow-primary);
 }
 
 .code-toolbar {
@@ -321,9 +366,9 @@ watch(() => props.readonly, () => {
   align-items: center;
   gap: 6px;
   padding: 4px 12px;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--primary);
   border-radius: var(--radius-sm);
-  background: var(--accent);
+  background: var(--primary);
   color: #fff;
   font-size: var(--text-xs);
   font-weight: 500;
@@ -332,8 +377,13 @@ watch(() => props.readonly, () => {
 }
 
 .btn-run:hover:not(:disabled) {
-  background: var(--accent-dark);
-  border-color: var(--accent-dark);
+  background: var(--primary-dark);
+  border-color: var(--primary-dark);
+}
+
+.btn-run:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-glow-primary);
 }
 
 .btn-run:disabled {
@@ -348,11 +398,11 @@ watch(() => props.readonly, () => {
   font-family: var(--font-mono);
 }
 
-/* ── 输出区 ── */
+/* ── 输出区：浅底深字，stderr/error 保留红系语义 ── */
 .output-area {
   border-top: 1px solid var(--border);
   padding: var(--space-3) var(--space-5);
-  background: #0F172A;
+  background: var(--surface-sunken);
   max-height: 400px;
   overflow-y: auto;
 }
@@ -362,14 +412,14 @@ watch(() => props.readonly, () => {
   padding: 2px 0;
   font-family: var(--font-mono);
   font-size: 12px;
-  color: #E2E8F0;
+  color: var(--ink);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .output-stderr {
-  color: #FCA5A5;
-  background: rgba(239, 68, 68, 0.08);
+  color: var(--danger);
+  background: rgba(240, 68, 56, 0.08);
   padding: 4px 8px;
   border-radius: 3px;
 }
@@ -379,9 +429,9 @@ watch(() => props.readonly, () => {
   padding: 8px 12px;
   font-family: var(--font-mono);
   font-size: 12px;
-  color: #FCA5A5;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: var(--danger);
+  background: rgba(240, 68, 56, 0.1);
+  border: 1px solid rgba(240, 68, 56, 0.3);
   border-radius: var(--radius-sm);
   white-space: pre-wrap;
 }

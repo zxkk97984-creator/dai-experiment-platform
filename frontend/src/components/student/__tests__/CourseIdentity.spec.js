@@ -51,3 +51,44 @@ describe('CourseIdentity', () => {
     expect(wrapper.find('.course-identity__icon').exists()).toBe(true)
   })
 })
+
+describe('CourseIdentity 课程封面', () => {
+  it('有封面 URL 时优先渲染封面图（94×94 占位）', () => {
+    const wrapper = mount(CourseIdentity, {
+      props: { title: 'Python 编程基础', coverUrl: '/api/v1/media/course-covers/42?v=x' },
+    })
+    const img = wrapper.find('.course-identity__cover')
+    expect(img.exists()).toBe(true)
+    expect(img.attributes('src')).toBe('/api/v1/media/course-covers/42?v=x')
+    expect(img.attributes('alt')).toBe('Python 编程基础课程封面')
+    // 封面存在时不渲染语义图标
+    expect(wrapper.find('.course-identity__icon').exists()).toBe(false)
+  })
+
+  it('无封面 URL 时保留现有语义图标占位', () => {
+    const wrapper = mount(CourseIdentity, { props: { title: '机器学习导论' } })
+    expect(wrapper.find('.course-identity__cover').exists()).toBe(false)
+    expect(wrapper.find('.course-identity__icon').exists()).toBe(true)
+  })
+
+  it('图片加载失败后回退图标占位', async () => {
+    const wrapper = mount(CourseIdentity, {
+      props: { title: 'Python 编程基础', coverUrl: '/broken-cover.png' },
+    })
+    await wrapper.find('.course-identity__cover').trigger('error')
+    expect(wrapper.find('.course-identity__cover').exists()).toBe(false)
+    expect(wrapper.find('.course-identity__icon').exists()).toBe(true)
+  })
+
+  it('封面 URL 变化时重置失败状态并重新尝试', async () => {
+    const wrapper = mount(CourseIdentity, {
+      props: { title: 'Python 编程基础', coverUrl: '/broken-cover.png' },
+    })
+    await wrapper.find('.course-identity__cover').trigger('error')
+    expect(wrapper.find('.course-identity__cover').exists()).toBe(false)
+
+    await wrapper.setProps({ coverUrl: '/new-cover.png' })
+    expect(wrapper.find('.course-identity__cover').exists()).toBe(true)
+    expect(wrapper.find('.course-identity__cover').attributes('src')).toBe('/new-cover.png')
+  })
+})

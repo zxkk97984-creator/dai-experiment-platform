@@ -32,6 +32,7 @@ const enrolling = ref(false)
 const enrolled = ref(false)
 const fetchError = ref(false)
 const notFound = ref(false)
+const forbidden = ref(false)
 const tab = ref('overview')
 
 const courseId = computed(() => route.params.id)
@@ -133,35 +134,50 @@ async function fetchAll() {
   loading.value = true
   fetchError.value = false
   notFound.value = false
-  const results = await Promise.allSettled([
-    coursesAPI.get(courseId.value),
-    coursesAPI.getChapters(courseId.value),
-    assignmentsAPI.list({ course_id: courseId.value }),
-    examsAPI.list({ course_id: courseId.value }),
-    dashboardAPI.student(),
-  ])
-  if (results[0].status === 'fulfilled') {
-    course.value = results[0].value.data
-    enrolled.value = true
-  } else if (results[0].reason?.response?.status === 403) {
-    enrolled.value = false
-  } else if (results[0].reason?.response?.status === 404) {
-    notFound.value = true
+  forbidden.value = false
+  // 先取课程元数据：403 = 无权访问或课程不可见；404 = 不存在
+  let courseRes
+  try {
+    courseRes = await coursesAPI.get(courseId.value)
+  } catch (e) {
+    const status = e.response?.status
+    if (status === 403) forbidden.value = true
+    else if (status === 404) notFound.value = true
+    else {
+      fetchError.value = true
+      app.showToast('加载课程失败', 'error')
+    }
+    loading.value = false
+    return
+  }
+  course.value = courseRes.data
+  enrolled.value = course.value.is_enrolled === true
+  if (enrolled.value) {
+    // 已选课：并发加载章节、作业、考试与 dashboard
+    const results = await Promise.allSettled([
+      coursesAPI.getChapters(courseId.value),
+      assignmentsAPI.list({ course_id: courseId.value }),
+      examsAPI.list({ course_id: courseId.value }),
+      dashboardAPI.student(),
+    ])
+    if (results[0].status === 'fulfilled') {
+      chapters.value = results[0].value.data?.items || results[0].value.data || []
+    }
+    if (results[1].status === 'fulfilled') {
+      assignments.value = results[1].value.data?.items || results[1].value.data || []
+    }
+    if (results[2].status === 'fulfilled') {
+      exams.value = results[2].value.data?.items || results[2].value.data || []
+    }
+    if (results[3].status === 'fulfilled') {
+      dashboard.value = results[3].value.data
+    }
   } else {
-    fetchError.value = true
-    app.showToast('加载课程失败', 'error')
-  }
-  if (results[1].status === 'fulfilled') {
-    chapters.value = results[1].value.data?.items || results[1].value.data || []
-  }
-  if (results[2].status === 'fulfilled') {
-    assignments.value = results[2].value.data?.items || results[2].value.data || []
-  }
-  if (results[3].status === 'fulfilled') {
-    exams.value = results[3].value.data?.items || results[3].value.data || []
-  }
-  if (results[4].status === 'fulfilled') {
-    dashboard.value = results[4].value.data
+    // 未选课：不请求章节/作业/考试/dashboard，避免预期中的 403
+    chapters.value = []
+    assignments.value = []
+    exams.value = []
+    dashboard.value = null
   }
   loading.value = false
 }
@@ -232,18 +248,43 @@ onMounted(fetchAll)
       <button type="button" class="btn-primary retry-btn" @click="fetchAll" style="margin-top:12px">重试</button>
     </div>
 
+    <!-- 无权访问或课程不可见 -->
+    <div v-else-if="forbidden" class="empty-state">
+      <p>无权访问或课程不可见</p>
+      <button type="button" class="btn-primary back-list-btn" @click="goBack" style="margin-top:12px">返回课程列表</button>
+    </div>
+
     <!-- 课程不存在 -->
     <div v-else-if="notFound" class="empty-state">
       <p>课程不存在</p>
       <button type="button" class="btn-primary back-list-btn" @click="goBack" style="margin-top:12px">返回课程列表</button>
     </div>
 
-    <!-- 未选课 -->
-    <div v-else-if="!course && !enrolled" class="empty-state">
-      <p>你还未选这门课，加入后即可查看课程内容</p>
-      <button type="button" class="btn-primary hero-enroll-btn" :disabled="enrolling" @click="handleEnroll" style="margin-top:12px">
-        {{ enrolling ? '选课中...' : '立即选课' }}
-      </button>
+    <!-- 未选课：仅展示 hero 与选课 CTA，不加载内容 -->
+    <div v-else-if="course && !enrolled" class="course-detail">
+      <StudentCourseHero
+        :course="course"
+        :progress="0"
+        :total-lessons="0"
+        :completed-lessons="0"
+        :total-chapters="0"
+        :enrolled="false"
+        :enrolling="enrolling"
+        @enroll="handleEnroll"
+        @back="goBack"
+      />
+      <div class="empty-state">
+        <p>你还未选这门课，加入后即可查看课程内容</p>
+        <button
+          type="button"
+          class="btn-primary hero-enroll-btn"
+          :disabled="enrolling"
+          @click="handleEnroll"
+          style="margin-top:12px"
+        >
+          {{ enrolling ? '选课中...' : '立即选课' }}
+        </button>
+      </div>
     </div>
 
     <!-- 防御：课程缺失 -->

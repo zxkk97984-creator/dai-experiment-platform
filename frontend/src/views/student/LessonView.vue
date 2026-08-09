@@ -16,7 +16,14 @@ const chapters = ref([])
 const course = ref(null)
 const lesson = ref(null)
 const loading = ref(true)
+const forbidden = ref(false)
 const dropdownOpen = ref(false)
+
+// 本地视频播放：签名 URL / 加载中 / 错误态
+const videoPlaybackUrl = ref('')
+const videoLoading = ref(false)
+const videoError = ref('')
+let videoRetryCount = 0 // 媒体 error 自动重新获取签名的次数（最多 1 次）
 
 const courseId = computed(() => route.params.id)
 const lessonId = computed(() => route.params.lid)
@@ -65,11 +72,65 @@ function findLesson() {
         if (found.content_type === 'notebook') {
           router.replace(`/student/courses/${courseId.value}/notebook/${found.id}`)
         }
+        loadVideoForCurrentLesson()
         return
       }
     }
   }
   lesson.value = null
+}
+
+// ── 本地视频播放 ────────────────────────────────────────────────────
+function resetVideoState() {
+  videoPlaybackUrl.value = ''
+  videoLoading.value = false
+  videoError.value = ''
+  videoRetryCount = 0
+}
+
+function loadVideoForCurrentLesson() {
+  const current = lesson.value
+  resetVideoState()
+  // 仅本地来源需要签名地址；外链直接渲染链接，不调用播放接口
+  if (!current || current.content_type !== 'video' || current.video_source !== 'upload') return
+  fetchVideoPlayback(current.id)
+}
+
+async function fetchVideoPlayback(id) {
+  videoLoading.value = true
+  videoError.value = ''
+  try {
+    const res = await coursesAPI.getLessonVideoPlaybackUrl(id)
+    // 防竞态：期间切换了课时则丢弃过期响应
+    if (lesson.value && String(lesson.value.id) === String(id)) {
+      videoPlaybackUrl.value = res.data.url
+    }
+  } catch (err) {
+    if (lesson.value && String(lesson.value.id) === String(id)) {
+      videoError.value = '视频加载失败，请重试'
+    }
+  } finally {
+    if (lesson.value && String(lesson.value.id) === String(id)) {
+      videoLoading.value = false
+    }
+  }
+}
+
+function onVideoMediaError() {
+  // 播放过程中 URL 过期后的新 Range 请求可能失败：自动重新获取一次签名
+  if (videoRetryCount >= 1) {
+    videoError.value = '视频加载失败，请重试'
+    return
+  }
+  videoRetryCount += 1
+  videoPlaybackUrl.value = ''
+  fetchVideoPlayback(lesson.value?.id)
+}
+
+function retryVideo() {
+  // 手动重试：重置自动刷新计数
+  videoRetryCount = 0
+  fetchVideoPlayback(lesson.value?.id)
 }
 
 function markComplete() {
@@ -87,6 +148,7 @@ function markComplete() {
 
 async function fetchData() {
   loading.value = true
+  forbidden.value = false
   try {
     const [chRes, cRes] = await Promise.all([
       coursesAPI.getChapters(courseId.value),
@@ -97,8 +159,13 @@ async function fetchData() {
     course.value = cRes.data
     findLesson()
     if (lesson.value) markComplete()
-  } catch {
-    app.showToast('加载课时失败', 'error')
+  } catch (e) {
+    if (e.response?.status === 403) {
+      // 未选课 / 已移出白名单 / 课程不可见：给出明确错误态而非仅 toast
+      forbidden.value = true
+    } else {
+      app.showToast('加载课时失败', 'error')
+    }
   } finally { loading.value = false }
 }
 
@@ -263,6 +330,12 @@ watch([lessonId, courseId], async ([newLid, newCid], [oldLid, oldCid]) => {
       <div class="skeleton" style="height:14px;width:100%;margin-bottom:8px" v-for="i in 8" :key="i"></div>
     </div>
 
+    <!-- 无权访问或课程不可见 -->
+    <div v-else-if="forbidden" class="empty-state">
+      <p>无权访问或课程不可见</p>
+      <button class="btn-primary" @click="goCourse" style="margin-top:12px">返回课程详情</button>
+    </div>
+
     <!-- Not found -->
     <div v-else-if="!lesson" class="empty-state">
       <p>课时不存在</p>
@@ -348,14 +421,37 @@ watch([lessonId, courseId], async ([newLid, newCid], [oldLid, oldCid]) => {
           </template>
 
           <div v-else-if="lesson.content_type === 'video'" class="lesson-video">
-            <div v-if="lesson.video_url" class="video-wrapper">
-              <div class="video-placeholder">
-                <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3"><circle cx="24" cy="24" r="20"/><path d="M20 16v16l12-8z"/></svg>
-                <p class="text-sm text-secondary" style="margin-top:12px">视频课时：{{ lesson.title }}</p>
-                <a :href="lesson.video_url" target="_blank" class="btn-primary" style="margin-top:12px;display:inline-flex;align-items:center;gap:6px">打开视频</a>
+            <!-- 本地上传：内嵌播放器 -->
+            <template v-if="lesson.video_source === 'upload'">
+              <div class="video-wrapper">
+                <p v-if="videoLoading" class="video-state">视频加载中…</p>
+                <p v-else-if="videoError" class="video-state video-error">
+                  {{ videoError }}
+                  <button class="btn-ghost btn-sm" type="button" @click="retryVideo">重新加载视频</button>
+                </p>
+                <video
+                  v-else-if="videoPlaybackUrl"
+                  controls
+                  playsinline
+                  preload="metadata"
+                  class="lesson-video-player"
+                  :src="videoPlaybackUrl"
+                  @error="onVideoMediaError"
+                ></video>
+                <p v-else class="video-state">视频暂不可用</p>
               </div>
-            </div>
-            <div v-else class="empty-state"><p>视频暂不可用</p></div>
+            </template>
+            <!-- 外链：打开视频按钮 -->
+            <template v-else>
+              <div v-if="lesson.video_url" class="video-wrapper">
+                <div class="video-placeholder">
+                  <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3"><circle cx="24" cy="24" r="20"/><path d="M20 16v16l12-8z"/></svg>
+                  <p class="text-sm text-secondary" style="margin-top:12px">视频课时：{{ lesson.title }}</p>
+                  <a :href="lesson.video_url" target="_blank" rel="noopener noreferrer" class="btn-primary" style="margin-top:12px;display:inline-flex;align-items:center;gap:6px">打开视频</a>
+                </div>
+              </div>
+              <div v-else class="empty-state"><p>视频暂不可用</p></div>
+            </template>
           </div>
 
           <div v-else class="lesson-notebook">
@@ -615,6 +711,28 @@ watch([lessonId, courseId], async ([newLid, newCid], [oldLid, oldCid]) => {
 .video-placeholder {
   text-align: center; padding: var(--space-12) var(--space-6);
   display: flex; flex-direction: column; align-items: center;
+}
+/* 本地视频播放器：宽度 100% 跟随正文列，16:9 比例、黑色背景、圆角一致 */
+.lesson-video-player {
+  display: block;
+  width: 100%;
+  max-width: 780px;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-lg);
+  background: #000;
+}
+.video-state {
+  margin: 0;
+  padding: var(--space-10) var(--space-4);
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.video-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
 }
 .lesson-notebook { max-width: 780px; margin: var(--space-6) auto; }
 

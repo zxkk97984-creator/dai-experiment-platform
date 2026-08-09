@@ -174,6 +174,64 @@ def test_student_dashboard_real_data(client, db_session_factory):
     assert body["summary"]["unread_announcement_count"] == 1
 
 
+def test_priority_experiments_only_unsubmitted(client, db_session_factory):
+    """待办实验仅显示 started（未提交）；submitted/graded 已交记录不进 priority_items"""
+    from app.models import (
+        ExperimentModule, ExperimentRecord, Lesson,
+        NotebookTemplate, NotebookTemplateVersion,
+    )
+
+    g = _build_graph(db_session_factory)
+    with db_session_factory() as db:
+        tpl = NotebookTemplate(name="待办模板", status="published", owner_id=g["teacher_a"].id)
+        db.add(tpl)
+        db.flush()
+        ver = NotebookTemplateVersion(
+            template_id=tpl.id, version_number=1, sha256="z" * 64,
+            cells=[], cell_order=[], notebook_metadata={}, published_by_id=g["teacher_a"].id,
+        )
+        db.add(ver)
+        db.flush()
+        lesson_started = Lesson(chapter_id=g["lesson"].chapter_id, title="未提交课时实验")
+        lesson_graded = Lesson(chapter_id=g["lesson"].chapter_id, title="已评分课时实验")
+        db.add_all([lesson_started, lesson_graded])
+        db.flush()
+        module_started = ExperimentModule(
+            name="未提交模块实验", status="published", owner_id=g["teacher_a"].id,
+        )
+        module_submitted = ExperimentModule(
+            name="已提交模块实验", status="published", owner_id=g["teacher_a"].id,
+        )
+        db.add_all([module_started, module_submitted])
+        db.flush()
+        rec_started = ExperimentRecord(
+            lesson_id=lesson_started.id, template_version_id=ver.id,
+            student_id=g["student"].id, status="started", started_at=NOW - timedelta(hours=1),
+        )
+        rec_graded = ExperimentRecord(
+            lesson_id=lesson_graded.id, template_version_id=ver.id,
+            student_id=g["student"].id, status="graded", started_at=NOW - timedelta(days=1),
+            submitted_at=NOW - timedelta(hours=20),
+        )
+        rec_mod_started = ExperimentRecord(
+            module_id=module_started.id, template_version_id=ver.id,
+            student_id=g["student"].id, status="started", started_at=NOW - timedelta(minutes=30),
+        )
+        rec_mod_submitted = ExperimentRecord(
+            module_id=module_submitted.id, template_version_id=ver.id,
+            student_id=g["student"].id, status="submitted", started_at=NOW - timedelta(days=2),
+            submitted_at=NOW - timedelta(hours=5),
+        )
+        db.add_all([rec_started, rec_graded, rec_mod_started, rec_mod_submitted])
+        db.commit()
+
+    token, _ = login(client, "dash-student")
+    body = client.get("/api/v1/dashboard/student", headers=auth_header(token)).json()
+    exp_ids = [i["id"] for i in body["priority_items"] if i["kind"] == "experiment"]
+    # 仅未提交（started）记录：课时 + 模块各一条；已提交/已评分（含 _build_graph 原记录）全部隐藏
+    assert set(exp_ids) == {rec_started.id, rec_mod_started.id}
+
+
 # ── 教师首页 ───────────────────────────────────────────────────
 
 

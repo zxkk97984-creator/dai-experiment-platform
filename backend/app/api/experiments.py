@@ -224,6 +224,8 @@ def ensure_record_for_lesson(
     record = ExperimentRecord(
         lesson_id=lesson_id, module_id=None,
         template_version_id=version.id,
+        # Phase 5（计划 9.2）：从模板版本复制环境版本——已存在记录不因模板发布 v2 自动升级
+        environment_version_id=version.environment_version_id,
         student_id=current_user.id,
         status="started",
         started_at=datetime.now(timezone.utc),
@@ -260,6 +262,8 @@ def ensure_record_for_module(
     record = ExperimentRecord(
         lesson_id=None, module_id=module_id,
         template_version_id=version.id,
+        # Phase 5（计划 9.2）：从模板版本复制环境版本——已存在记录不因模板发布 v2 自动升级
+        environment_version_id=version.environment_version_id,
         student_id=current_user.id,
         status="started",
         started_at=datetime.now(timezone.utc),
@@ -323,6 +327,17 @@ def get_record_detail(
         and not any(c.get("id") == cell.id and c.get("source_hidden") for c in version.cells)
     )
 
+    # Phase 5：学生可见环境摘要（模板版本绑定的环境 + 模板发布时冻结的 import 策略）
+    from app.services.environment_service import public_environment_summary
+    from app.services.import_policy import ImportPolicy
+
+    env_summary = None
+    if version.environment_version_id is not None:
+        env_summary = public_environment_summary(
+            db, version.environment_version_id,
+            ImportPolicy.from_mode(version.import_policy_mode, list(version.allowed_imports or [])),
+        )
+
     return ExperimentRecordDetailResponse(
         id=record.id, lesson_id=record.lesson_id, module_id=record.module_id,
         student_id=record.student_id, status=record.status,
@@ -330,6 +345,7 @@ def get_record_detail(
         record_revision=record.record_revision,
         entry_name=entry_name, entry_description=entry_description,
         cells=cells_out, execution_count=visible_count,
+        environment_summary=env_summary,
     )
 
 
@@ -437,32 +453,127 @@ def execute_cell(
     if len(payload.code) > 50000:
         raise api_error(400, "CODE_TOO_LONG", "代码过长，最多 50000 字符")
 
+    # Phase 5（计划 9.3/9.4）：解析实验运行环境（记录快照 digest + 模板版本 import 策略）
+    env_id = getattr(record, "environment_version_id", None)
+    image_ref = None
+    installed: set[str] = set()
+    if env_id is not None:
+        from app.services.environment_service import (
+            installed_imports_for_version,
+            resolve_run_image_ref,
+        )
+
+        try:
+            image_ref = resolve_run_image_ref(db, env_id)
+        except Exception:
+            raise api_error(503, "ENVIRONMENT_IMAGE_MISSING",
+                            "运行环境暂不可用，请稍后重试")
+        installed = installed_imports_for_version(db, env_id)
+
+    from app.services.import_policy import ImportPolicy, classify_imports
+
+    policy = ImportPolicy.from_mode(
+        version.import_policy_mode if version else "unrestricted",
+        list(version.allowed_imports or []) if version else [],
+    )
+
+    # import 预检（计划 9.4）：只分析学生代码；IMPORT_NOT_ALLOWED → 422，IMPORT_NOT_INSTALLED → 500
+    if policy.restricted:
+        diagnostics = classify_imports(payload.code, policy, installed)
+        if diagnostics:
+            diagnostic = diagnostics[0]
+            if diagnostic.code == "IMPORT_NOT_ALLOWED":
+                raise api_error(422, "IMPORT_NOT_ALLOWED", diagnostic.message)
+            if diagnostic.code == "IMPORT_NOT_INSTALLED":
+                raise api_error(500, "IMPORT_NOT_INSTALLED", diagnostic.message)
+
     _init_hidden_cells_once(record, version, db)
 
     try:
         km = get_kernel_manager()
-        km.get_or_create_session(record_id)
+        if env_id is not None:
+            km.get_or_create_session(record_id, image_ref=image_ref,
+                                     environment_version_id=env_id)
+        else:
+            km.get_or_create_session(record_id)  # 未绑定环境版本：存量兼容路径
         result = km.execute(record_id, payload.code)
     except RuntimeError as e:
         raise api_error(409, "KERNEL_BUSY", str(e))
     except Exception as e:
         raise api_error(500, "KERNEL_ERROR", f"执行失败：{e}")
 
+    # Kernel 输出中的 ModuleNotFoundError 兜底归类（计划 9.4）：不把裸 traceback 当策略错误
+    kernel_diagnostic = _classify_kernel_module_not_found(result["outputs"], policy, installed)
+
     outputs = record.cells_outputs.copy()
     execution_count = _visible_execution_count(record, version) + 1
+    final_outputs = result["outputs"]
+    if kernel_diagnostic is not None:
+        final_outputs = _replace_error_output(final_outputs, kernel_diagnostic.message)
     outputs[cell_id] = {
         "execution_count": execution_count,
-        "outputs": result["outputs"],
+        "outputs": final_outputs,
         "execution_time_ms": result["execution_time_ms"],
     }
     record.cells_outputs = outputs
     db.commit()
 
     return ExperimentCellExecuteResponse(
-        outputs=result["outputs"],
+        outputs=final_outputs,
         execution_time_ms=result["execution_time_ms"],
         execution_count=execution_count,
+        diagnostic=kernel_diagnostic,
     )
+
+
+def _classify_kernel_module_not_found(outputs: list[dict], policy, installed: set[str]):
+    """Kernel 输出中的 ModuleNotFoundError 兜底归类（计划 9.4）。
+
+    预检已拦截策略错误；若代码绕过静态分析（动态拼接 import 名等）在 Kernel 内触发
+    ModuleNotFoundError，则按白名单/安装清单归为 IMPORT_NOT_ALLOWED 或
+    IMPORT_NOT_INSTALLED，不把裸 traceback 作为策略错误直接返回。
+    """
+    from app.schemas.environments import ImportDiagnosticRead
+    import re as _re
+
+    if not policy.restricted:
+        return None
+    for out in outputs:
+        if out.get("msg_type") != "error":
+            continue
+        text = (out.get("content") or {}).get("text", "") or ""
+        match = _re.search(r"No module named '([^']+)'", text)
+        if not match:
+            continue
+        module = match.group(1).split(".")[0]
+        if module not in policy.allowed_imports:
+            return ImportDiagnosticRead(
+                code="IMPORT_NOT_ALLOWED",
+                module=module,
+                message=f"导入限制：{module} 未在本实验允许范围内",
+            )
+        if module not in installed:
+            return ImportDiagnosticRead(
+                code="IMPORT_NOT_INSTALLED",
+                module=module,
+                message=f"环境配置错误：本实验允许 {module}，但当前环境未安装",
+            )
+    return None
+
+
+def _replace_error_output(outputs: list[dict], message: str) -> list[dict]:
+    """把第一个 error 输出替换为无 traceback 的合成中文诊断输出。"""
+    replaced = False
+    result = []
+    for out in outputs:
+        if not replaced and out.get("msg_type") == "error":
+            result.append({"msg_type": "error", "content": {"text": message}})
+            replaced = True
+        else:
+            result.append(out)
+    if not replaced:
+        result.append({"msg_type": "error", "content": {"text": message}})
+    return result
 
 
 def _init_hidden_cells_once(record: ExperimentRecord, version, db: Session) -> None:
@@ -477,8 +588,21 @@ def _init_hidden_cells_once(record: ExperimentRecord, version, db: Session) -> N
         return
 
     km = get_kernel_manager()
+    env_id = getattr(record, "environment_version_id", None)
+    image_ref = None
+    if env_id is not None:
+        from app.services.environment_service import resolve_run_image_ref
+
+        try:
+            image_ref = resolve_run_image_ref(db, env_id)
+        except Exception:
+            raise api_error(503, "ENVIRONMENT_IMAGE_MISSING", "运行环境暂不可用，请稍后重试")
     try:
-        km.get_or_create_session(record.id)
+        if env_id is not None:
+            km.get_or_create_session(record.id, image_ref=image_ref,
+                                     environment_version_id=env_id)
+        else:
+            km.get_or_create_session(record.id)  # 未绑定环境版本：存量兼容路径
     except Exception as e:
         raise api_error(500, "KERNEL_INIT_FAILED", f"Kernel 创建失败：{e}")
 
@@ -535,6 +659,7 @@ def restart_kernel(
     record.cells_outputs = {}
     db.commit()
 
+    # Phase 5：重启沿用记录绑定环境的 digest 镜像（session 内已记录，restart 自动继承）
     km = get_kernel_manager()
     km.restart(record_id)
     return {"status": "restarted"}

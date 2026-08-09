@@ -24,7 +24,7 @@ def _setup_course(client, db_session_factory, course_status="published", assignm
     t_tok, _ = login(client, "t_j")
     s_tok, _ = login(client, "s_j")
     c = client.post('/api/v1/courses', headers=auth_header(t_tok), json={
-        'title': 'Judge Course', 'status': course_status,
+        'title': 'Judge Course', 'status': course_status, 'visibility': 'public',
     })
     cid = c.json()['id']
     if course_status == 'published':
@@ -75,7 +75,7 @@ def test_sample_run_permission_denied_all_cases(client, db_session_factory):
     t_tok, _ = login(client, "t_perm2")
     s_tok, _ = login(client, "s_perm2")
     c = client.post('/api/v1/courses', headers=auth_header(t_tok), json={
-        'title': 'C', 'status': 'published',
+        'title': 'C', 'status': 'published', 'visibility': 'public',
     })
     cid = c.json()['id']
     # 不选课
@@ -101,7 +101,7 @@ def test_sample_run_permission_denied_all_cases(client, db_session_factory):
     create_user(db_session_factory, "s_da2", "student")
     t_da, _ = login(client, "t_da2")
     s_da, _ = login(client, "s_da2")
-    c2 = client.post('/api/v1/courses', headers=auth_header(t_da), json={'title':'C2','status':'published'})
+    c2 = client.post('/api/v1/courses', headers=auth_header(t_da), json={'title':'C2','status':'published','visibility':'public'})
     client.post(f'/api/v1/courses/{c2.json()["id"]}/enroll', headers=auth_header(s_da))
     a2 = client.post('/api/v1/assignments', headers=auth_header(t_da), json={'course_id':c2.json()['id'],'title':'A2','status':'draft'})
     q2 = client.post(f'/api/v1/assignments/{a2.json()["id"]}/questions', headers=auth_header(t_da), json={

@@ -66,6 +66,29 @@ const latestSubmissionByQuestion = new Map()
 const currentGradingMode = computed(() => questions.value[activeQ.value]?.grading_mode || 'legacy')
 const submitSucceeded = computed(() => ['accepted', 'graded'].includes(submitResult.value?.status))
 
+// ── Phase 5：学生端环境提示与 import 诊断 ────────────────────
+// 当前题目的有效环境摘要：题目覆盖优先（本题环境），否则作业默认（本作业环境）
+const currentEnvSummary = computed(() => {
+  const q = questions.value[activeQ.value]
+  return q?.environment_summary || assignment.value?.environment_summary || null
+})
+const envLabel = computed(() => {
+  const q = questions.value[activeQ.value]
+  return q?.environment_summary ? '本题环境' : '本作业环境'
+})
+const envImportsText = computed(() => {
+  const imports = currentEnvSummary.value?.imports || []
+  return imports.join(' · ')
+})
+const envAllowedText = computed(() => {
+  const summary = currentEnvSummary.value
+  if (!summary || summary.import_policy_mode !== 'restricted') return ''
+  return (summary.allowed_imports || []).join(' · ')
+})
+// 判题/自测结果优先显示结构化 diagnostic（安全中文文案，无裸 traceback）
+const submitDiagnostic = computed(() => submitResult.value?.diagnostic || null)
+const testDiagnostic = computed(() => testResult.value?.diagnostic || null)
+
 let pollTimer = null
 let pollCount = 0
 
@@ -323,6 +346,21 @@ function stopSubmitPolling() {
           <div v-if="showProblem" class="problem-body">
             <div class="problem-desc" v-if="descriptionHtml"
               v-html="descriptionHtml"></div>
+            <!-- Phase 5：环境提示（学生无需选择/切换/确认，只读展示） -->
+            <div class="env-banner" v-if="currentEnvSummary">
+              <div class="env-line">
+                <span class="env-label">{{ envLabel }}：</span>
+                <span class="env-value">{{ currentEnvSummary.display_name }} {{ currentEnvSummary.version_label }}</span>
+              </div>
+              <div class="env-line" v-if="envImportsText">
+                <span class="env-label">可用库：</span>
+                <span class="env-value env-imports">{{ envImportsText }}</span>
+              </div>
+              <div class="env-line" v-if="envAllowedText">
+                <span class="env-label">本题允许导入：</span>
+                <span class="env-value env-imports">{{ envAllowedText }}</span>
+              </div>
+            </div>
             <div class="problem-meta" v-if="questions[activeQ]">
               <div class="meta-item" v-if="questions[activeQ]?.signature || questions[activeQ]?.function_name">
                 <span class="meta-label">函数签名</span>
@@ -427,6 +465,11 @@ function stopSubmitPolling() {
                     <span class="prompt">$</span> 运行测试中...
                   </div>
                   <template v-else>
+                    <!-- Phase 5：import 诊断优先显示安全中文文案，不展示裸 traceback -->
+                    <div v-if="testDiagnostic" class="terminal-line error">
+                      <span class="check">✗</span>
+                      {{ testDiagnostic.message }}
+                    </div>
                     <div class="terminal-line muted">
                       <span class="prompt">$</span> pytest test_{{ questions[activeQ]?.function_name || 'solution' }}.py
                     </div>
@@ -465,6 +508,12 @@ function stopSubmitPolling() {
                 <template v-else>
                   <div class="result-status">
                     <span>{{ SUBMIT_STATUS_LABEL[submitResult?.status] || '✗ ' + submitResult?.status }}</span>
+                  </div>
+                  <!-- Phase 5：结构化诊断优先显示安全中文文案（IMPORT_NOT_ALLOWED 等），
+                       不把底层 Docker 信息或裸 traceback 作为主要提示 -->
+                  <div v-if="submitDiagnostic" class="result-diagnostic">
+                    <span class="diag-icon">⚠</span>
+                    {{ submitDiagnostic.message }}
                   </div>
                   <div class="result-meta">
                     <span v-if="submitResult?.execution_time_ms != null">{{ submitResult.execution_time_ms }}ms</span>
@@ -653,6 +702,22 @@ function stopSubmitPolling() {
 }
 
 .problem-meta { margin-top: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
+
+/* Phase 5：学生端环境提示（只读展示，学生无需选择/确认） */
+.env-banner {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-md);
+  display: flex; flex-direction: column; gap: 6px;
+  font-size: var(--text-sm);
+}
+.env-line { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.env-label { color: var(--text-secondary); font-weight: 500; white-space: nowrap; }
+.env-value { color: var(--ink); font-weight: 600; }
+.env-imports { color: var(--text-secondary); font-weight: 400; font-family: var(--font-mono); font-size: 0.92em; }
 
 .meta-item { display: flex; flex-direction: column; gap: 4px; }
 
@@ -1033,6 +1098,20 @@ function stopSubmitPolling() {
   font-size: var(--text-sm); color: var(--text-secondary);
   display: flex; gap: var(--space-4);
 }
+
+/* Phase 5：结构化诊断（安全中文文案，不展示裸 traceback） */
+.result-diagnostic {
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  border: 1px dashed var(--warning, #d97706);
+  border-radius: var(--radius-sm);
+  color: var(--warning, #d97706);
+  font-size: var(--text-sm);
+  display: flex; align-items: center; gap: 6px;
+  line-height: 1.5;
+}
+.diag-icon { font-size: 14px; flex-shrink: 0; }
 
 .shadow-mode-note {
   margin-top: var(--space-4);

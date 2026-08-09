@@ -40,6 +40,10 @@ vi.mock('../../../api/studio.js', () => ({
   },
 }))
 
+vi.mock('../../../api/environments.js', () => ({
+  environmentsAPI: { listAvailable: vi.fn().mockResolvedValue({ data: [] }) },
+}))
+
 vi.mock('../../../stores/app.js', () => ({
   useAppStore: () => appState,
 }))
@@ -150,12 +154,17 @@ describe('LessonEditView', () => {
     studioAPI.createTemplate.mockResolvedValue({ data: { id: 99 } })
     const wrapper = await mountPage()
     expect(wrapper.text()).toContain('该 Notebook 课时尚未关联模板')
+    expect(wrapper.text()).toContain('暂无可用环境，请联系管理员')
     await wrapper.findAll('button').find((b) => b.text().includes('创建模板并进入')).trigger('click')
     await flushPromises()
+    // Phase 4：兜底创建携带环境字段（无可用环境时为 null + 默认策略）
     expect(studioAPI.createTemplate).toHaveBeenCalledWith({
       name: '复制实验簿',
       description: '简介',
       lesson_id: 2,
+      environment_version_id: null,
+      import_policy_mode: 'unrestricted',
+      allowed_imports: [],
     })
     expect(routerState.replace).toHaveBeenCalledWith({ query: { template: 99 } })
   })

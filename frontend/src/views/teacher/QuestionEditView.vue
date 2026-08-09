@@ -1,241 +1,1798 @@
 <script setup>
-import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+// QuestionEditView：教师端「编程题目编辑」页（IDE 风格布局重构）
+//
+// 布局：左侧导航（AppLayout 现状不动） + 中间主编辑区（纵向三大区）
+//       + 右侧 sticky 运行设置栏 + 底部 fixed 操作栏。
+// 主编辑区：① 基础信息（标题/签名/描述 Markdown） ② 学生代码模板（深色 CodeMirror）
+//           ③ 测试用例（公开样例表格 + 私有测试双模式）
+// 数据契约不变：public_cases 仍为 JSON 数组、hidden_tests 仍为 pytest 代码字符串提交。
+import { ref, computed, watch, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
+import AppIcon from '../../components/ui/AppIcon.vue'
 import AIQuestionConfig from '../../components/ai/AIQuestionConfig.vue'
+import AiConfigForm from '../../components/ai/AiConfigForm.vue'
+import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
+import EnvironmentProfilePicker from '../../components/common/EnvironmentProfilePicker.vue'
+import QeMarkdownEditor from '../../components/teacher/question-editor/QeMarkdownEditor.vue'
+import QeCodeEditor from '../../components/teacher/question-editor/QeCodeEditor.vue'
+import QeTestCases from '../../components/teacher/question-editor/QeTestCases.vue'
 import { assignmentsAPI } from '../../api/assignments.js'
+import { environmentsAPI } from '../../api/environments.js'
+import { judgeAPI } from '../../api/judge.js'
+import { aiGradingAPI } from '../../api/aiGrading.js'
 import { useAppStore } from '../../stores/app.js'
 
 const route = useRoute()
+const router = useRouter()
 const app = useAppStore()
+
 const assignment = ref(null)
 const questions = ref([])
 const loading = ref(true)
-const showForm = ref(false)
-const aiConfigQid = ref(null)  // 当前展开 AI 配置的题目 ID
-const form = ref({
-  title: '', description: '', function_name: '', signature: '',
-  starter_code: '', public_cases: '[]', hidden_tests: '',
-  time_limit_ms: 10000, memory_limit_mb: 256,
-})
+
+// ── 编辑状态：null = 未选择题目；'new' = 新建；数字 = 编辑已有题目 ──
+const activeId = ref(null)
+const editingId = ref(null)  // 编辑中的题目 id（null = 新建）
+const formKey = ref(0)       // 强制 QeTestCases 在加载/重置时重挂
+const lastSavedAt = ref(null)
 const saving = ref(false)
+const publishing = ref(false)      // 发布作业进行中（防重复点击）
+const confirmPublish = ref(false)  // 发布作业确认弹窗
+const runResult = ref(null)
+const fullscreenCode = ref(false)
+const sideTab = ref('run')   // 右侧栏 tab：run | ai
+
+// ── AI 评分配置草稿（新建题无 id 时使用；随「保存题目」一起提交） ──
+// 新建题默认 legacy（显式传值，不依赖后端默认 active，避免未开 AI 却 503）
+const aiDraft = ref({ grading_mode: 'legacy', teacher_constraints: {}, reference_solution: '', test_groups: [], score_cap_rules: [] })
+const aiDraftDirty = ref(false)      // 草稿有未保存修改（切题/创建成功时据此处理）
+const aiFormKey = ref(0)             // 草稿表单重挂 key（重置草稿后按默认值重新初始化）
+const aiDraftMsg = ref('')           // 草稿侧 AI 提示（如：先保存题目再生成测试组）
+
+function resetAiDraft() {
+ aiDraft.value = { grading_mode: 'legacy', teacher_constraints: {}, reference_solution: '', test_groups: [], score_cap_rules: [] }
+ aiDraftDirty.value = false
+ aiFormKey.value++
+ aiDraftMsg.value = ''
+}
+
+// 草稿编辑回调：v-model 数据上抛并置脏标记
+function onAiDraftChange(v) { aiDraft.value = v; aiDraftDirty.value = true }
+
+// 草稿模式无 questionId，AI 生成测试组端点无法寻址题目：提示先保存
+function onDraftGenerateTestGroups() {
+  aiDraftMsg.value = '请先保存题目后再生成测试组'
+}
+
+// 切题边界：新建题草稿未保存时切换到其他题目，提示已丢弃并重置（防草稿串题）
+function discardAiDraftIfDirty() {
+ if (activeId.value === 'new' && aiDraftDirty.value) {
+   app.showToast('当前新题的 AI 配置草稿未保存，已丢弃', 'error')
+   resetAiDraft()
+ }
+}
+
+// 发布前 Rubric 门禁提示：当前题 shadow/active 时提前提醒（后端 503 仍兜底）
+const currentGradingMode = computed(() => {
+ if (!editingId.value) return aiDraft.value.grading_mode  // 新建草稿模式
+ const q = questions.value.find((x) => x.id === editingId.value)
+ return q?.grading_mode || 'legacy'
+})
+const aiGateNotice = computed(() => {
+ if (currentGradingMode.value === 'legacy') return ''
+ return `当前题目为 ${currentGradingMode.value} 模式，若 Rubric 未生成并锁定，发布将被后端拒绝。`
+})
+
+const form = ref({
+ title: '', description: '', function_name: '', signature: '',
+ starter_code: '', public_cases: '[]', hidden_tests: '',
+ time_limit_ms: 10000, memory_limit_mb: 256,
+})
+
+// ── 作业默认环境与白名单（draft 可编辑；发布后绑定不可变） ──────────
+const envOptions = ref([])
+const assignmentEnvId = ref(null)
+const assignmentPolicy = ref('unrestricted')
+const assignmentAllowedImports = ref([])
+// 题目级环境：env_mode = inherit(继承作业) | override(指定版本)
+const questionEnvMode = ref('inherit')
+const questionEnvId = ref(null)
+const questionPolicyMode = ref('inherit')  // inherit | unrestricted | restricted
+const questionAllowedImports = ref([])
+const assignmentDraft = computed(() => assignment.value?.status === 'draft')
+
+const envById = (id) => envOptions.value.find((o) => o.environment_version_id === id) || null
+const envImportCandidates = (envId) => {
+ const env = envById(envId)
+ if (!env) return []
+ const seen = new Set()
+ const names = []
+ for (const p of env.packages || []) {
+   for (const name of p.import_names || []) {
+     if (!seen.has(name)) { seen.add(name); names.push(name) }
+   }
+ }
+ return names
+}
+
+// 题目最终生效环境：覆盖 → 题目指定；否则继承作业默认
+const effectiveEnvId = computed(() => (questionEnvMode.value === 'override' ? questionEnvId.value : assignmentEnvId.value))
+const effectiveEnv = computed(() => envById(effectiveEnvId.value))
+const memoryWarning = computed(() => {
+ if (!effectiveEnv.value) return ''
+ if (form.value.memory_limit_mb < effectiveEnv.value.minimum_memory_mb) {
+   return `内存上限 ${form.value.memory_limit_mb} MB 低于环境最低内存 ${effectiveEnv.value.minimum_memory_mb} MB，发布将被阻止`
+ }
+ return ''
+})
+// 白名单含未安装包 → 黄色警告（教学规则，不强制耦合）
+const mismatchWarning = computed(() => {
+ if (questionPolicyMode.value !== 'restricted' || questionAllowedImports.value.length === 0) return ''
+ const installed = new Set(envImportCandidates(effectiveEnvId.value))
+ const missing = questionAllowedImports.value.filter((name) => !installed.has(name))
+ return missing.length ? `注意：${missing.join('、')} 未在当前环境安装，学生运行时会提示环境配置问题` : ''
+})
+const assignmentMismatch = computed(() => {
+ if (assignmentPolicy.value !== 'restricted' || assignmentAllowedImports.value.length === 0) return ''
+ const installed = new Set(envImportCandidates(assignmentEnvId.value))
+ const missing = assignmentAllowedImports.value.filter((name) => !installed.has(name))
+ return missing.length ? `注意：${missing.join('、')} 未在作业环境安装` : ''
+})
+
+// ── 函数签名 → 函数名自动解析（合并输入框后 function_name 仍正常提交） ─
+const fnParseState = ref('')
+watch(() => form.value.signature, (sig) => {
+ const m = /^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(sig || '')
+ if (m) {
+   form.value.function_name = m[1]
+   fnParseState.value = `已识别函数名「${m[1]}」`
+ } else if (sig && sig.trim()) {
+   fnParseState.value = '未识别到 def 签名，请按 def xxx(...) 格式填写'
+ } else {
+   fnParseState.value = ''
+ }
+})
+
+// 公开样例数组 ↔ 表单 JSON 字符串（提交时仍按原字段契约）
+const publicCasesArr = computed({
+ get: () => {
+   try { return JSON.parse(form.value.public_cases) } catch { return [] }
+ },
+ set: (arr) => { form.value.public_cases = JSON.stringify(arr) },
+})
+
+async function fetchEnv() {
+ try {
+   const res = await environmentsAPI.listAvailable()
+   envOptions.value = res.data || []
+ } catch { /* 环境加载失败不阻塞题目编辑 */ }
+}
 
 async function fetch() {
-  loading.value = true
-  try {
-    const [aRes, qRes] = await Promise.all([
-      assignmentsAPI.get(route.params.id),
-      assignmentsAPI.getQuestions(route.params.id),
-    ])
-    assignment.value = aRes.data
-    questions.value = qRes.data.items || qRes.data
-  } catch { app.showToast('加载失败', 'error') }
-  finally { loading.value = false }
+ loading.value = true
+ try {
+   const [aRes, qRes] = await Promise.all([
+     assignmentsAPI.get(route.params.id),
+     assignmentsAPI.getQuestions(route.params.id),
+   ])
+   assignment.value = aRes.data
+   questions.value = qRes.data.items || qRes.data
+   assignmentEnvId.value = aRes.data.environment_version_id ?? null
+   assignmentPolicy.value = aRes.data.import_policy_mode || 'unrestricted'
+   assignmentAllowedImports.value = [...(aRes.data.allowed_imports || [])]
+   if (!assignmentEnvId.value && envOptions.value.length) {
+     assignmentEnvId.value = envOptions.value[0].environment_version_id
+   }
+ } catch { app.showToast('加载失败', 'error') }
+ finally {
+   loading.value = false
+   // 默认进入「新建第一道题目」编辑态：作业尚无题目时自动开始新题（避免停在空状态）
+   if (!activeId.value && questions.value.length === 0) startNew()
+ }
 }
 
-async function createQuestion() {
-  if (!form.value.title || !form.value.function_name) {
-    app.showToast('请填写标题和函数名', 'error'); return
-  }
-  saving.value = true
-  try {
-    let publicCases = []
-    try { publicCases = JSON.parse(form.value.public_cases) }
-    catch { app.showToast('公开样例 JSON 格式错误', 'error'); saving.value = false; return }
-    await assignmentsAPI.createQuestion(route.params.id, { ...form.value, public_cases: publicCases })
-    app.showToast('题目已创建', 'success')
-    showForm.value = false
-    form.value = {
-      title: '', description: '', function_name: '', signature: '',
-      starter_code: '', public_cases: '[]', hidden_tests: '',
-      time_limit_ms: 10000, memory_limit_mb: 256,
-    }
-    fetch()
-  } catch (e) { app.showToast(e.response?.data?.detail?.message || '创建失败', 'error') }
-  finally { saving.value = false }
+// 保存作业默认环境与白名单（发布后绑定不可变，后端 409）
+async function saveAssignmentEnv() {
+ try {
+   const res = await assignmentsAPI.update(route.params.id, {
+     environment_version_id: assignmentEnvId.value,
+     import_policy_mode: assignmentPolicy.value,
+     allowed_imports: assignmentPolicy.value === 'restricted' ? [...assignmentAllowedImports.value] : [],
+   })
+   assignment.value = res.data
+   app.showToast('作业环境设置已保存', 'success')
+ } catch (e) {
+   app.showToast(e.response?.data?.detail?.message || '保存失败（已发布作业的环境设置不可修改）', 'error')
+   fetch()
+ }
 }
 
-onMounted(fetch)
+function toggleAssignmentImport(name) {
+ const idx = assignmentAllowedImports.value.indexOf(name)
+ if (idx >= 0) assignmentAllowedImports.value.splice(idx, 1)
+ else assignmentAllowedImports.value.push(name)
+}
+
+function toggleQuestionImport(name) {
+ const idx = questionAllowedImports.value.indexOf(name)
+ if (idx >= 0) questionAllowedImports.value.splice(idx, 1)
+ else questionAllowedImports.value.push(name)
+}
+
+function resetQuestionForm() {
+ form.value = {
+   title: '', description: '', function_name: '', signature: '',
+   starter_code: '', public_cases: '[]', hidden_tests: '',
+   time_limit_ms: 10000, memory_limit_mb: 256,
+ }
+ editingId.value = null
+ questionEnvMode.value = 'inherit'
+ questionEnvId.value = null
+ questionPolicyMode.value = 'inherit'
+ questionAllowedImports.value = []
+}
+
+// 添加新题目：清空表单进入编辑区
+function startNew() {
+ discardAiDraftIfDirty()
+ resetQuestionForm()
+ activeId.value = 'new'
+ formKey.value++
+ runResult.value = null
+ window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+// 编辑已有题目 → 回填表单（含环境覆盖与策略）
+function openEdit(q) {
+ discardAiDraftIfDirty()
+ editingId.value = q.id
+ activeId.value = q.id
+ form.value = {
+   title: q.title || '', description: q.description || '', function_name: q.function_name || '',
+   signature: q.signature || '', starter_code: q.starter_code || '',
+   public_cases: JSON.stringify(q.public_cases || [], null, 2), hidden_tests: q.hidden_tests || '',
+   time_limit_ms: q.time_limit_ms ?? 10000, memory_limit_mb: q.memory_limit_mb ?? 256,
+ }
+ questionEnvMode.value = q.environment_version_id ? 'override' : 'inherit'
+ questionEnvId.value = q.environment_version_id ?? null
+ questionPolicyMode.value = q.import_policy_mode || 'inherit'
+ questionAllowedImports.value = [...(q.allowed_imports || [])]
+ formKey.value++
+ runResult.value = null
+ window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+// 保存草稿（创建或更新），返回是否成功
+async function submitQuestion() {
+ if (!form.value.title || !form.value.function_name) {
+   app.showToast('请填写标题和函数名', 'error'); return false
+ }
+ saving.value = true
+ try {
+   let publicCases = []
+   try { publicCases = JSON.parse(form.value.public_cases) }
+   catch { app.showToast('公开样例 JSON 格式错误', 'error'); saving.value = false; return false }
+   const payload = {
+     ...form.value,
+     public_cases: publicCases,
+     environment_version_id: questionEnvMode.value === 'override' ? questionEnvId.value : null,
+     import_policy_mode: questionPolicyMode.value,
+     allowed_imports: questionPolicyMode.value === 'restricted' ? [...questionAllowedImports.value] : [],
+   }
+   // 新建题：AI 草稿字段随 payload 一起提交（显式传 grading_mode，默认 legacy，
+   // 不依赖后端默认 active；其余 AI 字段为 create 链路前瞻，落库仍走独立接口）
+   if (!editingId.value) {
+     payload.grading_mode = aiDraft.value.grading_mode
+     payload.teacher_constraints = aiDraft.value.teacher_constraints || {}
+     payload.reference_solution = aiDraft.value.reference_solution || null
+     payload.test_groups = aiDraft.value.test_groups
+     payload.score_cap_rules = aiDraft.value.score_cap_rules
+   }
+   let res
+   if (editingId.value) {
+     await assignmentsAPI.updateQuestion(route.params.id, editingId.value, payload)
+     app.showToast('题目已更新', 'success')
+   } else {
+     res = await assignmentsAPI.createQuestion(route.params.id, payload)
+     app.showToast('题目已创建', 'success')
+     // 新建成功后获得真实题目 id，进入编辑态（运行测试等能力可用）
+     if (res?.data?.id) {
+       // 创建链路不接收 AI 配置字段：修改过的草稿经独立接口落库到新题目
+       if (aiDraftDirty.value) {
+         try {
+           await aiGradingAPI.updateConfig('assignment', res.data.id, {
+             grading_mode: aiDraft.value.grading_mode,
+             teacher_constraints: aiDraft.value.teacher_constraints || {},
+             reference_solution: aiDraft.value.reference_solution || null,
+             test_groups: aiDraft.value.test_groups,
+             score_cap_rules: aiDraft.value.score_cap_rules,
+           })
+         } catch (e) {
+           app.showToast(`AI 配置未随题目保存：${e.response?.data?.detail?.message || e.message || '保存失败'}`, 'error')
+         }
+       }
+       resetAiDraft()  // 清除草稿/脏标记，AI tab 切持久化模式
+       editingId.value = res.data.id
+       activeId.value = res.data.id
+     }
+   }
+   lastSavedAt.value = new Date()
+   fetch()
+   return true
+ } catch (e) {
+   app.showToast(e.response?.data?.detail?.message || '保存失败', 'error')
+   return false
+ } finally { saving.value = false }
+}
+
+// ── 发布作业（作业级接口 POST /assignments/{id}/publish）────────────
+// 流程：先保存当前题目（草稿，失败即停）→ 调用发布接口 → 刷新作业状态。
+// 发布失败时明确区分「题目已保存」与「发布失败」两段。
+async function publishAssignment() {
+ if (publishing.value) return
+ publishing.value = true
+ let saved = false
+ try {
+   if (activeId.value !== null) {
+     saved = await submitQuestion()  // 保存失败已由 submitQuestion toast 错误
+     if (!saved) { confirmPublish.value = false; return }
+   }
+   await assignmentsAPI.publish(route.params.id)
+   app.showToast('作业已发布', 'success')
+   confirmPublish.value = false
+   fetch()  // 刷新作业状态：按钮随之变为「已发布」禁用
+ } catch (e) {
+   const msg = e.response?.data?.detail?.message || '发布失败，请稍后重试'
+   app.showToast(saved ? `题目已保存为草稿，但发布失败：${msg}` : `发布失败：${msg}`, 'error')
+ } finally {
+   publishing.value = false
+ }
+}
+
+function openPublishConfirm() {
+ if (!assignmentDraft.value || publishing.value) return
+ // Rubric 门禁前置提示：当前题 shadow/active 时提前提醒（后端 503 仍兜底）
+ if (aiGateNotice.value) app.showToast(aiGateNotice.value, 'error')
+ confirmPublish.value = true
+}
+
+// 列表行「🤖 AI 配置」按钮收敛：选中该题并打开右侧栏 AI tab（唯一编辑面）
+function openAiConfig(q) {
+ openEdit(q)
+ sideTab.value = 'ai'
+}
+
+// 运行测试：调用后端 sample-run（该接口仅对学生开放，教师调用会返回 403，
+// 错误如实展示，不做假成功）
+async function runSample() {
+ const qid = Number(editingId.value)
+ if (!qid) { app.showToast('请先保存题目后再运行测试', 'error'); return }
+ runResult.value = { status: 'running' }
+ try {
+   const res = await judgeAPI.sampleRun(qid, { question_id: qid, code: form.value.starter_code })
+   runResult.value = res.data || {}
+ } catch (e) {
+   runResult.value = {
+     status: 'error',
+     message: e.response?.data?.detail?.message || e.response?.data?.message || e.message || '运行失败',
+   }
+ }
+}
+
+// 内存警告卡「使用推荐值」：一键设为环境最低内存
+function applyRecommendedMemory() {
+ if (!effectiveEnv.value) return
+ form.value.memory_limit_mb = effectiveEnv.value.minimum_memory_mb
+}
+
+function cancel() {
+ router.push('/teacher/assignments')
+}
+
+// 保存成功时间戳（「今天 14:32 已保存」）
+function formatSavedAt(d) {
+ const now = new Date()
+ const hh = String(d.getHours()).padStart(2, '0')
+ const mm = String(d.getMinutes()).padStart(2, '0')
+ if (d.toDateString() === now.toDateString()) return `今天 ${hh}:${mm}`
+ return `${d.getMonth() + 1}月${d.getDate()}日 ${hh}:${mm}`
+}
+
+// 底部 fixed 操作栏：跟随左侧导航折叠状态（与 AppLayout 的 main-area 一致）
+const bottomBarStyle = computed(() => ({
+ left: app.sidebarCollapsed ? 'var(--sidebar-collapsed-width)' : 'var(--sidebar-width)',
+}))
+
+onMounted(() => { fetch(); fetchEnv() })
 </script>
 
 <template>
   <AppLayout>
-    <div class="question-editor">
-      <header class="page-head">
-        <div>
-          <h1 class="page-title">{{ assignment?.title || '作业' }} - 题目管理</h1>
-          <p class="page-sub">添加与编辑判题题目，配置测试用例</p>
+    <div class="qe-page">
+      <!-- ── 顶部：面包屑 + 标题 + 保存状态 ─────────────────────── -->
+      <header class="qe-topbar">
+        <div class="qe-topbar-left">
+          <nav class="qe-crumbs" aria-label="面包屑">
+            题目管理 <span class="qe-crumbs-sep">/</span>
+            <span class="qe-crumbs-name">{{ assignment?.title || '作业' }}</span>
+            <span class="qe-crumbs-sep">/</span>
+            <span class="qe-crumbs-cur">{{ editingId ? '#' + editingId : (activeId === 'new' ? '新建' : '选择题目') }}</span>
+          </nav>
+          <h1 class="qe-title">{{ activeId === 'new' ? '添加题目' : '编辑题目' }}</h1>
         </div>
-        <button class="btn-primary" @click="showForm = !showForm">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-          {{ showForm ? '取消' : '添加题目' }}
-        </button>
+        <div class="qe-topbar-right">
+          <span v-if="lastSavedAt" class="qe-saved" role="status">
+            <AppIcon name="check" :size="14" />
+            {{ formatSavedAt(lastSavedAt) }} 已保存
+          </span>
+          <button
+            type="button"
+            class="btn btn-sm btn-primary qe-topbar-publish"
+            :disabled="!assignmentDraft || publishing"
+            @click="openPublishConfirm"
+          >
+            <AppIcon name="arrow-right" :size="14" />
+            {{ publishing ? '发布中...' : (assignmentDraft ? '发布作业' : '已发布') }}
+          </button>
+        </div>
       </header>
 
-      <div v-if="showForm" class="card mb-4">
-        <div class="grid-2">
-          <div class="form-group">
-            <label>题目标题</label>
-            <input v-model="form.title" placeholder="如: 两数之和" />
+      <!-- ── 题目列表（保留「添加题目」入口，选中后进入编辑） ─────── -->
+      <section class="card qe-list-card">
+        <div class="qe-list-head">
+          <h2 class="qe-card-title">题目 <span class="qe-count-badge">{{ questions.length }}</span></h2>
+          <div v-if="!loading && questions.length === 0" class="qe-empty">
+            <AppIcon name="assignment" :size="18" />
+            <p>暂无题目，点击「添加题目」创建第一道题目</p>
           </div>
-          <div class="form-group">
-            <label>函数名</label>
-            <input v-model="form.function_name" placeholder="如: add" />
-          </div>
+          <button class="btn-primary btn-sm" @click="startNew">
+            <AppIcon name="plus" :size="14" />
+            添加题目
+          </button>
         </div>
-
-        <div class="form-group">
-          <label>题目描述 (Markdown)</label>
-          <textarea v-model="form.description" rows="4" placeholder="支持 Markdown 格式编写题目描述"></textarea>
+        <div v-if="loading" class="qe-list-loading">
+          <div class="skeleton" style="height:20px;width:260px"></div>
         </div>
-
-        <div class="form-group">
-          <label>函数签名</label>
-          <input v-model="form.signature" placeholder="def add(a: int, b: int) -> int" />
-        </div>
-
-        <div class="form-group">
-          <label>初始代码</label>
-          <textarea v-model="form.starter_code" rows="5" class="code-editor" placeholder="def add(a, b):&#10;    # TODO&#10;    pass"></textarea>
-        </div>
-
-        <div class="grid-2">
-          <div class="form-group">
-            <label>公开样例 (JSON)</label>
-            <textarea v-model="form.public_cases" rows="4" class="code-editor" placeholder='[{"args": [1, 2], "expected": 3}]'></textarea>
-          </div>
-          <div class="form-group">
-            <label>隐藏测试 (pytest 代码)</label>
-            <textarea v-model="form.hidden_tests" rows="4" class="code-editor" placeholder="def test_add(): assert add(1,2)==3"></textarea>
-          </div>
-        </div>
-
-        <div class="grid-2">
-          <div class="form-group">
-            <label>超时 (ms)</label>
-            <input v-model.number="form.time_limit_ms" type="number" />
-          </div>
-          <div class="form-group">
-            <label>内存限制 (MB)</label>
-            <input v-model.number="form.memory_limit_mb" type="number" />
+        <div v-else-if="questions.length > 0" class="qe-list">
+          <div
+            v-for="(q, i) in questions"
+            :key="q.id"
+            class="qe-list-row"
+            :class="{ 'qe-list-row--active': activeId === q.id }"
+          >
+            <div class="qe-list-main" :class="{ 'qe-list-main--readonly': !assignmentDraft }" @click="assignmentDraft && openEdit(q)">
+              <span class="qe-list-no">#{{ i + 1 }}</span>
+              <div class="qe-list-text">
+                <div class="qe-list-title">{{ q.title }}</div>
+                <div class="qe-list-meta">
+                  函数: {{ q.function_name || '—' }} | 超时: {{ q.time_limit_ms }}ms | 内存: {{ q.memory_limit_mb }}MB
+                  <span v-if="q.grading_mode && q.grading_mode !== 'legacy'" class="badge-mode">{{ q.grading_mode }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="qe-list-actions">
+              <button v-if="assignmentDraft" class="btn-sm btn-outline" @click="openEdit(q)">编辑</button>
+              <!-- 收敛：不再行内展开第二个 AIQuestionConfig 实例，统一打开右侧栏 AI tab -->
+              <button class="btn-sm btn-outline" @click="openAiConfig(q)">
+                <AppIcon name="settings" :size="14" />
+                <span class="qe-sr-only">🤖 </span>AI 配置
+              </button>
+            </div>
           </div>
         </div>
+      </section>
 
-        <button class="btn-primary btn-submit" :disabled="saving" @click="createQuestion">
-          {{ saving ? '创建中...' : '确认创建' }}
-        </button>
+      <!-- ── 主编辑区 + 右侧 sticky 设置栏 ───────────────────────── -->
+      <div class="qe-body">
+        <!-- 中间主编辑区：纵向三大区 -->
+        <div v-if="activeId !== null" class="qe-main">
+          <!-- ① 基础信息 -->
+          <section class="card qe-card">
+            <h2 class="qe-card-title">基础信息</h2>
+            <div class="qe-grid-2">
+              <div class="form-group">
+                <label>题目标题</label>
+                <input v-model="form.title" placeholder="如: 两数之和" />
+              </div>
+              <div class="form-group">
+                <label>函数签名 <span class="qe-fn-state" :class="{ 'qe-fn-state--err': fnParseState.includes('未识别') }">{{ fnParseState }}</span></label>
+                <input v-model="form.signature" placeholder="def add(a: int, b: int) -> int（自动识别函数名）" />
+              </div>
+            </div>
+            <div class="form-group qe-md-group">
+              <label>题目描述（Markdown）</label>
+              <QeMarkdownEditor v-model="form.description" :height="200" />
+            </div>
+          </section>
+
+          <!-- ② 学生代码模板 -->
+          <section class="card qe-card">
+            <div class="qe-card-head">
+              <h2 class="qe-card-title">学生代码模板</h2>
+              <div class="qe-card-actions">
+                <span class="qe-lang-badge">Python</span>
+                <button class="btn-sm btn-outline" @click="fullscreenCode = !fullscreenCode">
+                  <AppIcon name="move" :size="14" />
+                  <span class="qe-sr-only">⛶ </span>{{ fullscreenCode ? '退出全屏' : '全屏' }}
+                </button>
+              </div>
+            </div>
+            <QeCodeEditor v-model="form.starter_code" :fullscreen="fullscreenCode" :height="380" placeholder="def add(a, b):&#10;    # TODO&#10;    pass" />
+            <p class="qe-hint"><AppIcon name="drag" :size="14" />拖动右下角手柄调整编辑器高度；编辑器内部滚动，长代码不撑高页面</p>
+          </section>
+
+          <!-- ③ 测试用例 -->
+          <section class="card qe-card">
+            <div class="qe-card-head">
+              <h2 class="qe-card-title">测试用例</h2>
+            </div>
+            <QeTestCases
+              :key="'cases-' + formKey"
+              :public-cases="publicCasesArr"
+              :hidden-tests="form.hidden_tests"
+              :function-name="form.function_name"
+              :question-id="editingId ? Number(editingId) : null"
+              :run-result="runResult"
+              @update:public-cases="publicCasesArr = $event"
+              @update:hidden-tests="form.hidden_tests = $event"
+              @run-sample="runSample"
+              @parse-failed="app.showToast('当前 pytest 代码无法解析为可视化用例，请使用 pytest 模式', 'error')"
+            />
+          </section>
+        </div>
+
+        <!-- 右侧设置栏：sticky，滚动时保持可见 -->
+        <aside class="qe-side">
+          <div class="qe-side-card">
+            <div class="qe-side-tabs" role="tablist">
+              <button
+                type="button"
+                class="qe-side-tab"
+                :class="{ active: sideTab === 'run' }"
+                role="tab"
+                :aria-selected="sideTab === 'run'"
+                @click="sideTab = 'run'"
+              >运行设置</button>
+              <button
+                type="button"
+                class="qe-side-tab"
+                :class="{ active: sideTab === 'ai' }"
+                role="tab"
+                :aria-selected="sideTab === 'ai'"
+                @click="sideTab = 'ai'"
+              >AI 评分配置</button>
+            </div>
+
+            <div v-if="sideTab === 'run'" class="qe-side-body">
+              <!-- 作业默认环境（draft 可编辑；发布后绑定不可变） -->
+              <div class="qe-side-sec qe-side-sec--assignment">
+                <div class="qe-side-sec-head">
+                  <h3 class="qe-side-title">作业默认环境</h3>
+                  <span v-if="!assignmentDraft" class="badge badge-neutral">已发布（不可修改）</span>
+                </div>
+                <p class="qe-side-sub">所有题目默认在此环境运行；发布后绑定不可变</p>
+                <div class="form-group qe-side-assignment-env">
+                  <EnvironmentProfilePicker
+                    v-model="assignmentEnvId"
+                    :disabled="!assignmentDraft"
+                    show-memory
+                    label="作业环境"
+                  />
+                  <p v-if="assignmentDraft && assignmentEnvId && envById(assignmentEnvId)" class="form-hint">
+                    环境最低内存 {{ envById(assignmentEnvId).minimum_memory_mb }} MB——题目内存不得低于该值
+                  </p>
+                </div>
+                <div class="form-group qe-side-assignment-policy">
+                  <label>作业导入规则</label>
+                  <select v-model="assignmentPolicy" class="import-policy-select" :disabled="!assignmentDraft">
+                    <option value="unrestricted">不限制</option>
+                    <option value="restricted">限定白名单</option>
+                  </select>
+                </div>
+                <div v-if="assignmentPolicy === 'restricted'" class="form-group qe-side-imports">
+                  <label>作业允许导入（白名单）</label>
+                  <div v-if="envImportCandidates(assignmentEnvId).length" class="import-candidates">
+                    <label v-for="name in envImportCandidates(assignmentEnvId)" :key="name" class="import-chip">
+                      <input type="checkbox" :disabled="!assignmentDraft" :checked="assignmentAllowedImports.includes(name)" @change="toggleAssignmentImport(name)" />
+                      {{ name }}
+                    </label>
+                  </div>
+                  <p v-if="assignmentMismatch" class="form-hint env-warn">{{ assignmentMismatch }}</p>
+                </div>
+                <button v-if="assignmentDraft" class="btn-primary btn-sm" @click="saveAssignmentEnv">保存作业环境设置</button>
+              </div>
+
+              <div class="qe-side-divider"></div>
+
+              <!-- 本题运行设置 -->
+              <div
+                v-if="activeId !== null"
+                class="qe-side-sec qe-side-sec--question"
+                :class="{ 'qe-side-sec--question-override': questionEnvMode === 'override' }"
+              >
+                <h3 class="qe-side-title">本题运行设置</h3>
+                <div class="form-group qe-side-runtime">
+                  <label>运行环境</label>
+                  <select v-model="questionEnvMode" class="import-policy-select">
+                    <option value="inherit">继承作业默认</option>
+                    <option value="override">指定环境</option>
+                  </select>
+                </div>
+                <EnvironmentProfilePicker
+                  v-if="questionEnvMode === 'override'"
+                  v-model="questionEnvId"
+                  class="qe-side-question-env"
+                  show-memory
+                  label="本题环境"
+                />
+                <div class="qe-side-grid-2">
+                  <div class="form-group">
+                    <label>超时 (ms)</label>
+                    <input v-model.number="form.time_limit_ms" type="number" />
+                  </div>
+                  <div class="form-group">
+                    <label>内存限制 (MB)</label>
+                    <input v-model.number="form.memory_limit_mb" type="number" />
+                  </div>
+                </div>
+                <div class="form-group qe-side-policy">
+                  <label>导入规则</label>
+                  <select v-model="questionPolicyMode" class="import-policy-select">
+                    <option value="inherit">继承作业规则</option>
+                    <option value="unrestricted">不限制</option>
+                    <option value="restricted">自定义白名单</option>
+                  </select>
+                </div>
+                <div v-if="questionPolicyMode === 'restricted'" class="form-group qe-side-imports">
+                  <label>本题允许导入（白名单）</label>
+                  <div v-if="envImportCandidates(effectiveEnvId).length" class="import-candidates">
+                    <label v-for="name in envImportCandidates(effectiveEnvId)" :key="name" class="import-chip">
+                      <input type="checkbox" :checked="questionAllowedImports.includes(name)" @change="toggleQuestionImport(name)" />
+                      {{ name }}
+                    </label>
+                  </div>
+                  <p v-else class="form-hint">当前环境未提供教学库，可留空白名单</p>
+                </div>
+
+                <!-- 内存警告卡片（浅橙） -->
+                <div v-if="memoryWarning" class="qe-warn-card" role="alert">
+                  <p class="qe-warn-text"><AppIcon name="warning" :size="14" /><span class="qe-sr-only">⚠ </span>{{ memoryWarning }}</p>
+                  <p class="qe-warn-sub">当前内存低于环境最低要求，建议自动调整</p>
+                  <button type="button" class="qe-warn-btn" @click="applyRecommendedMemory">使用推荐值</button>
+                </div>
+
+                <!-- 有效环境 info（浅蓝） -->
+                <p v-if="effectiveEnv" class="qe-info">
+                  本题有效环境：{{ effectiveEnv.display_name }} v{{ effectiveEnv.version_number }} 最低内存 {{ effectiveEnv.minimum_memory_mb }} MB
+                </p>
+                <p v-if="mismatchWarning" class="form-hint env-warn">{{ mismatchWarning }}</p>
+              </div>
+            </div>
+
+            <div v-else-if="sideTab === 'ai'" class="qe-side-body qe-side-body--scroll">
+              <!-- AI 评分配置：编辑已有题目 → 持久化容器（GET/PUT/Rubric） -->
+              <template v-if="editingId">
+                <div class="qe-side-sec">
+                  <div class="qe-side-sec-head">
+                    <h3 class="qe-side-title">AI 评分配置</h3>
+                    <span class="qe-ai-qid">#{{ editingId }}</span>
+                  </div>
+                  <p class="qe-side-sub">配置评分模式、功能/鲁棒性测试组、教师约束与 Rubric；发布前需完成配置。</p>
+                  <AIQuestionConfig
+                    :kind="'assignment'"
+                    :question-id="Number(editingId)"
+                    :expanded="true"
+                    @close="sideTab = 'run'"
+                  />
+                </div>
+              </template>
+              <!-- 新建题目（无 id）→ 草稿模式：可编辑全部字段，随「保存题目」一起提交 -->
+              <div v-else-if="activeId === 'new'" class="qe-ai-draft">
+                <div class="qe-side-sec">
+                  <div class="qe-side-sec-head">
+                    <h3 class="qe-side-title">AI 评分配置</h3>
+                    <span class="qe-ai-qid">新建</span>
+                  </div>
+                  <p class="qe-side-sub">配置评分模式与测试组，随「保存题目」一起提交；Rubric 需在保存题目后生成。</p>
+                  <!-- Rubric 门禁前置提示：shadow/active 尚无 Rubric（后端 503 仍兜底） -->
+                  <div v-if="aiDraft.grading_mode !== 'legacy'" class="qe-warn-card" role="alert">
+                    <p class="qe-warn-text"><AppIcon name="warning" :size="14" /><span class="qe-sr-only">⚠ </span>当前为 {{ aiDraft.grading_mode }} 模式，尚无可发布的 Rubric，请先保存题目后生成并锁定</p>
+                  </div>
+                  <AiConfigForm
+                    :key="'ai-draft-' + aiFormKey"
+                    :model-value="aiDraft"
+                    @update:model-value="onAiDraftChange"
+                    @generate-test-groups="onDraftGenerateTestGroups"
+                  />
+                  <p v-if="aiDraftMsg" class="qe-hint" role="status">{{ aiDraftMsg }}</p>
+                  <p class="qe-hint">保存题目后可生成 Rubric。</p>
+                </div>
+              </div>
+              <div v-else class="qe-ai-empty">
+                <p>请先选择或添加题目，再进行 AI 评分配置</p>
+              </div>
+            </div>
+          </div>
+        </aside>
       </div>
 
-      <div v-if="loading" class="card" style="padding:48px;text-align:center">
-        <div class="skeleton" style="height:22px;width:200px;margin:0 auto 12px"></div>
-        <div class="skeleton" style="height:14px;width:300px;margin:0 auto"></div>
-      </div>
-
-      <div v-else-if="questions.length === 0" class="empty-state">
-        <p>🧩 暂无题目，点击「添加题目」创建第一道题目</p>
-      </div>
-
-      <div v-else v-for="(q, i) in questions" :key="q.id" class="card question-card mb-3">
-        <div class="flex-between">
-          <div>
-            <h3 class="question-title">题目 {{ i + 1 }}: {{ q.title }}</h3>
-            <p class="text-sm text-secondary question-meta">
-              函数: {{ q.function_name }} | 超时: {{ q.time_limit_ms }}ms | 内存: {{ q.memory_limit_mb }}MB
-              <span v-if="q.grading_mode && q.grading_mode !== 'legacy'" class="badge-mode">{{ q.grading_mode }}</span>
-            </p>
+      <!-- ── 底部固定操作栏 ─────────────────────────────────────── -->
+      <footer class="qe-bottom-bar">
+        <div class="qe-bottom-inner">
+          <div class="qe-bottom-left">
+            <span v-if="editingId" class="qe-bottom-id">#{{ editingId }}</span>
+            <span v-else-if="activeId === 'new'" class="qe-bottom-id">新题目</span>
           </div>
-          <div class="q-actions">
-            <button class="btn-sm btn-outline" @click="aiConfigQid = aiConfigQid === q.id ? null : q.id">
-              {{ aiConfigQid === q.id ? '收起 AI 配置' : '🤖 AI 配置' }}
+          <div class="qe-bottom-actions">
+            <button type="button" class="btn btn-sm" @click="cancel">取消</button>
+            <button type="button" class="btn btn-sm btn-primary" :disabled="saving || activeId === null" @click="submitQuestion">
+              {{ saving ? '保存中...' : '保存题目' }}
             </button>
-            <span class="badge badge-neutral">#{{ i + 1 }}</span>
           </div>
         </div>
-        <AIQuestionConfig v-if="aiConfigQid === q.id" :kind="'assignment'" :question-id="q.id" :expanded="true" @close="aiConfigQid = null" />
-      </div>
+      </footer>
+
+      <!-- 发布作业确认弹窗（作业级影响，防误点）；AI 门禁提示随当前题模式动态追加 -->
+      <ConfirmDialog
+        v-if="confirmPublish"
+        title="发布整个作业？"
+        :message="'将发布整个作业，全部题目对学生可见；发布后作业环境与白名单绑定不可修改。' + aiGateNotice"
+        confirm-text="确认发布"
+        cancel-text="取消"
+        :busy="publishing"
+        @confirm="publishAssignment()"
+        @cancel="confirmPublish = false"
+      />
     </div>
   </AppLayout>
 </template>
 
 <style scoped>
-/* ═══════════════════════════════════════════════════════════════════════
-   Question Edit — Code Studio
-   page-head + create form + question cards
-   ═══════════════════════════════════════════════════════════════════════ */
-.question-editor { display: flex; flex-direction: column; gap: 24px; }
-
-/* ── Page head ─────────────────────────────────────────────────────── */
-.page-head {
-  display: flex; justify-content: space-between; align-items: flex-start;
-  gap: 16px;
-}
-.page-title {
-  font-size: 28px; font-weight: 700;
-  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
-  margin: 0 0 6px;
-}
-.page-sub {
-  font-size: var(--text-sm); color: var(--text-secondary); margin: 0;
+/* ═══════════════════════════════════════════════════════════════════
+  Question Edit — IDE 风格（轻量后台管理 + 编辑器）
+  白色/浅灰背景 + 蓝色主强调 + 8~10px 圆角 + 轻阴影
+  ═══════════════════════════════════════════════════════════════════ */
+.qe-page {
+ display: flex;
+ flex-direction: column;
+ gap: 20px;
+ padding-bottom: 24px; /* 底部操作栏占位（content-inner 已有 80px 内边距） */
 }
 
-/* ── Code editor (keep dark surface) ── */
-.code-editor {
-  width: 100%;
-  background: #0F172A;
-  color: #E2E8F0;
-  border: 1px solid #1E293B;
-  border-radius: var(--radius-md);
-  padding: var(--space-4);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  line-height: 1.65;
-  tab-size: 4;
-  resize: vertical;
-}
-.code-editor:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: var(--shadow-glow-primary);
+/* ── 顶部：面包屑 + 标题 + 保存状态 ─────────────────────────────── */
+.qe-topbar {
+ display: flex;
+ justify-content: space-between;
+ align-items: flex-end;
+ gap: 16px;
 }
 
-/* ── Number inputs ── */
-input[type="number"] {
-  -moz-appearance: textfield;
-}
-input[type="number"]::-webkit-inner-spin-button,
-input[type="number"]::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-/* ── Submit button ── */
-.btn-submit {
-  margin-top: var(--space-2);
-  padding: 9px 24px;
-  font-size: var(--text-sm);
+.qe-crumbs {
+ display: flex;
+ align-items: center;
+ gap: 6px;
+ font-size: 12px;
+ color: var(--text-tertiary);
+ margin-bottom: 4px;
 }
 
-/* ── Question list cards ── */
-.question-card:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-md);
+.qe-crumbs-sep { color: var(--border-strong); }
+
+.qe-crumbs-name {
+ color: var(--text-secondary);
+ max-width: 240px;
+ overflow: hidden;
+ text-overflow: ellipsis;
+ white-space: nowrap;
 }
-.question-title {
-  font-size: var(--text-base);
+
+.qe-crumbs-cur { color: var(--primary); font-weight: 500; }
+
+.qe-title {
+ font-size: 22px;
+ font-weight: 700;
+ color: var(--ink);
+ letter-spacing: -0.01em;
+ margin: 0;
+ line-height: 1.2;
+}
+
+.qe-saved {
+ display: inline-flex;
+ align-items: center;
+ gap: 5px;
+ font-size: 12px;
+ color: var(--success);
+ background: var(--success-light);
+ border-radius: 999px;
+ padding: 4px 12px;
+ white-space: nowrap;
+}
+
+.qe-topbar-right {
+ display: flex;
+ align-items: center;
+ gap: 10px;
+}
+
+.qe-topbar-publish {
+ white-space: nowrap;
+}
+
+/* ── 卡片公共 ───────────────────────────────────────────────────── */
+.qe-card {
+ border-radius: 10px;
+ box-shadow: var(--shadow-card);
+}
+
+.qe-card-title {
+ font-size: 15px;
+ font-weight: 600;
+ color: var(--ink);
+ margin: 0;
+}
+
+.qe-card-head {
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ gap: 12px;
+ margin-bottom: 14px;
+}
+
+.qe-card-actions {
+ display: flex;
+ align-items: center;
+ gap: 8px;
+}
+
+.qe-hint {
+ margin: 8px 0 0;
+ font-size: 12px;
+ color: var(--text-tertiary);
+}
+
+/* ── 题目列表卡 ─────────────────────────────────────────────────── */
+.qe-list-head {
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ gap: 12px;
+ margin-bottom: 12px;
+}
+
+.qe-count-badge {
+ display: inline-block;
+ min-width: 20px;
+ padding: 0 6px;
+ border-radius: 999px;
+ background: var(--primary-light);
+ color: var(--primary);
+ font-size: 11px;
+ font-weight: 600;
+ text-align: center;
+ vertical-align: 2px;
+}
+
+.qe-list-loading { padding: 8px 0; }
+
+.qe-empty {
+ padding: 22px 0;
+ text-align: center;
+ color: var(--text-tertiary);
+ font-size: var(--text-sm);
+}
+
+.qe-empty p { margin: 0; }
+
+/* 题目列表：纵向紧凑列表，超出内部滚动（长内容铁律） */
+.qe-list {
+ display: flex;
+ flex-direction: column;
+ max-height: 300px;
+ overflow-y: auto;
+ margin: 0 -16px;
+ padding: 0 16px;
+}
+
+.qe-list-row {
+ border: 1px solid transparent;
+ border-radius: 8px;
+ padding: 10px 12px;
+ display: flex;
+ align-items: center;
+ gap: 12px;
+ transition: background var(--duration-fast), border-color var(--duration-fast);
+}
+
+.qe-list-row:hover { background: var(--surface-sunken); }
+
+.qe-list-row--active {
+ background: var(--primary-light);
+ border-color: rgba(20, 99, 243, 0.25);
+}
+
+.qe-list-row + .qe-list-row { margin-top: 2px; }
+
+.qe-list-main {
+ display: flex;
+ align-items: center;
+ gap: 10px;
+ flex: 1;
+ min-width: 0;
+ cursor: pointer;
+}
+
+.qe-list-main--readonly { cursor: default; }
+
+.qe-list-no {
+ font-family: var(--font-mono);
+ font-size: 12px;
+ color: var(--text-tertiary);
+ flex-shrink: 0;
+}
+
+.qe-list-text { min-width: 0; }
+
+.qe-list-title {
+ font-size: var(--text-sm);
+ font-weight: 600;
+ color: var(--ink);
+ overflow: hidden;
+ text-overflow: ellipsis;
+ white-space: nowrap;
+}
+
+.qe-list-meta {
+ font-size: 12px;
+ color: var(--text-tertiary);
+ margin-top: 2px;
+ overflow: hidden;
+ text-overflow: ellipsis;
+ white-space: nowrap;
+}
+
+.qe-list-actions {
+ display: flex;
+ gap: 8px;
+ align-items: center;
+ flex-shrink: 0;
+}
+
+.badge-mode {
+ display: inline-block; padding: 1px 8px; border-radius: 10px;
+ font-size: 11px; font-weight: 500; margin-left: 6px;
+ background: #dbeafe; color: #1e40af;
+}
+
+/* ── 主体：主编辑区 + 右侧栏 ───────────────────────────────────── */
+.qe-body {
+ display: flex;
+ align-items: flex-start;
+ gap: 24px;
+}
+
+.qe-main {
+ flex: 1;
+ min-width: 0;
+ display: flex;
+ flex-direction: column;
+ gap: 20px;
+}
+
+.qe-side {
+ width: 300px;
+ flex-shrink: 0;
+ position: sticky;
+ top: 24px;
+}
+
+/* ── 基础信息 ───────────────────────────────────────────────────── */
+.qe-grid-2 {
+ display: grid;
+ grid-template-columns: 1fr 1fr;
+ gap: 16px;
+}
+
+.qe-md-group { margin-bottom: 0; }
+
+.qe-fn-state {
+ font-size: 12px;
+ font-weight: 400;
+ color: var(--success);
+ margin-left: 4px;
+}
+
+.qe-fn-state--err { color: var(--warning); }
+
+/* ── 语言徽标 ───────────────────────────────────────────────────── */
+.qe-lang-badge {
+ display: inline-flex;
+ align-items: center;
+ gap: 5px;
+ padding: 3px 10px;
+ border: 1px solid var(--border);
+ border-radius: 999px;
+ background: var(--surface-raised);
+ color: var(--text-secondary);
+ font-size: 12px;
+ font-weight: 600;
+}
+
+/* ── 右侧设置栏 ─────────────────────────────────────────────────── */
+.qe-side-card {
+ border: 1px solid var(--border);
+ border-radius: 10px;
+ background: var(--surface);
+ box-shadow: var(--shadow-card);
+ overflow: hidden;
+}
+
+.qe-side-tabs {
+ display: flex;
+ border-bottom: 1px solid var(--border);
+ background: var(--surface-raised);
+}
+
+.qe-side-tab {
+ flex: 1;
+ padding: 10px 0;
+ border: none;
+ border-bottom: 2px solid transparent;
+ background: transparent;
+ color: var(--text-secondary);
+ font-size: var(--text-sm);
+ font-weight: 500;
+ cursor: pointer;
+ margin-bottom: -1px;
+ transition: color var(--duration-fast);
+}
+
+.qe-side-tab:hover { color: var(--ink); }
+
+.qe-side-tab.active {
+ color: var(--primary);
+ border-bottom-color: var(--primary);
+ font-weight: 600;
+ background: var(--surface);
+}
+
+.qe-side-body { padding: 14px 16px 16px; }
+
+.qe-side-sec-head {
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ gap: 8px;
+}
+
+.qe-side-title {
+ font-size: var(--text-sm);
+ font-weight: 600;
+ color: var(--ink);
+ margin: 0 0 4px;
+}
+
+.qe-side-sub {
+ margin: 0 0 12px;
+ font-size: 12px;
+ color: var(--text-tertiary);
+ line-height: 1.6;
+}
+
+.qe-side-divider {
+ height: 1px;
+ background: var(--border);
+ margin: 14px -16px;
+}
+
+.qe-side-grid-2 {
+ display: grid;
+ grid-template-columns: 1fr 1fr;
+ gap: 12px;
+}
+
+/* 右侧栏内表单组间距收紧（窄栏） */
+.qe-side-body .form-group { margin-bottom: 14px; }
+
+.import-policy-select {
+ width: 100%;
+ padding: 9px 12px;
+ border: 1px solid var(--border);
+ border-radius: var(--radius-control, 7px);
+ background: var(--surface, #fff);
+ color: var(--ink, #223);
+ font-family: inherit;
+ font-size: var(--text-sm, 13px);
+}
+
+.import-policy-select:disabled {
+ background: var(--surface-raised, #f4f6f8);
+ color: var(--text-tertiary, #9aa);
+}
+
+.env-warn { color: var(--warning, #b7791f); }
+
+.import-candidates {
+ display: flex;
+ flex-wrap: wrap;
+ gap: 8px;
+}
+
+.import-chip {
+ display: inline-flex;
+ align-items: center;
+ gap: 6px;
+ padding: 5px 10px;
+ border: 1px solid var(--border);
+ border-radius: 999px;
+ background: var(--surface-raised, #f4f6f8);
+ font-size: var(--text-sm, 13px);
+ cursor: pointer;
+}
+
+.import-chip input { margin: 0; }
+
+/* ── 内存警告卡（浅橙，不是一行小字） ───────────────────────────── */
+.qe-warn-card {
+ margin: 4px 0 12px;
+ padding: 10px 12px;
+ border: 1px solid rgba(245, 138, 7, 0.35);
+ border-radius: 8px;
+ background: var(--warning-light);
+}
+
+.qe-warn-text {
+ margin: 0 0 4px;
+ font-size: 12.5px;
+ font-weight: 600;
+ color: #b45309;
+ line-height: 1.5;
+}
+
+.qe-warn-sub {
+ margin: 0 0 8px;
+ font-size: 12px;
+ color: #d97706;
+}
+
+.qe-warn-btn {
+ padding: 5px 12px;
+ border: 1px solid #f59e0b;
+ border-radius: 6px;
+ background: #fff;
+ color: #b45309;
+ font-size: 12px;
+ font-weight: 500;
+ cursor: pointer;
+ transition: background var(--duration-fast);
+}
+
+.qe-warn-btn:hover { background: #fffbeb; }
+
+/* ── 有效环境 info（浅蓝） ──────────────────────────────────────── */
+.qe-info {
+ margin: 0 0 8px;
+ padding: 8px 10px;
+ border-radius: 8px;
+ background: var(--info-light);
+ color: #0e7490;
+ font-size: 12px;
+ line-height: 1.6;
+}
+
+/* ── AI 评分配置 tab ────────────────────────────────────────────── */
+.qe-ai-qid {
+ font-family: var(--font-mono);
+ font-size: 12px;
+ color: var(--text-tertiary);
+}
+
+.qe-ai-empty {
+ padding: 20px 4px;
+ text-align: center;
+ color: var(--text-tertiary);
+ font-size: var(--text-sm);
+ line-height: 1.6;
+}
+
+.qe-ai-empty p { margin: 0; }
+
+/* AI 配置表单较长：该 tab 内内部滚动（长内容铁律），不撑高页面 */
+.qe-side-body--scroll {
+ max-height: calc(100vh - 150px);
+ overflow-y: auto;
+}
+
+/* AIQuestionConfig 默认自带 12px 顶部外边距与不可换行的上限行，窄栏内收拢 */
+.qe-side-body--scroll :deep(.ai-config) { margin-top: 0; }
+
+.qe-side-body--scroll :deep(.cap-row) { flex-wrap: wrap; }
+
+/* ── 底部固定操作栏 ─────────────────────────────────────────────── */
+.qe-bottom-bar {
+ position: fixed;
+ right: 0;
+ bottom: 0;
+ z-index: 100;
+ background: var(--surface);
+ border-top: 1px solid var(--border);
+ box-shadow: 0 -2px 8px rgba(31, 58, 94, 0.04);
+}
+
+.qe-bottom-inner {
+ max-width: var(--content-max, 1440px);
+ margin: 0 auto;
+ padding: 10px 36px;
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ gap: 16px;
+}
+
+.qe-bottom-left { min-width: 80px; }
+
+.qe-bottom-id {
+ font-family: var(--font-mono);
+ font-size: 12px;
+ color: var(--text-tertiary);
+}
+
+.qe-bottom-actions {
+ display: flex;
+ align-items: center;
+ gap: 10px;
+}
+
+.qe-bottom-actions .btn {
+ min-width: 88px;
+ justify-content: center;
+}
+
+/* 窄屏：底部栏内容收窄 */
+@media (max-width: 767.98px) {
+ .qe-bottom-inner { padding: 10px 16px; }
+ .qe-bottom-left { display: none; }
+ .qe-grid-2 { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 1199px) {
+  /* 侧栏折叠时底部栏跟随（与 AppLayout 的 main-area 一致） */
+  .qe-bottom-bar { left: var(--sidebar-collapsed-width); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Approved editor canvas refresh
+   One calm canvas, a horizontal configuration shelf, and a responsive
+   single-column fallback. All selectors below are presentation-only;
+   the existing data and event contracts stay unchanged.
+   ═══════════════════════════════════════════════════════════════════ */
+.qe-page {
+  gap: 14px;
+  min-width: 0;
+  padding-bottom: 20px;
+}
+
+.qe-page button:focus-visible,
+.qe-page input:focus-visible,
+.qe-page select:focus-visible,
+.qe-page textarea:focus-visible {
+  outline: 2px solid rgba(20, 99, 243, 0.45);
+  outline-offset: 2px;
+}
+
+.qe-topbar {
+  align-items: center;
+  min-height: 48px;
+}
+
+.qe-topbar-right,
+.qe-topbar-publish,
+.qe-list-head button,
+.qe-list-actions button,
+.qe-card-actions button,
+.qe-bottom-actions .btn,
+.qe-hint,
+.qe-warn-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.qe-topbar-publish,
+.btn-outline {
+  border: 1px solid var(--border-strong, #c7d3e3);
+  border-radius: var(--radius-control, 7px);
+  background: var(--surface, #fff);
+  color: var(--ink, #10213d);
   font-weight: 600;
-  color: var(--ink);
+}
+
+.qe-topbar-publish:hover:not(:disabled),
+.btn-outline:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+.qe-topbar-publish:disabled,
+.btn-outline:disabled {
+  opacity: 0.55;
+}
+
+.qe-saved {
+  background: var(--success-light);
+  border: 1px solid rgba(22, 163, 74, 0.16);
+  padding: 5px 10px;
+}
+
+.qe-list-card,
+.qe-card,
+.qe-side-card {
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+.qe-list-card:hover,
+.qe-card:hover,
+.qe-side-card:hover {
+  border-color: var(--border);
+  box-shadow: none;
+  transform: none;
+}
+
+.qe-list-card {
+  position: relative;
+  min-width: 0;
+  padding: 13px 16px;
+  border-radius: var(--radius-card, 12px);
+  background: var(--surface);
+}
+
+.qe-list-head {
+  min-height: 30px;
+  margin-bottom: 10px;
+}
+
+.qe-list-head .qe-card-title {
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.qe-count-badge {
+  min-width: 21px;
+  padding: 2px 7px;
+  background: var(--primary-light);
+}
+
+.qe-empty {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+}
+
+.qe-empty .app-icon { color: var(--text-tertiary); }
+
+.qe-empty p {
+  max-width: 100%;
+  margin: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qe-list {
+  max-height: 220px;
+  margin: 0 -8px;
+  padding: 0 8px;
+}
+
+.qe-list-row {
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.qe-list-row--active {
+  background: rgba(20, 99, 243, 0.07);
+  border-color: rgba(20, 99, 243, 0.24);
+}
+
+.qe-list-actions { gap: 6px; }
+
+.qe-list-actions .btn-sm,
+.qe-card-actions .btn-sm {
+  min-height: 30px;
+  padding-inline: 10px;
+}
+
+.qe-body {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  min-width: 0;
+  width: 100%;
+}
+
+.qe-main {
+  order: 0;
+  width: 100%;
+  min-width: 0;
+  gap: 0;
+  overflow: visible;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card, 12px);
+  background: var(--surface);
+}
+
+.qe-main > .qe-card {
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 22px 24px;
+}
+
+.qe-main > .qe-card + .qe-card {
+  border-top: 1px solid var(--border);
+}
+
+.qe-main > .qe-card:hover {
+  border-color: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.qe-main > .qe-card:first-child { border-radius: var(--radius-card, 12px) var(--radius-card, 12px) 0 0; }
+.qe-main > .qe-card:last-child { border-radius: 0 0 var(--radius-card, 12px) var(--radius-card, 12px); }
+
+.qe-card-title {
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.qe-card-head { margin-bottom: 14px; }
+
+.qe-side {
+  order: -1;
+  width: 100%;
+  min-width: 0;
+  position: static;
+}
+
+.qe-side-card {
+  min-width: 0;
+  border-radius: var(--radius-card, 12px);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.qe-side-tabs {
+  min-height: 40px;
+  padding: 0 6px;
+  background: var(--surface);
+}
+
+.qe-side-tab {
+  min-height: 40px;
+  padding: 8px 14px;
+  border-bottom-width: 2px;
+  font-size: 13px;
+}
+
+.qe-side-body:not(.qe-side-body--scroll) {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) 1px minmax(0, 1.2fr);
+  gap: 16px;
+  align-items: stretch;
+  min-width: 0;
+  padding: 12px 16px 14px;
+}
+
+.qe-side-body:not(.qe-side-body--scroll) .qe-side-sec {
+  min-width: 0;
+}
+
+.qe-side-sec--assignment,
+.qe-side-sec--question {
+  align-content: start;
+  min-width: 0;
+}
+
+.qe-side-sec--assignment {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 7px 12px;
+}
+
+.qe-side-sec--assignment > .qe-side-sec-head,
+.qe-side-sec--assignment > .qe-side-sub,
+.qe-side-sec--assignment > .qe-side-imports {
+  grid-column: 1 / -1;
+}
+
+.qe-side-sec--assignment > .qe-side-sec-head { grid-row: 1; }
+.qe-side-sec--assignment > .qe-side-assignment-env {
+  grid-column: 1;
+  grid-row: 2;
+}
+.qe-side-sec--assignment > .qe-side-assignment-policy {
+  grid-column: 2;
+  grid-row: 2;
+}
+.qe-side-sec--assignment > .qe-side-sub {
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
+
+.qe-side-sec--assignment > .form-group { margin-bottom: 0; }
+
+.qe-side-sec--assignment > button {
+  grid-column: 1 / -1;
+  align-self: start;
+  justify-self: end;
+}
+
+.qe-side-sec--question {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr) minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 7px 12px;
+}
+
+.qe-side-sec--question > .qe-side-title {
+  grid-column: 1 / -1;
+}
+
+.qe-side-sec--question > .qe-side-runtime {
+  grid-column: 2;
+  grid-row: 2;
+}
+.qe-side-sec--question > .qe-side-question-env {
+  grid-column: 1;
+  grid-row: 3;
+  min-width: 0;
+}
+.qe-side-sec--question > .qe-side-grid-2 {
+  grid-column: 2 / -1;
+  grid-row: 3;
+  align-self: start;
+}
+.qe-side-sec--question > .qe-side-policy {
+  grid-column: 1;
+  grid-row: 2;
+}
+.qe-side-sec--question:not(.qe-side-sec--question-override) > .qe-side-grid-2 {
+  grid-column: 1 / -1;
+}
+.qe-side-sec--question > .qe-side-imports,
+.qe-side-sec--question > .qe-warn-card,
+.qe-side-sec--question > .qe-info,
+.qe-side-sec--question > .env-warn { grid-column: 1 / -1; }
+.qe-side-sec--question > .form-group { margin-bottom: 0; }
+
+.qe-side-divider {
+  width: 1px;
+  height: auto;
+  margin: 0;
+  background: var(--border);
+}
+
+.qe-side-body .form-group { min-width: 0; }
+
+.qe-side-body--scroll {
+  max-height: none;
+  overflow: visible;
+  padding: 14px 16px 16px;
+}
+
+.qe-side-body--scroll .qe-side-sec {
+  min-width: 0;
+}
+
+.qe-side-sub {
+  max-width: 780px;
+  margin-bottom: 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.qe-side-sec--assignment .qe-side-sub {
+  margin-bottom: 2px;
+}
+
+.qe-side-sec--assignment .form-hint {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qe-side-grid-2 {
+  gap: 10px;
+}
+
+.qe-side-body .import-policy-select {
+  min-height: 34px;
+  padding-block: 8px;
+}
+
+.qe-side-body .form-hint,
+.qe-side-body .env-warn {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.qe-warn-card {
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.qe-warn-text {
   margin-bottom: 4px;
 }
-.question-meta {
-  margin-top: 2px;
+
+.qe-warn-text .app-icon { flex: 0 0 auto; }
+
+.qe-info {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 11px;
 }
-.badge-mode {
-  display: inline-block; padding: 1px 8px; border-radius: 10px;
-  font-size: 11px; font-weight: 500; margin-left: 6px;
-  background: #dbeafe; color: #1e40af;
+
+.qe-hint {
+  line-height: 1.5;
 }
-.q-actions { display: flex; gap: 8px; align-items: center; }
-.btn-sm { padding: 4px 12px; font-size: 12px; border-radius: 4px; cursor: pointer; }
-.btn-outline { border: 1px solid #3b82f6; color: #3b82f6; background: #fff; }
-.btn-outline:hover { background: #eff6ff; }
+
+.qe-hint .app-icon { flex: 0 0 auto; color: var(--text-tertiary); }
+
+.qe-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.qe-bottom-bar {
+  left: var(--modal-left, var(--sidebar-width, 264px));
+  right: 0;
+  z-index: 50;
+  box-shadow: 0 -4px 14px rgba(31, 58, 94, 0.06);
+}
+
+.qe-bottom-inner {
+  padding-top: 11px;
+  padding-bottom: 11px;
+}
+
+.qe-bottom-actions .btn-primary {
+  min-width: 116px;
+}
+
+@media (max-width: 980px) {
+  .qe-side-body:not(.qe-side-body--scroll) {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .qe-side-divider {
+    width: auto;
+    height: 1px;
+    margin: 0;
+  }
+
+  .qe-side-sec--assignment,
+  .qe-side-sec--question {
+    grid-template-columns: 1fr;
+  }
+
+  .qe-side-sec--assignment > button,
+  .qe-side-sec--assignment > .qe-side-assignment-env,
+  .qe-side-sec--assignment > .qe-side-assignment-policy,
+  .qe-side-sec--question > .qe-side-runtime,
+  .qe-side-sec--question > .qe-side-question-env,
+  .qe-side-sec--question > .qe-side-grid-2,
+  .qe-side-sec--question > .qe-side-policy,
+  .qe-side-sec--question > .qe-side-imports,
+  .qe-side-sec--question > .qe-warn-card,
+  .qe-side-sec--question > .qe-info,
+  .qe-side-sec--question > .env-warn {
+    grid-column: 1;
+  }
+
+  .qe-side-sec--question > .qe-side-runtime,
+  .qe-side-sec--question > .qe-side-question-env,
+  .qe-side-sec--question > .qe-side-grid-2,
+  .qe-side-sec--question > .qe-side-policy {
+    grid-row: auto;
+  }
+
+  .qe-side-sec--assignment > .qe-side-sec-head,
+  .qe-side-sec--assignment > .qe-side-assignment-env,
+  .qe-side-sec--assignment > .qe-side-assignment-policy,
+  .qe-side-sec--assignment > .qe-side-sub,
+  .qe-side-sec--assignment > .qe-side-imports,
+  .qe-side-sec--assignment > button {
+    grid-row: auto;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .qe-page { gap: 12px; }
+
+  .qe-topbar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .qe-topbar-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .qe-title { font-size: 20px; }
+
+  .qe-list-card { padding-inline: 12px; }
+
+  .qe-list-head { align-items: flex-start; }
+
+  .qe-list-head { flex-wrap: wrap; }
+
+  .qe-list-head .qe-empty {
+    order: 3;
+    flex-basis: 100%;
+    padding: 2px 0 0;
+  }
+
+  .qe-list-row { flex-wrap: wrap; }
+
+  .qe-list-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .qe-main > .qe-card { padding: 18px 16px; }
+
+  .qe-side-body:not(.qe-side-body--scroll),
+  .qe-side-body--scroll {
+    padding: 16px;
+  }
+
+  .qe-side { order: 1; }
+
+  .qe-side-sec--assignment,
+  .qe-side-sec--question {
+    grid-template-columns: 1fr;
+  }
+
+  .qe-side-sec--question > .qe-side-runtime,
+  .qe-side-sec--question > .qe-side-grid-2,
+  .qe-side-sec--question > .qe-side-policy,
+  .qe-side-sec--question > .qe-side-imports,
+  .qe-side-sec--question > .qe-warn-card,
+  .qe-side-sec--question > .qe-info,
+  .qe-side-sec--question > .env-warn {
+    grid-column: 1;
+  }
+
+  .qe-side-sec--question > .qe-side-grid-2 { align-self: auto; }
+
+  .qe-bottom-inner { padding-inline: 12px; }
+  .qe-bottom-left { display: none; }
+  .qe-bottom-actions { width: 100%; }
+  .qe-bottom-actions .btn { flex: 1 1 0; min-width: 0; }
+}
 </style>

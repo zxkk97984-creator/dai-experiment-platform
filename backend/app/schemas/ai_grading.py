@@ -38,6 +38,25 @@ class ScoreCapRule(BaseModel):
     description: str = Field(min_length=1, max_length=300)
 
 
+def check_test_groups_weights(test_groups: list[TestGroup]) -> None:
+    """active/shadow 测试组强校验：非空、F=60、R=10、ID 唯一。
+
+    AIQuestionConfigUpdate 的 model_validator 与「AI 生成测试组」端点共用，
+    避免生成结果绕过/漂移于现有配置强校验。
+    """
+    if not test_groups:
+        raise ValueError("active/shadow 模式必须至少包含一个测试组")
+
+    f_total = sum(g.max_score for g in test_groups if g.dimension == "F")
+    r_total = sum(g.max_score for g in test_groups if g.dimension == "R")
+    if abs(f_total - 60) > 1e-6 or abs(r_total - 10) > 1e-6:
+        raise ValueError(
+            f"AI V1 测试组必须满足 F=60、R=10，当前 F={f_total}、R={r_total}"
+        )
+    if len({g.id for g in test_groups}) != len(test_groups):
+        raise ValueError("测试组 ID 必须唯一")
+
+
 class AIQuestionConfigUpdate(BaseModel):
     """教师更新题目 AI 评分配置"""
 
@@ -49,21 +68,47 @@ class AIQuestionConfigUpdate(BaseModel):
 
     @model_validator(mode="after")
     def validate_weights(self) -> AIQuestionConfigUpdate:
-        if self.grading_mode == "legacy":
-            return self
-
-        if not self.test_groups:
-            raise ValueError("active/shadow 模式必须至少包含一个测试组")
-
-        f_total = sum(g.max_score for g in self.test_groups if g.dimension == "F")
-        r_total = sum(g.max_score for g in self.test_groups if g.dimension == "R")
-        if abs(f_total - 60) > 1e-6 or abs(r_total - 10) > 1e-6:
-            raise ValueError(
-                f"AI V1 测试组必须满足 F=60、R=10，当前 F={f_total}、R={r_total}"
-            )
-        if len({g.id for g in self.test_groups}) != len(self.test_groups):
-            raise ValueError("测试组 ID 必须唯一")
+        if self.grading_mode != "legacy":
+            check_test_groups_weights(self.test_groups)
         return self
+
+
+# ── AI 测试组生成（只生成、不保存） ──
+
+
+class TestGroupsGenerateRequest(BaseModel):
+    """AI 生成测试组请求——仅接受教师当前未保存草稿字段。
+
+    不允许客户端传 hidden_tests、题干等权威数据，避免伪造或越权。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    teacher_constraints: dict[str, Any] | None = None
+    reference_solution: str | None = None
+
+
+class TestGroupsValidationSummary(BaseModel):
+    """生成结果的合规摘要"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    f_total: float
+    r_total: float
+    group_count: int
+    f_group_count: int
+    r_group_count: int
+
+
+class TestGroupsGenerateResponse(BaseModel):
+    """AI 生成测试组响应——不含 hidden_tests 与原始模型输出"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    test_groups: list[TestGroup]
+    validation: TestGroupsValidationSummary
+    warnings: list[str] = Field(default_factory=list)
+    generation_id: str = Field(min_length=1, max_length=64)
 
 
 # ── Rubric 文档 ──
@@ -77,6 +122,9 @@ class RubricCriterionItem(BaseModel):
     id: str = Field(min_length=1, max_length=20)
     name: str = Field(min_length=1, max_length=200)
     points: float = Field(gt=0, le=20)
+    # 2026-08-09：AI 生成物常带评分项描述（内容合理且有价值），采纳为可空字段；
+    # 其余未知字段仍 extra=forbid 拒绝
+    description: str | None = Field(default=None, max_length=500)
 
 
 class RubricDocument(BaseModel):

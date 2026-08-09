@@ -8,6 +8,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    field_validator,
     model_validator,
 )
 
@@ -49,6 +50,18 @@ class StudioTemplateCreate(BaseModel):
     description: str | None = None
     lesson_id: int | None = None
     module_id: int | None = None
+    # ── 草稿环境绑定（Phase 4：教师选择） ─────────────────────
+    # 教师显式选择 available 环境版本；省略时服务层解析 basic 当前可用版本。
+    environment_version_id: int | None = None
+    import_policy_mode: Literal["unrestricted", "restricted"] = "unrestricted"
+    allowed_imports: list[str] = Field(default_factory=list)
+
+    @field_validator("allowed_imports")
+    @classmethod
+    def _check_allowed_imports(cls, v: list[str]) -> list[str]:
+        from app.services.import_policy import validate_import_names
+
+        return validate_import_names(v)
 
     @model_validator(mode="after")
     def one_context_at_most(self):
@@ -82,6 +95,21 @@ class StudioDraftUpdate(BaseModel):
 
     draft_revision: int
     cells: list[StudioCell]
+    # ── 草稿环境绑定（Phase 4） ───────────────────────────────
+    # 与 cells 同一 revision 保存；显式传了才更新（服务层 exclude_unset），
+    # 兼容旧调用（不传时保留草稿已有环境）。
+    environment_version_id: int | None = None
+    import_policy_mode: Literal["unrestricted", "restricted"] | None = None
+    allowed_imports: list[str] | None = None
+
+    @field_validator("allowed_imports")
+    @classmethod
+    def _check_allowed_imports(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        from app.services.import_policy import validate_import_names
+
+        return validate_import_names(v)
 
     @model_validator(mode="after")
     def unique_cell_ids(self):
@@ -98,6 +126,16 @@ class StudioImportCreate(BaseModel):
     description: str | None = None
     lesson_id: int | None = None
     module_id: int | None = None
+    environment_version_id: int | None = None
+    import_policy_mode: Literal["unrestricted", "restricted"] = "unrestricted"
+    allowed_imports: list[str] = Field(default_factory=list)
+
+    @field_validator("allowed_imports")
+    @classmethod
+    def _check_allowed_imports(cls, v: list[str]) -> list[str]:
+        from app.services.import_policy import validate_import_names
+
+        return validate_import_names(v)
 
     @model_validator(mode="after")
     def one_context_at_most(self):
@@ -134,6 +172,10 @@ class StudioVersionRead(BaseModel):
     assets_dir: str | None = None
     published_at: datetime
     published_by_id: int
+    # 发布时从草稿复制的不可变环境快照（Phase 4）
+    environment_version_id: int | None = None
+    import_policy_mode: str = "unrestricted"
+    allowed_imports: list[str] = Field(default_factory=list)
 
 
 class StudioTemplateRead(BaseModel):
@@ -147,6 +189,10 @@ class StudioTemplateRead(BaseModel):
     draft_revision: int
     draft_metadata: dict
     draft_assets_dir: str | None = None
+    # 草稿环境绑定（Phase 4）：发布时复制到新版本，历史版本不更新
+    draft_environment_version_id: int | None = None
+    draft_import_policy_mode: str = "unrestricted"
+    draft_allowed_imports: list[str] = Field(default_factory=list)
     lesson_id: int | None = None
     module_id: int | None = None
     current_version: StudioVersionRead | None = None

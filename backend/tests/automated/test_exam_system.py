@@ -11,7 +11,7 @@ def _setup(client, db_session_factory):
     create_user(db_session_factory, "e_s", "student")
     t_tok, _ = login(client, "e_t")
     s_tok, _ = login(client, "e_s")
-    c = client.post(f"{API}/courses", headers=_h(t_tok), json={"title":"C","status":"published"})
+    c = client.post(f"{API}/courses", headers=_h(t_tok), json={"title":"C","status":"published","visibility":"public"})
     cid = c.json()["id"]
     client.post(f"{API}/courses/{cid}/enroll", headers=_h(s_tok))
     now = datetime.datetime.now(timezone.utc)
@@ -159,3 +159,66 @@ def test_p1_resubmit_idempotent(client, db_session_factory):
     # 第二次交卷（幂等）
     r2 = client.post(f"{API}/exams/{ctx['eid']}/submit", headers=_h(ctx['s_tok']))
     assert r2.status_code in (200, 201), f"重复交卷不应 403: {r2.status_code}"
+
+
+def test_exam_list_returns_is_submitted_for_student(client, db_session_factory):
+    """任务中心数据源：学生考试列表返回 is_submitted（submitted/grading/graded 任一状态都算已考，与 dashboard 待办语义互补）"""
+    from app.models import ExamSubmission, User
+    from sqlalchemy import select
+
+    ctx = _setup(client, db_session_factory)
+    t_tok, s_tok, cid, eid = ctx["t_tok"], ctx["s_tok"], ctx["cid"], ctx["eid"]
+
+    # 额外两个考试，用于覆盖 grading / graded 两种交后状态（eid 走真实 start→submit 流程）
+    extra_ids = []
+    for title in ("E-grading", "E-graded"):
+        extra_id = client.post(
+            f"{API}/exams", headers=_h(t_tok),
+            json={"course_id": cid, "title": title, "duration_minutes": 60},
+        ).json()["id"]
+        r = client.post(
+            f"{API}/exams/{extra_id}/questions", headers=_h(t_tok),
+            json={"question_type": "single_choice", "prompt": "Q", "correct_answer": {"correct": ["A"]},
+                  "points": 10, "options": {"A": "选项A", "B": "选项B"}},
+        )
+        assert r.status_code == 201, r.text
+        extra_ids.append(extra_id)
+    grading_eid, graded_eid = extra_ids
+
+    for exam_id in [eid, grading_eid, graded_eid]:
+        r = client.patch(f"{API}/exams/{exam_id}", headers=_h(t_tok), json={"status": "published"})
+        assert r.status_code == 200, r.text
+
+    def student_items():
+        r = client.get(f"{API}/exams", headers=_h(s_tok))
+        assert r.status_code == 200, r.text
+        return {it["id"]: it["is_submitted"] for it in r.json()["items"]}
+
+    # 未开始考试：未提交
+    assert student_items()[eid] is False
+
+    # 只开始不交卷（started）：仍视为未提交（started 不算已考，与 dashboard 待办语义一致）
+    r = client.post(f"{API}/exams/{eid}/start", headers=_h(s_tok))
+    assert r.status_code == 201, r.text
+    assert student_items()[eid] is False
+
+    # 交卷后（真实流程，状态为 submitted/grading 之一）：已提交
+    r = client.post(f"{API}/exams/{eid}/submit", headers=_h(s_tok))
+    assert r.status_code == 201, r.text
+    assert student_items()[eid] is True
+
+    # 手动构造 grading / graded 提交记录：同样视为已提交
+    with db_session_factory() as db:
+        student = db.scalar(select(User).where(User.username == "e_s"))
+        for exam_id, status in ((grading_eid, "grading"), (graded_eid, "graded")):
+            db.add(ExamSubmission(exam_id=exam_id, student_id=student.id, status=status))
+        db.commit()
+    by_id = student_items()
+    assert by_id[grading_eid] is True
+    assert by_id[graded_eid] is True
+
+    # 教师视角不计算学生提交状态：默认 False
+    r = client.get(f"{API}/exams", headers=_h(t_tok))
+    assert r.status_code == 200, r.text
+    teacher_items = {it["id"]: it["is_submitted"] for it in r.json()["items"]}
+    assert all(v is False for v in teacher_items.values()), teacher_items

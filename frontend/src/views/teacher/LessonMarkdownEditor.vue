@@ -25,8 +25,8 @@ function isDirty() {
 }
 
 const {
-  lesson, loading, loadError, saving, saveState, showLeaveDialog,
-  load, save, goBack, onConfirmLeave, onCancelLeave,
+  lesson, loading, loadError, saving, publishing, saveState, showLeaveDialog,
+  load, save, publish, goBack, onConfirmLeave, onCancelLeave,
 } = useLessonEditor({
   courseId: props.courseId,
   lessonId: props.lessonId,
@@ -58,6 +58,17 @@ const previewHtml = computed(() => {
 
 const charCount = computed(() => content.value.length)
 const canSave = computed(() => !saving.value && title.value.trim().length > 0)
+
+// 发布状态判断：兼容后端旧字段 published 布尔值（与 ChapterManageView 一致）
+const isPublished = computed(() =>
+  lesson.value?.status === 'published' || lesson.value?.published === true
+)
+
+// 发布/转为草稿：一次 PATCH 提交当前内容 + status，成功后重置快照
+async function handlePublish() {
+  const ok = await publish(isPublished.value ? 'draft' : 'published')
+  if (ok) snapshot.value = { title: title.value, content: content.value }
+}
 </script>
 
 <template>
@@ -71,6 +82,13 @@ const canSave = computed(() => !saving.value && title.value.trim().length > 0)
       <input v-model="title" class="title-input" placeholder="课时标题" aria-label="课时标题" />
       <span class="save-state" :class="{ dirty: isDirty() }">{{ saveState }}</span>
       <button class="btn-primary save-btn" type="button" :disabled="!canSave" @click="handleSave">保存</button>
+      <button
+        v-if="lesson"
+        class="btn-outline publish-btn"
+        type="button"
+        :disabled="publishing || saving || loading"
+        @click="handlePublish"
+      >{{ isPublished ? '转为草稿' : '发布' }}</button>
     </header>
 
     <div v-if="loading" class="editor-body">
@@ -165,6 +183,17 @@ const canSave = computed(() => !saving.value && title.value.trim().length > 0)
 .save-state { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
 .save-state.dirty { color: var(--warning); }
 .save-btn { flex: none; }
+.publish-btn {
+  flex: none;
+  border: 1px solid var(--primary);
+  color: var(--primary);
+  background: var(--surface);
+  font-weight: 500;
+}
+.publish-btn:hover:not(:disabled) {
+  background: var(--primary-light);
+  border-color: var(--primary);
+}
 
 /* ── 正文区 ───────────────────────────────────────────────────────── */
 .editor-body { min-height: 200px; }

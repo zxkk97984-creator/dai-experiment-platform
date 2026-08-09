@@ -111,12 +111,14 @@ const rendered = computed(() => {
 }
 
 .cell-body :deep(pre) {
-  background: #0F172A;
-  color: #E2E8F0;
+  background: var(--surface);
+  color: var(--ink);
   padding: var(--space-4);
   border-radius: var(--radius-md);
   overflow-x: auto;
-  border: 1px solid #1E293B;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  box-shadow: var(--shadow-xs);
   margin: 12px 0;
   line-height: 1.7;
 }

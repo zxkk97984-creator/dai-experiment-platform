@@ -1,6 +1,6 @@
 <script setup>
 // 我的课程（参考图 02）：标题 + 状态标签页 + 搜索 + 横向课程行。
-// 每行按课程抓取章节（allSettled），403 视为未选课；
+// 选课状态以后端 is_enrolled 为准，只对已选课程抓取章节；
 // 进度与下一步全部来自本地真实学习记录，失败降级为 0 而不是隐藏课程。
 
 import { computed, onMounted, ref } from 'vue'
@@ -13,6 +13,7 @@ import AppIcon from '../../components/ui/AppIcon.vue'
 import UiProgress from '../../components/ui/UiProgress.vue'
 import { coursesAPI } from '../../api/courses.js'
 import { useAppStore } from '../../stores/app.js'
+import { getCourseCoverUrl } from '../../utils/courseCover.js'
 import { getCourseProgress, getFirstIncompleteLesson } from '../../utils/studentUi.js'
 
 const router = useRouter()
@@ -40,14 +41,17 @@ async function fetchCourses() {
 }
 
 async function loadRows() {
-  // 每个课程独立抓取章节：一个失败不影响其他行
+  // 选课状态以后端 is_enrolled 为准：只对已选课程抓取章节，
+  // 不再用章节 403 猜测是否已选课。
   const results = await Promise.allSettled(
-    courses.value.map((c) => coursesAPI.getChapters(c.id)),
+    courses.value.map((c) =>
+      c.is_enrolled ? coursesAPI.getChapters(c.id) : Promise.resolve({ data: { items: [] } }),
+    ),
   )
   rows.value = courses.value.map((course, i) => {
     const res = results[i]
-    const enrolled = res.status === 'fulfilled'
-    const chapters = enrolled ? (res.value.data?.items || res.value.data || []) : []
+    const enrolled = course.is_enrolled === true
+    const chapters = enrolled ? (res.value?.data?.items || []) : []
     const progress = enrolled ? getCourseProgress(course.id, chapters, localStorage) : 0
     const nextLesson = enrolled
       ? getFirstIncompleteLesson(course.id, chapters, localStorage)
@@ -80,7 +84,8 @@ async function handleEnroll(course) {
   try {
     await coursesAPI.enroll(course.id)
     app.showToast('选课成功', 'success')
-    await loadRows()
+    // 重新拉取列表，以服务端最新 is_enrolled 为准
+    await fetchCourses()
   } catch (e) {
     const msg = e.response?.data?.detail?.message || '选课失败'
     app.showToast(msg, 'error')
@@ -162,7 +167,11 @@ onMounted(fetchCourses)
           <article v-for="row in filteredRows" :key="row.course.id" class="course-row">
             <!-- 身份（约 34%） -->
             <button type="button" class="course-row-link" @click="goDetail(row.course.id)">
-              <CourseIdentity :title="row.course.title" :meta="metaText(row)" />
+              <CourseIdentity
+                :title="row.course.title"
+                :meta="metaText(row)"
+                :cover-url="getCourseCoverUrl(row.course)"
+              />
             </button>
 
             <!-- 进度（约 22%） -->
@@ -312,6 +321,7 @@ onMounted(fetchCourses)
 
 .course-row-link {
   flex: 0 0 34%;
+  justify-content: flex-start; /* 覆盖全局 button 的 center：内容不满时身份块不能居中，须与同行其他卡片左对齐 */
   background: none;
   border: none;
   padding: 0;
