@@ -1,6 +1,6 @@
 # DAI 实验平台
 
-面向人工智能课程的一站式在线实验平台。支持课程学习、在线编程实验、作业自动判题、考试系统（选择题 + 编程题）和 Notebook 交互式实验。
+面向人工智能课程的一站式在线实验平台。支持课程学习、在线编程实验、作业与考试自动判题、AI 辅助评分、Notebook 交互式实验、多档运行环境，以及课程封面和课时视频上传。
 
 ---
 
@@ -42,7 +42,7 @@ copy .env.example .env
 .venv\Scripts\python.exe -m alembic upgrade head
 
 # 创建管理员账号
-.venv\Scripts\python.exe -m app.cli create-admin --username admin --password Passw0rd! --real-name Administrator
+.venv\Scripts\python.exe -m app.cli create-admin --username admin --password Test1234! --real-name Administrator
 
 # 构建判题镜像（仅首次需要）
 docker build -t dai-judge-python:latest docker\judge
@@ -72,7 +72,7 @@ npm run dev
 
 - 前端页面：<http://localhost:5173>
 - Swagger 文档：<http://localhost:8000/docs>
-- 健康检查：<http://localhost:8000/health>
+- 健康检查：<http://localhost:8000/api/v1/health/ready>
 
 ### 6. 默认账号
 
@@ -80,7 +80,7 @@ npm run dev
 
 | 用户名 | 密码 | 角色 | 说明 |
 |--------|------|------|------|
-| `admin` | `Passw0rd!` | 管理员 | 管理用户、课程和实验模块 |
+| `admin` | `Test1234!` | 管理员 | 管理用户、课程和实验模块 |
 | `teacher_john` | `Test1234!` | 教师 | 张教授，管理课程与作业 |
 | `teacher_li` | `Test1234!` | 教师 | 李老师，管理课程与作业 |
 | `student_alice` | `Test1234!` | 学生 | 已选课、已完成部分作业和考试 |
@@ -311,6 +311,50 @@ mysql -u<用户> -p <库名> < whitelist_bak_<日期>.sql
 mysql -u<用户> -p <库名> < visibility_bak_<日期>.sql
 ```
 
+## 开发验证
+
+### 后端自动化测试
+
+Windows 下建议把 pytest 临时目录放到当前用户的本地临时目录，避免历史测试目录权限异常：
+
+```bat
+cd backend
+mkdir "%LOCALAPPDATA%\Temp\dai-pytest-tmp" 2>nul
+set PYTEST_DEBUG_TEMPROOT=%LOCALAPPDATA%\Temp\dai-pytest-tmp
+.venv\Scripts\python.exe -m pytest tests\automated -q -p no:cacheprovider
+```
+
+当前基线：**815 项通过、3 项跳过、0 项失败**。
+
+### 前端测试与构建
+
+```bash
+cd frontend
+npm test
+npm run build
+```
+
+当前基线：**63 个测试文件、675 项测试全部通过**，生产构建成功。
+
+### 仓库清理边界
+
+以下内容属于可重新生成的本地文件，不应提交：
+
+- `frontend/dist/`、`frontend/node_modules/.vite/`；
+- `.pytest_cache/`、`__pycache__/`、`*.pyc`；
+- `.playwright-mcp/`、测试临时数据库和 `MagicMock/mock.judge_work_dir/` 残留。
+
+以下内容是业务数据或运行状态，即使被 Git 忽略也不得当作缓存清理：
+
+- `backend/storage/`：课程封面、课时视频等上传文件；
+- `backend/lesson_content/`：课程讲义和教学内容；
+- `judge-work/`：判题与 Kernel 当前工作目录；
+- `.env`、`backend/.env`：本地运行配置。
+
+Notebook 前端现统一使用 Studio 和 Experiment 链路；旧版前端 Notebook/Jupyter API 包装已移除，后端兼容接口仍暂时保留。
+
+---
+
 ## 技术栈
 
 | 层面 | 技术 |
@@ -329,25 +373,31 @@ mysql -u<用户> -p <库名> < visibility_bak_<日期>.sql
 ```text
 ├── backend/
 │   ├── app/
-│   │   ├── api/              # API 路由（auth/users/courses/assignments/judge/exams/experiments/studio）
+│   │   ├── api/              # 认证、课程、作业、考试、判题、实验、AI 评分等接口
 │   │   ├── models/           # SQLAlchemy 数据模型
-│   │   ├── schemas/          # Pydantic 请求/响应模型
-│   │   ├── services/         # 业务服务
-│   │   └── worker/           # 判题 Worker
+│   │   ├── schemas/          # Pydantic 请求与响应模型
+│   │   ├── services/         # 业务、媒体、环境与 Notebook 服务
+│   │   └── worker/           # 判题与环境构建 Worker
 │   ├── alembic/              # 数据库迁移
 │   ├── docker/
 │   │   ├── judge/            # 判题镜像
-│   │   └── kernel/           # Kernel 镜像
-│   ├── lesson_content/       # 课时教学内容（Markdown）
-│   └── tests/                # 后端测试
+│   │   └── kernel/           # 交互式 Kernel 镜像
+│   ├── lesson_content/       # 课时教学内容（业务数据）
+│   ├── storage/              # 封面、视频等上传内容（业务数据）
+│   └── tests/automated/      # 后端自动化测试
 ├── frontend/
+│   ├── e2e/                  # Playwright 端到端测试
 │   └── src/
 │       ├── api/              # Axios API 封装
-│       ├── components/       # 公共组件（CodeBlock、AppLayout 等）
+│       ├── components/       # 公共和业务组件
 │       ├── stores/           # Pinia 状态管理
 │       ├── utils/            # 工具函数
 │       └── views/            # 页面（按角色分目录）
-├── docker-compose.yml        # MySQL + Redis
+├── docs/                     # 架构和部署运维文档
+├── scripts/                  # 验收与演示辅助脚本
+├── judge-work/               # 本地判题与 Kernel 运行目录（不提交）
+├── docker-compose.yml        # 本地 MySQL 与 Redis
+├── docker-compose.prod.yml   # 生产部署编排
 └── README.md
 ```
 
@@ -375,7 +425,7 @@ mysql -u<用户> -p <库名> < visibility_bak_<日期>.sql
 确认管理员账号已创建：
 ```bash
 cd backend
-.venv\Scripts\python.exe -m app.cli create-admin --username admin --password Passw0rd! --real-name Administrator
+.venv\Scripts\python.exe -m app.cli create-admin --username admin --password Test1234! --real-name Administrator
 ```
 
 ### 提交代码一直是 `queued`
@@ -396,7 +446,7 @@ DAI_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ### 前端页面打开白屏
 
 1. 确认 `cd frontend && npm install` 已执行
-2. 确认后端 API 在 <http://localhost:8000/health> 可访问
+2. 确认后端 API 在 <http://localhost:8000/api/v1/health/ready> 可访问
 3. 打开浏览器控制台查看具体报错
 
 ### Docker 未启动
