@@ -140,11 +140,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
 import { useAuthStore } from '../../stores/auth.js'
 import { aiGradingAPI } from '../../api/aiGrading.js'
+import { createLatestRequestGuard } from '../../utils/latestRequest.js'
 
 const auth = useAuthStore()
 const basePath = computed(() => auth.isAdmin ? '/admin/ai-grading' : '/teacher/ai-grading')
@@ -189,17 +190,22 @@ function buildParams() {
   return params
 }
 
+const requestGuard = createLatestRequestGuard()
+
 async function load() {
+  const token = requestGuard.begin()
   loading.value = true
   error.value = ''
   try {
     const res = await aiGradingAPI.listGrades(buildParams())
+    if (!requestGuard.isLatest(token)) return
     items.value = res.data.items || []
     total.value = res.data.total || 0
   } catch (e) {
+    if (!requestGuard.isLatest(token)) return
     error.value = e.response?.data?.detail?.message || e.message || '加载失败，请稍后重试'
   } finally {
-    loading.value = false
+    if (requestGuard.isLatest(token)) loading.value = false
   }
 }
 
@@ -227,6 +233,7 @@ function displayScore(value) { return value == null ? '—' : value }
 function formatTime(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) }
 
 onMounted(() => { load(); loadSummary() })
+onBeforeUnmount(() => requestGuard.invalidate())
 </script>
 
 <style scoped>

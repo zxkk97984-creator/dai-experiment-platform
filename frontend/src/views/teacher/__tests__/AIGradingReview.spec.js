@@ -80,6 +80,88 @@ describe('AI 评分复核列表', () => {
     expect(text).toContain('已完成')
   })
 
+  it('快速筛选时旧响应晚返回不会覆盖新结果', async () => {
+    let resolveFirst
+    let resolveSecond
+    aiGradingAPI.listGrades
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }))
+      .mockImplementationOnce(() => Promise.resolve({ data: { items: [], total: 0 } }))
+      .mockImplementationOnce(() => Promise.resolve({ data: { items: [], total: 0 } }))
+      .mockImplementationOnce(() => Promise.resolve({ data: { items: [], total: 0 } }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve }))
+    const mod = await import('../AIGradingReviewView.vue')
+    const wrapper = mount(mod.default, {
+      global: { stubs: { 'router-link': { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    // 切换评分状态筛选 → 发出新请求
+    await wrapper.findAll('select')[1].setValue('completed')
+    await flushPromises()
+
+    // 新请求先返回：显示 60 分记录
+    resolveSecond({
+      data: {
+        items: [{ id: 2, submission_id: 6, mode: 'active', status: 'completed',
+          functional_score: 60, algorithm_score: 0, robustness_score: 0, quality_score: 0,
+          raw_total: 60, score_cap: null, final_score_100: 60, needs_teacher_review: false,
+          attempt_count: 1, created_at: '2026-01-02T00:00:00' }],
+        total: 1, page: 1, page_size: 20,
+      },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('60')
+
+    // 旧请求后返回 79 分记录——不得覆盖新结果
+    resolveFirst({
+      data: {
+        items: [{ id: 1, submission_id: 5, mode: 'shadow', status: 'completed',
+          functional_score: 54, algorithm_score: 13, robustness_score: 7, quality_score: 5,
+          raw_total: 79, score_cap: null, final_score_100: 79, needs_teacher_review: false,
+          attempt_count: 1, created_at: '2026-01-01T00:00:00' }],
+        total: 1, page: 1, page_size: 20,
+      },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('60')
+    expect(wrapper.text()).not.toContain('79')
+  })
+
+  it('汇总并行请求三次且独立于筛选变化', async () => {
+    aiGradingAPI.listGrades.mockResolvedValue({ data: { items: [], total: 0 } })
+    const mod = await import('../AIGradingReviewView.vue')
+    const wrapper = mount(mod.default, {
+      global: { stubs: { 'router-link': { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    expect(aiGradingAPI.listGrades).toHaveBeenCalledTimes(4)
+    const summaryCalls = aiGradingAPI.listGrades.mock.calls.filter(([params]) => params.page === 1 && params.page_size === 1)
+    expect(summaryCalls).toHaveLength(3)
+
+    // 切换筛选只重新请求列表，汇总请求次数不变
+    await wrapper.findAll('select')[1].setValue('completed')
+    await flushPromises()
+    expect(aiGradingAPI.listGrades).toHaveBeenCalledTimes(5)
+    const summaryCallsAfter = aiGradingAPI.listGrades.mock.calls.filter(([params]) => params.page === 1 && params.page_size === 1)
+    expect(summaryCallsAfter).toHaveLength(3)
+  })
+
+  it('汇总请求失败时回退为列表总数', async () => {
+    aiGradingAPI.listGrades
+      .mockResolvedValueOnce({ data: { items: [], total: 7 } })
+      .mockRejectedValueOnce(new Error('汇总失败'))
+      .mockRejectedValueOnce(new Error('汇总失败'))
+      .mockRejectedValueOnce(new Error('汇总失败'))
+    const mod = await import('../AIGradingReviewView.vue')
+    const wrapper = mount(mod.default, {
+      global: { stubs: { 'router-link': { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('全部评分7')
+  })
+
   it('按学生姓名查询并显示学生信息', async () => {
     aiGradingAPI.listGrades.mockResolvedValue({
       data: {

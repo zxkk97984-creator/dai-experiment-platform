@@ -7,6 +7,7 @@ import { useAuthStore } from '../../stores/auth.js'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
 import { formatDateTime } from '../../utils/format.js'
+import { createLatestRequestGuard } from '../../utils/latestRequest.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,6 +32,7 @@ const filters = reactive({
 })
 
 let searchTimer = null
+const requestGuard = createLatestRequestGuard()
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const hasFilters = computed(() => Boolean(
@@ -44,6 +46,7 @@ const pageNumbers = computed(() => {
 })
 
 async function load({ initial = false } = {}) {
+  const token = requestGuard.begin()
   if (initial) loading.value = true
   else refreshing.value = true
   loadError.value = false
@@ -60,17 +63,21 @@ async function load({ initial = false } = {}) {
     if (filters.reviewStatus) params.review_status = filters.reviewStatus
 
     const res = await experimentsAPI.listSubmissions(params)
+    if (!requestGuard.isLatest(token)) return
     submissions.value = res.data?.items || []
     total.value = res.data?.total || 0
     Object.assign(summary, res.data?.summary || { total: 0, pending: 0, graded: 0 })
     filterOptions.courses = res.data?.filter_options?.courses || []
     filterOptions.entries = res.data?.filter_options?.entries || []
   } catch {
+    if (!requestGuard.isLatest(token)) return
     loadError.value = true
     app.showToast('加载提交列表失败', 'error')
   } finally {
-    loading.value = false
-    refreshing.value = false
+    if (requestGuard.isLatest(token)) {
+      loading.value = false
+      refreshing.value = false
+    }
   }
 }
 
@@ -118,7 +125,7 @@ watch(
 )
 
 onMounted(() => load({ initial: true }))
-onBeforeUnmount(() => window.clearTimeout(searchTimer))
+onBeforeUnmount(() => { window.clearTimeout(searchTimer); requestGuard.invalidate() })
 </script>
 
 <template>

@@ -6,6 +6,7 @@ import UiStatusPill from '../../components/ui/UiStatusPill.vue'
 import { experimentsAPI } from '../../api/experiments.js'
 import { formatDateTime } from '../../utils/format.js'
 import { EXPERIMENT_STATUS_MAP, statusBadge } from '../../utils/status.js'
+import { createLatestRequestGuard } from '../../utils/latestRequest.js'
 
 const router = useRouter()
 
@@ -21,7 +22,7 @@ const page = ref(1)
 const pageSize = 10
 const total = ref(0)
 let searchTimer = null
-let requestSequence = 0
+const requestGuard = createLatestRequestGuard()
 
 const statusTabs = computed(() => [
   { value: '', label: '全部', count: summary.value.total },
@@ -58,7 +59,7 @@ function actionLabel(value) {
 }
 
 async function loadCatalog() {
-  const sequence = ++requestSequence
+  const sequence = requestGuard.begin()
   loading.value = true
   failed.value = false
   try {
@@ -69,7 +70,7 @@ async function loadCatalog() {
       page: page.value,
       page_size: pageSize,
     })
-    if (sequence !== requestSequence) return
+    if (!requestGuard.isLatest(sequence)) return
     const data = response.data
     items.value = data.items || []
     summary.value = data.summary || summary.value
@@ -78,11 +79,11 @@ async function loadCatalog() {
       page.value = Math.max(1, Math.ceil(total.value / pageSize))
     }
   } catch {
-    if (sequence !== requestSequence) return
+    if (!requestGuard.isLatest(sequence)) return
     items.value = []
     failed.value = true
   } finally {
-    if (sequence === requestSequence) loading.value = false
+    if (requestGuard.isLatest(sequence)) loading.value = false
   }
 }
 
@@ -115,7 +116,7 @@ watch(searchInput, (value) => {
 watch([activeStatus, sortBy, page], loadCatalog)
 
 onMounted(loadCatalog)
-onBeforeUnmount(() => clearTimeout(searchTimer))
+onBeforeUnmount(() => { clearTimeout(searchTimer); requestGuard.invalidate() })
 </script>
 
 <template>

@@ -96,6 +96,35 @@ describe('实验提交与评分列表', () => {
     expect(text).toContain('查看详情')
   })
 
+  it('快速筛选时旧响应晚返回不会覆盖新结果', async () => {
+    vi.useFakeTimers()
+    let resolveFirst
+    let resolveSecond
+    experimentsAPI.listSubmissions
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    // 输入搜索词 → 防抖后发出第二个请求（新）
+    await wrapper.find('input[type="search"]').setValue('张三')
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+    expect(experimentsAPI.listSubmissions).toHaveBeenNthCalledWith(2, expect.objectContaining({ q: '张三' }))
+
+    // 新请求先返回：搜索后无结果
+    resolveSecond({ data: { ...LIST_RESPONSE, items: [], total: 0, summary: { total: 0, pending: 0, graded: 0 } } })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('李四')
+    expect(wrapper.text()).toContain('没有符合条件的提交')
+
+    // 旧请求后返回全量列表——不得覆盖新结果
+    resolveFirst({ data: LIST_RESPONSE })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('李四')
+    expect(wrapper.text()).toContain('没有符合条件的提交')
+  })
+
   it('搜索防抖并传递课程、实验、状态与排序参数', async () => {
     vi.useFakeTimers()
     const wrapper = mountPage()
