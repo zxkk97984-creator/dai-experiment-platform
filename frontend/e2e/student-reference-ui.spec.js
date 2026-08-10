@@ -94,4 +94,27 @@ test.describe('学生参考 UI 冒烟（非破坏）', () => {
     const pageErrors = errors.filter((e) => /^(pageerror|console)/.test(e))
     expect(pageErrors).toEqual([])
   })
+
+  test('实验目录快速连续搜索保留最新结果（防抖与防竞态）', async ({ page }) => {
+    await page.goto('/login')
+    await page.fill('#login-username', 'student_alice')
+    await page.fill('#login-password', 'Test1234!')
+    await page.click('button[type="submit"]')
+    await expect(page).toHaveURL(/\/student$/, { timeout: 15000 })
+
+    await page.goto('/student/experiments')
+    await expect(page.getByRole('heading', { name: '实验模块', exact: true })).toBeVisible({ timeout: 15000 })
+
+    const searchBox = page.locator('.search-box input')
+    await expect(searchBox).toBeVisible()
+
+    // 快速连续输入：中间词会触发请求，但最终结果必须对应最后输入
+    await searchBox.fill('不存在的实验关键词xyz')
+    await page.waitForTimeout(100)
+    await searchBox.fill('')
+
+    // 清空后应回到全部列表（最新请求结果胜出，旧结果不覆盖）
+    await expect(page.getByText('全部实验模块')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText(/共 \d+ 个/)).toBeVisible({ timeout: 10000 })
+  })
 })
