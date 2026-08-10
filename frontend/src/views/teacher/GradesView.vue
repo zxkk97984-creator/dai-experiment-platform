@@ -5,6 +5,8 @@ import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
 import { examsAPI } from '../../api/exams.js'
 import { useAppStore } from '../../stores/app.js'
+import { formatDateTime } from '../../utils/format.js'
+import { EXAM_GRADE_STATUS_MAP, statusBadge } from '../../utils/status.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,13 +23,6 @@ const sortOrder = ref('score-desc')
 const page = ref(1)
 const pageSize = ref(10)
 
-function formatDate(value) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(date).replaceAll('/', '-')
-}
-function statusLabel(status) { return ({ graded: '已评分', review_required: '待复核', grading: '评分中', submitted: '已交卷', started: '进行中', absent: '缺考' })[status] || status }
 function scoreMatches(score, range) {
   if (range === 'all') return true
   if (score == null) return false
@@ -70,7 +65,7 @@ async function load() {
 function resetPage() { page.value = 1 }
 function viewDetail(item) { if (item.submission_id) router.push(`/teacher/exams/${route.params.id}/grades/${item.submission_id}`) }
 function exportGrades() {
-  const rows = [['学生姓名', '学号', '状态', '得分', '提交时间'], ...filteredGrades.value.map((item) => [item.student_name, item.student_number, statusLabel(item.status), item.score ?? '', formatDate(item.submitted_at)])]
+  const rows = [['学生姓名', '学号', '状态', '得分', '提交时间'], ...filteredGrades.value.map((item) => [item.student_name, item.student_number, statusBadge(EXAM_GRADE_STATUS_MAP, item.status).label, item.score ?? '', formatDateTime(item.submitted_at, { seconds: true })])]
   const csv = `\ufeff${rows.map((row) => row.map((cell) => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(',')).join('\n')}`
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
   const link = document.createElement('a'); link.href = url; link.download = `${exam.value.title || '考试'}-成绩.csv`; link.click(); URL.revokeObjectURL(url)
@@ -104,7 +99,7 @@ onMounted(load)
         <div class="filter-bar"><label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索学生姓名或学号" @input="resetPage" /></label><select v-model="statusFilter" @change="resetPage"><option value="all">状态：全部</option><option value="graded">已评分</option><option value="review_required">待复核</option><option value="grading">评分中</option><option value="absent">缺考</option></select><select v-model="scoreFilter" @change="resetPage"><option value="all">分数段：全部</option><option value="excellent">90–100</option><option value="good">80–89</option><option value="pass">60–79</option><option value="fail">0–59</option></select><select v-model="sortOrder"><option value="score-desc">排序：分数从高到低</option><option value="score-asc">排序：分数从低到高</option><option value="time">排序：最近提交</option><option value="name">排序：学生姓名</option></select></div>
         <div v-if="loading" class="loading-list"><span v-for="i in 5" :key="i" class="skeleton"></span></div>
         <div v-else-if="!filteredGrades.length" class="empty-state"><AppIcon name="chart" :size="34" /><strong>暂无符合条件的成绩</strong></div>
-        <div v-else class="table-scroll"><table class="grade-table"><thead><tr><th>学生</th><th>学号</th><th>课程</th><th>交卷状态</th><th>得分</th><th>提交时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in pagedGrades" :key="item.id"><td data-label="学生"><span class="student-cell"><i>{{ item.student_name?.slice(0, 1) || '学' }}</i><strong>{{ item.student_name }}</strong></span></td><td data-label="学号">{{ item.student_number }}</td><td data-label="课程">{{ exam.course_title || '—' }}</td><td data-label="交卷状态"><span class="status-pill" :class="item.status">{{ statusLabel(item.status) }}</span></td><td data-label="得分"><strong v-if="item.score != null" class="score">{{ item.score }}</strong><span v-else>—</span></td><td data-label="提交时间" class="muted-cell">{{ formatDate(item.submitted_at) }}</td><td data-label="操作"><button class="detail-action" :disabled="!item.submission_id" @click="viewDetail(item)">查看详情</button></td></tr></tbody></table></div>
+        <div v-else class="table-scroll"><table class="grade-table"><thead><tr><th>学生</th><th>学号</th><th>课程</th><th>交卷状态</th><th>得分</th><th>提交时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in pagedGrades" :key="item.id"><td data-label="学生"><span class="student-cell"><i>{{ item.student_name?.slice(0, 1) || '学' }}</i><strong>{{ item.student_name }}</strong></span></td><td data-label="学号">{{ item.student_number }}</td><td data-label="课程">{{ exam.course_title || '—' }}</td><td data-label="交卷状态"><span class="status-pill" :class="item.status">{{ statusBadge(EXAM_GRADE_STATUS_MAP, item.status).label }}</span></td><td data-label="得分"><strong v-if="item.score != null" class="score">{{ item.score }}</strong><span v-else>—</span></td><td data-label="提交时间" class="muted-cell">{{ formatDateTime(item.submitted_at, { seconds: true }) }}</td><td data-label="操作"><button class="detail-action" :disabled="!item.submission_id" @click="viewDetail(item)">查看详情</button></td></tr></tbody></table></div>
         <footer v-if="!loading && filteredGrades.length" class="pagination-bar"><span>共 {{ filteredGrades.length }} 条</span><div class="pagination"><button :disabled="page === 1" @click="page--">‹</button><button v-for="number in pageCount" :key="number" :class="{ active: page === number }" @click="page = number">{{ number }}</button><button :disabled="page === pageCount" @click="page++">›</button></div><select v-model.number="pageSize" @change="resetPage"><option :value="10">10 条/页</option><option :value="20">20 条/页</option></select></footer>
       </section>
     </main>

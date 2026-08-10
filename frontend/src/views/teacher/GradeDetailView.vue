@@ -5,6 +5,7 @@ import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
 import { examsAPI } from '../../api/exams.js'
 import { useAppStore } from '../../stores/app.js'
+import { formatDateTime } from '../../utils/format.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -35,12 +36,6 @@ const scorePercent = computed(() => Math.min(100, Math.round(totalScore.value * 
 const accuracy = computed(() => payload.value.analysis.question_count ? Math.round(payload.value.analysis.correct_count * 100 / payload.value.analysis.question_count) : 0)
 const rankPercent = computed(() => Math.min(99, Math.max(1, scorePercent.value)))
 
-function formatDate(value) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date).replaceAll('/', '-')
-}
 function answerState(answer) {
   if (answer.score == null) return { label: '待评分', tone: 'pending' }
   if (Number(answer.score) >= Number(answer.points)) return { label: '正确', tone: 'correct' }
@@ -76,7 +71,7 @@ onMounted(load)
         <div class="identity-item"><span class="identity-icon blue"><AppIcon name="user" :size="21" /></span><span><small>学号</small><strong>{{ payload.student.number }}</strong></span></div>
         <div class="identity-item"><span class="identity-icon purple"><AppIcon name="exam" :size="21" /></span><span><small>考试名称</small><strong>{{ payload.exam.title }}</strong></span></div>
         <div class="identity-item"><span class="identity-icon green"><AppIcon name="course" :size="21" /></span><span><small>所属课程</small><strong>{{ payload.exam.course_title }}</strong></span></div>
-        <div class="identity-item"><span class="identity-icon orange"><AppIcon name="clock" :size="21" /></span><span><small>提交时间</small><strong>{{ formatDate(payload.submission.submitted_at) }}</strong></span></div>
+        <div class="identity-item"><span class="identity-icon orange"><AppIcon name="clock" :size="21" /></span><span><small>提交时间</small><strong>{{ formatDateTime(payload.submission.submitted_at) }}</strong></span></div>
         <div class="final-score"><small>总分</small><strong>{{ payload.submission.score ?? '—' }}<em> 分</em></strong><span class="complete-pill">已完成</span></div>
       </section>
 

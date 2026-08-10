@@ -4,13 +4,16 @@ export function formatDate(isoStr) {
   return d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
 }
 
-export function formatDateTime(isoStr) {
-  if (!isoStr) return '—'
-  const d = new Date(isoStr)
-  return d.toLocaleString('zh-CN', {
+export function formatDateTime(value, { seconds = false } = {}) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat('zh-CN', {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit',
-  })
+    ...(seconds ? { second: '2-digit' } : {}),
+    hour12: false,
+  }).format(date).replaceAll('/', '-')
 }
 
 export function formatDuration(minutes) {

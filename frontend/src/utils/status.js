@@ -35,6 +35,15 @@ export const EXAM_STATUS_MAP = {
   archived: { label: '已归档', color: 'neutral' },
 }
 
+export const EXAM_GRADE_STATUS_MAP = {
+  graded: { label: '已评分', color: 'success' },
+  review_required: { label: '待复核', color: 'warning' },
+  grading: { label: '评分中', color: 'info' },
+  submitted: { label: '已交卷', color: 'info' },
+  started: { label: '进行中', color: 'info' },
+  absent: { label: '缺考', color: 'danger' },
+}
+
 export const ENROLL_STATUS_MAP = {
   enrolled: { label: '已选课', color: 'success' },
   dropped: { label: '已退课', color: 'neutral' },

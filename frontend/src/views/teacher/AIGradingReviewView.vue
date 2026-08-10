@@ -96,7 +96,7 @@
                   <td data-label="评分记录">
                     <div class="record-cell">
                       <strong>#{{ item.id }} · {{ item.submission_id ? '作业' : '考试' }}</strong>
-                      <small>{{ modeMap[item.mode] || item.mode || '-' }}<template v-if="item.created_at"> · {{ formatTime(item.created_at) }}</template></small>
+                      <small>{{ modeMap[item.mode] || item.mode || '-' }}<template v-if="item.created_at"> · {{ formatDateTime(item.created_at) }}</template></small>
                     </div>
                   </td>
                   <td data-label="分项得分">
@@ -146,6 +146,7 @@ import AppIcon from '../../components/ui/AppIcon.vue'
 import { useAuthStore } from '../../stores/auth.js'
 import { aiGradingAPI } from '../../api/aiGrading.js'
 import { createLatestRequestGuard } from '../../utils/latestRequest.js'
+import { formatDateTime } from '../../utils/format.js'
 
 const auth = useAuthStore()
 const basePath = computed(() => auth.isAdmin ? '/admin/ai-grading' : '/teacher/ai-grading')
@@ -230,7 +231,6 @@ function resetFilters() { filterStudent.value = ''; filterKind.value = ''; filte
 function goToPage(nextPage) { if (nextPage < 1 || nextPage > totalPages.value || nextPage === page.value) return; page.value = nextPage; load() }
 function studentInitial(item) { return (item.student_name || String(item.student_id ?? '学')).trim().slice(0, 1) }
 function displayScore(value) { return value == null ? '—' : value }
-function formatTime(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) }
 
 onMounted(() => { load(); loadSummary() })
 onBeforeUnmount(() => requestGuard.invalidate())

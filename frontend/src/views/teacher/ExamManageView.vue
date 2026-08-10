@@ -6,6 +6,8 @@ import AppIcon from '../../components/ui/AppIcon.vue'
 import { examsAPI } from '../../api/exams.js'
 import { coursesAPI } from '../../api/courses.js'
 import { useAppStore } from '../../stores/app.js'
+import { formatDateTime } from '../../utils/format.js'
+import { EXAM_STATUS_MAP, statusBadge } from '../../utils/status.js'
 
 const router = useRouter()
 const app = useAppStore()
@@ -29,14 +31,6 @@ function displayStatus(exam) {
   if (exam.end_at && new Date(exam.end_at).getTime() < now()) return 'ended'
   return 'published'
 }
-function statusLabel(status) { return ({ published: '已发布', draft: '草稿', ended: '已结束' })[status] || status }
-function formatDate(value) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date).replaceAll('/', '-')
-}
-
 const summary = computed(() => ({
   total: exams.value.length,
   published: exams.value.filter((item) => displayStatus(item) === 'published').length,
@@ -144,13 +138,13 @@ onMounted(() => { fetchExams(); fetchCourses() })
           <table class="exam-table">
             <thead><tr><th>考试名称</th><th>所属课程</th><th>状态</th><th>题目数</th><th>时长</th><th>参与人数</th><th>最近更新</th><th>操作</th></tr></thead>
             <tbody><tr v-for="exam in pagedExams" :key="exam.id">
-              <td data-label="考试名称"><strong>{{ exam.title }}</strong><small>{{ exam.start_at ? formatDate(exam.start_at) + ' 开始' : '未设置考试时间' }}</small></td>
+              <td data-label="考试名称"><strong>{{ exam.title }}</strong><small>{{ exam.start_at ? formatDateTime(exam.start_at) + ' 开始' : '未设置考试时间' }}</small></td>
               <td data-label="所属课程"><span>{{ courseName(exam) }}</span><small>课程 ID {{ exam.course_id }}</small></td>
-              <td data-label="状态"><span class="status-pill" :class="displayStatus(exam)">{{ statusLabel(displayStatus(exam)) }}</span></td>
+              <td data-label="状态"><span class="status-pill" :class="displayStatus(exam)">{{ statusBadge(EXAM_STATUS_MAP, displayStatus(exam)).label }}</span></td>
               <td data-label="题目数">{{ exam.question_count ?? '—' }}</td>
               <td data-label="时长">{{ exam.duration_minutes }} 分钟</td>
               <td data-label="参与人数">{{ exam.participant_count ?? 0 }}<span v-if="exam.expected_count"> / {{ exam.expected_count }}</span></td>
-              <td data-label="最近更新" class="muted-cell">{{ formatDate(exam.updated_at || exam.created_at) }}</td>
+              <td data-label="最近更新" class="muted-cell">{{ formatDateTime(exam.updated_at || exam.created_at) }}</td>
               <td data-label="操作" class="row-actions">
                 <button class="text-action" @click="router.push(`/teacher/exams/${exam.id}/edit`)">编辑题目</button>
                 <button class="text-action" @click="router.push(`/teacher/exams/${exam.id}/grades`)">成绩分析</button>
