@@ -24,6 +24,17 @@ describe('experimentsAPI module mutations', () => {
     expect(client.post).toHaveBeenCalledWith('/experiments/modules', payload)
   })
 
+  it('queries the student catalog with server-side controls', () => {
+    const params = { q: 'Python', status: 'started', sort: 'recent_desc', page: 2, page_size: 10 }
+
+    experimentsAPI.listStudentCatalog(params)
+
+    expect(client.get).toHaveBeenCalledWith(
+      '/experiments/modules/student-catalog',
+      { params },
+    )
+  })
+
   it('publishes or edits an existing module with PATCH', () => {
     experimentsAPI.updateModule(12, { status: 'published' })
 

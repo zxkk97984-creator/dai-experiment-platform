@@ -8,6 +8,7 @@
 不创建 ExamGrade；父级转入 review_required 等待人工处理。
 """
 import logging
+from decimal import Decimal, ROUND_HALF_UP
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -171,6 +172,7 @@ def finalize_if_ready(submission_id: int, db: Session) -> FinalizeResult:
         )
     )
     total = float(total) if total is not None else 0.0
+    total = float(Decimal(str(total)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
 
     now = datetime.now(timezone.utc)
     result = db.execute(

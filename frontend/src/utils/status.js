@@ -41,9 +41,11 @@ export const ENROLL_STATUS_MAP = {
 }
 
 export const EXPERIMENT_STATUS_MAP = {
-  started: { label: '进行中', color: 'warning' },
-  completed: { label: '已完成', color: 'success' },
-  submitted: { label: '已提交', color: 'info' },
+  not_started: { label: '未开始', color: 'neutral', tone: 'pending' },
+  started: { label: '进行中', color: 'info', tone: 'progress' },
+  completed: { label: '已评分', color: 'success', tone: 'success' },
+  submitted: { label: '已提交', color: 'warning', tone: 'submitted' },
+  graded: { label: '已评分', color: 'success', tone: 'success' },
 }
 
 export function statusBadge(map, value) {

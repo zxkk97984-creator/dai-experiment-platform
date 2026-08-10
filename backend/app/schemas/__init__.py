@@ -534,6 +534,21 @@ class ExamQuestionRead(BaseModel):
     grading_mode: Literal["legacy", "shadow", "active"]
 
 
+class ExamQuestionTeacherRead(ExamQuestionRead):
+    """教师题目视图——包含编辑所需私有字段，禁止用于学生响应。"""
+
+    correct_answer: dict = Field(default_factory=dict)
+    hidden_tests: str | None = None
+    time_limit_ms: int | None = None
+    memory_limit_mb: int | None = None
+    grading_mode: Literal["legacy", "shadow", "active"] | None = None
+    teacher_constraints: dict = Field(default_factory=dict)
+    reference_solution: str | None = None
+    test_groups: list = Field(default_factory=list)
+    score_cap_rules: list = Field(default_factory=list)
+    has_locked_rubric: bool = False
+
+
 class ExamSubmissionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -629,6 +644,31 @@ class ExperimentModuleRead(BaseModel):
     status: str
 
 
+class StudentExperimentModuleRead(BaseModel):
+    id: int
+    name: str
+    learning_status: Literal["not_started", "started", "submitted", "graded"]
+    last_learning_at: datetime | None = None
+
+
+class StudentExperimentCatalogSummary(BaseModel):
+    total: int = 0
+    not_started: int = 0
+    started: int = 0
+    submitted: int = 0
+    graded: int = 0
+
+
+class StudentExperimentCatalogRead(BaseModel):
+    items: list[StudentExperimentModuleRead] = Field(default_factory=list)
+    page: int = 1
+    page_size: int = 10
+    total: int = 0
+    summary: StudentExperimentCatalogSummary = Field(
+        default_factory=StudentExperimentCatalogSummary
+    )
+
+
 # ── 统一实验记录 Schemas ──────────────────────────────────────
 
 
@@ -691,7 +731,37 @@ class ExperimentSubmissionRead(BaseModel):
     reviewed_at: datetime | None = None
     # 前端展示辅助字段（列表查询时填充）
     student_name: str | None = None
+    student_username: str | None = None
     entry_name: str | None = None
+    entry_id: int | None = None
+    entry_type: Literal["lesson", "module"] | None = None
+    course_id: int | None = None
+    course_name: str | None = None
+
+
+class ExperimentSubmissionSummary(BaseModel):
+    total: int = 0
+    pending: int = 0
+    graded: int = 0
+
+
+class ExperimentSubmissionFilterOption(BaseModel):
+    id: int
+    name: str
+
+
+class ExperimentSubmissionFilterOptions(BaseModel):
+    courses: list[ExperimentSubmissionFilterOption] = Field(default_factory=list)
+    entries: list[ExperimentSubmissionFilterOption] = Field(default_factory=list)
+
+
+class ExperimentSubmissionListRead(BaseModel):
+    items: list[ExperimentSubmissionRead] = Field(default_factory=list)
+    page: int = 1
+    page_size: int = 10
+    total: int = 0
+    summary: ExperimentSubmissionSummary = Field(default_factory=ExperimentSubmissionSummary)
+    filter_options: ExperimentSubmissionFilterOptions = Field(default_factory=ExperimentSubmissionFilterOptions)
 
 
 class ExperimentCellMetadata(BaseModel):

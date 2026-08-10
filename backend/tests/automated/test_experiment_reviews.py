@@ -101,6 +101,71 @@ def test_submission_detail_returns_immutable_cell_context(client, db_session_fac
     }
     assert body["outputs_snapshot"]["c1"]["execution_count"] == 1
     assert body["outputs_snapshot"]["c1"]["outputs"][0]["text"] == "submitted\n"
+    assert body["student_name"]
+    assert body["student_username"] == "erv_s"
+    assert body["course_id"] == ctx["cid"]
+    assert body["course_name"] == "RVC"
+    assert body["entry_name"] == "L1"
+    assert body["entry_type"] == "lesson"
+
+
+def test_submission_list_workspace_filters_summary_and_sort(client, db_session_factory):
+    """工作台列表返回全局汇总、筛选项，并正确执行查询与排序。"""
+    ctx = _setup_submission(client, db_session_factory)
+
+    second = client.post(
+        f"{API}/experiments/records/{ctx['rid']}/submit",
+        headers=auth_header(ctx["s_tok"]),
+        json={"client_request_id": str(uuid.uuid4())},
+    )
+    assert second.status_code == 201, second.text
+    second_id = second.json()["id"]
+
+    reviewed = client.patch(
+        f"{API}/experiments/submissions/{ctx['sub_id']}/review",
+        headers=auth_header(ctx["t_tok"]),
+        json={"score": 88, "feedback": "已检查"},
+    )
+    assert reviewed.status_code == 200, reviewed.text
+
+    base = client.get(
+        f"{API}/experiments/submissions?page_size=10&sort=submitted_desc",
+        headers=auth_header(ctx["t_tok"]),
+    )
+    assert base.status_code == 200, base.text
+    body = base.json()
+    assert body["summary"] == {"total": 2, "pending": 1, "graded": 1}
+    assert body["items"][0]["id"] == second_id
+    assert body["items"][0]["student_username"] == "erv_s"
+    assert body["items"][0]["course_name"] == "RVC"
+    assert body["items"][0]["entry_name"] == "L1"
+    assert body["filter_options"]["courses"] == [{"id": ctx["cid"], "name": "RVC"}]
+    entry = body["filter_options"]["entries"][0]
+
+    pending = client.get(
+        f"{API}/experiments/submissions?review_status=pending&q=erv_s"
+        f"&course_id={ctx['cid']}&entry_id={entry['id']}",
+        headers=auth_header(ctx["t_tok"]),
+    )
+    assert pending.status_code == 200, pending.text
+    assert [item["id"] for item in pending.json()["items"]] == [second_id]
+    assert pending.json()["summary"] == {"total": 2, "pending": 1, "graded": 1}
+
+    graded = client.get(
+        f"{API}/experiments/submissions?review_status=graded&sort=submitted_asc",
+        headers=auth_header(ctx["t_tok"]),
+    )
+    assert graded.status_code == 200, graded.text
+    assert [item["id"] for item in graded.json()["items"]] == [ctx["sub_id"]]
+
+    no_match = client.get(
+        f"{API}/experiments/submissions?q=not-a-real-student",
+        headers=auth_header(ctx["t_tok"]),
+    )
+    assert no_match.status_code == 200, no_match.text
+    assert no_match.json()["items"] == []
+    assert no_match.json()["total"] == 0
+    assert no_match.json()["summary"]["total"] == 2
 
 
 # ═══════════════════════════════════════════════════════════════

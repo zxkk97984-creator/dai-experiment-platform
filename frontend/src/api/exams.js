@@ -9,6 +9,7 @@ export const examsAPI = {
     start(id) { return client.post(`/exams/${id}/start`) },
     submit(id, data) { return client.post(`/exams/${id}/submit`, data) },
     getGrades(id) { return client.get(`/exams/${id}/grades`) },
+    getGradeDetail(examId, submissionId) { return client.get(`/exams/${examId}/grades/${submissionId}`) },
     getQuestions(id) { return client.get(`/exams/${id}/questions`) },
     createQuestion(id, data) { return client.post(`/exams/${id}/questions`, data) },
     updateQuestion(examId, qId, data) { return client.patch(`/exams/${examId}/questions/${qId}`, data) },

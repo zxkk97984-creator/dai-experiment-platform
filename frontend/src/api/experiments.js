@@ -45,6 +45,10 @@ export const experimentsAPI = {
 
   // 模块管理
   listModules(params) { return client.get('/experiments/modules', { params }) },
+  /** 学生实验目录（模块 + 当前学生学习状态） */
+  listStudentCatalog(params) {
+    return client.get('/experiments/modules/student-catalog', { params })
+  },
   getModule(id) { return client.get(`/experiments/modules/${id}`) },
   createModule(payload) { return client.post('/experiments/modules', payload) },
   updateModule(id, payload) { return client.patch(`/experiments/modules/${id}`, payload) },

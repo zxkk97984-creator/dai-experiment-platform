@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
+import AppIcon from '../../components/ui/AppIcon.vue'
 import { assignmentsAPI } from '../../api/assignments.js'
 import { coursesAPI } from '../../api/courses.js'
 import EnvironmentProfilePicker from '../../components/common/EnvironmentProfilePicker.vue'
@@ -23,6 +24,10 @@ const importPolicy = ref('unrestricted')
 const allowedImports = ref([])
 // 课程弹窗：courses 为可选课程列表，courseModalOpen 控制弹窗开关，manualCourseId 为弹窗内手输 ID
 const courses = ref([])
+const query = ref('')
+const statusFilter = ref('all')
+const courseFilter = ref('all')
+const sortOrder = ref('updated')
 const courseModalOpen = ref(false)
 const manualCourseId = ref('')
 
@@ -65,6 +70,19 @@ async function fetchCourses() {
 }
 
 // 展示框显示：已选课程在列表中 → 「课程名（ID: n）」；手输未在列表 → 「课程 ID: n」
+const assignmentStatus = (assignment) => assignment.status || 'draft'
+const assignmentUpdated = (assignment) => assignment.updated_at || assignment.created_at || ''
+const summary = computed(() => ({ total: assignments.value.length, published: assignments.value.filter((item) => assignmentStatus(item) === 'published').length, draft: assignments.value.filter((item) => assignmentStatus(item) === 'draft').length, ended: assignments.value.filter((item) => assignmentStatus(item) === 'ended' || (item.due_at && new Date(item.due_at) < new Date())).length }))
+const filteredAssignments = computed(() => {
+  const keyword = query.value.trim().toLowerCase()
+  const result = assignments.value.filter((item) => {
+    const course = courses.value.find((candidate) => String(candidate.id) === String(item.course_id))
+    const courseTitle = item.course_title || course?.title || ''
+    return (!keyword || `${item.title || ''} ${courseTitle}`.toLowerCase().includes(keyword)) && (statusFilter.value === 'all' || assignmentStatus(item) === statusFilter.value) && (courseFilter.value === 'all' || String(item.course_id) === courseFilter.value)
+  })
+  return [...result].sort((a, b) => sortOrder.value === 'title' ? String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN') : new Date(assignmentUpdated(b) || 0) - new Date(assignmentUpdated(a) || 0))
+})
+const courseName = (assignment) => assignment.course_title || courses.value.find((course) => String(course.id) === String(assignment.course_id))?.title || '未关联课程'
 const selectedCourse = computed(
   () => courses.value.find((c) => String(c.id) === String(form.value.course_id)) || null,
 )
@@ -209,46 +227,10 @@ onMounted(() => { fetch(); fetchCourses() })
         </div>
       </header>
 
-      <!-- ── Loading ────────────────────────────────────────────────────── -->
-      <div v-if="loading" class="card table-card">
-        <div class="skeleton-row" v-for="i in 4" :key="i">
-          <div class="skeleton skel-cell w-35"></div>
-          <div class="skeleton skel-cell w-15"></div>
-          <div class="skeleton skel-cell w-25"></div>
-          <div class="skeleton skel-cell w-20"></div>
-        </div>
-      </div>
+      <section class="metric-grid" aria-label="作业统计"><article v-for="item in [{ key: 'total', label: '全部作业', icon: 'assignment', tone: 'blue' }, { key: 'published', label: '已发布', icon: 'send', tone: 'green' }, { key: 'draft', label: '草稿', icon: 'draft', tone: 'orange' }, { key: 'ended', label: '已截止', icon: 'clock', tone: 'purple' }]" :key="item.key" class="metric-card"><span class="metric-icon" :class="item.tone"><AppIcon :name="item.icon" :size="24" /></span><span><small>{{ item.label }}</small><strong>{{ summary[item.key] }}</strong><em>个</em></span></article></section>
+      <section class="data-panel"><div class="filter-bar"><label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索作业名称" /></label><select v-model="statusFilter"><option value="all">状态：全部</option><option value="published">已发布</option><option value="draft">草稿</option><option value="ended">已截止</option></select><select v-model="courseFilter"><option value="all">课程：全部课程</option><option v-for="course in courses" :key="course.id" :value="String(course.id)">{{ course.title }}</option></select><select v-model="sortOrder"><option value="updated">排序：最近更新</option><option value="title">排序：作业名称</option></select></div><div v-if="loading" class="loading-list"><span v-for="i in 6" :key="i" class="skeleton"></span></div><div v-else-if="filteredAssignments.length === 0" class="empty-state"><p>✍️ 暂无符合条件的作业</p></div><div v-else class="table-scroll"><table><thead><tr><th>作业名称</th><th>所属课程 / 班级</th><th>状态</th><th>截止时间</th><th>提交进度</th><th>最近更新</th><th>操作</th></tr></thead><tbody><tr v-for="assignment in filteredAssignments" :key="assignment.id"><td class="title-cell">{{ assignment.title }}<small>{{ assignment.description || '暂无作业描述' }}</small></td><td>{{ courseName(assignment) }}<small>{{ assignment.class_name || '未设置班级' }}</small></td><td><span class="status-pill" :class="assignmentStatus(assignment)">{{ assignmentStatus(assignment) === 'published' ? '已发布' : assignmentStatus(assignment) === 'draft' ? '草稿' : '已截止' }}</span></td><td>{{ formatDateTime(assignment.due_at) }}</td><td>{{ assignment.submitted_count != null ? `${assignment.submitted_count} / ${assignment.student_count || '—'}` : '—' }}</td><td class="muted-cell">{{ formatDateTime(assignmentUpdated(assignment)) }}</td><td class="actions-cell"><button class="text-action" @click="router.push(`/teacher/assignments/${assignment.id}/edit`)">编辑题目</button><button v-if="assignment.status === 'draft'" class="publish-action" @click="handlePublish(assignment)">发布</button><button v-if="assignment.status === 'draft'" class="delete-action" @click="askDelete(assignment)">删除</button><button v-if="assignment.status === 'published'" class="text-action" @click="askUnpublish(assignment)">取消发布</button></td></tr></tbody></table></div><footer v-if="!loading && filteredAssignments.length" class="pagination-bar"><span>共 {{ filteredAssignments.length }} 条</span><span>10 条/页　‹　<span class="active-page">1</span>　2　›</span></footer></section>
 
-      <!-- ── Empty ──────────────────────────────────────────────────────── -->
-      <div v-else-if="assignments.length === 0" class="empty-state">
-        <p>✍️ 暂无作业，点击「布置作业」创建第一个</p>
-      </div>
-
-      <!-- ── Table ──────────────────────────────────────────────────────── -->
-      <div v-else class="card table-card">
-        <table>
-          <thead>
-            <tr><th>名称</th><th>状态</th><th>截止</th><th>操作</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="a in assignments" :key="a.id">
-              <td class="title-cell">{{ a.title }}</td>
-              <td>
-                <span class="badge" :class="'badge-' + statusBadge(PUBLISH_STATUS_MAP, a.status).color">
-                  {{ statusBadge(PUBLISH_STATUS_MAP, a.status).label }}
-                </span>
-              </td>
-              <td class="text-sm text-secondary">{{ formatDateTime(a.due_at) }}</td>
-              <td class="actions-cell">
-                <button class="btn-ghost btn-sm" @click="router.push(`/teacher/assignments/${a.id}/edit`)">编辑题目</button>
-                <button v-if="a.status === 'draft'" class="btn-sm btn-publish" @click="handlePublish(a)">发布</button>
-                <button v-if="a.status === 'draft'" class="btn-sm btn-delete-text" @click="askDelete(a)">删除</button>
-                <button v-if="a.status === 'published'" class="btn-ghost btn-sm" @click="askUnpublish(a)">取消发布</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <!-- ── 创建作业弹窗（点「布置作业」打开：基本信息 + 环境配置，确定后创建并跳转题目编辑页） ── -->
     </div>
 
     <!-- ── 创建作业弹窗（点「布置作业」打开：基本信息 + 环境配置，确定后创建并跳转题目编辑页） ── -->
@@ -384,11 +366,16 @@ onMounted(() => { fetch(); fetchCourses() })
 </template>
 
 <style scoped>
+/* 表格在内容区内自适应，避免页面出现横向滚动 */
+.table-scroll{overflow-x:hidden}.table-scroll table{width:100%;min-width:0;table-layout:fixed}.table-scroll th,.table-scroll td{overflow:hidden;text-overflow:ellipsis}.table-scroll th:nth-child(1){width:21%}.table-scroll th:nth-child(2){width:20%}.table-scroll th:nth-child(3){width:10%}.table-scroll th:nth-child(4){width:13%}.table-scroll th:nth-child(5){width:12%}.table-scroll th:nth-child(6){width:12%}.table-scroll th:nth-child(7){width:22%}.table-scroll td{white-space:nowrap}.table-scroll td small{white-space:nowrap}.status-pill{white-space:nowrap;word-break:keep-all;display:inline-flex;min-width:max-content}.actions-cell{overflow:hidden;gap:0}.actions-cell button{padding-left:5px;padding-right:5px;font-size:12px}
+.metric-icon :deep(svg){display:block}
+@media(max-width:1150px){.table-scroll th:nth-child(4),.table-scroll td:nth-child(4),.table-scroll th:nth-child(5),.table-scroll td:nth-child(5),.table-scroll th:nth-child(6),.table-scroll td:nth-child(6){display:none}.table-scroll th:nth-child(1){width:27%}.table-scroll th:nth-child(2){width:27%}.table-scroll th:nth-child(3){width:14%}.table-scroll th:nth-child(7){width:32%}}
+@media(max-width:700px){.table-scroll{overflow-x:auto}.table-scroll table{min-width:780px}.table-scroll th:nth-child(n),.table-scroll td:nth-child(n){display:table-cell}.table-scroll th:nth-child(1){width:25%}.table-scroll th:nth-child(2){width:22%}.table-scroll th:nth-child(3){width:12%}.table-scroll th:nth-child(7){width:24%}}
 /* ═══════════════════════════════════════════════════════════════════════
    Teacher Assignment Manage — Code Studio
    page-head + create modal + skeleton table + data table
    ═══════════════════════════════════════════════════════════════════════ */
-.page { display: flex; flex-direction: column; gap: 24px; }
+.page { display: flex; min-width: 0; container-type: inline-size; flex-direction: column; gap: 24px; }
 
 /* ── Page Head ─────────────────────────────────────────────────────── */
 .page-head {
@@ -589,4 +576,17 @@ onMounted(() => { fetch(); fetchCourses() })
   .page-head { flex-direction: column; }
   .page-title { font-size: 24px; }
 }
+.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px;margin-bottom:22px}.metric-card{display:flex;align-items:center;gap:18px;min-height:106px;padding:20px;border:1px solid var(--border);border-radius:12px;background:var(--surface);box-shadow:var(--shadow-card)}.metric-icon{display:grid;place-items:center;width:54px;height:54px;border-radius:15px}.metric-icon.blue{color:var(--primary);background:#edf4ff}.metric-icon.green{color:#10a66a;background:#eaf9f2}.metric-icon.orange{color:#ef8b10;background:#fff4e7}.metric-icon.purple{color:#7c4ce0;background:#f3edff}.metric-card span:last-child{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}.metric-card small{width:100%;color:var(--text-secondary);font-size:14px}.metric-card strong{color:var(--ink);font-size:27px;line-height:1}.metric-card em{color:var(--text-secondary);font-size:13px;font-style:normal}.data-panel{overflow:hidden;border:1px solid var(--border);border-radius:12px;background:var(--surface);box-shadow:var(--shadow-card)}.filter-bar{display:grid;grid-template-columns:minmax(220px,1.4fr) repeat(3,minmax(150px,.8fr));gap:14px;padding:18px;border-bottom:1px solid var(--border)}.search-control{display:flex;align-items:center;gap:9px;padding:0 13px;border:1px solid var(--border);border-radius:8px;color:var(--text-tertiary)}.search-control input{min-width:0;padding:0;border:0;box-shadow:none!important}.filter-bar select{height:44px;min-width:0}.table-scroll{overflow-x:auto}.table-scroll table{width:100%;min-width:1000px;margin:0}.table-scroll th{height:44px;background:#f8fafc}.table-scroll td{height:68px;padding:10px 16px}.table-scroll td small{display:block;margin-top:3px;color:var(--text-tertiary);font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.status-pill{display:inline-flex;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:600}.status-pill.published{color:#099b61;background:#e9f8f1}.status-pill.draft{color:#ef8b10;background:#fff4e7}.status-pill.ended{color:#7443d5;background:#f1ebfd}.text-action,.publish-action,.delete-action{padding:5px 7px;border:0;background:transparent;color:var(--primary);font-size:13px;white-space:nowrap}.publish-action{color:var(--warning)}.delete-action{color:var(--danger)}.pagination-bar{display:flex;justify-content:space-between;padding:14px 18px;border-top:1px solid var(--border);color:var(--text-secondary);font-size:13px}.active-page{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:7px;color:#fff;background:var(--primary)}.loading-list{display:grid;gap:1px;background:var(--border)}.loading-list .skeleton{height:68px}@media(max-width:1100px){.metric-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{grid-template-columns:1fr 1fr}}@media(max-width:700px){.metric-grid{grid-template-columns:1fr 1fr;gap:10px}.filter-bar{grid-template-columns:1fr}.table-scroll table{min-width:900px}}
+/* 侧栏展开时以内容容器宽度为准，避免作业列表被固定最小宽度推出可视区 */
+.data-panel{min-width:0}
+.filter-bar{min-width:0}
+.filter-bar select,.search-control{min-width:0}
+.search-control input{min-width:0}
+.table-scroll{min-width:0;overflow-x:hidden}
+.table-scroll table{width:100%;min-width:0!important;table-layout:fixed}
+.table-scroll th,.table-scroll td{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.table-scroll th:nth-child(1){width:20%}.table-scroll th:nth-child(2){width:17%}.table-scroll th:nth-child(3){width:10%}.table-scroll th:nth-child(4){width:12%}.table-scroll th:nth-child(5){width:10%}.table-scroll th:nth-child(6){width:9%}.table-scroll th:nth-child(7){width:22%}
+.table-scroll td{white-space:nowrap}.table-scroll td strong,.table-scroll td small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.actions-cell{display:flex;flex-wrap:wrap;align-items:center;gap:0;white-space:normal}.actions-cell button{flex:0 0 auto;padding:4px 5px;font-size:12px;white-space:nowrap}
+@container (max-width:1050px){.filter-bar{grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,.7fr))}.table-scroll th:nth-child(1){width:28%}.table-scroll th:nth-child(2){width:25%}.table-scroll th:nth-child(3){width:15%}.table-scroll th:nth-child(7){width:32%}.table-scroll th:nth-child(4),.table-scroll td:nth-child(4),.table-scroll th:nth-child(5),.table-scroll td:nth-child(5),.table-scroll th:nth-child(6),.table-scroll td:nth-child(6){display:none}.table-scroll td:last-child{padding-left:8px;padding-right:8px}.actions-cell button{padding:4px;font-size:12px}}
+@container (max-width:760px){.filter-bar{grid-template-columns:1fr;padding:12px}.table-scroll{overflow:visible;padding:12px;background:#f8fafc}.table-scroll table,.table-scroll tbody{display:block;width:100%;min-width:0!important}.table-scroll thead{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.table-scroll tbody{display:grid;gap:12px}.table-scroll tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:hidden;border:1px solid var(--border);border-radius:10px;background:var(--surface)}.table-scroll td,.table-scroll td:nth-child(4),.table-scroll td:nth-child(5),.table-scroll td:nth-child(6){display:flex;width:auto;height:auto;min-height:58px;padding:10px 12px;flex-direction:column;justify-content:center;gap:5px;border-bottom:1px solid var(--border);overflow:visible;white-space:normal}.table-scroll td::before{color:var(--text-tertiary);font-size:11px;font-weight:500}.table-scroll td:nth-child(1)::before{content:'作业名称'}.table-scroll td:nth-child(2)::before{content:'所属课程 / 班级'}.table-scroll td:nth-child(3)::before{content:'状态'}.table-scroll td:nth-child(4)::before{content:'截止时间'}.table-scroll td:nth-child(5)::before{content:'提交进度'}.table-scroll td:nth-child(6)::before{content:'最近更新'}.table-scroll td:nth-child(7)::before{content:'操作'}.table-scroll td:nth-child(1),.table-scroll td:nth-child(2),.table-scroll td:nth-child(7){grid-column:1/-1}.table-scroll td:nth-child(6),.table-scroll td:nth-last-child(-n+2){border-bottom:0}.table-scroll td strong,.table-scroll td small{overflow:visible;white-space:normal}.table-scroll .actions-cell{display:flex;flex-direction:row;align-items:center;justify-content:flex-end;gap:6px}.table-scroll .actions-cell::before{margin-right:auto}.actions-cell button{padding:6px 8px}}
 </style>

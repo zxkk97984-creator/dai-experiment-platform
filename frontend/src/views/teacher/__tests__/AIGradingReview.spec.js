@@ -3,6 +3,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
+const { mockedAuth } = vi.hoisted(() => ({
+  mockedAuth: {
+    isAdmin: false,
+    isTeacher: true,
+    isStudent: false,
+    user: { id: 1, username: 'teacher', role: 'teacher' },
+  },
+}))
+
 vi.mock('../../../api/aiGrading.js', () => ({
   aiGradingAPI: {
     listGrades: vi.fn(),
@@ -13,12 +22,7 @@ vi.mock('../../../api/aiGrading.js', () => ({
 }))
 
 vi.mock('../../../stores/auth.js', () => ({
-  useAuthStore: () => ({
-    isAdmin: false,
-    isTeacher: true,
-    isStudent: false,
-    user: { id: 1, username: 'teacher', role: 'teacher' },
-  }),
+  useAuthStore: () => mockedAuth,
 }))
 
 const routeQuery = {}
@@ -41,6 +45,12 @@ describe('AI 评分复核列表', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    Object.assign(mockedAuth, {
+      isAdmin: false,
+      isTeacher: true,
+      isStudent: false,
+      user: { id: 1, username: 'teacher', role: 'teacher' },
+    })
   })
 
   it('加载并展示评分列表', async () => {
@@ -65,7 +75,39 @@ describe('AI 评分复核列表', () => {
     expect(aiGradingAPI.listGrades).toHaveBeenCalled()
     const text = wrapper.text()
     expect(text).toContain('79')
-    expect(text).toContain('shadow')
+    expect(text).toContain('影子评分')
+    expect(text).toContain('全部评分')
+    expect(text).toContain('已完成')
+  })
+
+  it('按学生姓名查询并显示学生信息', async () => {
+    aiGradingAPI.listGrades.mockResolvedValue({
+      data: {
+        items: [
+          { id: 3, submission_id: 8, student_id: 42, student_name: '张三', mode: 'active', status: 'completed',
+            functional_score: 60, algorithm_score: 20, robustness_score: 10, quality_score: 10,
+            raw_total: 100, score_cap: null, final_score_100: 100, needs_teacher_review: false,
+            attempt_count: 1, created_at: '2026-01-03T00:00:00' },
+        ],
+        total: 1, page: 1, page_size: 20,
+      },
+    })
+
+    const mod = await import('../AIGradingReviewView.vue')
+    const wrapper = mount(mod.default, {
+      global: { stubs: { 'router-link': { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    await wrapper.find('input').setValue('张三')
+    await wrapper.find('.filter-bar').trigger('submit')
+    await flushPromises()
+
+    expect(aiGradingAPI.listGrades).toHaveBeenCalledWith(expect.objectContaining({ student_name: '张三' }))
+    expect(wrapper.text()).toContain('学生 ID')
+    expect(wrapper.text()).toContain('学生信息')
+    expect(wrapper.text()).toContain('42')
+    expect(wrapper.text()).toContain('张三')
   })
 
   it('状态 badge 正确映射', async () => {
@@ -89,7 +131,42 @@ describe('AI 评分复核列表', () => {
 
     const text = wrapper.text()
     expect(text).toContain('需复核')
-    expect(text).toContain('是')
+    expect(text).toContain('复核状态')
+  })
+
+  it('管理员列表使用管理员详情路由', async () => {
+    Object.assign(mockedAuth, {
+      isAdmin: true,
+      isTeacher: false,
+      user: { id: 2, username: 'admin', role: 'admin' },
+    })
+    aiGradingAPI.listGrades.mockResolvedValue({
+      data: {
+        items: [{
+          id: 9, submission_id: 5, student_id: 17, student_name: '爱丽丝',
+          mode: 'active', status: 'completed', functional_score: 60,
+          algorithm_score: 20, robustness_score: 10, quality_score: 10,
+          raw_total: 100, score_cap: null, final_score_100: 100,
+          needs_teacher_review: false, created_at: '2026-01-03T00:00:00',
+        }],
+        total: 1, page: 1, page_size: 10,
+      },
+    })
+
+    const mod = await import('../AIGradingReviewView.vue')
+    const wrapper = mount(mod.default, {
+      global: {
+        stubs: {
+          'router-link': {
+            props: ['to'],
+            template: '<a :href="to"><slot /></a>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.row-action').attributes('href')).toBe('/admin/ai-grading/9')
   })
 })
 
@@ -154,6 +231,12 @@ describe('AI 评分详情（评分工作台）', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     Object.keys(routeQuery).forEach((k) => delete routeQuery[k])
+    Object.assign(mockedAuth, {
+      isAdmin: false,
+      isTeacher: true,
+      isStudent: false,
+      user: { id: 1, username: 'teacher', role: 'teacher' },
+    })
   })
 
   it('标题含作业标题，编号为辅助信息', async () => {

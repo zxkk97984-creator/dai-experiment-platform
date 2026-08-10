@@ -1,44 +1,65 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { experimentsAPI } from '../../api/experiments.js'
 import { useAppStore } from '../../stores/app.js'
 import AppLayout from '../../components/layout/AppLayout.vue'
+import AppIcon from '../../components/ui/AppIcon.vue'
+import SubmissionSnapshotCell from '../../components/teacher/SubmissionSnapshotCell.vue'
+import { formatDateTime } from '../../utils/format.js'
 
 const route = useRoute()
 const router = useRouter()
 const app = useAppStore()
+
 const submission = ref(null)
 const loading = ref(true)
+const loadError = ref(false)
 const reviewScore = ref('')
 const reviewFeedback = ref('')
 const saving = ref(false)
+const showEmptyCells = ref(false)
 
 const cells = computed(() => {
   if (!submission.value?.cells_snapshot) return []
   const cellMap = submission.value.cell_metadata || {}
   const outputs = submission.value.outputs_snapshot || {}
 
-  return Object.entries(submission.value.cells_snapshot).map(([id, source], idx) => {
+  return Object.entries(submission.value.cells_snapshot).map(([id, source], index) => {
     const meta = cellMap[id] || {}
     return {
       id,
       source: source || '',
       type: meta.type || 'code',
-      order: meta.order ?? idx,
+      order: meta.order ?? index,
       outputs: outputs[id] || null,
     }
   }).sort((a, b) => a.order - b.order)
 })
 
+const visibleCells = computed(() => {
+  if (showEmptyCells.value) return cells.value
+  return cells.value.filter((cell) => cell.source.trim() || cell.outputs?.outputs?.length)
+})
+const emptyCellCount = computed(() => cells.value.length - cells.value.filter(
+  (cell) => cell.source.trim() || cell.outputs?.outputs?.length,
+).length)
+const isGraded = computed(() => submission.value?.score != null)
+const avatarText = computed(() => {
+  const value = submission.value?.student_name || submission.value?.student_username || '学'
+  return value.trim().slice(0, 1)
+})
+
 async function load() {
   loading.value = true
+  loadError.value = false
   try {
     const res = await experimentsAPI.getSubmission(route.params.id)
     submission.value = res.data
-    if (res.data.score != null) reviewScore.value = String(res.data.score)
-    if (res.data.feedback) reviewFeedback.value = res.data.feedback
+    reviewScore.value = res.data.score != null ? String(res.data.score) : ''
+    reviewFeedback.value = res.data.feedback || ''
   } catch {
+    loadError.value = true
     app.showToast('加载提交详情失败', 'error')
   } finally {
     loading.value = false
@@ -46,31 +67,36 @@ async function load() {
 }
 
 async function submitReview() {
-  const score = reviewScore.value ? parseFloat(reviewScore.value) : null
-  if (score != null && (isNaN(score) || score < 0 || score > 100)) {
+  const rawScore = String(reviewScore.value).trim()
+  const feedback = reviewFeedback.value.trim()
+  const score = rawScore === '' ? null : Number(rawScore)
+
+  if (score != null && (!Number.isFinite(score) || score < 0 || score > 100)) {
     app.showToast('评分必须在 0-100 之间', 'error')
     return
   }
+  if (score == null && !feedback) {
+    app.showToast('请填写评分或反馈', 'error')
+    return
+  }
+
   saving.value = true
   try {
-    const payload = {}
+    const payload = { feedback }
     if (score != null) payload.score = score
-    if (reviewFeedback.value) payload.feedback = reviewFeedback.value
     await experimentsAPI.updateReview(submission.value.id, payload)
     app.showToast('评分已保存', 'success')
     await load()
-  } catch (e) {
-    app.showToast(e.response?.data?.detail?.message || '评分失败', 'error')
+  } catch (error) {
+    app.showToast(error.response?.data?.detail?.message || '评分失败', 'error')
   } finally {
     saving.value = false
   }
 }
 
 function goBack() {
-  // 根据角色返回正确的提交列表页
   const role = route.meta?.role
-  if (role === 'admin') router.push('/admin/submissions')
-  else router.push('/teacher/submissions')
+  router.push(role === 'admin' ? '/admin/submissions' : '/teacher/submissions')
 }
 
 onMounted(load)
@@ -78,85 +104,209 @@ onMounted(load)
 
 <template>
   <AppLayout>
-    <button class="btn-back" @click="goBack">← 返回提交列表</button>
+    <div class="detail-page">
+      <button type="button" class="back-button" @click="goBack">
+        <AppIcon name="back" :size="17" />
+        返回提交列表
+      </button>
 
-    <div v-if="loading" class="loading">加载中...</div>
-
-    <template v-else-if="submission">
-      <div class="detail-header">
-        <h1>提交详情 — 第 {{ submission.attempt_number }} 次</h1>
-        <p class="meta">提交时间: {{ new Date(submission.submitted_at).toLocaleString('zh-CN') }}</p>
+      <div v-if="loading" class="detail-loading">
+        <div class="skeleton title-skeleton"></div>
+        <div class="skeleton meta-skeleton"></div>
+        <div class="loading-grid">
+          <div class="skeleton content-skeleton"></div>
+          <div class="skeleton review-skeleton"></div>
+        </div>
       </div>
 
-      <!-- 快照（只读） -->
-      <div class="snapshot-section">
-        <h2>提交快照（只读）</h2>
-        <div v-for="cell in cells" :key="cell.id" class="cell-card card">
-          <div class="cell-header">
-            <span class="cell-id">{{ cell.id }}</span>
-            <span class="cell-type">{{ cell.type === 'markdown' ? '📝 Markdown' : '💻 Code' }}</span>
-            <span class="cell-order">#{{ cell.order }}</span>
+      <div v-else-if="loadError" class="error-panel">
+        <span><AppIcon name="warning" :size="26" /></span>
+        <strong>提交详情暂时无法加载</strong>
+        <p>请稍后重试，或返回提交列表选择其他记录。</p>
+        <button type="button" class="secondary-button" @click="load">重新加载</button>
+      </div>
+
+      <template v-else-if="submission">
+        <header class="page-head">
+          <h1>提交详情 / 评分工作台</h1>
+          <p>查看学生实验快照并完成评分反馈</p>
+        </header>
+
+        <section class="submission-meta" aria-label="提交信息">
+          <div class="student-summary">
+            <span class="student-avatar" aria-hidden="true">{{ avatarText }}</span>
+            <span>
+              <strong>{{ submission.student_name || '未命名学生' }}</strong>
+              <small>账号：{{ submission.student_username || '—' }}</small>
+            </span>
           </div>
-          <pre class="cell-source">{{ cell.source || '(空)' }}</pre>
-          <!-- 输出展示（如有） -->
-          <div v-if="cell.outputs" class="cell-outputs">
-            <div class="outputs-label">执行输出 (execution_count: {{ cell.outputs.execution_count }})</div>
-            <div v-for="(out, oi) in (cell.outputs.outputs || [])" :key="oi" class="output-item">
-              <pre class="output-text">{{ out.text || out.data || JSON.stringify(out) }}</pre>
+          <dl>
+            <div><dt>实验名称</dt><dd>{{ submission.entry_name || '未命名实验' }}</dd></div>
+            <div><dt>所属课程</dt><dd>{{ submission.course_name || '独立实验' }}</dd></div>
+            <div><dt>提交次数</dt><dd><span class="attempt-pill">第 {{ submission.attempt_number }} 次提交</span></dd></div>
+            <div><dt>提交时间</dt><dd>{{ formatDateTime(submission.submitted_at) }}</dd></div>
+            <div>
+              <dt>当前状态</dt>
+              <dd><span class="status-pill" :class="isGraded ? 'graded' : 'pending'">{{ isGraded ? '已评分' : '待评分' }}</span></dd>
             </div>
-          </div>
-        </div>
-        <div v-if="cells.length === 0" class="empty">无代码快照</div>
-      </div>
+          </dl>
+        </section>
 
-      <!-- 评分反馈 -->
-      <div class="review-section card">
-        <h2>评分与反馈</h2>
-        <div class="review-form">
-          <label>
-            评分 (0-100):
-            <input type="number" v-model="reviewScore" min="0" max="100" step="0.5"
-                   class="input" placeholder="输入评分" />
-          </label>
-          <label>
-            反馈:
-            <textarea v-model="reviewFeedback" class="textarea" rows="4"
-                      placeholder="输入反馈意见..."></textarea>
-          </label>
-          <button class="btn-primary" @click="submitReview" :disabled="saving">
-            {{ saving ? '保存中...' : '保存评分' }}
-          </button>
-          <span v-if="submission.reviewed_at" class="reviewed-at">
-            上次评分: {{ new Date(submission.reviewed_at).toLocaleString('zh-CN') }}
-          </span>
+        <div class="workspace-grid">
+          <section class="snapshot-panel">
+            <header class="panel-head">
+              <div>
+                <h2>学生提交内容</h2>
+                <p>提交时的 Notebook 内容与执行输出，仅供查看</p>
+              </div>
+              <span>{{ visibleCells.length }} / {{ cells.length }} 个内容块</span>
+            </header>
+
+            <div v-if="visibleCells.length" class="cell-list">
+              <SubmissionSnapshotCell v-for="cell in visibleCells" :key="cell.id" :cell="cell" />
+            </div>
+            <div v-else class="empty-content">该提交没有可展示的内容</div>
+
+            <footer v-if="emptyCellCount" class="snapshot-footer">
+              <span>{{ emptyCellCount }} 个空单元格{{ showEmptyCells ? '已展开' : '已收起' }}</span>
+              <button type="button" @click="showEmptyCells = !showEmptyCells">
+                {{ showEmptyCells ? '收起空单元格' : '展开全部' }}
+                <AppIcon :name="showEmptyCells ? 'chevron-up' : 'chevron-down'" :size="16" />
+              </button>
+            </footer>
+          </section>
+
+          <aside class="review-panel" aria-label="评分工作台">
+            <header class="panel-head">
+              <div>
+                <h2>评分工作台</h2>
+                <p>评分保存后将同步给学生</p>
+              </div>
+            </header>
+
+            <div class="current-status">
+              <span>当前状态</span>
+              <span class="status-pill" :class="isGraded ? 'graded' : 'pending'">{{ isGraded ? '已评分' : '待评分' }}</span>
+            </div>
+
+            <div class="score-row">
+              <label for="review-score">得分</label>
+              <div class="score-input">
+                <input
+                  id="review-score"
+                  v-model="reviewScore"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.5"
+                  inputmode="decimal"
+                  placeholder="—"
+                />
+                <span>/ 100</span>
+              </div>
+            </div>
+
+            <label class="feedback-field" for="review-feedback">
+              <span>教师反馈</span>
+              <textarea
+                id="review-feedback"
+                v-model="reviewFeedback"
+                rows="8"
+                maxlength="500"
+                placeholder="请输入对学生提交内容的评价与建议…"
+              ></textarea>
+              <small>{{ reviewFeedback.length }} / 500</small>
+            </label>
+
+            <div v-if="submission.reviewed_at" class="reviewed-time">
+              <AppIcon name="clock" :size="15" />
+              上次保存于 {{ formatDateTime(submission.reviewed_at) }}
+            </div>
+
+            <button type="button" class="save-button" :disabled="saving" @click="submitReview">
+              <AppIcon name="check" :size="17" />
+              {{ saving ? '保存中…' : '保存评分' }}
+            </button>
+          </aside>
         </div>
-      </div>
-    </template>
+      </template>
+    </div>
   </AppLayout>
 </template>
 
 <style scoped>
-.btn-back { background: none; border: none; color: var(--primary); cursor: pointer; margin-bottom: var(--space-4); font-size: var(--text-sm); }
-.loading, .empty { text-align: center; padding: var(--space-8); color: var(--text-secondary); }
-.detail-header { margin-bottom: var(--space-6); }
-.detail-header h1 { font-size: 22px; margin: 0 0 4px; }
-.meta { color: var(--text-secondary); font-size: var(--text-sm); margin: 0; }
-.snapshot-section { margin-bottom: var(--space-8); }
-.snapshot-section h2, .review-section h2 { font-size: 16px; margin: 0 0 var(--space-3); }
-.cell-card { padding: var(--space-3); margin-bottom: var(--space-2); }
-.cell-header { display: flex; align-items: center; gap: var(--space-2); margin-bottom: 4px; }
-.cell-id { font-size: var(--text-xs); color: var(--text-secondary); }
-.cell-type { font-size: var(--text-xs); padding: 1px 6px; border-radius: 10px; background: var(--primary-light); color: var(--primary); }
-.cell-order { font-size: var(--text-xs); color: var(--text-tertiary); }
-.cell-source { font-family: var(--font-mono); font-size: 13px; margin: 0; white-space: pre-wrap; word-break: break-all; }
-.cell-outputs { margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px dashed var(--border); }
-.outputs-label { font-size: var(--text-xs); color: var(--text-secondary); margin-bottom: 4px; }
-.output-text { font-family: var(--font-mono); font-size: 12px; background: var(--surface-raised); padding: 6px 8px; border-radius: var(--radius-sm); margin: 0; white-space: pre-wrap; word-break: break-all; }
-.review-form { display: flex; flex-direction: column; gap: var(--space-3); }
-.review-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-sm); }
-.input, .textarea { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: var(--text-sm); }
-.input:focus, .textarea:focus { outline: none; border-color: var(--primary); }
-.btn-primary { align-self: flex-start; padding: 8px 24px; background: var(--primary); color: #fff; border: none; border-radius: var(--radius-sm); cursor: pointer; font-size: var(--text-sm); }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.reviewed-at { font-size: var(--text-xs); color: var(--text-secondary); }
+.detail-page { display: flex; flex-direction: column; gap: 18px; }
+.back-button { width: fit-content; padding: 4px 0; display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--primary); font-size: 13px; cursor: pointer; }
+.back-button:hover { color: var(--primary-dark); }
+.page-head h1 { margin: 0 0 5px; color: var(--ink); font-size: 28px; line-height: 1.2; letter-spacing: -.025em; }
+.page-head p { margin: 0; color: var(--text-secondary); font-size: 13px; }
+
+.submission-meta { display: grid; grid-template-columns: 230px minmax(0, 1fr); align-items: center; padding: 18px 20px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-card); }
+.student-summary { display: flex; align-items: center; gap: 12px; padding-right: 20px; border-right: 1px solid var(--border); }
+.student-avatar { width: 46px; height: 46px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; border-radius: 50%; background: var(--primary-light); color: var(--primary); font-size: 20px; font-weight: 600; }
+.student-summary > span:last-child { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.student-summary strong { overflow: hidden; color: var(--ink); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.student-summary small { color: var(--text-secondary); font-size: 11px; }
+.submission-meta dl { display: grid; grid-template-columns: 1.15fr 1.15fr .9fr 1.3fr .8fr; margin: 0; }
+.submission-meta dl > div { min-width: 0; padding: 0 18px; border-right: 1px solid var(--border); }
+.submission-meta dl > div:last-child { border-right: 0; }
+.submission-meta dt { margin-bottom: 5px; color: var(--text-tertiary); font-size: 11px; }
+.submission-meta dd { overflow: hidden; margin: 0; color: var(--ink); font-size: 12.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.attempt-pill, .status-pill { display: inline-flex; width: fit-content; padding: 4px 8px; border: 1px solid var(--primary-soft); border-radius: var(--radius-sm); background: var(--primary-light); color: var(--primary); font-size: 11px; font-weight: 500; }
+.status-pill.pending { border-color: var(--warning-soft); background: var(--warning-light); color: var(--warning); }
+.status-pill.graded { border-color: var(--success-soft); background: var(--success-light); color: var(--success); }
+
+.workspace-grid { display: grid; grid-template-columns: minmax(0, 1.28fr) minmax(340px, .72fr); align-items: start; gap: 18px; }
+.snapshot-panel, .review-panel { border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-card); }
+.panel-head { min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 18px; border-bottom: 1px solid var(--border); }
+.panel-head h2 { margin: 0 0 3px; color: var(--ink); font-size: 15px; }
+.panel-head p { margin: 0; color: var(--text-secondary); font-size: 11px; }
+.panel-head > span { color: var(--text-tertiary); font-size: 11px; white-space: nowrap; }
+.cell-list { display: flex; flex-direction: column; gap: 12px; padding: 14px; }
+.empty-content { padding: 64px 20px; color: var(--text-secondary); font-size: 13px; text-align: center; }
+.snapshot-footer { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 11px; }
+.snapshot-footer button { padding: 5px 8px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--primary); font-size: 11px; cursor: pointer; }
+
+.review-panel { position: sticky; top: 16px; overflow: hidden; }
+.current-status { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; border-bottom: 1px solid var(--border); color: var(--text-secondary); font-size: 12px; }
+.score-row { padding: 18px; border-bottom: 1px solid var(--border); }
+.score-row > label, .feedback-field > span { display: block; margin-bottom: 8px; color: var(--ink); font-size: 12px; font-weight: 600; }
+.score-input { display: flex; align-items: center; gap: 10px; }
+.score-input input { width: 126px; height: 46px; color: var(--primary); font-size: 21px; font-weight: 700; text-align: center; }
+.score-input span { color: var(--text-secondary); font-size: 12px; }
+.feedback-field { position: relative; display: block; padding: 18px; border-bottom: 1px solid var(--border); }
+.feedback-field textarea { min-height: 166px; resize: vertical; line-height: 1.65; }
+.feedback-field small { position: absolute; right: 28px; bottom: 26px; color: var(--text-tertiary); font-size: 10px; }
+.reviewed-time { display: flex; align-items: center; gap: 6px; padding: 13px 18px 0; color: var(--text-tertiary); font-size: 11px; }
+.save-button { width: calc(100% - 36px); height: 42px; margin: 16px 18px 18px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--primary); border-radius: var(--radius-control); background: var(--primary); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
+.save-button:hover:not(:disabled) { border-color: var(--primary-dark); background: var(--primary-dark); box-shadow: 0 4px 12px rgba(20, 99, 243, .18); }
+.save-button:disabled { opacity: .55; cursor: not-allowed; }
+
+.detail-loading { display: flex; flex-direction: column; gap: 16px; }
+.title-skeleton { width: 260px; height: 34px; }
+.meta-skeleton { height: 100px; }
+.loading-grid { display: grid; grid-template-columns: 1.3fr .7fr; gap: 18px; }
+.content-skeleton, .review-skeleton { height: 420px; }
+.error-panel { min-height: 430px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); text-align: center; }
+.error-panel > span { width: 54px; height: 54px; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 14px; border-radius: 50%; background: var(--danger-light); color: var(--danger); }
+.error-panel strong { color: var(--ink); }
+.error-panel p { margin: 6px 0 16px; color: var(--text-secondary); font-size: 12px; }
+.secondary-button { padding: 8px 16px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface); color: var(--ink); cursor: pointer; }
+
+@media (max-width: 1199px) {
+  .submission-meta { grid-template-columns: 1fr; gap: 16px; }
+  .student-summary { padding: 0 0 16px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .submission-meta dl > div:first-child { padding-left: 0; }
+  .workspace-grid { grid-template-columns: 1fr; }
+  .review-panel { position: static; }
+}
+@media (max-width: 800px) {
+  .detail-page { gap: 14px; }
+  .page-head h1 { font-size: 23px; }
+  .submission-meta { padding: 16px; }
+  .submission-meta dl { grid-template-columns: 1fr 1fr; row-gap: 16px; }
+  .submission-meta dl > div { padding: 0 12px 0 0; border-right: 0; }
+  .panel-head { align-items: flex-start; }
+  .loading-grid { grid-template-columns: 1fr; }
+}
 </style>

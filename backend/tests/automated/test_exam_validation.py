@@ -5,7 +5,7 @@ import pytest
 from pydantic import ValidationError as PydanticValidationError
 
 from app.schemas import ExamQuestionCreate, ExamQuestionUpdate, PublicCase
-from app.services.exam_service import validate_publish, validate_question
+from app.services.exam_service import score_choice_answer, validate_publish, validate_question
 from conftest import auth_header, create_user, login
 
 
@@ -103,7 +103,7 @@ def test_multi_choice_validation(db_session_factory):
 
 
 def test_code_question_validation(db_session_factory):
-    """编程题：必须有 hidden_tests"""
+    """编程题草稿允许不完整，发布时按评分模式检查。"""
     from app.models import ExamQuestion
 
     q = ExamQuestion(question_type="code", prompt="Q",
@@ -112,12 +112,40 @@ def test_code_question_validation(db_session_factory):
     errors = validate_question(q)
     assert len(errors) == 0, f"应通过: {errors}"
 
-    # 缺少 hidden_tests
+    # active 草稿允许先保存，发布时必须有 AI 测试组
     q1 = ExamQuestion(question_type="code", prompt="Q",
-                      correct_answer={}, points=10)
+                      correct_answer={}, points=10, grading_mode="active")
     errors1 = validate_question(q1)
-    assert len(errors1) >= 1
-    assert "隐藏测试" in errors1[0]
+    assert errors1 == []
+    publish_errors = validate_question(q1, publish=True)
+    assert any("AI 测试组" in error for error in publish_errors)
+
+    # legacy 发布仍必须有隐藏测试
+    q1.grading_mode = "legacy"
+    publish_errors = validate_question(q1, publish=True)
+    assert any("隐藏测试" in error for error in publish_errors)
+
+
+def test_multi_choice_partial_scoring_no_wrong_answers():
+    """部分得分：无错选按比例，任一错选即零分，并保留一位小数。"""
+    from app.models import ExamQuestion
+
+    q = ExamQuestion(question_type="multi_choice", prompt="Q", points=10,
+                     options={"A": "A", "B": "B", "C": "C", "D": "D"},
+                     correct_answer={"correct": ["A", "B", "C"], "scoring_mode": "partial_no_wrong"})
+    assert score_choice_answer(q, ["A"]) == 3.3
+    assert score_choice_answer(q, ["A", "B"]) == 6.7
+    assert score_choice_answer(q, ["A", "D"]) == 0.0
+
+
+def test_legacy_choice_scoring_defaults_to_all_or_nothing():
+    """历史 correct_answer 没有 scoring_mode 时继续完全匹配。"""
+    from app.models import ExamQuestion
+
+    q = ExamQuestion(question_type="multi_choice", prompt="Q", points=5,
+                     options={"A": "A", "B": "B"}, correct_answer={"correct": ["A", "B"]})
+    assert score_choice_answer(q, ["A"]) == 0.0
+    assert score_choice_answer(q, ["A", "B"]) == 5.0
 
 
 def test_points_must_be_positive(db_session_factory):
@@ -172,8 +200,8 @@ def test_publish_fails_with_invalid_questions(client, db_session_factory):
     assert r.status_code == 200, f"有效考试发布应成功: {r.text}"
 
 
-def test_publish_fails_with_code_question_no_hidden_tests(client, db_session_factory):
-    """编程题无 hidden_tests 时创建应被拒绝"""
+def test_active_code_draft_can_save_but_publish_requires_test_groups(client, db_session_factory):
+    """active 编程题可先保存草稿，但配置不完整时不能发布。"""
     create_user(db_session_factory, "pv2_t", "teacher")
     t_tok, _ = login(client, "pv2_t")
     c = client.post("/api/v1/courses", headers=auth_header(t_tok),
@@ -189,11 +217,15 @@ def test_publish_fails_with_code_question_no_hidden_tests(client, db_session_fac
     })
     eid = e.json()["id"]
 
-    # 创建编程题但无 hidden_tests
+    # 创建 active 编程题草稿，不要求 hidden_tests
     r = client.post(f"/api/v1/exams/{eid}/questions", headers=auth_header(t_tok), json={
-        "question_type": "code", "prompt": "Q", "points": 10, "correct_answer": {},
+        "question_type": "code", "prompt": "Q", "points": 10, "correct_answer": {}, "grading_mode": "active",
     })
-    assert r.status_code == 422, f"无隐藏测试的编程题应返回 422: {r.status_code}"
+    assert r.status_code == 201, r.text
+
+    published = client.patch(f"/api/v1/exams/{eid}", headers=auth_header(t_tok), json={"status": "published"})
+    assert published.status_code == 422
+    assert "AI 测试组" in published.text
 
 
 # ═══════════════════════════════════════════════════════════════

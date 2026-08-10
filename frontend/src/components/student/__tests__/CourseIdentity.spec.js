@@ -2,6 +2,8 @@
 // 其余用稳定关键词选择的库图标；禁止 emoji 图标。
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import CourseIdentity from '../CourseIdentity.vue'
 
 describe('CourseIdentity', () => {
@@ -53,6 +55,11 @@ describe('CourseIdentity', () => {
 })
 
 describe('CourseIdentity 课程封面', () => {
+  it('在正方形容器内完整显示课程封面', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/student/CourseIdentity.vue'), 'utf8')
+    expect(source).toMatch(/\.course-identity__cover\s*\{[^}]*object-fit:\s*contain/s)
+  })
+
   it('有封面 URL 时优先渲染封面图（94×94 占位）', () => {
     const wrapper = mount(CourseIdentity, {
       props: { title: 'Python 编程基础', coverUrl: '/api/v1/media/course-covers/42?v=x' },

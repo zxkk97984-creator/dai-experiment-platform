@@ -1,5 +1,6 @@
 """Task 9: 考试 AI 评分测试——折算、门禁、shadow/active 行为差异"""
 from app.services.score_merger import merge_scores
+from app.services.exam_service import round_score
 
 
 def test_exam_score_scaling():
@@ -8,6 +9,12 @@ def test_exam_score_scaling():
     assert result.raw_total == 80
     assert result.final_score_100 == 80
     assert result.scaled_score == pytest.approx(20.0)
+
+
+def test_exam_official_score_uses_one_decimal_half_up():
+    """AI 内部保留高精度，写入考试正式题目得分时保留一位小数。"""
+    assert round_score(10 * 80 / 100) == 8.0
+    assert round_score(6.65) == 6.7
 
 
 def test_exam_score_with_cap():

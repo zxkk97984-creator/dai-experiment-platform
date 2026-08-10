@@ -28,6 +28,24 @@ def test_question_crud(client, db_session_factory):
     r = client.get(f"{API}/exams/{ctx['eid']}/questions", headers=_h(ctx['t_tok']))
     assert r.status_code == 200
     assert len(r.json()["items"]) == 2
+    teacher_choice = r.json()["items"][0]
+    teacher_code = r.json()["items"][1]
+    assert teacher_choice["correct_answer"] == {"correct": ["A"]}
+    assert teacher_code["hidden_tests"] == "assert True"
+
+
+def test_student_question_response_never_leaks_private_fields(client, db_session_factory):
+    ctx = _setup(client, db_session_factory)
+    client.patch(f"{API}/exams/{ctx['eid']}", headers=_h(ctx['t_tok']), json={"status": "published"})
+    client.post(f"{API}/exams/{ctx['eid']}/start", headers=_h(ctx['s_tok']))
+
+    r = client.get(f"{API}/exams/{ctx['eid']}/questions", headers=_h(ctx['s_tok']))
+    assert r.status_code == 200
+    for question in r.json()["items"]:
+        assert "correct_answer" not in question
+        assert "hidden_tests" not in question
+        assert "reference_solution" not in question
+        assert "test_groups" not in question
 
 def test_publish_locks_questions(client, db_session_factory):
     ctx = _setup(client, db_session_factory)
@@ -91,9 +109,37 @@ def test_teacher_grades(client, db_session_factory):
     ctx = _setup(client, db_session_factory)
     client.patch(f"{API}/exams/{ctx['eid']}", headers=_h(ctx['t_tok']), json={"status":"published"})
     client.post(f"{API}/exams/{ctx['eid']}/start", headers=_h(ctx['s_tok']))
+    client.put(f"{API}/exams/{ctx['eid']}/answers/{ctx['q1_id']}", headers=_h(ctx['s_tok']), json={"selected_options":["A"]})
+    client.put(f"{API}/exams/{ctx['eid']}/answers/{ctx['q2_id']}", headers=_h(ctx['s_tok']), json={"code_answer":"def answer(): return True"})
     client.post(f"{API}/exams/{ctx['eid']}/submit", headers=_h(ctx['s_tok']))
     r = client.get(f"{API}/exams/{ctx['eid']}/grades", headers=_h(ctx['t_tok']))
     assert r.status_code == 200
+    body = r.json()
+    assert body["exam"]["title"] == "E"
+    assert body["exam"]["question_count"] == 2
+    assert body["summary"]["expected_count"] == 1
+    assert body["summary"]["submitted_count"] == 1
+    assert len(body["distribution"]) == 5
+    assert body["items"][0]["student_name"]
+    assert body["items"][0]["student_number"] == "e_s"
+    assert body["items"][0]["submission_id"] is not None
+
+    detail = client.get(
+        f"{API}/exams/{ctx['eid']}/grades/{body['items'][0]['submission_id']}",
+        headers=_h(ctx['t_tok']),
+    )
+    assert detail.status_code == 200
+    detail_body = detail.json()
+    assert detail_body["student"]["number"] == "e_s"
+    assert len(detail_body["answers"]) == 2
+    assert all("correct_answer" not in answer for answer in detail_body["answers"])
+    assert all("hidden_tests" not in answer for answer in detail_body["answers"])
+
+    listing = client.get(f"{API}/exams", headers=_h(ctx['t_tok']))
+    listed_exam = next(item for item in listing.json()["items"] if item["id"] == ctx["eid"])
+    assert listed_exam["course_title"] == "C"
+    assert listed_exam["question_count"] == 2
+    assert listed_exam["participant_count"] == 1
 
 
 def test_p0_maybe_finalize_checks_running_not_just_pending(client, db_session_factory):

@@ -2,6 +2,184 @@
 from conftest import auth_header, create_user, login
 
 
+def _seed_student_catalog(db_session_factory):
+    """创建四态目录数据，并放入一条其他学生记录验证隔离。"""
+    from datetime import datetime, timedelta, timezone
+
+    from app.models import (
+        ExperimentModule,
+        ExperimentRecord,
+        NotebookTemplate,
+        NotebookTemplateVersion,
+    )
+
+    developer = create_user(db_session_factory, "catalog_developer", "developer")
+    student = create_user(db_session_factory, "catalog_student", "student")
+    other_student = create_user(db_session_factory, "catalog_other", "student")
+
+    with db_session_factory() as db:
+        template = NotebookTemplate(
+            name="Catalog template",
+            status="published",
+            owner_id=developer.id,
+        )
+        db.add(template)
+        db.flush()
+        version = NotebookTemplateVersion(
+            template_id=template.id,
+            version_number=1,
+            sha256="catalog-v1",
+            cells=[],
+            published_by_id=developer.id,
+        )
+        db.add(version)
+        db.flush()
+
+        modules = [
+            ExperimentModule(name="01 Python 入门", status="published", owner_id=developer.id),
+            ExperimentModule(name="02 NumPy 基础", status="published", owner_id=developer.id),
+            ExperimentModule(name="03 可视化", status="published", owner_id=developer.id),
+            ExperimentModule(name="04 数据清洗", status="published", owner_id=developer.id),
+            ExperimentModule(name="隐藏草稿", status="draft", owner_id=developer.id),
+        ]
+        db.add_all(modules)
+        db.flush()
+
+        now = datetime.now(timezone.utc)
+        db.add_all([
+            ExperimentRecord(
+                module_id=modules[0].id,
+                template_version_id=version.id,
+                student_id=student.id,
+                status="started",
+                updated_at=now - timedelta(days=3),
+            ),
+            ExperimentRecord(
+                module_id=modules[1].id,
+                template_version_id=version.id,
+                student_id=student.id,
+                status="submitted",
+                updated_at=now - timedelta(days=2),
+            ),
+            ExperimentRecord(
+                module_id=modules[2].id,
+                template_version_id=version.id,
+                student_id=student.id,
+                status="graded",
+                updated_at=now - timedelta(days=1),
+            ),
+            ExperimentRecord(
+                module_id=modules[3].id,
+                template_version_id=version.id,
+                student_id=other_student.id,
+                status="graded",
+                updated_at=now,
+            ),
+        ])
+        db.commit()
+
+    return student
+
+
+def test_student_catalog_merges_status_summary_and_isolates_records(client, db_session_factory):
+    _seed_student_catalog(db_session_factory)
+    token, _ = login(client, "catalog_student")
+
+    response = client.get(
+        "/api/v1/experiments/modules/student-catalog",
+        headers=auth_header(token),
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [item["learning_status"] for item in body["items"]] == [
+        "started", "submitted", "graded", "not_started",
+    ]
+    assert body["summary"] == {
+        "total": 4,
+        "not_started": 1,
+        "started": 1,
+        "submitted": 1,
+        "graded": 1,
+    }
+    assert body["items"][3]["last_learning_at"] is None
+    assert all(item["name"] != "隐藏草稿" for item in body["items"])
+
+
+def test_student_catalog_search_filter_sort_and_pagination(client, db_session_factory):
+    _seed_student_catalog(db_session_factory)
+    token, _ = login(client, "catalog_student")
+    headers = auth_header(token)
+
+    filtered = client.get(
+        "/api/v1/experiments/modules/student-catalog?status=submitted&q=NumPy",
+        headers=headers,
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert filtered.json()["total"] == 1
+    assert filtered.json()["items"][0]["name"] == "02 NumPy 基础"
+    assert filtered.json()["summary"]["total"] == 4
+
+    recent = client.get(
+        "/api/v1/experiments/modules/student-catalog?sort=recent_desc&page=2&page_size=2",
+        headers=headers,
+    )
+    assert recent.status_code == 200, recent.text
+    assert recent.json()["page"] == 2
+    assert recent.json()["page_size"] == 2
+    assert recent.json()["total"] == 4
+    assert [item["name"] for item in recent.json()["items"]] == [
+        "01 Python 入门", "04 数据清洗",
+    ]
+
+
+def test_student_catalog_rejects_non_student_roles(client, db_session_factory):
+    create_user(db_session_factory, "catalog_teacher", "teacher")
+    token, _ = login(client, "catalog_teacher")
+    response = client.get(
+        "/api/v1/experiments/modules/student-catalog",
+        headers=auth_header(token),
+    )
+    assert response.status_code == 403
+
+
+def test_teacher_can_create_and_update_own_module_only(client, db_session_factory):
+    """教师可以创建模块，但不能修改其他开发者的模块"""
+    create_user(db_session_factory, "teacher_module", "teacher")
+    create_user(db_session_factory, "developer_module", "developer")
+    teacher_tok, _ = login(client, "teacher_module")
+    developer_tok, _ = login(client, "developer_module")
+
+    own = client.post(
+        "/api/v1/experiments/modules",
+        headers=auth_header(teacher_tok),
+        json={"name": "教师实验模块", "description": "教师创建"},
+    )
+    assert own.status_code == 201, own.text
+
+    own_update = client.patch(
+        f"/api/v1/experiments/modules/{own.json()['id']}",
+        headers=auth_header(teacher_tok),
+        json={"status": "published"},
+    )
+    assert own_update.status_code == 200, own_update.text
+    assert own_update.json()["status"] == "published"
+
+    other = client.post(
+        "/api/v1/experiments/modules",
+        headers=auth_header(developer_tok),
+        json={"name": "开发者实验模块"},
+    )
+    assert other.status_code == 201, other.text
+
+    other_update = client.patch(
+        f"/api/v1/experiments/modules/{other.json()['id']}",
+        headers=auth_header(teacher_tok),
+        json={"status": "draft"},
+    )
+    assert other_update.status_code == 403
+
+
 def test_student_cannot_read_draft_module(client, db_session_factory):
     """学生不能查看 draft 状态的实验模块"""
     create_user(db_session_factory, "developer1", "developer")

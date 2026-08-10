@@ -154,7 +154,8 @@ def grade_code_submission(
         elif grade.exam_answer_id:
             ans = db.get(ExamAnswer, grade.exam_answer_id)
             if ans and isinstance(question, ExamQuestion):
-                ans.score = merged.scaled_score
+                from app.services.exam_service import round_score
+                ans.score = round_score(merged.scaled_score)
                 # 不在此处 finalize——由 process_ai_grade 完成后再触发
 
     db.flush()

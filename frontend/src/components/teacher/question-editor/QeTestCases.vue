@@ -19,6 +19,8 @@ const props = defineProps({
   questionId: { type: Number, default: null },
   /** 运行测试结果（父组件调用 sample-run 后传入） */
   runResult: { type: Object, default: null },
+  /** 是否展示公开样例运行按钮（考试题暂不提供 sample-run 端点） */
+  showRun: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['update:publicCases', 'update:hiddenTests', 'run-sample', 'parse-failed'])
@@ -418,6 +420,7 @@ const privateImportError = ref('')
             {{ importOpen ? '收起导入' : '批量导入' }}
           </button>
           <button
+            v-if="showRun"
             type="button"
             class="btn btn-sm qe-cases__run"
             :disabled="!questionId"

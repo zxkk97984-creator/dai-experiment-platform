@@ -1,6 +1,7 @@
 """考试系统业务逻辑"""
 import logging
 from datetime import timedelta
+from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.errors import api_error
@@ -15,7 +16,25 @@ def require_exam_editable(exam, user):
     if exam.status != "draft":
         raise api_error(403, "EXAM_LOCKED", "考试已发布，不能修改题目")
 
-def validate_question(question) -> list[str]:
+def round_score(value: float) -> float:
+    """正式考试题目得分统一按十进制四舍五入保留一位。"""
+    return float(Decimal(str(value)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
+
+
+def score_choice_answer(question, selected_options) -> float:
+    """选择题评分；历史数据默认完全匹配，多选可启用无错选部分得分。"""
+    answer_config = question.correct_answer or {}
+    correct = set(answer_config.get("correct", []))
+    selected = set(selected_options or [])
+    if question.question_type == "multi_choice" \
+            and answer_config.get("scoring_mode", "all_or_nothing") == "partial_no_wrong":
+        if selected - correct or not correct:
+            return 0.0
+        return round_score(float(question.points) * len(selected & correct) / len(correct))
+    return round_score(float(question.points)) if correct == selected else 0.0
+
+
+def validate_question(question, *, publish: bool = False) -> list[str]:
     """逐题校验，返回错误列表（空=通过）"""
     errors = []
 
@@ -37,10 +56,20 @@ def validate_question(question) -> list[str]:
         for key in correct:
             if key not in options:
                 errors.append(f"题目 {question.order_index}: 正确答案 '{key}' 不在选项中")
+        if any(not str(key).strip() or not str(value).strip() for key, value in options.items()):
+            errors.append(f"题目 {question.order_index}: 选项标识和内容不能为空")
+        scoring_mode = (question.correct_answer or {}).get("scoring_mode", "all_or_nothing")
+        if scoring_mode not in ("all_or_nothing", "partial_no_wrong"):
+            errors.append(f"题目 {question.order_index}: 不支持的多选计分方式 '{scoring_mode}'")
+        if question.question_type == "single_choice" and scoring_mode != "all_or_nothing":
+            errors.append(f"题目 {question.order_index}: 单选题只支持完全匹配计分")
 
     elif question.question_type == "code":
-        if not question.hidden_tests or not question.hidden_tests.strip():
-            errors.append(f"题目 {question.order_index}: 编程题必须配置隐藏测试")
+        mode = question.grading_mode or "active"
+        if publish and mode in ("legacy", "shadow") and not (question.hidden_tests or "").strip():
+            errors.append(f"题目 {question.order_index}: {mode} 模式必须配置隐藏测试")
+        if publish and mode in ("shadow", "active") and not (question.test_groups or []):
+            errors.append(f"题目 {question.order_index}: {mode} 模式必须配置 AI 测试组")
         if question.time_limit_ms is not None and question.time_limit_ms <= 0:
             errors.append(f"题目 {question.order_index}: 时间限制必须为正数")
         if question.time_limit_ms is None:
@@ -69,7 +98,7 @@ def validate_publish(exam, db):
     # 逐题校验
     all_errors = []
     for q in questions:
-        all_errors.extend(validate_question(q))
+        all_errors.extend(validate_question(q, publish=True))
     if all_errors:
         raise api_error(422, "QUESTION_INVALID", "题目校验失败：" + "; ".join(all_errors))
 def start_exam(exam, student, db):
@@ -169,9 +198,7 @@ def _prepare_answers(sub, db):
         if not ans:
             continue
         if q.question_type in ("single_choice", "multi_choice"):
-            correct = set(q.correct_answer.get("correct", []))
-            selected = set(ans.selected_options or [])
-            ans.score = q.points if correct == selected else 0
+            ans.score = score_choice_answer(q, ans.selected_options)
             ans.grading_status = "completed"
         elif q.question_type == "code":
             if ans.code_answer:
@@ -328,9 +355,7 @@ def retry_exam_submission(submission_id: int, answer_ids: list[int], actor, db):
             ans.score = None  # 原始方案：选中的 system_error 答案清理 score=NULL，等判题后定分
             code_answer_ids.append(aid)
         else:
-            correct = set(q.correct_answer.get("correct", []))
-            selected = set(ans.selected_options or [])
-            ans.score = q.points if correct == selected else 0
+            ans.score = score_choice_answer(q, ans.selected_options)
             ans.grading_status = "completed"
             ans.attempt_count = 0
             ans.queued_at = None
@@ -519,6 +544,9 @@ def update_question(db, exam_id, question_id, payload, user):
     q = get_question(db, exam_id, question_id)
     for key, value in payload.items():
         setattr(q, key, value)
+
+    if q.question_type != "code":
+        q.grading_mode = "legacy"
 
     # 更新后校验
     errors = validate_question(q)

@@ -1,8 +1,9 @@
 """统一实验 API — 模块管理 + 记录管理 + Cell 操作 + 提交（v5 统一模型）"""
 from datetime import datetime, timezone
+from typing import Literal
 
-from fastapi import APIRouter, Depends, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db, require_roles
@@ -31,9 +32,16 @@ from app.schemas import (
     ExperimentRecordRead,
     ExperimentReviewUpdate,
     ExperimentSubmissionDetailRead,
+    ExperimentSubmissionFilterOption,
+    ExperimentSubmissionFilterOptions,
+    ExperimentSubmissionListRead,
     ExperimentSubmissionRead,
+    ExperimentSubmissionSummary,
     ExperimentSubmitRequest,
     PaginatedResponse,
+    StudentExperimentCatalogRead,
+    StudentExperimentCatalogSummary,
+    StudentExperimentModuleRead,
 )
 from app.services.kernel_manager import get_kernel_manager
 
@@ -153,11 +161,106 @@ def list_modules(
     )
 
 
+@router.get("/modules/student-catalog", response_model=StudentExperimentCatalogRead)
+def list_student_module_catalog(
+    q: str | None = None,
+    status_filter: Literal["not_started", "started", "submitted", "graded"] | None = Query(
+        default=None, alias="status"
+    ),
+    sort: Literal["default", "recent_desc", "name_asc"] = "default",
+    page: int = 1,
+    page_size: int = 10,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("student")),
+):
+    """学生实验目录：合并已发布模块与当前学生自己的实验状态。"""
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
+
+    learning_status = case(
+        (ExperimentRecord.id.is_(None), "not_started"),
+        (ExperimentRecord.status.in_(("graded", "completed")), "graded"),
+        (ExperimentRecord.status == "submitted", "submitted"),
+        else_="started",
+    ).label("learning_status")
+
+    join_condition = and_(
+        ExperimentRecord.module_id == ExperimentModule.id,
+        ExperimentRecord.student_id == current_user.id,
+    )
+    base_query = (
+        select(
+            ExperimentModule.id,
+            ExperimentModule.name,
+            learning_status,
+            ExperimentRecord.updated_at.label("last_learning_at"),
+        )
+        .select_from(ExperimentModule)
+        .outerjoin(ExperimentRecord, join_condition)
+        .where(ExperimentModule.status == "published")
+    )
+
+    # 汇总不随当前搜索/筛选变化，供页面顶部稳定展示全局状态。
+    summary_rows = db.execute(
+        select(learning_status, func.count(ExperimentModule.id))
+        .select_from(ExperimentModule)
+        .outerjoin(ExperimentRecord, join_condition)
+        .where(ExperimentModule.status == "published")
+        .group_by(learning_status)
+    ).all()
+    summary_counts = {key: value for key, value in summary_rows}
+    summary = StudentExperimentCatalogSummary(
+        total=sum(summary_counts.values()),
+        not_started=summary_counts.get("not_started", 0),
+        started=summary_counts.get("started", 0),
+        submitted=summary_counts.get("submitted", 0),
+        graded=summary_counts.get("graded", 0),
+    )
+
+    normalized_q = (q or "").strip()
+    if normalized_q:
+        base_query = base_query.where(ExperimentModule.name.ilike(f"%{normalized_q}%"))
+    if status_filter:
+        base_query = base_query.where(learning_status == status_filter)
+
+    count_query = select(func.count()).select_from(base_query.order_by(None).subquery())
+    total = db.scalar(count_query) or 0
+
+    if sort == "recent_desc":
+        base_query = base_query.order_by(
+            ExperimentRecord.updated_at.desc().nullslast(),
+            ExperimentModule.id.asc(),
+        )
+    elif sort == "name_asc":
+        base_query = base_query.order_by(ExperimentModule.name.asc(), ExperimentModule.id.asc())
+    else:
+        base_query = base_query.order_by(ExperimentModule.id.asc())
+
+    rows = db.execute(
+        base_query.offset((page - 1) * page_size).limit(page_size)
+    ).all()
+    return StudentExperimentCatalogRead(
+        items=[
+            StudentExperimentModuleRead(
+                id=row.id,
+                name=row.name,
+                learning_status=row.learning_status,
+                last_learning_at=row.last_learning_at,
+            )
+            for row in rows
+        ],
+        page=page,
+        page_size=page_size,
+        total=total,
+        summary=summary,
+    )
+
+
 @router.post("/modules", response_model=ExperimentModuleRead, status_code=status.HTTP_201_CREATED)
 def create_module(
     payload: ExperimentModuleCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("admin", "developer")),
+    current_user: User = Depends(require_roles("admin", "teacher", "developer")),
 ):
     module = ExperimentModule(**payload.model_dump(), owner_id=current_user.id)
     db.add(module)
@@ -185,13 +288,13 @@ def patch_module(
     module_id: int,
     payload: dict,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("admin", "developer")),
+    current_user: User = Depends(require_roles("admin", "teacher", "developer")),
 ):
     module = db.get(ExperimentModule, module_id)
     if not module:
         raise api_error(404, "EXPERIMENT_MODULE_NOT_FOUND", "实验模块不存在")
-    if current_user.role == "developer" and module.owner_id != current_user.id:
-        raise api_error(403, "FORBIDDEN", "无权管理其他开发者的实验模块")
+    if current_user.role in ("teacher", "developer") and module.owner_id != current_user.id:
+        raise api_error(403, "FORBIDDEN", "无权管理其他用户创建的实验模块")
     for key in ("name", "description", "template_id", "status"):
         if key in payload:
             setattr(module, key, payload[key])
@@ -791,11 +894,39 @@ def submit_record(
     return ExperimentSubmissionRead.model_validate(submission)
 
 
-@router.get("/submissions", response_model=PaginatedResponse)
+def _submission_records_query(*columns):
+    """提交列表统一的记录上下文，供权限、筛选与筛选项复用。"""
+    return (
+        select(*columns)
+        .select_from(ExperimentRecord)
+        .join(User, ExperimentRecord.student_id == User.id)
+        .outerjoin(Lesson, ExperimentRecord.lesson_id == Lesson.id)
+        .outerjoin(Chapter, Lesson.chapter_id == Chapter.id)
+        .outerjoin(Course, Chapter.course_id == Course.id)
+        .outerjoin(ExperimentModule, ExperimentRecord.module_id == ExperimentModule.id)
+    )
+
+
+def _apply_submission_visibility(query, current_user: User):
+    if current_user.role == "student":
+        return query.where(ExperimentRecord.student_id == current_user.id)
+    if current_user.role == "teacher":
+        return query.where(Course.teacher_id == current_user.id)
+    if current_user.role == "developer":
+        return query.where(ExperimentModule.owner_id == current_user.id)
+    return query
+
+
+@router.get("/submissions", response_model=ExperimentSubmissionListRead)
 def list_submissions(
     record_id: int | None = None,
+    q: str | None = None,
+    course_id: int | None = None,
+    entry_id: int | None = None,
+    review_status: Literal["pending", "graded"] | None = None,
+    sort: Literal["submitted_desc", "submitted_asc"] = "submitted_desc",
     page: int = 1,
-    page_size: int = 20,
+    page_size: int = 10,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -807,28 +938,74 @@ def list_submissions(
     - 开发者：仅自己模块的提交
     - 管理员：全部
     """
-    # 构建可见记录 ID 子查询
-    visible_ids = select(ExperimentRecord.id)
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
 
-    if current_user.role == "student":
-        visible_ids = visible_ids.where(ExperimentRecord.student_id == current_user.id)
-    elif current_user.role == "teacher":
-        # 教师通过 lesson → chapter → course 查看，显式 join 完整链条
-        visible_ids = (
-            visible_ids
-            .join(Lesson, ExperimentRecord.lesson_id == Lesson.id)
-            .join(Chapter, Lesson.chapter_id == Chapter.id)
-            .join(Course, Chapter.course_id == Course.id)
-            .where(Course.teacher_id == current_user.id)
+    # 汇总与筛选项只受权限（及 record_id 上下文）影响，不跟随当前筛选变化。
+    scope_ids = _apply_submission_visibility(
+        _submission_records_query(ExperimentRecord.id), current_user
+    )
+    if record_id is not None:
+        scope_ids = scope_ids.where(ExperimentRecord.id == record_id)
+
+    summary_total = db.scalar(
+        select(func.count()).select_from(ExperimentSubmission).where(
+            ExperimentSubmission.record_id.in_(scope_ids)
         )
-    elif current_user.role == "developer":
-        # 开发者通过 module → owner 查看
-        visible_ids = (
-            visible_ids
-            .join(ExperimentModule, ExperimentRecord.module_id == ExperimentModule.id)
-            .where(ExperimentModule.owner_id == current_user.id)
+    ) or 0
+    summary_pending = db.scalar(
+        select(func.count()).select_from(ExperimentSubmission).where(
+            ExperimentSubmission.record_id.in_(scope_ids),
+            ExperimentSubmission.score.is_(None),
         )
-    # admin 不限制
+    ) or 0
+    summary_graded = summary_total - summary_pending
+
+    option_query = _apply_submission_visibility(
+        _submission_records_query(
+            Course.id,
+            Course.title,
+            Lesson.id,
+            Lesson.title,
+            ExperimentModule.id,
+            ExperimentModule.name,
+        ),
+        current_user,
+    )
+    if record_id is not None:
+        option_query = option_query.where(ExperimentRecord.id == record_id)
+    option_rows = db.execute(option_query.distinct()).all()
+    course_options = {}
+    entry_options = {}
+    for course_row_id, course_title, lesson_id, lesson_title, module_id, module_name in option_rows:
+        if course_row_id is not None:
+            course_options[course_row_id] = course_title
+        if lesson_id is not None:
+            entry_options[lesson_id] = lesson_title
+        elif module_id is not None:
+            entry_options[module_id] = module_name
+
+    visible_ids = _apply_submission_visibility(
+        _submission_records_query(ExperimentRecord.id), current_user
+    )
+    if record_id is not None:
+        visible_ids = visible_ids.where(ExperimentRecord.id == record_id)
+    if course_id is not None:
+        visible_ids = visible_ids.where(Course.id == course_id)
+    if entry_id is not None:
+        visible_ids = visible_ids.where(or_(
+            ExperimentRecord.lesson_id == entry_id,
+            ExperimentRecord.module_id == entry_id,
+        ))
+    normalized_q = (q or "").strip()
+    if normalized_q:
+        pattern = f"%{normalized_q}%"
+        visible_ids = visible_ids.where(or_(
+            User.real_name.ilike(pattern),
+            User.username.ilike(pattern),
+            Lesson.title.ilike(pattern),
+            ExperimentModule.name.ilike(pattern),
+        ))
 
     query = select(ExperimentSubmission).where(
         ExperimentSubmission.record_id.in_(visible_ids)
@@ -840,10 +1017,21 @@ def list_submissions(
     if record_id is not None:
         query = query.where(ExperimentSubmission.record_id == record_id)
         count_query = count_query.where(ExperimentSubmission.record_id == record_id)
+    if review_status == "pending":
+        query = query.where(ExperimentSubmission.score.is_(None))
+        count_query = count_query.where(ExperimentSubmission.score.is_(None))
+    elif review_status == "graded":
+        query = query.where(ExperimentSubmission.score.is_not(None))
+        count_query = count_query.where(ExperimentSubmission.score.is_not(None))
 
     total = db.scalar(count_query) or 0
+    order_by = (
+        ExperimentSubmission.submitted_at.asc()
+        if sort == "submitted_asc"
+        else ExperimentSubmission.submitted_at.desc()
+    )
     submissions = db.scalars(
-        query.order_by(ExperimentSubmission.id.desc())
+        query.order_by(order_by, ExperimentSubmission.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()
@@ -869,11 +1057,19 @@ def list_submissions(
     module_ids = [r.module_id for r in records_map.values() if r.module_id]
     lesson_map = {}
     module_map = {}
+    chapter_map = {}
+    course_map = {}
     if lesson_ids:
         lessons = db.scalars(
             select(Lesson).where(Lesson.id.in_(lesson_ids))
         ).all()
         lesson_map = {l.id: l for l in lessons}
+        chapter_ids = list({lesson.chapter_id for lesson in lessons})
+        chapters = db.scalars(select(Chapter).where(Chapter.id.in_(chapter_ids))).all()
+        chapter_map = {chapter.id: chapter for chapter in chapters}
+        course_ids = list({chapter.course_id for chapter in chapters})
+        courses = db.scalars(select(Course).where(Course.id.in_(course_ids))).all()
+        course_map = {course.id: course for course in courses}
     if module_ids:
         modules = db.scalars(
             select(ExperimentModule).where(ExperimentModule.id.in_(module_ids))
@@ -888,14 +1084,41 @@ def list_submissions(
             student = students_map.get(record.student_id)
             if student:
                 item.student_name = student.real_name or student.username
+                item.student_username = student.username
             if record.lesson_id and record.lesson_id in lesson_map:
-                item.entry_name = lesson_map[record.lesson_id].title
+                lesson = lesson_map[record.lesson_id]
+                item.entry_name = lesson.title
+                item.entry_id = lesson.id
+                item.entry_type = "lesson"
+                chapter = chapter_map.get(lesson.chapter_id)
+                course = course_map.get(chapter.course_id) if chapter else None
+                if course:
+                    item.course_id = course.id
+                    item.course_name = course.title
             elif record.module_id and record.module_id in module_map:
-                item.entry_name = module_map[record.module_id].name
+                module = module_map[record.module_id]
+                item.entry_name = module.name
+                item.entry_id = module.id
+                item.entry_type = "module"
         items.append(item)
 
-    return PaginatedResponse(
+    return ExperimentSubmissionListRead(
         items=items, page=page, page_size=page_size, total=total,
+        summary=ExperimentSubmissionSummary(
+            total=summary_total,
+            pending=summary_pending,
+            graded=summary_graded,
+        ),
+        filter_options=ExperimentSubmissionFilterOptions(
+            courses=[
+                ExperimentSubmissionFilterOption(id=option_id, name=name)
+                for option_id, name in sorted(course_options.items(), key=lambda item: item[1])
+            ],
+            entries=[
+                ExperimentSubmissionFilterOption(id=option_id, name=name)
+                for option_id, name in sorted(entry_options.items(), key=lambda item: item[1])
+            ],
+        ),
     )
 
 
@@ -952,6 +1175,27 @@ def get_submission(
     detail = ExperimentSubmissionDetailRead.model_validate(submission)
     detail.outputs_snapshot = submission.outputs_snapshot or {}
     detail.cell_metadata = metadata
+    student = db.get(User, record.student_id)
+    if student:
+        detail.student_name = student.real_name or student.username
+        detail.student_username = student.username
+    if record.lesson_id:
+        lesson = db.get(Lesson, record.lesson_id)
+        if lesson:
+            detail.entry_id = lesson.id
+            detail.entry_type = "lesson"
+            detail.entry_name = lesson.title
+            chapter = db.get(Chapter, lesson.chapter_id)
+            course = db.get(Course, chapter.course_id) if chapter else None
+            if course:
+                detail.course_id = course.id
+                detail.course_name = course.title
+    elif record.module_id:
+        module = db.get(ExperimentModule, record.module_id)
+        if module:
+            detail.entry_id = module.id
+            detail.entry_type = "module"
+            detail.entry_name = module.name
     return detail
 
 

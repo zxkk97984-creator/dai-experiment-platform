@@ -14,6 +14,51 @@ def _make_user(db, username, role):
 class TestGradesQueryDedup:
     """验证 _build_grade_base_query 消除重复 JOIN"""
 
+    def test_student_name_filter_returns_student_context(self, db_session_factory):
+        from app.api.ai_grading import list_grades
+
+        with db_session_factory() as db:
+            teacher = _make_user(db, "gqn_teacher", "teacher")
+            student = _make_user(db, "gqn_student", "student")
+            student.real_name = "张三"
+            course = Course(title="GQN", status="published", teacher_id=teacher.id)
+            db.add(course); db.flush()
+            assignment = Assignment(title="GQNA", course_id=course.id, status="published")
+            db.add(assignment); db.flush()
+            question = JudgeQuestion(
+                assignment_id=assignment.id, title="Q", function_name="f",
+                hidden_tests="def test(): pass", grading_mode="active",
+                test_groups=[{"id": "F1", "name": "F", "dimension": "F", "max_score": 60,
+                              "tests": "def test(): assert True"}],
+            )
+            db.add(question); db.flush()
+            rubric = QuestionRubric(
+                judge_question_id=question.id, version=1, status="locked",
+                source_hash="a", source_snapshot={}, rubric_json={}, model_name="m",
+                locked_at=datetime.now(timezone.utc),
+            )
+            db.add(rubric); db.flush()
+            submission = Submission(
+                question_id=question.id, student_id=student.id, code="def f(): pass",
+                status="graded", grading_status="completed", score=80,
+            )
+            db.add(submission); db.flush()
+            grade = CodeGrade(
+                submission_id=submission.id, rubric_id=rubric.id, mode="active",
+                status="completed", functional_score=60, robustness_score=10,
+            )
+            db.add(grade); db.commit()
+
+            response = list_grades(
+                kind="assignment", question_id=None, student_id=None,
+                student_name="张", status=None, page=1, page_size=20,
+                db=db, current_user=teacher,
+            )
+
+            assert response.total == 1
+            assert response.items[0]["student_id"] == student.id
+            assert response.items[0]["student_name"] == "张三"
+
     def test_kind_assignment_uses_single_path(self, db_session_factory):
         from app.api.ai_grading import _build_grade_base_query
 

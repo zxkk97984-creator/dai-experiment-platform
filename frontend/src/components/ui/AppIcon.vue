@@ -42,6 +42,12 @@ import dragHandle from '@iconify-icons/ri/menu-line'
 import trash from '@iconify-icons/ri/delete-bin-line'
 import back from '@iconify-icons/ri/arrow-left-line'
 import video from '@iconify-icons/ri/video-line'
+import send from '@iconify-icons/ri/send-plane-line'
+import draft from '@iconify-icons/ri/draft-line'
+import trophy from '@iconify-icons/ri/trophy-line'
+import pie from '@iconify-icons/ri/pie-chart-line'
+import download from '@iconify-icons/ri/download-2-line'
+import refresh from '@iconify-icons/ri/refresh-line'
 
 // 语义键 → { data: 图标数据, set: 来源图标集 }；set 透传为 data-set 属性便于测试与排查
 const ICONS = {
@@ -81,6 +87,12 @@ const ICONS = {
   trash: { data: trash, set: 'ri' },
   back: { data: back, set: 'ri' },
   video: { data: video, set: 'ri' },
+  send: { data: send, set: 'ri' },
+  draft: { data: draft, set: 'ri' },
+  trophy: { data: trophy, set: 'ri' },
+  pie: { data: pie, set: 'ri' },
+  download: { data: download, set: 'ri' },
+  refresh: { data: refresh, set: 'ri' },
 }
 
 const props = defineProps({

@@ -93,7 +93,7 @@ watch(() => props.course?.cover, () => { coverFailed.value = false })
   display: flex;
   flex-direction: column;
   gap: 12px;
-  /* 最小高度容纳封面（16:9），内容更高时自然撑开 */
+  /* 最小高度容纳课程信息，正方形封面可自然撑开卡片 */
   min-height: 166px;
   padding: 18px 24px;
   background: var(--surface);
@@ -135,11 +135,11 @@ watch(() => props.course?.cover, () => { coverFailed.value = false })
   min-width: 0;
 }
 
-/* 封面 16:9 固定比例，flex-shrink: 0 保证不挤压进度与 CTA */
+/* 与课程列表统一为正方形；flex-shrink: 0 保证不挤压进度与 CTA */
 .hero-cover {
   flex-shrink: 0;
   width: 168px;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 1 / 1;
   border-radius: var(--radius-control);
   overflow: hidden;
   background: var(--surface-raised, #f1f5f9);
@@ -153,7 +153,7 @@ watch(() => props.course?.cover, () => { coverFailed.value = false })
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .hero-identity {
@@ -225,7 +225,7 @@ watch(() => props.course?.cover, () => { coverFailed.value = false })
 @media (max-width: 767.98px) {
   .course-hero { padding: 16px; }
   .hero-body { flex-direction: column; align-items: stretch; gap: 14px; }
-  /* 移动端封面全宽，保持稳定 16:9 区域 */
+  /* 移动端封面全宽，仍保持正方形区域 */
   .hero-cover { width: 100%; }
   .hero-cta { align-self: stretch; }
   .hero-cta .btn-primary { width: 100%; }

@@ -397,7 +397,8 @@ def lock_rubric_endpoint(
 # ── 评分列表与详情 ──
 
 def _build_grade_base_query(db: Session, user: User, kind: str | None,
-                             question_id: int | None, student_id: int | None, status: str | None):
+                             question_id: int | None, student_id: int | None, status: str | None,
+                             student_name: str | None = None):
     """构建带权限筛选的 CodeGrade 查询。按 kind 构建单一路径避免重复 JOIN。"""
     if kind not in (None, "assignment", "exam"):
         raise api_error(400, "INVALID_KIND", "kind 必须为 assignment 或 exam")
@@ -489,6 +490,29 @@ def _build_grade_base_query(db: Session, user: User, kind: str | None,
                 Submission.student_id == student_id,
                 _ES2.student_id == student_id))
 
+    # student_name 筛选：通过学生真实姓名（兼容用户名）模糊匹配，分别覆盖作业和考试路径。
+    if student_name and student_name.strip():
+        like = f"%{student_name.strip()}%"
+        assignment_student_match = select(1).select_from(Submission).join(
+            User, Submission.student_id == User.id
+        ).where(
+            Submission.id == CodeGrade.submission_id,
+            or_(User.real_name.ilike(like), User.username.ilike(like)),
+        ).exists()
+        exam_student_match = select(1).select_from(ExamAnswer).join(
+            ExamSubmission, ExamAnswer.submission_id == ExamSubmission.id
+        ).join(User, ExamSubmission.student_id == User.id).where(
+            ExamAnswer.id == CodeGrade.exam_answer_id,
+            or_(User.real_name.ilike(like), User.username.ilike(like)),
+        ).exists()
+        name_filter = exam_student_match if kind == "exam" else (
+            assignment_student_match if kind == "assignment" else or_(
+                assignment_student_match, exam_student_match
+            )
+        )
+        query = query.where(name_filter)
+        count_q = count_q.where(name_filter)
+
     if status:
         query = query.where(CodeGrade.status == status)
         count_q = count_q.where(CodeGrade.status == status)
@@ -501,6 +525,7 @@ def list_grades(
     kind: str | None = Query(None),
     question_id: int | None = Query(None),
     student_id: int | None = Query(None),
+    student_name: str | None = Query(None),
     status: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -509,24 +534,57 @@ def list_grades(
 ):
     _teacher_or_admin(current_user)
 
-    query, count_q = _build_grade_base_query(db, current_user, kind, question_id, student_id, status)
+    query, count_q = _build_grade_base_query(
+        db, current_user, kind, question_id, student_id, status, student_name
+    )
 
     total = db.scalar(count_q) or 0
     grades = db.scalars(
         query.order_by(CodeGrade.id.desc()).offset((page - 1) * page_size).limit(page_size)
     ).all()
 
-    items = [{
-        "id": cg.id, "submission_id": cg.submission_id, "exam_answer_id": cg.exam_answer_id,
-        "mode": cg.mode, "status": cg.status,
-        "functional_score": cg.functional_score, "algorithm_score": cg.algorithm_score,
-        "robustness_score": cg.robustness_score, "quality_score": cg.quality_score,
-        "raw_total": cg.raw_total, "score_cap": cg.score_cap,
-        "final_score_100": cg.final_score_100,
-        "needs_teacher_review": cg.needs_teacher_review,
-        "attempt_count": cg.attempt_count,
-        "created_at": cg.created_at.isoformat() if cg.created_at else None,
-    } for cg in grades]
+    submission_ids = [cg.submission_id for cg in grades if cg.submission_id]
+    exam_answer_ids = [cg.exam_answer_id for cg in grades if cg.exam_answer_id]
+    students_by_submission = {}
+    students_by_exam_answer = {}
+    if submission_ids:
+        students_by_submission = {
+            submission_id: (student_id, student_name, student_username)
+            for submission_id, student_id, student_name, student_username in db.execute(
+                select(Submission.id, User.id, User.real_name, User.username)
+                .join(User, Submission.student_id == User.id)
+                .where(Submission.id.in_(submission_ids))
+            ).all()
+        }
+    if exam_answer_ids:
+        students_by_exam_answer = {
+            exam_answer_id: (student_id, student_name, student_username)
+            for exam_answer_id, student_id, student_name, student_username in db.execute(
+                select(ExamAnswer.id, User.id, User.real_name, User.username)
+                .join(ExamSubmission, ExamAnswer.submission_id == ExamSubmission.id)
+                .join(User, ExamSubmission.student_id == User.id)
+                .where(ExamAnswer.id.in_(exam_answer_ids))
+            ).all()
+        }
+
+    items = []
+    for cg in grades:
+        student = students_by_submission.get(cg.submission_id) if cg.submission_id else None
+        if student is None and cg.exam_answer_id:
+            student = students_by_exam_answer.get(cg.exam_answer_id)
+        items.append({
+            "id": cg.id, "submission_id": cg.submission_id, "exam_answer_id": cg.exam_answer_id,
+            "student_id": student[0] if student else None,
+            "student_name": student[1] if student else None,
+            "mode": cg.mode, "status": cg.status,
+            "functional_score": cg.functional_score, "algorithm_score": cg.algorithm_score,
+            "robustness_score": cg.robustness_score, "quality_score": cg.quality_score,
+            "raw_total": cg.raw_total, "score_cap": cg.score_cap,
+            "final_score_100": cg.final_score_100,
+            "needs_teacher_review": cg.needs_teacher_review,
+            "attempt_count": cg.attempt_count,
+            "created_at": cg.created_at.isoformat() if cg.created_at else None,
+        })
     return PaginatedResponse(items=items, page=page, page_size=page_size, total=total)
 
 

@@ -1,26 +1,19 @@
 <script setup>
-// 任务中心（参考图 05）：作业 + 考试 + 实验聚合为统一任务列表。
+// 任务中心：作业 + 考试 + 实验聚合为统一任务表格。
 // 全部数据来自既有 API（allSettled，单来源失败不整页报错）；
-// 状态、分组、筛选、排序全部走 studentUi 纯函数，零伪造日期。
+// 状态、筛选、排序走 studentUi 纯函数，零伪造日期。
 
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import AppLayout from '../../components/layout/AppLayout.vue'
 import DashboardAsyncState from '../../components/dashboard/DashboardAsyncState.vue'
-import AppIcon from '../../components/ui/AppIcon.vue'
-import UiPanel from '../../components/ui/UiPanel.vue'
+import UiStatusPill from '../../components/ui/UiStatusPill.vue'
 import { assignmentsAPI } from '../../api/assignments.js'
 import { examsAPI } from '../../api/exams.js'
 import { experimentsAPI } from '../../api/experiments.js'
 import { coursesAPI } from '../../api/courses.js'
-import {
-  groupTasksByDeadline,
-  normalizeAssignmentTask,
-  normalizeExamTask,
-  normalizeExperimentTask,
-  taskStatus,
-} from '../../utils/studentUi.js'
+import { normalizeAssignmentTask, normalizeExamTask, normalizeExperimentTask, taskStatus } from '../../utils/studentUi.js'
 
 const router = useRouter()
 
@@ -29,36 +22,13 @@ const tasks = ref([])
 const courseMap = ref({})
 const loading = ref(true)
 const error = ref(false)
+const page = ref(1)
+const pageSize = 10
 
 const filters = reactive({ status: 'all', courseId: '', kind: '', time: 'all', sort: 'due' })
 
 const timeFmt = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 const kindLabel = { assignment: '作业', exam: '考试', experiment: '实验' }
-const kindIcon = { assignment: 'assignment', exam: 'exam', experiment: 'experiment' }
-const groupLabel = {
-  overdue: '已逾期',
-  today: '今天截止',
-  tomorrow: '明天截止',
-  this_week: '本周截止',
-  later: '更晚',
-  no_deadline: '无截止时间',
-}
-const groupIcon = {
-  overdue: 'warning',
-  today: 'clock',
-  tomorrow: 'calendar',
-  this_week: 'calendar',
-  later: 'clock',
-  no_deadline: 'clipboard',
-}
-const groupTone = {
-  overdue: 'tone-danger',
-  today: 'tone-warning',
-  tomorrow: 'tone-primary',
-  this_week: 'tone-primary',
-  later: 'tone-neutral',
-  no_deadline: 'tone-neutral',
-}
 
 const now = () => new Date()
 
@@ -146,15 +116,15 @@ const filteredTasks = computed(() => {
   return list
 })
 
-const groups = computed(() => groupTasksByDeadline(filteredTasks.value, now()))
-
-/** 主 CTA 仅给最紧急的逾期任务，其余为轮廓按钮 */
-const mostUrgentId = computed(() => {
-  const t = now()
-  const overdue = filteredTasks.value
-    .filter((task) => taskStatus(task, t) === 'overdue')
-    .sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0))
-  return overdue[0]?.id ?? null
+const pageCount = computed(() => Math.max(1, Math.ceil(filteredTasks.value.length / pageSize)))
+const paginatedTasks = computed(() => {
+  const start = (page.value - 1) * pageSize
+  return filteredTasks.value.slice(start, start + pageSize)
+})
+const visiblePages = computed(() => {
+  const start = Math.max(1, Math.min(page.value - 2, pageCount.value - 4))
+  const end = Math.min(pageCount.value, start + 4)
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index)
 })
 
 const courseOptions = computed(() => {
@@ -187,6 +157,10 @@ function resetFilters() {
   filters.sort = 'due'
 }
 
+function goToPage(value) {
+  page.value = Math.min(Math.max(value, 1), pageCount.value)
+}
+
 function go(route) {
   if (route === '/student' || route.startsWith('/student/')) {
     router.push(route)
@@ -198,6 +172,14 @@ function formatTime(value) {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '' : timeFmt.format(date)
 }
+
+watch(filters, () => {
+  page.value = 1
+})
+
+watch(pageCount, (count) => {
+  if (page.value > count) page.value = count
+})
 
 onMounted(loadAll)
 </script>
@@ -278,6 +260,11 @@ onMounted(loadAll)
       </div>
 
       <!-- 任务区 -->
+      <div class="task-catalog-heading">
+        <h2>全部任务</h2>
+        <span>共 {{ filteredTasks.length }} 个</span>
+      </div>
+
       <DashboardAsyncState
         :loading="loading"
         :error="error"
@@ -286,50 +273,74 @@ onMounted(loadAll)
         empty-body="没有符合条件的任务"
         @retry="loadAll"
       >
-        <div class="task-groups">
-          <section
-            v-for="(items, key) in groups"
-            :key="key"
-            class="task-group"
-            :class="{ 'is-hidden': items.length === 0 }"
-          >
-            <h3 class="task-group-title">
-              <span class="group-icon" :class="groupTone[key]" aria-hidden="true">
-                <AppIcon :name="groupIcon[key]" :size="16" />
-              </span>
-              <span class="group-label">{{ groupLabel[key] }}</span>
-              <span class="group-count">{{ items.length }}</span>
-            </h3>
-            <div class="task-list">
-              <article
-                v-for="task in items"
-                :key="task.kind + '-' + task.id"
-                class="task-row"
-              >
-                <span class="task-kind-icon" aria-hidden="true">
-                  <AppIcon :name="kindIcon[task.kind]" :size="18" />
-                </span>
-                <div class="task-row-main">
-                  <span class="task-row-title">{{ task.title }}</span>
-                  <span class="task-row-course">{{ task.courseTitle || '—' }}</span>
-                </div>
-                <span class="task-kind-label">{{ kindLabel[task.kind] || task.kind }}</span>
-                <span class="task-deadline">{{ task.dueAt ? formatTime(task.dueAt) : '—' }}</span>
-                <span class="task-status-pill" :class="'status-' + statusTone(task)">
-                  {{ statusText(task) }}
-                </span>
-                <button
-                  type="button"
-                  class="task-row-cta"
-                  :class="task.id === mostUrgentId ? 'btn-primary' : 'btn-outline'"
-                  @click="go(task.route)"
-                >
-                  进入
-                </button>
-              </article>
-            </div>
-          </section>
+        <div class="table-shell">
+          <table class="task-table">
+            <thead>
+              <tr>
+                <th>任务名称</th>
+                <th>所属课程</th>
+                <th>类型</th>
+                <th>状态</th>
+                <th>截止时间</th>
+                <th class="action-column">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="task in paginatedTasks" :key="task.kind + '-' + task.id">
+                <td data-label="任务名称">
+                  <strong class="task-name" :title="task.title">{{ task.title }}</strong>
+                </td>
+                <td data-label="所属课程" class="task-course">{{ task.courseTitle || '—' }}</td>
+                <td data-label="类型" class="task-kind">{{ kindLabel[task.kind] || task.kind }}</td>
+                <td data-label="状态">
+                  <UiStatusPill :tone="statusTone(task)" :label="statusText(task)" />
+                </td>
+                <td data-label="截止时间" class="task-deadline">
+                  {{ task.dueAt ? formatTime(task.dueAt) : '—' }}
+                </td>
+                <td data-label="操作" class="action-column">
+                  <button type="button" class="task-action" @click="go(task.route)">进入</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
+
+        <nav class="pagination" aria-label="任务分页">
+          <span class="pagination-total">共 {{ filteredTasks.length }} 条</span>
+          <div class="pagination-controls">
+            <button
+              type="button"
+              class="page-arrow"
+              :disabled="page === 1"
+              aria-label="上一页"
+              @click="goToPage(page - 1)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+            </button>
+            <button
+              v-for="pageNumber in visiblePages"
+              :key="pageNumber"
+              type="button"
+              class="page-number"
+              :class="{ active: pageNumber === page }"
+              :aria-current="pageNumber === page ? 'page' : undefined"
+              @click="goToPage(pageNumber)"
+            >
+              {{ pageNumber }}
+            </button>
+            <button
+              type="button"
+              class="page-arrow"
+              :disabled="page === pageCount"
+              aria-label="下一页"
+              @click="goToPage(page + 1)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
+            </button>
+          </div>
+          <span class="page-size">10 条/页</span>
+        </nav>
       </DashboardAsyncState>
     </div>
   </AppLayout>
@@ -428,110 +439,141 @@ onMounted(loadAll)
 }
 .reset-btn:hover { background: var(--primary-light); color: var(--primary); }
 
-/* ── 分组 ────────────────────────────────────────────────────── */
-.task-groups { display: flex; flex-direction: column; gap: 20px; }
-.task-group.is-hidden { display: none; }
-.task-group-title {
+/* ── 任务表格 ────────────────────────────────────────────────── */
+.task-catalog-heading {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 10px;
-  font-size: var(--text-sm);
-  font-weight: 700;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: -6px;
+}
+.task-catalog-heading h2 {
+  margin: 0;
   color: var(--ink);
+  font-size: 18px;
+  font-weight: 650;
 }
-.group-icon {
-  width: 28px; height: 28px;
-  border-radius: var(--radius-control);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.group-icon.tone-danger { background: var(--danger-light); color: var(--danger); }
-.group-icon.tone-warning { background: var(--warning-light); color: var(--warning); }
-.group-icon.tone-primary { background: var(--primary-light); color: var(--primary); }
-.group-icon.tone-neutral { background: var(--surface-raised); color: var(--text-secondary); }
-.group-count {
-  padding: 1px 8px;
-  border-radius: var(--radius-full);
-  background: var(--surface-raised);
-  font-size: var(--text-xs);
-  font-weight: 600;
+.task-catalog-heading span {
   color: var(--text-secondary);
+  font-size: 13px;
 }
 
-/* ── 任务行（96–102px） ──────────────────────────────────────── */
-.task-list { display: flex; flex-direction: column; gap: 10px; }
-.task-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-height: 96px;
-  padding: 14px 20px;
+.table-shell {
+  overflow: hidden;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
 }
-.task-kind-icon {
-  flex-shrink: 0;
-  width: 42px; height: 42px;
-  border-radius: var(--radius-control);
-  background: var(--primary-light);
-  color: var(--primary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.task-table {
+  width: 100%;
+  margin: 0;
+  border-collapse: collapse;
+  table-layout: fixed;
 }
-.task-row-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.task-row-title {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--ink);
-}
-.task-row-course {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-}
-.task-kind-label {
-  flex-shrink: 0;
-  min-width: 44px;
-  font-size: var(--text-xs);
+.task-table th {
+  height: 46px;
+  padding: 0 18px;
+  background: #f8fafc;
   color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
 }
+.task-table th:first-child { width: 25%; }
+.task-table th:nth-child(2) { width: 23%; }
+.task-table th:nth-child(3) { width: 10%; }
+.task-table th:nth-child(4) { width: 12%; }
+.task-table th:nth-child(5) { width: 18%; }
+.task-table th:last-child { width: 12%; }
+.task-table td {
+  height: 60px;
+  padding: 0 18px;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 13px;
+  vertical-align: middle;
+}
+.task-table tbody tr { transition: background var(--duration-fast); }
+.task-table tbody tr:hover { background: #f8fbff; }
+.task-name {
+  display: block;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-course {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-kind { color: var(--text-secondary); }
 .task-deadline {
-  flex-shrink: 0;
-  min-width: 108px;
-  font-size: var(--text-xs);
   color: var(--text-secondary);
   font-family: var(--font-mono);
+  white-space: nowrap;
 }
-.task-status-pill {
-  flex-shrink: 0;
-  min-width: 52px;
-  text-align: center;
-  padding: 3px 10px;
-  border-radius: var(--radius-full);
-  font-size: var(--text-xs);
+.action-column { text-align: right !important; }
+.task-action {
+  min-height: 32px;
+  padding: 6px 16px;
+  border: 1px solid var(--primary-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--primary);
+  font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
 }
-.task-status-pill.status-pending { color: var(--text-secondary); background: var(--surface-raised); }
-.task-status-pill.status-danger { color: var(--danger); background: var(--danger-light); }
-.task-status-pill.status-success { color: var(--success); background: var(--success-light); }
+.task-action:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
 
-.task-row-cta {
-  flex-shrink: 0;
-  height: 40px;
-  padding: 0 20px;
-  font-weight: 600;
-  border-radius: var(--radius-control);
+/* ── 分页 ────────────────────────────────────────────────────── */
+.pagination {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  min-height: 40px;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
+.pagination-controls { display: flex; gap: 8px; }
+.pagination button {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.pagination button:hover:not(:disabled) {
+  border-color: var(--primary-soft);
+  color: var(--primary);
+}
+.pagination button.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+.pagination button:disabled { cursor: not-allowed; opacity: .45; }
+.pagination svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.page-size { justify-self: end; }
+
 .btn-outline {
   background: var(--surface);
   border: 1px solid var(--border-strong);
@@ -541,7 +583,55 @@ onMounted(loadAll)
 .btn-outline:hover { background: var(--primary-light); border-color: var(--primary-soft); }
 
 @media (max-width: 767.98px) {
-  .task-row { flex-wrap: wrap; gap: 10px; }
-  .task-row-main { flex: 1 1 100%; }
+  .page { gap: 16px; }
+  .page-title { font-size: 24px; }
+  .filter-card { align-items: stretch; gap: 12px; padding: 14px; }
+  .filter-field, .filter-field select { width: 100%; }
+  .reset-btn { width: 100%; }
+  .table-shell { overflow: visible; border: 0; background: transparent; box-shadow: none; }
+  .task-table, .task-table tbody { display: block; }
+  .task-table thead { display: none; }
+  .task-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px 18px;
+    margin-bottom: 10px;
+    padding: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xs);
+  }
+  .task-table td {
+    display: flex;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    text-align: left !important;
+  }
+  .task-table td::before {
+    flex: 0 0 auto;
+    content: attr(data-label);
+    color: var(--text-tertiary);
+    font-size: 12px;
+  }
+  .task-table td:first-child,
+  .task-table td:nth-child(2),
+  .task-table td:nth-child(5) { grid-column: 1 / -1; }
+  .task-table td:first-child::before { display: none; }
+  .task-table .action-column { justify-self: end; }
+  .task-name { white-space: normal; }
+  .task-course { white-space: normal; }
+  .pagination { grid-template-columns: 1fr auto; }
+  .pagination-total { display: none; }
+  .pagination-controls { justify-self: start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-table tbody tr { transition: none; }
 }
 </style>

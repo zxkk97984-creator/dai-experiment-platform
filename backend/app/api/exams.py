@@ -8,8 +8,8 @@ from app.api.courses import can_access_course_content, ensure_course_manager, re
 from app.config import Settings, get_settings
 from app.dependencies import get_current_user, get_db, require_roles
 from app.errors import api_error
-from app.models import Course, CourseEnrollment, Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission, User
-from app.schemas import ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionUpdate, ExamRead, ExamRetryRequest, ExamSubmitRequest, ExamSubmissionRead, ExamUpdate, PaginatedResponse
+from app.models import Course, CourseEnrollment, Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission, QuestionRubric, User
+from app.schemas import ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionTeacherRead, ExamQuestionUpdate, ExamRead, ExamRetryRequest, ExamSubmitRequest, ExamSubmissionRead, ExamUpdate, PaginatedResponse
 from app.services.exam_service import create_question, delete_question, get_my_grade, get_question, list_questions, require_exam_editable, retry_exam_submission as retry_exam_submission_service, save_answer, start_exam as svc_start_exam, submit_exam as svc_submit_exam, update_question, validate_publish
 
 router = APIRouter(prefix="/exams", tags=["exams"])
@@ -84,6 +84,27 @@ def list_exams(
         data = ExamRead.model_validate(exam).model_dump()
         if current_user.role == "student":
             data["is_submitted"] = exam.id in submitted_ids
+        else:
+            data.update({
+                "course_title": exam.course.title if exam.course else "",
+                "question_count": db.scalar(
+                    select(func.count()).select_from(ExamQuestion).where(ExamQuestion.exam_id == exam.id)
+                ) or 0,
+                "participant_count": db.scalar(
+                    select(func.count()).select_from(ExamSubmission).where(
+                        ExamSubmission.exam_id == exam.id,
+                        ExamSubmission.status.in_(("submitted", "grading", "graded", "review_required")),
+                    )
+                ) or 0,
+                "expected_count": db.scalar(
+                    select(func.count()).select_from(CourseEnrollment).where(
+                        CourseEnrollment.course_id == exam.course_id,
+                        CourseEnrollment.status == "enrolled",
+                    )
+                ) or 0,
+                "created_at": exam.created_at,
+                "updated_at": exam.updated_at,
+            })
         items.append(data)
     return PaginatedResponse(items=items, page=page, page_size=page_size, total=total)
 
@@ -133,7 +154,7 @@ def update_exam(
     # 发布时强制校验
     if exam.status == "published":
         validate_publish(exam, db)
-        # AI 评分门禁：非 legacy 编程题需要锁定 Rubric
+        # AI 评分门禁：非 legacy 编程题必须由教师检查并锁定 Rubric。
         code_questions = db.scalars(
             select(ExamQuestion).where(
                 ExamQuestion.exam_id == exam_id,
@@ -144,13 +165,16 @@ def update_exam(
         if code_questions:
             if not settings.ai_ready:
                 raise api_error(503, "AI_NOT_READY", "发布含 AI 评分的考试需要配置 DAI_AI_API_KEY")
-            from app.services.ai_client import DeepSeekClient, AIServiceError
-            from app.services.rubric_service import ensure_locked_rubrics_for_publish
-            try:
-                client = DeepSeekClient(settings)
-                ensure_locked_rubrics_for_publish(db, client, code_questions)
-            except AIServiceError as exc:
-                raise api_error(503, "AI_RUBRIC_UNAVAILABLE", f"Rubric 生成失败: {exc}")
+            missing = []
+            for question in code_questions:
+                locked = db.scalar(select(QuestionRubric.id).where(
+                    QuestionRubric.exam_question_id == question.id,
+                    QuestionRubric.status == "locked",
+                ).limit(1))
+                if locked is None:
+                    missing.append(str(question.order_index + 1))
+            if missing:
+                raise api_error(422, "AI_RUBRIC_REQUIRED", "以下编程题尚未锁定 Rubric：第 " + "、".join(missing) + " 题")
     db.commit()
     db.refresh(exam)
     return exam
@@ -224,7 +248,7 @@ def retry_exam_submission(
     return retry_exam_submission_service(submission_id, payload.answer_ids, current_user, db)
 
 
-@router.get("/{exam_id}/grades", response_model=PaginatedResponse)
+@router.get("/{exam_id}/grades")
 def exam_grades(
     exam_id: int,
     db: Session = Depends(get_db),
@@ -233,8 +257,162 @@ def exam_grades(
     exam = require_exam(exam_id, db)
     if current_user.role == "teacher":
         ensure_course_manager(exam.course, current_user)
-    grades = db.scalars(select(ExamGrade).where(ExamGrade.exam_id == exam_id).order_by(ExamGrade.id)).all()
-    return PaginatedResponse(items=[ExamGradeRead.model_validate(grade) for grade in grades], page=1, page_size=len(grades) or 20, total=len(grades))
+    submissions = db.scalars(
+        select(ExamSubmission).where(ExamSubmission.exam_id == exam_id).order_by(ExamSubmission.id)
+    ).all()
+    submission_by_student = {submission.student_id: submission for submission in submissions}
+
+    enrolled_students = db.scalars(
+        select(User)
+        .join(CourseEnrollment, CourseEnrollment.student_id == User.id)
+        .where(
+            CourseEnrollment.course_id == exam.course_id,
+            CourseEnrollment.status == "enrolled",
+        )
+        .order_by(User.id)
+    ).all()
+    students_by_id = {student.id: student for student in enrolled_students}
+    for submission in submissions:
+        students_by_id.setdefault(submission.student_id, submission.student)
+
+    items = []
+    for student in students_by_id.values():
+        submission = submission_by_student.get(student.id)
+        score = submission.score if submission else None
+        items.append({
+            "id": submission.id if submission else f"absent-{student.id}",
+            "exam_id": exam.id,
+            "student_id": student.id,
+            "student_name": student.real_name,
+            "student_number": student.username,
+            "submission_id": submission.id if submission else None,
+            "status": submission.status if submission else "absent",
+            "score": score,
+            "started_at": submission.started_at if submission else None,
+            "submitted_at": submission.submitted_at if submission else None,
+            "graded_at": submission.graded_at if submission else None,
+            "review_reason": submission.review_reason if submission else None,
+        })
+
+    scored = [float(item["score"]) for item in items if item["score"] is not None]
+    submitted_count = sum(1 for item in items if item["status"] in ("submitted", "grading", "graded", "review_required"))
+    pass_count = sum(1 for score in scored if score >= 60)
+    distribution = []
+    for label, low, high in (("90–100", 90, 101), ("80–89", 80, 90), ("70–79", 70, 80), ("60–69", 60, 70), ("0–59", 0, 60)):
+        distribution.append({"label": label, "count": sum(1 for score in scored if low <= score < high)})
+
+    question_count = db.scalar(
+        select(func.count()).select_from(ExamQuestion).where(ExamQuestion.exam_id == exam_id)
+    ) or 0
+    total_score = db.scalar(
+        select(func.sum(ExamQuestion.points)).where(ExamQuestion.exam_id == exam_id)
+    ) or 0
+    return {
+        "items": items,
+        "page": 1,
+        "page_size": len(items) or 20,
+        "total": len(items),
+        "exam": {
+            "id": exam.id,
+            "title": exam.title,
+            "status": exam.status,
+            "course_id": exam.course_id,
+            "course_title": exam.course.title if exam.course else "",
+            "duration_minutes": exam.duration_minutes,
+            "question_count": question_count,
+            "total_score": float(total_score),
+        },
+        "summary": {
+            "expected_count": len(items),
+            "submitted_count": submitted_count,
+            "graded_count": len(scored),
+            "average_score": round(sum(scored) / len(scored), 1) if scored else None,
+            "highest_score": max(scored) if scored else None,
+            "pass_rate": round(pass_count * 100 / len(scored), 1) if scored else 0,
+            "excellent_rate": round(sum(1 for score in scored if score >= 90) * 100 / len(scored), 1) if scored else 0,
+        },
+        "distribution": distribution,
+    }
+
+
+@router.get("/{exam_id}/grades/{submission_id}")
+def exam_grade_detail(
+    exam_id: int,
+    submission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("teacher", "admin")),
+):
+    exam = require_exam(exam_id, db)
+    if current_user.role == "teacher":
+        ensure_course_manager(exam.course, current_user)
+    submission = db.get(ExamSubmission, submission_id)
+    if not submission or submission.exam_id != exam_id:
+        raise api_error(404, "SUBMISSION_NOT_FOUND", "考试提交不存在")
+
+    answers = db.scalars(
+        select(ExamAnswer)
+        .join(ExamQuestion, ExamQuestion.id == ExamAnswer.question_id)
+        .where(ExamAnswer.submission_id == submission_id)
+        .order_by(ExamQuestion.order_index, ExamQuestion.id)
+    ).all()
+    objective_score = sum(float(answer.score or 0) for answer in answers if answer.question.question_type != "code")
+    objective_total = sum(float(answer.question.points) for answer in answers if answer.question.question_type != "code")
+    code_score = sum(float(answer.score or 0) for answer in answers if answer.question.question_type == "code")
+    code_total = sum(float(answer.question.points) for answer in answers if answer.question.question_type == "code")
+    elapsed_minutes = None
+    if submission.started_at and submission.submitted_at:
+        try:
+            elapsed_minutes = max(1, round((submission.submitted_at - submission.started_at).total_seconds() / 60))
+        except TypeError:
+            elapsed_minutes = None
+
+    return {
+        "exam": {
+            "id": exam.id,
+            "title": exam.title,
+            "course_title": exam.course.title if exam.course else "",
+            "duration_minutes": exam.duration_minutes,
+        },
+        "student": {
+            "id": submission.student.id,
+            "name": submission.student.real_name,
+            "number": submission.student.username,
+        },
+        "submission": {
+            "id": submission.id,
+            "status": submission.status,
+            "score": submission.score,
+            "started_at": submission.started_at,
+            "submitted_at": submission.submitted_at,
+            "graded_at": submission.graded_at,
+            "elapsed_minutes": elapsed_minutes,
+            "review_reason": submission.review_reason,
+        },
+        "analysis": {
+            "objective_score": round(objective_score, 1),
+            "objective_total": round(objective_total, 1),
+            "code_score": round(code_score, 1),
+            "code_total": round(code_total, 1),
+            "question_count": len(answers),
+            "correct_count": sum(1 for answer in answers if answer.score is not None and float(answer.score) >= float(answer.question.points)),
+        },
+        "answers": [
+            {
+                "id": answer.id,
+                "question_id": answer.question_id,
+                "order_index": answer.question.order_index,
+                "question_type": answer.question.question_type,
+                "prompt": answer.question.prompt,
+                "points": float(answer.question.points),
+                "score": float(answer.score) if answer.score is not None else None,
+                "grading_status": answer.grading_status,
+                "selected_options": answer.selected_options,
+                "code_answer": answer.code_answer,
+                "system_error": answer.system_error,
+            }
+            for answer in answers
+        ],
+    }
 
 
 # ── 考试题目管理 ──
@@ -268,7 +446,17 @@ def get_questions(exam_id: int, db: Session = Depends(get_db), current_user: Use
     # admin 可以查看全部
 
     questions = list_questions(db, exam_id)
-    items = [ExamQuestionRead.model_validate(q) for q in questions]
+    if current_user.role in ("teacher", "admin"):
+        locked_ids = set(db.scalars(select(QuestionRubric.exam_question_id).where(
+            QuestionRubric.exam_question_id.in_([q.id for q in questions]),
+            QuestionRubric.status == "locked",
+        )).all()) if questions else set()
+        items = [ExamQuestionTeacherRead.model_validate({
+            **{column.name: getattr(q, column.name) for column in q.__table__.columns},
+            "has_locked_rubric": q.id in locked_ids,
+        }) for q in questions]
+    else:
+        items = [ExamQuestionRead.model_validate(q) for q in questions]
     return PaginatedResponse(items=items, page=1, page_size=len(items), total=len(items))
 
 @router.post("/{exam_id}/questions", response_model=ExamQuestionRead, status_code=status.HTTP_201_CREATED)

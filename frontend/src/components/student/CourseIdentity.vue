@@ -94,7 +94,7 @@ const tileTone = computed(() => TILE_TONES[iconName.value] || 'tone-blue')
 
 .course-identity__cover {
   display: block;
-  object-fit: cover;
+  object-fit: contain;
   background: var(--surface-raised, #f1f5f9);
 }
 

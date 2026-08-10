@@ -1,6 +1,8 @@
 // StudentCourseHero：164–168px 白卡；面包屑 + 课程身份 + 元数据 + 进度 + CTA
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import StudentCourseHero from '../StudentCourseHero.vue'
 
 const course = {
@@ -68,6 +70,12 @@ describe('StudentCourseHero', () => {
 })
 
 describe('StudentCourseHero 课程封面', () => {
+  it('使用正方形容器并完整显示课程封面', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/student/StudentCourseHero.vue'), 'utf8')
+    expect(source).toMatch(/\.hero-cover\s*\{[^}]*aspect-ratio:\s*1\s*\/\s*1/s)
+    expect(source).toMatch(/\.hero-cover__img\s*\{[^}]*object-fit:\s*contain/s)
+  })
+
   it('受管封面 key 渲染为公开媒体 URL', () => {
     const wrapper = mountHero({ course: { ...course, cover: 'covers/7/abc.webp' } })
     const img = wrapper.find('.hero-cover__img')
