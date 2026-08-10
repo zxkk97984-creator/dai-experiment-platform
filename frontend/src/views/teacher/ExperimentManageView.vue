@@ -7,6 +7,7 @@ import { experimentsAPI } from '../../api/experiments.js'
 import { useAppStore } from '../../stores/app.js'
 import { useAuthStore } from '../../stores/auth.js'
 import { statusBadge, PUBLISH_STATUS_MAP } from '../../utils/status.js'
+import { useClientPagination } from '../../composables/useClientPagination.js'
 
 const router = useRouter()
 const app = useAppStore()
@@ -14,6 +15,7 @@ const auth = useAuthStore()
 const modules = ref([])
 const loading = ref(true)
 const createOpen = ref(false)
+const editingId = ref(null)
 const form = ref({ name: '', description: '', entry_url: '' })
 const query = ref('')
 const statusFilter = ref('all')
@@ -27,6 +29,7 @@ const filteredModules = computed(() => {
   const result = modules.value.filter((item) => (!keyword || `${item.name || ''} ${item.description || ''}`.toLowerCase().includes(keyword)) && (statusFilter.value === 'all' || moduleStatus(item) === statusFilter.value) && (entryFilter.value === 'all' || (entryFilter.value === 'external' ? item.entry_url : !item.entry_url)))
   return [...result].sort((a, b) => sortOrder.value === 'name' ? String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN') : new Date(moduleUpdated(b) || 0) - new Date(moduleUpdated(a) || 0))
 })
+const { page, pageSize, pageCount, pagedItems, goToPage, resetPage } = useClientPagination(filteredModules)
 function formatDate(value) { if (!value) return '—'; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date).replaceAll('/', '-') }
 
 async function fetch() {
@@ -42,6 +45,14 @@ async function fetch() {
 }
 
 function openCreateModal() {
+  editingId.value = null
+  form.value = { name: '', description: '', entry_url: '' }
+  createOpen.value = true
+}
+
+function openEditModal(module) {
+  editingId.value = module.id
+  form.value = { name: module.name || '', description: module.description || '', entry_url: module.entry_url || '' }
   createOpen.value = true
 }
 
@@ -49,21 +60,27 @@ function closeCreateModal() {
   createOpen.value = false
 }
 
-async function handleCreate() {
+async function saveModule() {
   const name = form.value.name.trim()
   if (!name) {
     app.showToast('请输入实验名称', 'error')
     return
   }
-
+  const payload = { ...form.value, name }
   try {
-    await experimentsAPI.createModule({ ...form.value, name })
-    app.showToast('创建成功', 'success')
+    if (editingId.value) {
+      await experimentsAPI.updateModule(editingId.value, payload)
+      app.showToast('修改成功', 'success')
+    } else {
+      await experimentsAPI.createModule(payload)
+      app.showToast('创建成功', 'success')
+    }
     createOpen.value = false
     form.value = { name: '', description: '', entry_url: '' }
+    editingId.value = null
     fetch()
   } catch (e) {
-    app.showToast(e.response?.data?.detail?.message || '创建失败', 'error')
+    app.showToast(e.response?.data?.detail?.message || (editingId.value ? '修改失败' : '创建失败'), 'error')
   }
 }
 
@@ -106,9 +123,9 @@ onMounted(fetch)
 
       <!-- ── Create Modal ──────────────────────────────────────────────── -->
       <div v-if="createOpen" class="modal-backdrop create-backdrop" @click.self="closeCreateModal">
-        <div class="create-panel create-modal create-form" role="dialog" aria-modal="true" aria-label="创建实验">
+        <div class="create-panel create-modal create-form" role="dialog" aria-modal="true" :aria-label="editingId ? '编辑实验' : '创建实验'">
           <header class="create-heading">
-            <strong>创建实验</strong>
+            <strong>{{ editingId ? '编辑实验' : '创建实验' }}</strong>
             <button class="create-close" type="button" aria-label="关闭" @click="closeCreateModal">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
             </button>
@@ -116,27 +133,27 @@ onMounted(fetch)
           <div class="create-modal-body">
             <div class="form-group">
               <label>实验名称</label>
-              <input v-model="form.name" placeholder="例如：Python 数据分析实验" />
+              <input v-model="form.name" name="module-name" placeholder="例如：Python 数据分析实验" />
             </div>
             <div class="form-group">
               <label>实验描述</label>
-              <textarea v-model="form.description" rows="3" placeholder="实验目标和步骤说明"></textarea>
+              <textarea v-model="form.description" name="module-description" rows="3" placeholder="实验目标和步骤说明"></textarea>
             </div>
             <div class="form-group">
               <label>入口 URL（可选）</label>
-              <input v-model="form.entry_url" placeholder="外部实验链接，留空则使用 JupyterLab" />
+              <input v-model="form.entry_url" name="module-entry-url" placeholder="外部实验链接，留空则使用 JupyterLab" />
             </div>
             <p class="form-hint modal-hint">创建后可在列表中发布或下架实验模块。</p>
             <div class="create-actions">
               <button class="btn-ghost btn-sm" type="button" @click="closeCreateModal">取消</button>
-              <button class="btn-primary btn-sm" type="button" @click="handleCreate">确定</button>
+              <button class="btn-primary btn-sm" type="button" data-action="save-module" @click="saveModule">{{ editingId ? '保存' : '确定' }}</button>
             </div>
           </div>
         </div>
       </div>
 
       <section class="metric-grid"><article v-for="item in [{ key: 'total', label: '全部实验', icon: 'experiment', tone: 'blue' }, { key: 'published', label: '已发布', icon: 'send', tone: 'green' }, { key: 'draft', label: '草稿', icon: 'draft', tone: 'orange' }, { key: 'offline', label: '已下架', icon: 'clock', tone: 'purple' }]" :key="item.key" class="metric-card"><span class="metric-icon" :class="item.tone"><AppIcon :name="item.icon" :size="24" /></span><span><small>{{ item.label }}</small><strong>{{ summary[item.key] }}</strong><em>个</em></span></article></section>
-      <section class="data-panel"><div class="filter-bar"><label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索实验名称" /></label><select v-model="statusFilter"><option value="all">状态：全部</option><option value="published">已发布</option><option value="draft">草稿</option><option value="offline">已下架</option></select><select v-model="entryFilter"><option value="all">入口：全部入口</option><option value="jupyter">JupyterLab</option><option value="external">外部入口</option></select><select v-model="sortOrder"><option value="updated">排序：最近更新</option><option value="name">排序：实验名称</option></select></div><div v-if="loading" class="loading-list"><span v-for="i in 6" :key="i" class="skeleton"></span></div><div v-else-if="filteredModules.length === 0" class="empty-state"><p>🧪 暂无符合条件的实验</p></div><div v-else class="table-scroll"><table><thead><tr><th>实验名称</th><th>描述</th><th>入口</th><th>状态</th><th>最近更新</th><th>操作</th></tr></thead><tbody><tr v-for="module in filteredModules" :key="module.id"><td class="title-cell">{{ module.name }}</td><td>{{ module.description || '暂无实验描述' }}</td><td><code v-if="module.entry_url" class="entry-code">{{ module.entry_url }}</code><span v-else>JupyterLab</span></td><td><span class="status-pill" :class="moduleStatus(module)">{{ moduleStatus(module) === 'published' ? '已发布' : moduleStatus(module) === 'draft' ? '草稿' : '已下架' }}</span></td><td class="muted-cell">{{ formatDate(moduleUpdated(module)) }}</td><td class="actions-cell"><button class="text-action">编辑模块</button><button class="text-action" @click="goToSubmissions">查看提交</button><button class="publish-action" @click="toggleStatus(module)">{{ module.status === 'published' ? '下架' : '发布' }}</button></td></tr></tbody></table></div><footer v-if="!loading && filteredModules.length" class="pagination-bar"><span>共 {{ filteredModules.length }} 条</span><span>10 条/页　‹　<span class="active-page">1</span>　2　›</span></footer></section>.
+      <section class="data-panel"><div class="filter-bar"><label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索实验名称" @input="resetPage" /></label><select v-model="statusFilter" @change="resetPage"><option value="all">状态：全部</option><option value="published">已发布</option><option value="draft">草稿</option><option value="offline">已下架</option></select><select v-model="entryFilter" @change="resetPage"><option value="all">入口：全部入口</option><option value="jupyter">JupyterLab</option><option value="external">外部入口</option></select><select v-model="sortOrder" @change="resetPage"><option value="updated">排序：最近更新</option><option value="name">排序：实验名称</option></select></div><div v-if="loading" class="loading-list"><span v-for="i in 6" :key="i" class="skeleton"></span></div><div v-else-if="filteredModules.length === 0" class="empty-state"><p>🧪 暂无符合条件的实验</p></div><div v-else class="table-scroll"><table><thead><tr><th>实验名称</th><th>描述</th><th>入口</th><th>状态</th><th>最近更新</th><th>操作</th></tr></thead><tbody><tr v-for="module in pagedItems" :key="module.id"><td class="title-cell">{{ module.name }}</td><td>{{ module.description || '暂无实验描述' }}</td><td><code v-if="module.entry_url" class="entry-code">{{ module.entry_url }}</code><span v-else>JupyterLab</span></td><td><span class="status-pill" :class="moduleStatus(module)">{{ moduleStatus(module) === 'published' ? '已发布' : moduleStatus(module) === 'draft' ? '草稿' : '已下架' }}</span></td><td class="muted-cell">{{ formatDate(moduleUpdated(module)) }}</td><td class="actions-cell"><button class="text-action" data-action="edit-module" @click="openEditModal(module)">编辑模块</button><button class="text-action" @click="goToSubmissions">查看提交</button><button class="publish-action" @click="toggleStatus(module)">{{ module.status === 'published' ? '下架' : '发布' }}</button></td></tr></tbody></table></div><footer v-if="!loading && filteredModules.length" class="pagination-bar"><span>共 {{ filteredModules.length }} 条</span><span class="pagination"><button aria-label="上一页" :disabled="page === 1" @click="goToPage(page - 1)">‹</button><button v-for="number in pageCount" :key="number" :aria-label="'第 ' + number + ' 页'" :aria-current="page === number ? 'page' : undefined" :class="{ active: page === number }" @click="goToPage(number)">{{ number }}</button><button aria-label="下一页" :disabled="page === pageCount" @click="goToPage(page + 1)">›</button></span><span>{{ pageSize }} 条/页</span></footer></section>.
     </div>
   </AppLayout>
 </template>

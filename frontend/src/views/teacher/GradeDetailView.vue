@@ -91,7 +91,7 @@ onMounted(load)
         </aside>
       </section>
 
-      <footer class="action-footer"><button><AppIcon name="download" :size="18" />导出报告</button><button @click="printReport"><AppIcon name="clipboard" :size="18" />打印成绩单</button><button class="btn-primary" @click="router.push(`/teacher/exams/${route.params.id}/grades`)">返回成绩总览</button></footer>
+      <footer class="action-footer"><button @click="printReport"><AppIcon name="clipboard" :size="18" />打印 / 保存 PDF</button><button class="btn-primary" @click="router.push(`/teacher/exams/${route.params.id}/grades`)">返回成绩总览</button></footer>
     </main>
     <main v-else class="detail-loading"><span v-for="i in 6" :key="i" class="skeleton"></span></main>
   </AppLayout>

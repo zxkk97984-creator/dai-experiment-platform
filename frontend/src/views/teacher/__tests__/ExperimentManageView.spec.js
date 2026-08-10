@@ -27,6 +27,16 @@ vi.mock('../../../stores/auth', () => ({
 
 import { experimentsAPI } from '../../../api/experiments.js'
 
+function makeModules(count) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: index + 1,
+    name: `实验模块 ${index + 1}`,
+    description: `描述 ${index + 1}`,
+    status: 'draft',
+    updated_at: '2026-08-01T08:00:00Z',
+  }))
+}
+
 async function mountPage() {
   const mod = await import('../ExperimentManageView.vue')
   return mount(mod.default, {
@@ -88,6 +98,37 @@ describe('实验模块管理页 ExperimentManageView', () => {
       entry_url: 'https://example.com/lab',
     })
     expect(wrapper.find('[role="dialog"][aria-label="创建实验"]').exists()).toBe(false)
+    expect(experimentsAPI.listModules).toHaveBeenCalledTimes(2)
+  })
+
+  it('12 个模块分两页展示：第 1 页 10 行，点「第 2 页」后 2 行', async () => {
+    experimentsAPI.listModules.mockResolvedValue({ data: { items: makeModules(12) } })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    expect(wrapper.findAll('tbody tr')).toHaveLength(10)
+    expect(wrapper.find('footer.pagination-bar').text()).toContain('共 12 条')
+
+    await wrapper.get('[aria-label="第 2 页"]').trigger('click')
+    expect(wrapper.findAll('tbody tr')).toHaveLength(2)
+  })
+
+  it('点击「编辑模块」回填表单并保存修改', async () => {
+    experimentsAPI.listModules.mockResolvedValue({ data: { items: makeModules(3) } })
+    experimentsAPI.updateModule.mockResolvedValue({ data: { id: 1 } })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    await wrapper.findAll('[data-action="edit-module"]')[0].trigger('click')
+    expect(wrapper.find('[role="dialog"]').text()).toContain('编辑实验')
+    expect(wrapper.find('[name="module-name"]').element.value).toBe('实验模块 1')
+
+    await wrapper.get('[name="module-name"]').setValue('新名称')
+    await wrapper.get('[data-action="save-module"]').trigger('click')
+    await flushPromises()
+
+    expect(experimentsAPI.updateModule).toHaveBeenCalledWith(1, expect.objectContaining({ name: '新名称' }))
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
     expect(experimentsAPI.listModules).toHaveBeenCalledTimes(2)
   })
 })

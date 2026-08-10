@@ -36,4 +36,18 @@ describe('学生成绩详情', () => {
     expect(wrapper.text()).toContain('学生答案')
     expect(wrapper.text()).toContain('A')
   })
+
+  it('无失效的「导出报告」按钮，打印按钮调用 window.print', async () => {
+    const printSpy = vi.spyOn(window, 'print').mockImplementation(() => {})
+    const wrapper = mount(GradeDetailView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' } } } })
+    await flushPromises()
+
+    expect(wrapper.findAll('button').some((button) => button.text().includes('导出报告'))).toBe(false)
+
+    const printButton = wrapper.findAll('button').find((button) => button.text().includes('打印 / 保存 PDF'))
+    expect(printButton).toBeDefined()
+    await printButton.trigger('click')
+    expect(printSpy).toHaveBeenCalledTimes(1)
+    printSpy.mockRestore()
+  })
 })
