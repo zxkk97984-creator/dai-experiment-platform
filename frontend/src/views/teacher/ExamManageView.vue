@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
+import ExamCreateDialog from '../../components/teacher/exam/ExamCreateDialog.vue'
 import { examsAPI } from '../../api/exams.js'
 import { coursesAPI } from '../../api/courses.js'
 import { useAppStore } from '../../stores/app.js'
@@ -15,15 +16,12 @@ const exams = ref([])
 const courses = ref([])
 const loading = ref(true)
 const createOpen = ref(false)
-const courseModalOpen = ref(false)
-const manualCourseId = ref('')
 const query = ref('')
 const statusFilter = ref('all')
 const courseFilter = ref('all')
 const sortOrder = ref('updated')
 const page = ref(1)
 const pageSize = ref(10)
-const form = ref({ title: '', course_id: '', duration_minutes: 60, start_at: '', end_at: '' })
 
 const now = () => Date.now()
 function displayStatus(exam) {
@@ -37,7 +35,6 @@ const summary = computed(() => ({
   draft: exams.value.filter((item) => displayStatus(item) === 'draft').length,
   ended: exams.value.filter((item) => displayStatus(item) === 'ended').length,
 }))
-const selectedCourse = computed(() => courses.value.find((course) => String(course.id) === String(form.value.course_id)) || null)
 const courseName = (exam) => exam.course_title || courses.value.find((course) => String(course.id) === String(exam.course_id))?.title || `课程 ${exam.course_id}`
 const filteredExams = computed(() => {
   const keyword = query.value.trim().toLowerCase()
@@ -71,25 +68,13 @@ async function fetchCourses() {
 function resetPage() { page.value = 1 }
 function openCreateModal() { createOpen.value = true }
 function closeCreateModal() { createOpen.value = false }
-function openCourseModal() { manualCourseId.value = form.value.course_id ? String(form.value.course_id) : ''; courseModalOpen.value = true }
-function closeCourseModal() { courseModalOpen.value = false }
-function pickCourse(course) { form.value.course_id = String(course.id); courseModalOpen.value = false }
-function confirmManualCourse() {
-  const id = manualCourseId.value.trim()
-  if (!id) return
-  form.value.course_id = id
-  courseModalOpen.value = false
-}
-async function handleCreate() {
-  const title = form.value.title.trim()
-  const courseId = Number(form.value.course_id)
-  const duration = Number(form.value.duration_minutes)
+async function handleSave({ title, course_id, duration_minutes, start_at, end_at }) {
   if (!title) return app.showToast('请输入考试名称', 'error')
-  if (!Number.isInteger(courseId) || courseId <= 0) return app.showToast('请选择课程', 'error')
-  if (!Number.isInteger(duration) || duration <= 0) return app.showToast('考试时长必须大于 0 分钟', 'error')
-  if (form.value.start_at && form.value.end_at && new Date(form.value.start_at) >= new Date(form.value.end_at)) return app.showToast('结束时间必须晚于开始时间', 'error')
+  if (!Number.isInteger(course_id) || course_id <= 0) return app.showToast('请选择课程', 'error')
+  if (!Number.isInteger(duration_minutes) || duration_minutes <= 0) return app.showToast('考试时长必须大于 0 分钟', 'error')
+  if (start_at && end_at && new Date(start_at) >= new Date(end_at)) return app.showToast('结束时间必须晚于开始时间', 'error')
   try {
-    const res = await examsAPI.create({ ...form.value, title, course_id: courseId, duration_minutes: duration, start_at: form.value.start_at || null, end_at: form.value.end_at || null })
+    const res = await examsAPI.create({ title, course_id, duration_minutes, start_at, end_at })
     app.showToast('创建成功', 'success')
     createOpen.value = false
     await fetchExams()
@@ -162,25 +147,7 @@ onMounted(() => { fetchExams(); fetchCourses() })
       </section>
     </main>
 
-    <div v-if="createOpen" class="modal-backdrop create-backdrop" @click.self="closeCreateModal">
-      <div class="create-panel create-form" role="dialog" aria-modal="true" aria-label="创建考试">
-        <header class="create-heading"><strong>创建考试</strong><button class="create-close" aria-label="关闭" @click="closeCreateModal"><AppIcon name="close" :size="18" /></button></header>
-        <div class="form-group"><label>考试名称</label><input v-model="form.title" placeholder="输入考试名称" /></div>
-        <div class="grid-2"><div class="form-group"><label>课程</label><button type="button" class="course-picker" @click="openCourseModal"><span v-if="selectedCourse">{{ selectedCourse.title }}（ID: {{ selectedCourse.id }}）</span><span v-else-if="form.course_id">课程 ID: {{ form.course_id }}</span><span v-else class="placeholder">选择课程</span><AppIcon name="chevron-down" :size="17" /></button></div><div class="form-group"><label>时长（分钟）</label><input v-model.number="form.duration_minutes" type="number" min="1" /></div></div>
-        <div class="grid-2"><div class="form-group"><label>开始时间（可选）</label><input v-model="form.start_at" type="datetime-local" /></div><div class="form-group"><label>结束时间（可选）</label><input v-model="form.end_at" type="datetime-local" /></div></div>
-        <p class="form-hint">基本信息确认后将进入题目编辑页面，完成题目配置后才能发布考试。</p>
-        <div class="create-actions"><button class="btn-ghost" @click="closeCreateModal">取消</button><button class="btn-primary" @click="handleCreate">确定</button></div>
-      </div>
-    </div>
-
-    <div v-if="courseModalOpen" class="modal-backdrop create-backdrop" @click.self="closeCourseModal">
-      <div class="create-panel course-picker-panel" role="dialog" aria-modal="true" aria-label="选择课程">
-        <header class="create-heading"><strong>选择课程</strong><button class="create-close" aria-label="关闭" @click="closeCourseModal"><AppIcon name="close" :size="18" /></button></header>
-        <div class="manual-row"><input v-model="manualCourseId" class="course-id-input" placeholder="输入课程 ID" @keyup.enter="confirmManualCourse" /><button class="btn-primary manual-confirm" :disabled="!manualCourseId.trim()" @click="confirmManualCourse">确定</button></div>
-        <div class="course-list"><button v-for="course in courses" :key="course.id" class="course-item" :class="{ active: String(course.id) === form.course_id }" @click="pickCourse(course)">{{ course.title }}（ID: {{ course.id }}）</button><p v-if="courses.length === 0" class="empty-tip">暂无课程，可直接输入课程 ID</p></div>
-        <div class="create-actions"><button class="btn-ghost" @click="closeCourseModal">取消</button></div>
-      </div>
-    </div>
+    <ExamCreateDialog :open="createOpen" :courses="courses" @save="handleSave" @close="closeCreateModal" />
   </AppLayout>
 </template>
 
@@ -190,8 +157,7 @@ onMounted(() => { fetchExams(); fetchCourses() })
 .data-panel{min-width:0;overflow:hidden;border:1px solid var(--border);border-radius:12px;background:var(--surface);box-shadow:var(--shadow-card)}.filter-bar{display:grid;min-width:0;grid-template-columns:minmax(240px,1.25fr) repeat(3,minmax(150px,.7fr));gap:14px;padding:18px;border-bottom:1px solid var(--border)}.filter-bar select,.search-control{height:44px;min-width:0}.search-control{display:flex;align-items:center;gap:9px;min-width:0;padding:0 13px;border:1px solid var(--border);border-radius:8px;color:var(--text-tertiary);background:#fff}.search-control:focus-within{border-color:var(--primary);box-shadow:var(--shadow-glow-primary)}.search-control input{height:auto;min-width:0;padding:0;border:0;box-shadow:none!important}.filter-bar select{cursor:pointer;color:var(--text-secondary)}
 .table-scroll{min-width:0;overflow-x:hidden}.exam-table{width:100%;min-width:0;table-layout:fixed}.exam-table th{height:44px;padding:0 16px;overflow:hidden;text-transform:none;letter-spacing:0;text-overflow:ellipsis;white-space:nowrap;background:#f8fafc}.exam-table th:nth-child(1){width:22%}.exam-table th:nth-child(2){width:19%}.exam-table th:nth-child(3){width:10%}.exam-table th:nth-child(4){width:9%}.exam-table th:nth-child(5){width:11%}.exam-table th:nth-child(6){width:12%}.exam-table th:nth-child(7){width:15%}.exam-table th:nth-child(8){width:22%}.exam-table td{height:68px;min-width:0;padding:10px 16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.exam-table td:first-child{min-width:0}.exam-table td strong,.exam-table td small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.exam-table td strong{color:var(--ink);font-size:14px}.exam-table td small{margin-top:3px;color:var(--text-tertiary);font-size:12px}.muted-cell{color:var(--text-secondary);font-size:13px}.status-pill{display:inline-flex;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:600}.status-pill.published{color:#099b61;background:#e9f8f1}.status-pill.draft{color:#64748b;background:#f1f5f9}.status-pill.ended{color:#7443d5;background:#f1ebfd}.row-actions{display:flex;flex-wrap:wrap;align-items:center;gap:2px;white-space:normal}.row-actions button{padding:5px 7px;border:0;background:transparent;font-size:13px;white-space:nowrap}.text-action{color:var(--primary)}.publish-action{color:#ef8b10}.row-actions button:hover{background:var(--primary-light)}
 .pagination-bar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;padding:14px 18px;border-top:1px solid var(--border);color:var(--text-secondary);font-size:13px}.pagination{display:flex;gap:6px}.pagination button{width:34px;height:34px;padding:0}.pagination button.active{border-color:var(--primary);color:#fff;background:var(--primary)}.pagination-bar>select{justify-self:end;width:105px}.loading-list{display:grid;gap:1px;background:var(--border)}.loading-list .skeleton{height:68px;border-radius:0}.empty-state{display:grid;place-items:center;gap:8px}.empty-state strong{color:var(--ink)}.empty-state p{margin:0}
-.modal-backdrop{position:fixed;z-index:40;inset:0 0 0 var(--modal-left,0);display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.3)}.create-panel{width:min(560px,calc(100% - 32px));max-height:calc(100vh - 48px);overflow:auto;padding:24px;border:1px solid var(--border);border-radius:14px;background:#fff;box-shadow:var(--shadow-xl)}.create-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}.create-heading strong{font-size:19px}.create-close{width:32px;height:32px;padding:0;border:0;background:transparent}.course-picker{width:100%;justify-content:space-between;min-height:42px;text-align:left}.placeholder{color:var(--text-tertiary)}.create-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}.manual-row{display:flex;gap:10px}.manual-confirm{flex:none}.course-list{display:grid;gap:7px;max-height:250px;margin-top:14px;overflow:auto}.course-item{justify-content:flex-start;text-align:left}.course-item.active{border-color:var(--primary);color:var(--primary);background:var(--primary-light)}.empty-tip{text-align:center;color:var(--text-secondary)}
-@media(max-width:1200px){.metric-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{grid-template-columns:1fr 1fr}}@media(max-width:720px){.exam-page{gap:16px}.page-head{align-items:stretch;flex-direction:column}.page-head h1{font-size:26px}.metric-grid{grid-template-columns:1fr 1fr;gap:10px}.metric-card{min-height:88px;padding:14px;gap:12px}.metric-icon{width:44px;height:44px}.metric-card strong{font-size:22px}.filter-bar{grid-template-columns:1fr;padding:12px}.pagination-bar{grid-template-columns:1fr auto}.pagination{grid-column:1/-1;grid-row:1;justify-content:center}.pagination-bar>select{justify-self:end}.grid-2{grid-template-columns:1fr}}
+@media(max-width:1200px){.metric-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{grid-template-columns:1fr 1fr}}@media(max-width:720px){.exam-page{gap:16px}.page-head{align-items:stretch;flex-direction:column}.page-head h1{font-size:26px}.metric-grid{grid-template-columns:1fr 1fr;gap:10px}.metric-card{min-height:88px;padding:14px;gap:12px}.metric-icon{width:44px;height:44px}.metric-card strong{font-size:22px}.filter-bar{grid-template-columns:1fr;padding:12px}.pagination-bar{grid-template-columns:1fr auto}.pagination{grid-column:1/-1;grid-row:1;justify-content:center}.pagination-bar>select{justify-self:end}}
 @container (max-width:1050px){.filter-bar{grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,.7fr))}.exam-table th:nth-child(1){width:27%}.exam-table th:nth-child(2){width:23%}.exam-table th:nth-child(3){width:14%}.exam-table th:nth-child(5){width:12%}.exam-table th:nth-child(8){width:24%}.exam-table th:nth-child(4),.exam-table td:nth-child(4),.exam-table th:nth-child(6),.exam-table td:nth-child(6),.exam-table th:nth-child(7),.exam-table td:nth-child(7){display:none}.exam-table td:last-child{padding-left:8px;padding-right:8px}.row-actions{gap:0}.row-actions button{padding:4px;font-size:12px}}
 @container (max-width:760px){.filter-bar{grid-template-columns:1fr;padding:12px}.table-scroll{overflow:visible;padding:12px;background:#f8fafc}.exam-table,.exam-table tbody{display:block;width:100%}.exam-table thead{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.exam-table tbody{display:grid;gap:12px}.exam-table tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:hidden;border:1px solid var(--border);border-radius:10px;background:var(--surface)}.exam-table td,.exam-table td:nth-child(4),.exam-table td:nth-child(6),.exam-table td:nth-child(7){display:flex;width:auto;height:auto;min-height:58px;padding:10px 12px;flex-direction:column;justify-content:center;gap:5px;border-bottom:1px solid var(--border);overflow:visible;white-space:normal}.exam-table td::before{content:attr(data-label);color:var(--text-tertiary);font-size:11px;font-weight:500}.exam-table td:nth-child(1),.exam-table td:nth-child(2),.exam-table td:nth-child(8){grid-column:1/-1}.exam-table td:nth-child(7),.exam-table td:nth-last-child(-n+2){border-bottom:0}.exam-table td strong,.exam-table td small{overflow:visible;white-space:normal}.exam-table .row-actions{display:flex;flex-direction:row;align-items:center;justify-content:flex-end;gap:6px}.exam-table .row-actions::before{margin-right:auto}.row-actions button{padding:6px 8px}}
 </style>

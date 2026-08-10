@@ -231,7 +231,7 @@ describe('考试管理页 ExamManageView', () => {
     expect(examsAPI.create).toHaveBeenCalledWith(expect.objectContaining({ course_id: 50005 }))
   })
 
-  it('未填课程时提交不携带 course_id（保持原有容错行为）', async () => {
+  it('未选课程时确定按钮禁用，无法提交', async () => {
     coursesAPI.list.mockResolvedValue({ data: { items: courses } })
     examsAPI.create.mockResolvedValue({})
     const wrapper = await mountPage()
@@ -239,9 +239,9 @@ describe('考试管理页 ExamManageView', () => {
     await openCreateForm(wrapper)
 
     await wrapper.find('input[placeholder="输入考试名称"]').setValue('无课程考试')
-    await submitCreate(wrapper)
-
+    const confirmButton = wrapper.find('.create-form button.btn-primary')
+    expect(confirmButton.attributes('disabled')).toBeDefined()
+    await confirmButton.trigger('click')
     expect(examsAPI.create).not.toHaveBeenCalled()
-    expect(showToastMock).toHaveBeenCalledWith('请选择课程', 'error')
   })
 })

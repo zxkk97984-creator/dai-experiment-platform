@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
+import ExamAnswerGroups from '../../components/teacher/exam/ExamAnswerGroups.vue'
 import { examsAPI } from '../../api/exams.js'
 import { useAppStore } from '../../stores/app.js'
 import { formatDateTime } from '../../utils/format.js'
@@ -12,41 +13,12 @@ const router = useRouter()
 const app = useAppStore()
 const loading = ref(true)
 const payload = ref({ exam: {}, student: {}, submission: {}, analysis: {}, answers: [] })
-const expanded = ref(new Set())
-
-const typeMeta = {
-  single_choice: { label: '单选题', order: 1 },
-  multi_choice: { label: '多选题', order: 2 },
-  code: { label: '编程题', order: 3 },
-}
-const groups = computed(() => Object.entries(payload.value.answers.reduce((acc, answer) => {
-  ;(acc[answer.question_type] ||= []).push(answer)
-  return acc
-}, {})).map(([type, answers]) => ({
-  type,
-  label: typeMeta[type]?.label || '其他题型',
-  answers,
-  score: answers.reduce((sum, answer) => sum + Number(answer.score || 0), 0),
-  total: answers.reduce((sum, answer) => sum + Number(answer.points || 0), 0),
-  order: typeMeta[type]?.order || 9,
-})).sort((a, b) => a.order - b.order))
 const totalScore = computed(() => Number(payload.value.submission.score || 0))
 const totalPossible = computed(() => payload.value.answers.reduce((sum, answer) => sum + Number(answer.points || 0), 0) || 100)
 const scorePercent = computed(() => Math.min(100, Math.round(totalScore.value * 100 / totalPossible.value)))
 const accuracy = computed(() => payload.value.analysis.question_count ? Math.round(payload.value.analysis.correct_count * 100 / payload.value.analysis.question_count) : 0)
 const rankPercent = computed(() => Math.min(99, Math.max(1, scorePercent.value)))
 
-function answerState(answer) {
-  if (answer.score == null) return { label: '待评分', tone: 'pending' }
-  if (Number(answer.score) >= Number(answer.points)) return { label: '正确', tone: 'correct' }
-  if (Number(answer.score) <= 0) return { label: '错误', tone: 'wrong' }
-  return { label: '部分正确', tone: 'partial' }
-}
-function toggle(id) {
-  const next = new Set(expanded.value)
-  next.has(id) ? next.delete(id) : next.add(id)
-  expanded.value = next
-}
 function printReport() { window.print() }
 async function load() {
   loading.value = true
@@ -76,7 +48,7 @@ onMounted(load)
       </section>
 
       <section class="content-grid">
-        <article class="question-panel"><h2>题目得分明细</h2><div v-if="!groups.length" class="empty-state">暂无答题明细</div><section v-for="(group, groupIndex) in groups" :key="group.type" class="question-group"><header><strong>{{ ['一','二','三','四'][groupIndex] || groupIndex + 1 }}、{{ group.label }}（共{{ group.answers.length }}题，{{ group.total }}分）</strong><span>得分：{{ group.score }} / {{ group.total }}</span></header><div v-for="answer in group.answers" :key="answer.id" class="question-row" :class="{ expanded: expanded.has(answer.id) }"><button @click="toggle(answer.id)"><span class="question-number">{{ answer.order_index + 1 }}</span><span class="question-prompt">{{ answer.prompt }}</span><strong>{{ answer.score ?? '—' }} / {{ answer.points }}</strong><span class="answer-state" :class="answerState(answer).tone">{{ answerState(answer).label }}</span><AppIcon :name="expanded.has(answer.id) ? 'chevron-up' : 'chevron-down'" :size="17" /></button><div v-if="expanded.has(answer.id)" class="answer-detail"><div v-if="answer.question_type === 'code'"><small>学生代码</small><pre>{{ answer.code_answer || '未作答' }}</pre></div><p v-else><small>学生答案</small>{{ answer.selected_options?.join('、') || '未作答' }}</p><p v-if="answer.system_error" class="error-note">评分异常：{{ answer.system_error }}</p></div></div></section></article>
+        <article class="question-panel"><h2>题目得分明细</h2><ExamAnswerGroups :answers="payload.answers" /></article>
 
         <aside class="analysis-column"><article class="analysis-card"><h2>成绩分析</h2><div class="analysis-grid"><span><i class="analysis-icon blue"><AppIcon name="clipboard" :size="20" /></i><small>客观题得分</small><strong>{{ payload.analysis.objective_score }} <em>/ {{ payload.analysis.objective_total }}</em></strong></span><span><i class="analysis-icon green"><AppIcon name="code" :size="20" /></i><small>编程题得分</small><strong>{{ payload.analysis.code_score }} <em>/ {{ payload.analysis.code_total }}</em></strong></span><span><i class="analysis-icon purple"><AppIcon name="pie" :size="20" /></i><small>正确率</small><strong>{{ accuracy }}%</strong></span><span><i class="analysis-icon slate"><AppIcon name="clock" :size="20" /></i><small>用时</small><strong>{{ payload.submission.elapsed_minutes ?? '—' }} <em>分钟</em></strong></span><span><i class="analysis-icon purple"><AppIcon name="user" :size="20" /></i><small>成绩水平</small><strong>{{ scorePercent >= 90 ? '优秀' : scorePercent >= 60 ? '合格' : '待提升' }}</strong></span><span><i class="analysis-icon blue"><AppIcon name="trophy" :size="20" /></i><small>超过参考</small><strong>{{ rankPercent }}%</strong></span></div></article>
 

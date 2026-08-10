@@ -6,6 +6,7 @@ import { useAppStore } from '../../stores/app.js'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
 import SubmissionSnapshotCell from '../../components/teacher/SubmissionSnapshotCell.vue'
+import SubmissionReviewPanel from '../../components/teacher/SubmissionReviewPanel.vue'
 import { formatDateTime } from '../../utils/format.js'
 
 const route = useRoute()
@@ -15,8 +16,6 @@ const app = useAppStore()
 const submission = ref(null)
 const loading = ref(true)
 const loadError = ref(false)
-const reviewScore = ref('')
-const reviewFeedback = ref('')
 const saving = ref(false)
 const showEmptyCells = ref(false)
 
@@ -56,8 +55,6 @@ async function load() {
   try {
     const res = await experimentsAPI.getSubmission(route.params.id)
     submission.value = res.data
-    reviewScore.value = res.data.score != null ? String(res.data.score) : ''
-    reviewFeedback.value = res.data.feedback || ''
   } catch {
     loadError.value = true
     app.showToast('加载提交详情失败', 'error')
@@ -66,11 +63,7 @@ async function load() {
   }
 }
 
-async function submitReview() {
-  const rawScore = String(reviewScore.value).trim()
-  const feedback = reviewFeedback.value.trim()
-  const score = rawScore === '' ? null : Number(rawScore)
-
+async function submitReview({ score, feedback }) {
   if (score != null && (!Number.isFinite(score) || score < 0 || score > 100)) {
     app.showToast('评分必须在 0-100 之间', 'error')
     return
@@ -176,58 +169,7 @@ onMounted(load)
             </footer>
           </section>
 
-          <aside class="review-panel" aria-label="评分工作台">
-            <header class="panel-head">
-              <div>
-                <h2>评分工作台</h2>
-                <p>评分保存后将同步给学生</p>
-              </div>
-            </header>
-
-            <div class="current-status">
-              <span>当前状态</span>
-              <span class="status-pill" :class="isGraded ? 'graded' : 'pending'">{{ isGraded ? '已评分' : '待评分' }}</span>
-            </div>
-
-            <div class="score-row">
-              <label for="review-score">得分</label>
-              <div class="score-input">
-                <input
-                  id="review-score"
-                  v-model="reviewScore"
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.5"
-                  inputmode="decimal"
-                  placeholder="—"
-                />
-                <span>/ 100</span>
-              </div>
-            </div>
-
-            <label class="feedback-field" for="review-feedback">
-              <span>教师反馈</span>
-              <textarea
-                id="review-feedback"
-                v-model="reviewFeedback"
-                rows="8"
-                maxlength="500"
-                placeholder="请输入对学生提交内容的评价与建议…"
-              ></textarea>
-              <small>{{ reviewFeedback.length }} / 500</small>
-            </label>
-
-            <div v-if="submission.reviewed_at" class="reviewed-time">
-              <AppIcon name="clock" :size="15" />
-              上次保存于 {{ formatDateTime(submission.reviewed_at) }}
-            </div>
-
-            <button type="button" class="save-button" :disabled="saving" @click="submitReview">
-              <AppIcon name="check" :size="17" />
-              {{ saving ? '保存中…' : '保存评分' }}
-            </button>
-          </aside>
+          <SubmissionReviewPanel :submission="submission" :saving="saving" @submit="submitReview" />
         </div>
       </template>
     </div>
