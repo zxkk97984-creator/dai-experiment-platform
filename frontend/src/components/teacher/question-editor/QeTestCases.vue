@@ -57,6 +57,8 @@ function nextKey() { return `k${++keySeq}` }
 
 function stripMeta(row) {
   const { _key, _editingArgs, ...rest } = row
+  void _key
+  void _editingArgs
   return rest
 }
 
@@ -97,7 +99,7 @@ function parsePytest(code, fn) {
         const argsStr = am[1].trim()
         const expStr = am[2].trim()
         // 简单参数才解析（含嵌套结构则跳过该行，保留给 pytest 模式）
-        if (!argsStr || /[\[{"']/.test(argsStr)) continue
+        if (!argsStr || /[[{"']/.test(argsStr)) continue
         const args = argsStr.split(',').map((x) => x.trim()).map(parseCellValue)
         rows.push({ args, expected: parseCellValue(expStr), desc: '', _key: nextKey() })
       }

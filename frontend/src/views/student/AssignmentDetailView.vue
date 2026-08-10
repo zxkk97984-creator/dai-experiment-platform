@@ -89,9 +89,6 @@ const envAllowedText = computed(() => {
 const submitDiagnostic = computed(() => submitResult.value?.diagnostic || null)
 const testDiagnostic = computed(() => testResult.value?.diagnostic || null)
 
-let pollTimer = null
-let pollCount = 0
-
 onMounted(async () => {
   const results = await Promise.allSettled([
     assignmentsAPI.get(route.params.id),

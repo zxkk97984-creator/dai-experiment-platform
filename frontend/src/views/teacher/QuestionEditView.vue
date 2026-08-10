@@ -399,11 +399,6 @@ function formatSavedAt(d) {
  return `${d.getMonth() + 1}月${d.getDate()}日 ${hh}:${mm}`
 }
 
-// 底部 fixed 操作栏：跟随左侧导航折叠状态（与 AppLayout 的 main-area 一致）
-const bottomBarStyle = computed(() => ({
- left: app.sidebarCollapsed ? 'var(--sidebar-collapsed-width)' : 'var(--sidebar-width)',
-}))
-
 onMounted(() => { fetch(); fetchEnv() })
 </script>
 

@@ -451,7 +451,7 @@ async function loadHistory() {
     const { studioAPI } = await import('../../api/studio.js')
     const res = await studioAPI.getVersions(props.templateId)
     history.value = res.data || []
-  } catch { }
+  } catch { /* 历史加载失败不阻塞查看 */ }
   showHistory.value = true
 }
 

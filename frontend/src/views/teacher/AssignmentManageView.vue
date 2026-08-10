@@ -8,7 +8,6 @@ import { coursesAPI } from '../../api/courses.js'
 import EnvironmentProfilePicker from '../../components/common/EnvironmentProfilePicker.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import { useAppStore } from '../../stores/app.js'
-import { statusBadge, PUBLISH_STATUS_MAP } from '../../utils/status.js'
 import { formatDateTime } from '../../utils/format.js'
 import { useClientPagination } from '../../composables/useClientPagination.js'
 

@@ -66,7 +66,7 @@ function courseTitleOf(courseMap, courseId) {
 }
 
 /** 作业 → 任务视图模型 */
-export function normalizeAssignmentTask(item, courseMap, now) {
+export function normalizeAssignmentTask(item, courseMap, _now) {
   const id = item?.id ?? null
   return {
     kind: 'assignment',
@@ -81,7 +81,7 @@ export function normalizeAssignmentTask(item, courseMap, now) {
 }
 
 /** 考试 → 任务视图模型（以结束时间为截止） */
-export function normalizeExamTask(item, courseMap, now) {
+export function normalizeExamTask(item, courseMap, _now) {
   const id = item?.id ?? null
   return {
     kind: 'exam',
@@ -97,7 +97,7 @@ export function normalizeExamTask(item, courseMap, now) {
 }
 
 /** 实验记录 → 任务视图模型（无截止日期，路由指向实验页面） */
-export function normalizeExperimentTask(item, courseMap, now) {
+export function normalizeExperimentTask(item, courseMap, _now) {
   const id = item?.id ?? null
   const targetId = item?.lesson_id ?? item?.module_id ?? id
   return {

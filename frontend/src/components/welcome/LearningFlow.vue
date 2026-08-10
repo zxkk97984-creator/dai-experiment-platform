@@ -1,7 +1,5 @@
 <script setup>
-import { computed } from 'vue'
-
-const props = defineProps({
+defineProps({
   steps: {
     type: Array,
     required: true,
@@ -12,7 +10,6 @@ const props = defineProps({
   },
 })
 
-const totalSteps = computed(() => props.steps.length)
 </script>
 
 <template>
@@ -46,7 +43,7 @@ const totalSteps = computed(() => props.steps.length)
         </div>
 
         <div
-          v-for="(step, idx) in steps"
+          v-for="step in steps"
           :key="step.n"
           class="loop-node"
           role="listitem"

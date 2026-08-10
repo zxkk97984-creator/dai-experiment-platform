@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { heroContent, navLinks, learningSteps } from './welcome/welcomeContent.js'
+import { navLinks, learningSteps } from './welcome/welcomeContent.js'
 import WelcomeHero from '../components/welcome/WelcomeHero.vue'
 import CapabilityShowcase from '../components/welcome/CapabilityShowcase.vue'
 import LearningFlow from '../components/welcome/LearningFlow.vue'

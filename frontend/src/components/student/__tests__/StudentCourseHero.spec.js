@@ -1,5 +1,5 @@
 // StudentCourseHero：164–168px 白卡；面包屑 + 课程身份 + 元数据 + 进度 + CTA
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'

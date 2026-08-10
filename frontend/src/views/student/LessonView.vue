@@ -105,7 +105,7 @@ async function fetchVideoPlayback(id) {
     if (lesson.value && String(lesson.value.id) === String(id)) {
       videoPlaybackUrl.value = res.data.url
     }
-  } catch (err) {
+  } catch {
     if (lesson.value && String(lesson.value.id) === String(id)) {
       videoError.value = '视频加载失败，请重试'
     }
@@ -312,7 +312,7 @@ onBeforeUnmount(() => {
 })
 
 // 路由参数变化时重新查找
-watch([lessonId, courseId], async ([newLid, newCid], [oldLid, oldCid]) => {
+watch([lessonId, courseId], async ([, newCid], [, oldCid]) => {
   if (newCid !== oldCid || chapters.value.length === 0) {
     await fetchData()
   } else {

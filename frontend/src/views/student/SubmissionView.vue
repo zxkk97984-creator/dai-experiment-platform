@@ -4,12 +4,10 @@ import { useRoute } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import StudentAIGradingResult from '../../components/ai/StudentAIGradingResult.vue'
 import { judgeAPI } from '../../api/judge.js'
-import { useAppStore } from '../../stores/app.js'
 import { statusBadge, JUDGE_STATUS_MAP } from '../../utils/status.js'
 import { formatDateTime } from '../../utils/format.js'
 
 const route = useRoute()
-const app = useAppStore()
 const submission = ref(null)
 const polling = ref(true)
 let timer = null

@@ -3,7 +3,7 @@
 // 问候 → 全宽续学面板 → 四摘要卡 → 左列(待办任务|最新反馈) → 右列(学习概览|公告|我的课程)
 // 全部数据来自 dashboardAPI.student() 与本地真实进度，零 mock、零样例数字。
 
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import AppLayout from '../../components/layout/AppLayout.vue'

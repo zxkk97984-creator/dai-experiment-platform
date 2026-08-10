@@ -578,6 +578,7 @@ async function saveSettings() {
     // 封面由上传组件独立提交，即使误入 settings 也在此显式排除，
     // 避免保存普通设置时覆盖已上传的封面
     const { cover: _ignoredCover, ...payload } = settings.value
+    void _ignoredCover
     payload.start_time = payload.start_time ? payload.start_time.slice(0, 16) : null
     payload.default_score =
       payload.default_score === '' || payload.default_score == null

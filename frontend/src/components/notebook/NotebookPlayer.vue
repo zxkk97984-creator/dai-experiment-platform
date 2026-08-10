@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from 'vue-router'
 import MarkdownCell from './MarkdownCell.vue'
 import CodeCell from './CodeCell.vue'
@@ -46,7 +46,7 @@ onMounted(async () => {
     }
     // 加载提交历史
     await store.loadSubmissions()
-  } catch (e) {
+  } catch {
     loadError.value = store.error || { code: 'LOAD_FAILED', message: '加载笔记本失败' }
   } finally {
     loading.value = false

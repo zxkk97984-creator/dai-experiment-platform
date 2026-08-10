@@ -1,6 +1,6 @@
 /** SubmissionReviewPanel 评分工作台组件契约测试：回填、提交载荷与 saving 状态 */
 import { describe, it, expect } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import SubmissionReviewPanel from '../SubmissionReviewPanel.vue'
 
 function makeSubmission(overrides = {}) {

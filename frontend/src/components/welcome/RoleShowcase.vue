@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { roles } from '../../views/welcome/welcomeContent.js'
 
 const activeScene = ref(null)
+defineEmits(['login'])
 </script>
 
 <template>

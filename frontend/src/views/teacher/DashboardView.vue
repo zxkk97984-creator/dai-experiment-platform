@@ -37,8 +37,6 @@ const timeFmt = new Intl.DateTimeFormat('zh-CN', {
   minute: '2-digit',
 })
 
-const urgencyText = { urgent: '紧急', soon: '即将', normal: '常规' }
-
 async function loadDashboard() {
   loading.value = true
   error.value = false

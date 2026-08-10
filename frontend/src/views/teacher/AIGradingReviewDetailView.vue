@@ -24,7 +24,7 @@ const gradeId = route.params.id
 const detail = ref(null)
 const loading = ref(true)
 const error = ref('')
-const retrying = ref(false)
+
 const submitting = ref(false)
 const activeLine = ref(null)
 const codeViewerRef = ref(null)
@@ -128,19 +128,6 @@ async function handleOverride(payload) {
     error.value = e.response?.data?.detail?.message || e.message || '覆盖失败'
   } finally {
     submitting.value = false
-  }
-}
-
-async function doRetry() {
-  retrying.value = true
-  error.value = ''
-  try {
-    await aiGradingAPI.retryGrade(gradeId)
-    await fetchDetail()
-  } catch (e) {
-    error.value = e.response?.data?.detail?.message || e.message || '重试失败'
-  } finally {
-    retrying.value = false
   }
 }
 

@@ -2,11 +2,11 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { heroContent, codeLines, codeOutput } from '../../views/welcome/welcomeContent.js'
 
-const props = defineProps({
+defineProps({
   isVisible: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['explore', 'login'])
+defineEmits(['explore', 'login'])
 
 const revealedLines = ref(0)
 const showOutput = ref(false)

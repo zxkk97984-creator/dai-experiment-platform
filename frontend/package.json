@@ -9,6 +9,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "lint": "eslint src e2e",
+    "lint:fix": "eslint src e2e --fix",
+    "check": "npm run lint && npm test && npm run build",
     "e2e": "npx playwright test",
     "e2e:ui": "npx playwright test --ui"
   },
@@ -30,9 +33,13 @@
     "vue-router": "^4.5.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.55.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "@vue/test-utils": "^2.4.11",
+    "eslint": "^10.8.1",
+    "eslint-plugin-vue": "^10.10.0",
+    "globals": "^17.9.0",
     "jsdom": "^29.1.1",
     "vite": "^6.0.5",
     "vitest": "^4.1.10"

@@ -49,7 +49,7 @@ describe('CourseIdentity', () => {
 
   it('图标 tile 为浅色表面而非 emoji', () => {
     const wrapper = mount(CourseIdentity, { props: { title: 'Python 编程基础' } })
-    expect(wrapper.text()).not.toMatch(/[📚📗📘📙]/)
+    expect(wrapper.text()).not.toMatch(/[📚📗📘📙]/u)
     expect(wrapper.find('.course-identity__icon').exists()).toBe(true)
   })
 })
