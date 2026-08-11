@@ -19,6 +19,9 @@ import clock from '@iconify-icons/ri/time-line'
 import check from '@iconify-icons/ri/check-line'
 import close from '@iconify-icons/ri/close-line'
 import warning from '@iconify-icons/ri/alert-line'
+import info from '@iconify-icons/ri/information-line'
+import image from '@iconify-icons/ri/image-line'
+import upload from '@iconify-icons/ri/upload-2-line'
 import arrowRight from '@iconify-icons/ri/arrow-right-line'
 import chevronRight from '@iconify-icons/ri/arrow-right-s-line'
 import chevronDown from '@iconify-icons/ri/arrow-down-s-line'
@@ -43,6 +46,7 @@ import trash from '@iconify-icons/ri/delete-bin-line'
 import back from '@iconify-icons/ri/arrow-left-line'
 import video from '@iconify-icons/ri/video-line'
 import send from '@iconify-icons/ri/send-plane-line'
+import save from '@iconify-icons/ri/save-3-line'
 import draft from '@iconify-icons/ri/draft-line'
 import trophy from '@iconify-icons/ri/trophy-line'
 import pie from '@iconify-icons/ri/pie-chart-line'
@@ -66,6 +70,9 @@ const ICONS = {
   check: { data: check, set: 'ri' },
   close: { data: close, set: 'ri' },
   warning: { data: warning, set: 'ri' },
+  info: { data: info, set: 'ri' },
+  image: { data: image, set: 'ri' },
+  upload: { data: upload, set: 'ri' },
   'arrow-right': { data: arrowRight, set: 'ri' },
   'chevron-right': { data: chevronRight, set: 'ri' },
   'chevron-down': { data: chevronDown, set: 'ri' },
@@ -89,6 +96,7 @@ const ICONS = {
   back: { data: back, set: 'ri' },
   video: { data: video, set: 'ri' },
   send: { data: send, set: 'ri' },
+  save: { data: save, set: 'ri' },
   draft: { data: draft, set: 'ri' },
   trophy: { data: trophy, set: 'ri' },
   pie: { data: pie, set: 'ri' },

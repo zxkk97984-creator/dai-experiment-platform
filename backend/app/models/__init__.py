@@ -135,7 +135,7 @@ class Course(TimestampMixin, Base):
     # ── 课程设置 ──────────────────────────────────────────────
     cover: Mapped[str | None] = mapped_column(String(500), nullable=True)
     start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    visibility: Mapped[str] = mapped_column(String(20), default="private", server_default="private", nullable=False)
+    visibility: Mapped[str] = mapped_column(String(20), default="class", server_default="class", nullable=False)
     default_score: Mapped[float] = mapped_column(Float, default=100.0, server_default="100")
 
     teacher: Mapped[User | None] = relationship()

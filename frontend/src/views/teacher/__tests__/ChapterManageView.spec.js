@@ -129,6 +129,35 @@ describe('课程管理页 ChapterManageView', () => {
     expect(coursesAPI.getChapters).toHaveBeenCalledWith('1')
   })
 
+  it('课程管理页提供保存和发布操作，发布成功后更新课程状态', async () => {
+    const draftCourse = {
+      ...courseData,
+      status: 'draft',
+      description: '课程简介',
+      cover: 'covers/course.png',
+      start_time: '2026-09-01T08:00:00',
+      visibility: 'class',
+      default_score: 100,
+      academic_term_id: 1,
+      teaching_classes: [{ id: 10, name: 'Python 程序设计 1 班' }],
+    }
+    coursesAPI.get.mockResolvedValue({ data: draftCourse })
+    coursesAPI.getChapters.mockResolvedValue({ data: [] })
+    coursesAPI.update.mockResolvedValue({ data: { ...draftCourse, status: 'published' } })
+
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    expect(wrapper.findAll('.overview-actions button').map((button) => button.text())).toEqual([
+      '保存草稿', '课程设置', '新增章节', '发布课程',
+    ])
+    await wrapper.findAll('.overview-actions button').find((button) => button.text() === '发布课程').trigger('click')
+    await flushPromises()
+
+    expect(coursesAPI.update).toHaveBeenCalledWith('1', { status: 'published' })
+    expect(wrapper.text()).toContain('已发布')
+  })
+
   it('已发布与草稿课时显示对应状态标签，且不重复', async () => {
     coursesAPI.get.mockResolvedValue({ data: courseData })
     coursesAPI.getChapters.mockResolvedValue({
@@ -622,7 +651,7 @@ describe('添加课时两步弹窗', () => {
   })
 })
 
-// ── 课程可见范围设置（private / public / whitelist） ──
+// ── 课程可见范围设置（private / class / whitelist） ──
 describe('课程可见范围设置', () => {
   async function mountWithSettings(visibility = 'private') {
     coursesAPI.get.mockResolvedValue({
@@ -642,10 +671,10 @@ describe('课程可见范围设置', () => {
 
   const visSelect = (wrapper) => wrapper.get('[data-testid="visibility-select"]')
 
-  it('可见范围 select 提供 private / public / whitelist 三个选项', async () => {
+  it('可见范围 select 提供 private / class / whitelist 三个选项', async () => {
     const wrapper = await mountWithSettings()
     const options = visSelect(wrapper).findAll('option').map((o) => o.attributes('value'))
-    expect(options).toEqual(['private', 'public', 'whitelist'])
+    expect(options).toEqual(['private', 'class', 'whitelist'])
   })
 
   it('选择 whitelist 显示白名单管理组件，并接收正确 courseId', async () => {
@@ -659,7 +688,7 @@ describe('课程可见范围设置', () => {
     expect(usersAPI.listStudents).toHaveBeenCalled()
   })
 
-  it('选择 private / public 时隐藏白名单管理组件', async () => {
+  it('选择 private / class 时隐藏白名单管理组件', async () => {
     const wrapper = await mountWithSettings()
     await visSelect(wrapper).setValue('whitelist')
     await flushPromises()
@@ -667,7 +696,7 @@ describe('课程可见范围设置', () => {
     await visSelect(wrapper).setValue('private')
     await flushPromises()
     expect(wrapper.find('.whitelist-manager').exists()).toBe(false)
-    await visSelect(wrapper).setValue('public')
+    await visSelect(wrapper).setValue('class')
     await flushPromises()
     expect(wrapper.find('.whitelist-manager').exists()).toBe(false)
   })
@@ -691,7 +720,7 @@ describe('课程可见范围设置', () => {
 
   it('关闭再打开设置抽屉时保留可见范围选择（不丢失未保存修改）', async () => {
     const wrapper = await mountWithSettings()
-    await visSelect(wrapper).setValue('public')
+    await visSelect(wrapper).setValue('class')
     await wrapper.find('.panel-header .icon-button').trigger('click')
     await flushPromises()
     expect(wrapper.find('.side-panel').exists()).toBe(false)
@@ -699,7 +728,7 @@ describe('课程可见范围设置', () => {
     const openSettingsButton = wrapper.findAll('button').find((b) => b.text().includes('课程设置'))
     await openSettingsButton.trigger('click')
     await flushPromises()
-    expect(visSelect(wrapper).element.value).toBe('public')
+    expect(visSelect(wrapper).element.value).toBe('class')
     expect(wrapper.find('.whitelist-manager').exists()).toBe(false)
   })
 })

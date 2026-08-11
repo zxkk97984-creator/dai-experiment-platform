@@ -42,7 +42,7 @@ def test_create_course_defaults_backward_compatible(client, db_session_factory):
     course = _create_course(client, token)
     assert course["cover"] is None
     assert course["start_time"] is None
-    assert course["visibility"] == "private"
+    assert course["visibility"] == "class"
     assert course["default_score"] == 100.0
 
 
@@ -55,7 +55,7 @@ def test_get_course_returns_settings(client, db_session_factory):
     data = resp.json()
     assert data["cover"] is None
     assert data["start_time"] is None
-    assert data["visibility"] == "private"
+    assert data["visibility"] == "class"
     assert data["default_score"] == 100.0
 
 
@@ -83,7 +83,7 @@ def test_update_course_partial_settings(client, db_session_factory):
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["cover"] == "new.png"
-    assert resp.json()["visibility"] == "private"
+    assert resp.json()["visibility"] == "class"
     assert resp.json()["default_score"] == 100.0
 
     resp = client.patch(
@@ -97,7 +97,7 @@ def test_update_course_partial_settings(client, db_session_factory):
     assert data["default_score"] == 150
     # 未传字段保持不变
     assert data["cover"] == "new.png"
-    assert data["visibility"] == "private"
+    assert data["visibility"] == "class"
 
 
 def test_update_course_clears_optional_fields(client, db_session_factory):
@@ -129,9 +129,9 @@ def test_update_course_rejects_null_settings(client, db_session_factory):
 
 
 def test_create_course_accepts_all_visibilities(client, db_session_factory):
-    """可见范围枚举：private / public / whitelist 三种值均可创建"""
+    """可见范围枚举：private / class / whitelist 三种值均可创建，public 仅保留兼容"""
     token = _teacher_token(client, db_session_factory)
-    for vis in ("private", "public", "whitelist"):
+    for vis in ("private", "class", "whitelist", "public"):
         resp = client.post(
             "/api/v1/courses",
             headers=auth_header(token),

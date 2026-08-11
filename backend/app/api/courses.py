@@ -72,6 +72,20 @@ def is_student_enrolled(course_id: int, student_id: int, db: Session) -> bool:
     )
 
 
+def is_student_manually_enrolled(course_id: int, student_id: int, db: Session) -> bool:
+    """学生是否由教师手动加入课程且当前仍为有效选课状态。"""
+    return bool(
+        db.scalar(
+            select(CourseEnrollment.id).where(
+                CourseEnrollment.course_id == course_id,
+                CourseEnrollment.student_id == student_id,
+                CourseEnrollment.status == "enrolled",
+                CourseEnrollment.origin == "manual",
+            )
+        )
+    )
+
+
 def has_enrollment_record(course_id: int, student_id: int, db: Session) -> bool:
     """是否存在任意状态的 enrollment 记录（含 dropped）"""
     return bool(
@@ -96,12 +110,30 @@ def is_student_whitelisted(course_id: int, student_id: int, db: Session) -> bool
     )
 
 
+def is_student_in_course_class(course_id: int, student_id: int, db: Session) -> bool:
+    """学生是否属于课程绑定的任一有效教学班"""
+    return bool(
+        db.scalar(
+            select(TeachingClassStudent.id)
+            .join(
+                CourseTeachingClass,
+                CourseTeachingClass.teaching_class_id == TeachingClassStudent.teaching_class_id,
+            )
+            .where(
+                CourseTeachingClass.course_id == course_id,
+                TeachingClassStudent.student_id == student_id,
+                TeachingClassStudent.status == "active",
+            )
+        )
+    )
+
+
 def can_view_course(course: Course, user: User, db: Session) -> bool:
     """课程可见性：能否发现课程、读取课程元数据。
 
     - admin：任意课程
     - teacher：仅自己的课程
-    - student：published + public / 白名单成员 / 存量已选（private）
+    - student：published + 教学班成员或教师手动加入 / 白名单成员 / 存量已选（private）
     - 其他角色（developer 等）：fail closed
     """
     if user.role == "admin":
@@ -113,7 +145,13 @@ def can_view_course(course: Course, user: User, db: Session) -> bool:
     if course.status != "published":
         return False
     if course.visibility == "public":
+        # 兼容迁移前的旧值：旧 public 仍按公开课程处理，迁移后新课程使用 class。
         return True
+    if course.visibility == "class":
+        return (
+            is_student_in_course_class(course.id, user.id, db)
+            or is_student_manually_enrolled(course.id, user.id, db)
+        )
     if course.visibility == "whitelist":
         return is_student_whitelisted(course.id, user.id, db)
     if course.visibility == "private":
@@ -183,7 +221,7 @@ def list_courses(
     count_query = select(func.count()).select_from(Course)
     access_filters = []
     if current_user.role == "student":
-        # 可见范围：public 全部；whitelist 需白名单关联；private 需存量有效选课
+        # 可见范围：class 接受绑定教学班成员或教师手动加入；whitelist 需白名单关联；private 需存量有效选课。
         whitelist_exists = (
             select(CourseWhitelistStudent.id)
             .where(
@@ -201,10 +239,34 @@ def list_courses(
             )
             .exists()
         )
+        manual_enrollment_exists = (
+            select(CourseEnrollment.id)
+            .where(
+                CourseEnrollment.course_id == Course.id,
+                CourseEnrollment.student_id == current_user.id,
+                CourseEnrollment.status == "enrolled",
+                CourseEnrollment.origin == "manual",
+            )
+            .exists()
+        )
+        class_member_exists = (
+            select(TeachingClassStudent.id)
+            .join(
+                CourseTeachingClass,
+                CourseTeachingClass.teaching_class_id == TeachingClassStudent.teaching_class_id,
+            )
+            .where(
+                CourseTeachingClass.course_id == Course.id,
+                TeachingClassStudent.student_id == current_user.id,
+                TeachingClassStudent.status == "active",
+            )
+            .exists()
+        )
         student_predicate = and_(
             Course.status == "published",
             or_(
                 Course.visibility == "public",
+                and_(Course.visibility == "class", or_(class_member_exists, manual_enrollment_exists)),
                 and_(Course.visibility == "whitelist", whitelist_exists),
                 and_(Course.visibility == "private", enrolled_exists),
             ),
@@ -275,7 +337,7 @@ def _course_student_flags(courses, current_user: User, db: Session):
         is_enrolled = enrollment is not None
         if is_enrolled:
             can_enroll = False
-        elif course.visibility == "public":
+        elif course.visibility in ("class", "public"):
             can_enroll = True
         elif course.visibility == "whitelist":
             # 能出现在学生结果中的 whitelist 课程即白名单成员
@@ -309,6 +371,29 @@ def _set_course_classes(db: Session, course: Course, class_ids: list[int]) -> No
 def _ensure_course_term_writable(course: Course) -> None:
     if course.academic_term is not None and course.academic_term.status == "closed":
         raise api_error(409, "ACADEMIC_TERM_CLOSED", "已关闭学期的课程只读")
+
+
+def _ensure_course_publishable(course: Course) -> None:
+    """课程从草稿发布前，必须具备完整的课程基本信息。"""
+    missing = []
+    if not (course.title or "").strip():
+        missing.append("课程名称")
+    if not (course.description or "").strip():
+        missing.append("课程简介")
+    if course.academic_term_id is None:
+        missing.append("所属学期")
+    if not course.teaching_class_links:
+        missing.append("教学班")
+    if not (course.cover or "").strip():
+        missing.append("课程封面")
+    if course.start_time is None:
+        missing.append("开课时间")
+    if not (course.visibility or "").strip():
+        missing.append("课程可见范围")
+    if course.default_score is None:
+        missing.append("默认评分")
+    if missing:
+        raise api_error(422, "COURSE_INCOMPLETE", f"发布前请完善：{'、'.join(missing)}")
 
 
 @router.post("/courses", response_model=CourseRead, status_code=status.HTTP_201_CREATED)
@@ -351,7 +436,10 @@ def get_course(course_id: int, db: Session = Depends(get_db), current_user: User
     can_enroll = False
     if current_user.role == "student":
         is_enrolled = is_student_enrolled(course.id, current_user.id, db)
-        can_enroll = not is_enrolled and course.visibility in ("public", "whitelist")
+        can_enroll = not is_enrolled and (
+            course.visibility in ("public", "whitelist")
+            or (course.visibility == "class" and is_student_in_course_class(course.id, current_user.id, db))
+        )
     origin = None
     if current_user.role == "student" and is_enrolled:
         enrollment = db.scalar(select(CourseEnrollment).where(CourseEnrollment.course_id == course.id, CourseEnrollment.student_id == current_user.id))
@@ -375,6 +463,7 @@ def update_course(
     ensure_course_manager(course, current_user)
     _ensure_course_term_writable(course)
     updates = payload.model_dump(exclude_unset=True)
+    publishing = updates.get("status") == "published" and course.status != "published"
     class_ids = updates.pop("teaching_class_ids", None)
     if "academic_term_id" in updates and updates["academic_term_id"] is not None:
         term = db.get(AcademicTerm, updates["academic_term_id"])
@@ -389,6 +478,8 @@ def update_course(
     elif "academic_term_id" in updates and course.teaching_class_links:
         if any(link.teaching_class.academic_term_id != course.academic_term_id for link in course.teaching_class_links):
             raise api_error(422, "TEACHING_CLASS_TERM_MISMATCH", "更换学期时必须同时重新选择教学班")
+    if publishing:
+        _ensure_course_publishable(course)
     db.commit()
     db.refresh(course)
     return get_course(course.id, db, current_user)
@@ -422,6 +513,9 @@ def enroll_course(
     )
     if course.visibility == "public":
         pass  # 所有学生可选
+    elif course.visibility == "class":
+        if not is_student_in_course_class(course.id, current_user.id, db):
+            raise api_error(403, "COURSE_NOT_VISIBLE", "只有课程教学班学生可以选修该课程")
     elif course.visibility == "whitelist":
         if not is_student_whitelisted(course.id, current_user.id, db):
             raise api_error(403, "COURSE_NOT_VISIBLE", "没有权限选修该课程")

@@ -12,8 +12,11 @@ import { usersAPI } from '../../api/users.js'
 import { useAppStore } from '../../stores/app.js'
 
 const props = defineProps({
-  courseId: { type: [String, Number], required: true },
+  courseId: { type: [String, Number], default: null },
+  modelValue: { type: Array, default: () => [] },
 })
+
+const emit = defineEmits(['update:modelValue'])
 
 const app = useAppStore()
 
@@ -34,7 +37,14 @@ const removing = ref(false)
 
 let debounceTimer = null
 
-const hasMore = computed(() => entries.value.length < total.value)
+const hasMore = computed(() => !isDraftMode.value && entries.value.length < total.value)
+const isDraftMode = computed(() => !props.courseId)
+const visibleEntries = computed(() => (
+  isDraftMode.value
+    ? props.modelValue.map((student) => ({ student }))
+    : entries.value
+))
+const visibleTotal = computed(() => (isDraftMode.value ? props.modelValue.length : total.value))
 
 async function loadWhitelist(reset = true) {
   if (reset) {
@@ -89,11 +99,15 @@ function onSearchInput() {
 }
 
 function isAdded(studentId) {
-  return entries.value.some((entry) => entry.student.id === studentId)
+  return visibleEntries.value.some((entry) => entry.student.id === studentId)
 }
 
 async function addStudent(student) {
   if (mutationIds.value.has(student.id)) return
+  if (isDraftMode.value) {
+    if (!isAdded(student.id)) emit('update:modelValue', [...props.modelValue, student])
+    return
+  }
   mutationIds.value.add(student.id)
   try {
     await coursesAPI.addWhitelistStudent(props.courseId, student.id)
@@ -113,8 +127,13 @@ function askRemove(entry) {
 
 async function confirmRemove() {
   if (!removeTarget.value) return
-  removing.value = true
   const studentId = removeTarget.value.student.id
+  if (isDraftMode.value) {
+    emit('update:modelValue', props.modelValue.filter((student) => student.id !== studentId))
+    removeTarget.value = null
+    return
+  }
+  removing.value = true
   try {
     await coursesAPI.removeWhitelistStudent(props.courseId, studentId)
     app.showToast('已移出白名单', 'success')
@@ -128,7 +147,8 @@ async function confirmRemove() {
 }
 
 onMounted(() => {
-  loadWhitelist()
+  if (!isDraftMode.value) loadWhitelist()
+  else loading.value = false
   searchStudents()
 })
 
@@ -139,21 +159,21 @@ onBeforeUnmount(() => clearTimeout(debounceTimer))
   <section class="whitelist-manager" aria-label="可见学生白名单">
     <div class="wl-heading">
       <h3>可见学生白名单</h3>
-      <span class="wl-count">{{ total }} 名学生</span>
+      <span class="wl-count">{{ visibleTotal }} 名学生</span>
     </div>
     <p class="wl-tip">
       <AppIcon name="info" :size="14" />
-      名单修改即时生效；可见范围本身需点击下方“保存设置”后生效。
+      {{ isDraftMode ? '所选学生将在课程创建成功后加入白名单。' : '名单修改即时生效；可见范围本身需点击下方“保存设置”后生效。' }}
     </p>
 
     <!-- 已加入列表 -->
     <div v-if="loading" class="wl-loading">正在加载名单…</div>
     <template v-else>
-      <div v-if="entries.length === 0" class="wl-empty">
+      <div v-if="visibleEntries.length === 0" class="wl-empty">
         当前未添加学生，保存为白名单后将没有学生可以看到该课程。
       </div>
-      <ul v-else class="wl-list">
-        <li v-for="entry in entries" :key="entry.student.id" class="wl-item">
+      <ul v-else class="wl-list wl-selected-list">
+        <li v-for="entry in visibleEntries" :key="entry.student.id" class="wl-item">
           <div class="wl-item-info">
             <span class="wl-name">{{ entry.student.real_name || entry.student.username }}</span>
             <span class="wl-username">{{ entry.student.username }}</span>

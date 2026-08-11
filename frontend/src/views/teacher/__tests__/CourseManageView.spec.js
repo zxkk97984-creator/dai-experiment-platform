@@ -52,7 +52,13 @@ async function mountPage() {
   const mod = await import('../CourseManageView.vue')
   return mount(mod.default, {
     global: {
-      stubs: { AppLayout: { template: '<div><slot /></div>' } },
+      stubs: {
+        AppLayout: { template: '<div><slot /></div>' },
+        CourseCreateModal: {
+          emits: ['created'],
+          template: '<div data-testid="course-create-modal"><button type="button" @click="$emit(\'created\', { id: 13 })">创建完成</button></div>',
+        },
+      },
     },
   })
 }
@@ -111,18 +117,21 @@ describe('课程管理页 CourseManageView', () => {
     expect(wrapper.text()).toContain('暂无符合条件的课程')
   })
 
-  it('创建课程成功后刷新列表', async () => {
-    coursesAPI.create.mockResolvedValue({ data: { id: 99 } })
+  it('点击创建课程后打开创建弹窗', async () => {
     const wrapper = await mountPage()
     await flushPromises()
 
     await wrapper.get('button.btn-primary').trigger('click')
-    await wrapper.get('input[placeholder="输入课程名称"]').setValue('数据结构')
-    await wrapper.get('textarea[placeholder="输入课程简介"]').setValue('数据结构与算法')
-    await wrapper.findAll('button.btn-primary').find((b) => b.text().includes('确认创建')).trigger('click')
+    expect(wrapper.find('[data-testid="course-create-modal"]').exists()).toBe(true)
+  })
+
+  it('课程创建成功后进入课程设置页', async () => {
+    const wrapper = await mountPage()
     await flushPromises()
 
-    expect(coursesAPI.create).toHaveBeenCalledWith({ title: '数据结构', description: '数据结构与算法', academic_term_id: null })
-    expect(coursesAPI.list).toHaveBeenCalledTimes(2)
+    await wrapper.get('button.btn-primary').trigger('click')
+    await wrapper.get('[data-testid="course-create-modal"] button').trigger('click')
+
+    expect(pushMock).toHaveBeenCalledWith('/teacher/courses/13/manage')
   })
 })

@@ -5,13 +5,16 @@ import { marked } from 'marked'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
 import CourseCoverUploader from '../../components/teacher/CourseCoverUploader.vue'
+import CourseFormModal from '../../components/teacher/CourseFormModal.vue'
 import CourseWhitelistManager from '../../components/teacher/CourseWhitelistManager.vue'
 import CourseRosterManager from '../../components/teacher/CourseRosterManager.vue'
+import TeachingClassMultiSelect from '../../components/teacher/TeachingClassMultiSelect.vue'
 import { coursesAPI } from '../../api/courses.js'
 import { academicsAPI } from '../../api/academics.js'
 import { studioAPI } from '../../api/studio.js'
 import EnvironmentProfilePicker from '../../components/common/EnvironmentProfilePicker.vue'
 import { useAppStore } from '../../stores/app.js'
+import { getCoursePublishMissingFields } from '../../utils/coursePublish.js'
 import { sanitizeHtml } from '../../utils/sanitize.js'
 
 const route = useRoute()
@@ -79,8 +82,10 @@ const savingSettings = ref(false)
 const settings = ref({})
 const academicTerms = ref([])
 const teachingClasses = ref([])
+const publishMissingFields = ref([])
 // 封面上传/移除期间禁用保存按钮，避免与普通设置提交互相覆盖
 const coverBusy = ref(false)
+const publishingCourse = ref(false)
 
 const courseId = computed(() => route.params.courseId || route.params.id)
 const rolePrefix = computed(() => route.path?.startsWith('/admin') ? '/admin' : '/teacher')
@@ -90,6 +95,7 @@ const availableClasses = computed(() => teachingClasses.value.filter((item) => N
 const courseStatusLabel = computed(
   () => ({ published: '已发布', draft: '草稿', archived: '已归档' })[course.value?.status] || '待发布',
 )
+const canPublishCourse = computed(() => course.value?.status === 'draft')
 const stats = computed(() => [
   { value: chapters.value.length, label: '章节' },
   { value: lessons.value.length, label: '课时' },
@@ -113,7 +119,7 @@ async function loadPage() {
       status: course.value.status || 'draft',
       // datetime-local 只需 YYYY-MM-DDTHH:mm，截掉秒与时区
       start_time: (course.value.start_time || '').slice(0, 16),
-      visibility: course.value.visibility || 'private',
+      visibility: course.value.visibility || 'class',
       default_score: course.value.default_score ?? 100,
       academic_term_id: course.value.academic_term_id ?? null,
       teaching_class_ids: (course.value.teaching_classes || []).map((item) => item.id),
@@ -592,6 +598,19 @@ async function saveSettings() {
       payload.default_score === '' || payload.default_score == null
         ? 100
         : Number(payload.default_score)
+    if (payload.status === 'published' && course.value?.status !== 'published') {
+      publishMissingFields.value = getCoursePublishMissingFields({
+        ...course.value,
+        ...payload,
+        cover: course.value?.cover,
+        teaching_classes: (payload.teaching_class_ids || []).map((id) => ({ id })),
+      })
+      if (publishMissingFields.value.length) {
+        app.showToast(`发布前请完善：${publishMissingFields.value.join('、')}`, 'error')
+        savingSettings.value = false
+        return
+      }
+    }
     const res = await coursesAPI.update(courseId.value, payload)
     // 以 API 响应更新课程，接收规范化字段（含 visibility）
     course.value = res.data
@@ -602,11 +621,40 @@ async function saveSettings() {
       default_score: res.data.default_score ?? payload.default_score,
     }
     settingsOpen.value = false
+    publishMissingFields.value = []
     app.showToast('课程设置已保存', 'success')
-  } catch {
-    app.showToast('课程设置保存失败', 'error')
+  } catch (err) {
+    app.showToast(err.response?.data?.detail?.message || '课程设置保存失败', 'error')
   } finally {
     savingSettings.value = false
+  }
+}
+
+function openCourseSettings() {
+  publishMissingFields.value = []
+  settingsOpen.value = true
+}
+
+async function publishCourse() {
+  if (!course.value || publishingCourse.value || !canPublishCourse.value) return
+  const missing = getCoursePublishMissingFields(course.value)
+  if (missing.length) {
+    publishMissingFields.value = missing
+    settingsOpen.value = true
+    app.showToast(`发布前请完善：${missing.join('、')}`, 'error')
+    return
+  }
+
+  publishingCourse.value = true
+  try {
+    const res = await coursesAPI.update(courseId.value, { status: 'published' })
+    course.value = res.data
+    settings.value = { ...settings.value, status: 'published' }
+    app.showToast('课程已发布', 'success')
+  } catch (err) {
+    app.showToast(err.response?.data?.detail?.message || '课程发布失败', 'error')
+  } finally {
+    publishingCourse.value = false
   }
 }
 
@@ -644,11 +692,23 @@ onBeforeUnmount(() => {
           <p class="subtitle">管理章节、课时、讲义与实验内容</p>
         </div>
         <div class="overview-actions">
-          <button class="button button-secondary" type="button" @click="settingsOpen = true">
+          <button class="button button-secondary" type="button" @click="openCourseSettings">
+            <AppIcon name="save" :size="16" /> 保存草稿
+          </button>
+          <button class="button button-secondary" type="button" @click="openCourseSettings">
             <AppIcon name="settings" :size="16" /> 课程设置
           </button>
-          <button class="button button-primary" type="button" @click="chapterDialog = true">
-            <AppIcon name="plus" :size="16" /> 添加章节
+          <button class="button button-outline-primary" type="button" @click="chapterDialog = true">
+            <AppIcon name="plus" :size="16" /> 新增章节
+          </button>
+          <button
+            class="button button-primary"
+            type="button"
+            :disabled="!canPublishCourse || publishingCourse"
+            @click="publishCourse"
+          >
+            <AppIcon name="send" :size="16" />
+            {{ publishingCourse ? '发布中…' : course?.status === 'published' ? '已发布' : '发布课程' }}
           </button>
         </div>
       </section>
@@ -818,101 +878,114 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- 课程设置抽屉 -->
-    <div v-if="settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false">
-      <form class="side-panel" @submit.prevent="saveSettings">
-        <div class="panel-header">
-          <div>
-            <p class="panel-eyebrow">课程设置</p>
-            <h2>课程信息</h2>
+    <CourseFormModal
+      v-if="settingsOpen"
+      title="编辑课程"
+      description="完善课程基本信息、教学班与可见范围。"
+      title-id="course-settings-title"
+      :busy="savingSettings || coverBusy"
+      panel-class="side-panel course-settings-panel"
+      body-class="course-settings-body"
+      actions-class="form-actions"
+      @close="settingsOpen = false"
+      @submit="saveSettings"
+    >
+        <div class="course-settings-content">
+          <label>
+            课程名称
+            <input v-model="settings.title" />
+          </label>
+          <label>
+            课程简介
+            <textarea v-model="settings.description" rows="4"></textarea>
+          </label>
+          <label>
+            课程状态
+            <select v-model="settings.status">
+              <option value="draft">草稿</option>
+              <option value="published">已发布</option>
+              <option value="archived">已归档</option>
+            </select>
+          </label>
+          <div v-if="publishMissingFields.length" class="publish-requirements" role="alert">
+            <strong>发布前还需完善</strong>
+            <span>{{ publishMissingFields.join('、') }}</span>
           </div>
-          <button class="icon-button" type="button" aria-label="关闭" @click="settingsOpen = false">
-            <AppIcon name="close" :size="18" />
-          </button>
-        </div>
-        <label>
-          课程名称
-          <input v-model="settings.title" />
-        </label>
-        <label>
-          课程简介
-          <textarea v-model="settings.description" rows="4"></textarea>
-        </label>
-        <label>
-          课程状态
-          <select v-model="settings.status">
-            <option value="draft">草稿</option>
-            <option value="published">已发布</option>
-            <option value="archived">已归档</option>
-          </select>
-        </label>
-        <div class="settings-grid">
-          <label>
-            所属学期
-            <select v-model="settings.academic_term_id" @change="settings.teaching_class_ids = []">
-              <option :value="null">未设置学期</option>
-              <option v-for="term in academicTerms" :key="term.id" :value="term.id" :disabled="term.status === 'closed'">{{ term.name }}</option>
-            </select>
-          </label>
-          <label>
+          <div class="settings-grid">
+            <label>
+              所属学期
+              <select v-model="settings.academic_term_id" @change="settings.teaching_class_ids = []">
+                <option :value="null">未设置学期</option>
+                <option v-for="term in academicTerms" :key="term.id" :value="term.id" :disabled="term.status === 'closed'">{{ term.name }}</option>
+              </select>
+            </label>
+            <label>
+              开课时间
+              <input v-model="settings.start_time" type="datetime-local" />
+            </label>
+          </div>
+          <label class="settings-field-full">
             教学班（可多选）
-            <select v-model="settings.teaching_class_ids" multiple size="4" :disabled="!settings.academic_term_id">
-              <option v-for="item in availableClasses" :key="item.id" :value="item.id">{{ item.name }}（{{ item.student_count }} 人）</option>
-            </select>
+            <TeachingClassMultiSelect
+              v-model="settings.teaching_class_ids"
+              :options="availableClasses"
+              :disabled="savingSettings || coverBusy || !settings.academic_term_id"
+              placeholder="请选择教学班"
+              empty-text="该学期暂无教学班"
+              loading-text="正在加载教学班…"
+              test-id="course-settings-teaching-classes"
+            />
+            <small class="settings-field-hint">点击下拉栏后可搜索并勾选多个教学班</small>
           </label>
+          <CourseCoverUploader
+            v-if="course"
+            :course-id="courseId"
+            :course="course"
+            @updated="handleCoverUpdated"
+            @busy-change="coverBusy = $event"
+          />
+          <div class="settings-grid">
+            <label>
+              课程可见范围
+              <select v-model="settings.visibility" data-testid="visibility-select">
+                <option value="private">仅自己可见</option>
+                <option value="class">教学班可见</option>
+                <option value="whitelist">指定学生可见</option>
+              </select>
+            </label>
+            <label>
+              默认评分设置
+              <input v-model.number="settings.default_score" type="number" placeholder="100" min="0" />
+            </label>
+          </div>
+          <div
+            v-if="settings.visibility === 'private'"
+            class="settings-note"
+          >
+            仅教师及存量已选学生访问，学生无法自行发现或选课。
+          </div>
+          <div
+            v-else-if="settings.visibility === 'class'"
+            class="settings-note"
+          >
+            只有绑定教学班的学生可发现并选课，学生名单会随教学班自动同步。
+          </div>
+          <div v-else class="settings-note">
+            只有指定学生可发现并选课；切换离开本范围不会删除已有名单。
+          </div>
+          <CourseWhitelistManager
+            v-if="settings.visibility === 'whitelist'"
+            :course-id="courseId"
+          />
+          <CourseRosterManager :course-id="courseId" @changed="loadPage" />
         </div>
-        <CourseCoverUploader
-          v-if="course"
-          :course-id="courseId"
-          :course="course"
-          @updated="handleCoverUpdated"
-          @busy-change="coverBusy = $event"
-        />
-        <div class="settings-grid">
-          <label>
-            开课时间
-            <input v-model="settings.start_time" type="datetime-local" />
-          </label>
-          <label>
-            课程可见范围
-            <select v-model="settings.visibility" data-testid="visibility-select">
-              <option value="private">仅自己可见</option>
-              <option value="public">公开浏览</option>
-              <option value="whitelist">指定学生可见</option>
-            </select>
-          </label>
-          <label>
-            默认评分设置
-            <input v-model.number="settings.default_score" type="number" placeholder="100" min="0" />
-          </label>
-        </div>
-        <div
-          v-if="settings.visibility === 'private'"
-          class="settings-note"
-        >
-          仅教师及存量已选学生访问，学生无法自行发现或选课。
-        </div>
-        <div
-          v-else-if="settings.visibility === 'public'"
-          class="settings-note"
-        >
-          所有学生可发现并选课。
-        </div>
-        <div v-else class="settings-note">
-          只有指定学生可发现并选课；切换离开本范围不会删除已有名单。
-        </div>
-        <CourseWhitelistManager
-          v-if="settings.visibility === 'whitelist'"
-          :course-id="courseId"
-        />
-        <CourseRosterManager :course-id="courseId" @changed="loadPage" />
-        <div class="form-actions">
+        <template #actions>
           <button class="button button-secondary" type="button" @click="settingsOpen = false">取消</button>
           <button class="button button-primary" type="submit" :disabled="savingSettings || coverBusy">
             {{ savingSettings ? '保存中…' : '保存设置' }}
           </button>
-        </div>
-      </form>
-    </div>
+        </template>
+    </CourseFormModal>
 
     <!-- 添加课时两步弹窗 -->
     <div v-if="createWizard" class="modal-backdrop create-backdrop" @click.self="createWizard = null">
@@ -1187,7 +1260,9 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 .button-primary { color: #fff; background: var(--primary); border-color: var(--primary); }
-.button-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+.button-primary:hover { background: var(--primary-dark); border-color: var(--primary-dark); }
+.button-outline-primary { color: var(--primary); background: #fff; border-color: var(--primary); }
+.button-outline-primary:hover { color: var(--primary-dark); background: var(--primary-light); border-color: var(--primary-dark); }
 .button-secondary { color: var(--text-secondary); background: #fff; border-color: var(--border); }
 .button-secondary:hover { color: var(--text-primary); background: #fff; border-color: #cbd5e1; }
 .button-danger { color: #fff; background: #dc2626; border-color: #dc2626; }
@@ -1576,7 +1651,7 @@ onBeforeUnmount(() => {
 }
 .panel-header h2 { margin: 0; font-size: 22px; line-height: 1.3; color: var(--text-primary); overflow-wrap: anywhere; }
 .panel-eyebrow { margin: 0 0 4px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
-.side-panel label {
+.course-settings-content label {
   display: grid;
   gap: 6px;
   margin-bottom: 16px;
@@ -1584,13 +1659,27 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-weight: 600;
 }
-.side-panel input,
-.side-panel textarea,
-.side-panel select {
+.course-settings-content input,
+.course-settings-content textarea,
+.course-settings-content select {
   width: 100%;
   border-radius: 8px;
 }
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.settings-field-full { width: 100%; min-width: 0; }
+.settings-field-hint { color: var(--text-tertiary); font-size: 12px; font-weight: 400; }
+.publish-requirements {
+  display: grid;
+  gap: 4px;
+  margin: -4px 0 16px;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff1f2;
+  color: #b42318;
+  font-size: 12px;
+  line-height: 1.5;
+}
 .settings-note {
   margin: 4px 0 0;
   padding: 10px 12px;
@@ -1678,8 +1767,8 @@ onBeforeUnmount(() => {
 @media (max-width: 899px) {
   .catalog-page { padding: 24px 16px 40px; }
   .course-overview { align-items: flex-start; flex-direction: column; }
-  .overview-actions { width: 100%; }
-  .overview-actions .button { flex: 1; }
+  .overview-actions { width: 100%; flex-wrap: wrap; }
+  .overview-actions .button { flex: 1 1 auto; }
   .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
   .chapter-header {
@@ -1714,7 +1803,6 @@ onBeforeUnmount(() => {
   .course-overview h1 { font-size: 26px; }
   .stats-grid { gap: 8px; }
   .stat-card { padding: 14px; }
-  .side-panel { padding: 20px; }
   .settings-grid { grid-template-columns: 1fr; }
   .preview-body { padding: 16px; }
 }

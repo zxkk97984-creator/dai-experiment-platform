@@ -70,7 +70,8 @@ class StatusUpdate(BaseModel):
     status: str
 
 
-CourseVisibility = Literal["private", "public", "whitelist"]
+# class 为新的“教学班可见”；public 仅作为旧数据/旧客户端兼容值保留。
+CourseVisibility = Literal["private", "class", "whitelist", "public"]
 
 
 class AcademicTermCreate(BaseModel):
@@ -138,7 +139,7 @@ class CourseCreate(BaseModel):
     status: str = "draft"
     cover: str | None = None
     start_time: datetime | None = None
-    visibility: CourseVisibility = "private"  # 可见范围：仅自己 / 公开 / 指定学生
+    visibility: CourseVisibility = "class"  # 可见范围：仅自己 / 教学班 / 指定学生
     default_score: float = 100.0  # 默认评分（满分制）
     academic_term_id: int | None = None
     teaching_class_ids: list[int] = Field(default_factory=list)
@@ -178,7 +179,7 @@ class CourseRead(BaseModel):
     teacher_id: int | None = None
     cover: str | None = None
     start_time: datetime | None = None
-    visibility: CourseVisibility = "private"
+    visibility: CourseVisibility = "class"
     default_score: float = 100.0
     academic_term_id: int | None = None
     academic_term: AcademicTermRead | None = None

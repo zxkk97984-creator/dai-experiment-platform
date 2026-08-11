@@ -1,7 +1,12 @@
 """课程可见范围：三种 visibility / 白名单管理 / 学生候选 / 权限隔离回归"""
 from __future__ import annotations
 
+from datetime import date
+
 from conftest import auth_header, create_user, login
+from sqlalchemy import select
+
+from app.models import AcademicTerm, TeachingClass, TeachingClassStudent, User
 
 API = "/api/v1"
 
@@ -42,7 +47,7 @@ def _chapters(client, token, course_id):
 
 def test_create_accepts_all_visibilities(client, db_session_factory):
     token = _token(client, db_session_factory, "t-vis")
-    for vis in ("private", "public", "whitelist"):
+    for vis in ("private", "class", "public", "whitelist"):
         course = _create_course(client, token, title=f"课程-{vis}", visibility=vis)
         assert course["visibility"] == vis
 
@@ -50,7 +55,7 @@ def test_create_accepts_all_visibilities(client, db_session_factory):
 def test_update_accepts_all_visibilities(client, db_session_factory):
     token = _token(client, db_session_factory, "t-upd")
     course_id = _create_course(client, token)["id"]
-    for vis in ("private", "public", "whitelist"):
+    for vis in ("private", "class", "public", "whitelist"):
         resp = client.patch(
             f"{API}/courses/{course_id}", headers=auth_header(token), json={"visibility": vis}
         )
@@ -81,10 +86,98 @@ def test_visibility_null_rejected(client, db_session_factory):
     assert resp.status_code == 422, resp.text
 
 
-def test_create_defaults_to_private(client, db_session_factory):
+def test_create_defaults_to_class_visibility(client, db_session_factory):
     token = _token(client, db_session_factory, "t-def")
-    course = _create_course(client, token)
-    assert course["visibility"] == "private"
+    resp = client.post(
+        f"{API}/courses",
+        headers=auth_header(token),
+        json={"title": "默认教学班可见课程"},
+    )
+    assert resp.status_code == 201, resp.text
+    course = resp.json()
+    assert course["visibility"] == "class"
+
+
+def test_class_visibility_allows_class_members_and_teacher_added_students(client, db_session_factory):
+    teacher_token = _token(client, db_session_factory, "t-class-scope")
+    member_token = _token(client, db_session_factory, "stu-class-member", "student")
+    outsider_token = _token(client, db_session_factory, "stu-class-outsider", "student")
+
+    with db_session_factory() as db:
+        member = db.scalar(select(User).where(User.username == "stu-class-member"))
+        term = AcademicTerm(
+            code="term-class-scope",
+            name="教学班可见测试学期",
+            start_date=date(2026, 9, 1),
+            end_date=date(2027, 1, 31),
+            status="active",
+        )
+        teaching_class = TeachingClass(
+            academic_term=term,
+            code="CLASS-SCOPE-1",
+            name="教学班可见测试班",
+            status="active",
+        )
+        db.add_all([term, teaching_class])
+        db.flush()
+        db.add(TeachingClassStudent(teaching_class_id=teaching_class.id, student_id=member.id, status="active"))
+        db.commit()
+        term_id = term.id
+        class_id = teaching_class.id
+
+    course = _create_course(
+        client,
+        teacher_token,
+        title="教学班可见课程",
+        visibility="class",
+        academic_term_id=term_id,
+        teaching_class_ids=[class_id],
+    )
+    course_id = course["id"]
+
+    member_list = client.get(f"{API}/courses", headers=auth_header(member_token))
+    assert member_list.status_code == 200, member_list.text
+    assert any(item["id"] == course_id for item in member_list.json()["items"])
+
+    outsider_list = client.get(f"{API}/courses", headers=auth_header(outsider_token))
+    assert outsider_list.status_code == 200, outsider_list.text
+    assert all(item["id"] != course_id for item in outsider_list.json()["items"])
+
+    member_detail = client.get(f"{API}/courses/{course_id}", headers=auth_header(member_token))
+    assert member_detail.status_code == 200, member_detail.text
+    assert member_detail.json()["is_enrolled"] is True
+
+    outsider_detail = client.get(f"{API}/courses/{course_id}", headers=auth_header(outsider_token))
+    assert outsider_detail.status_code == 403, outsider_detail.text
+    outsider_enroll = client.post(f"{API}/courses/{course_id}/enroll", headers=auth_header(outsider_token))
+    assert outsider_enroll.status_code == 403, outsider_enroll.text
+
+    # 教师可把非本班学生作为例外手动加入；加入后应能发现课程、查看详情和访问课程内容。
+    outsider_id = _student_id(client, outsider_token)
+    manual_add = client.post(
+        f"{API}/courses/{course_id}/students",
+        headers=auth_header(teacher_token),
+        json={"student_id": outsider_id},
+    )
+    assert manual_add.status_code == 201, manual_add.text
+    assert manual_add.json()["enrollment_origin"] == "manual"
+
+    outsider_list = client.get(f"{API}/courses", headers=auth_header(outsider_token))
+    assert any(item["id"] == course_id for item in outsider_list.json()["items"])
+
+    outsider_detail = client.get(f"{API}/courses/{course_id}", headers=auth_header(outsider_token))
+    assert outsider_detail.status_code == 200, outsider_detail.text
+    assert outsider_detail.json()["is_enrolled"] is True
+    assert outsider_detail.json()["enrollment_origin"] == "manual"
+    assert _chapters(client, outsider_token, course_id).status_code == 200
+
+    # 教师移除例外学生后立即撤销访问权限。
+    manual_remove = client.delete(
+        f"{API}/courses/{course_id}/students/{outsider_id}",
+        headers=auth_header(teacher_token),
+    )
+    assert manual_remove.status_code == 204, manual_remove.text
+    assert client.get(f"{API}/courses/{course_id}", headers=auth_header(outsider_token)).status_code == 403
 
 
 # ═══════════════════════════════════════════════════════════════
