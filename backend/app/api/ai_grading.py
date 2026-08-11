@@ -767,7 +767,6 @@ def override_grade(
 
     if data.final_score_100 is not None:
         cg.final_score_100 = data.final_score_100
-        cg.raw_total = data.final_score_100
     else:
         # 教师未指定总分→合并 F+A+R+Q 重算
         merged = merge_scores(f=f_score, a=a_score, r=r_score, q=q_score, cap=cg.score_cap, exam_points=None)

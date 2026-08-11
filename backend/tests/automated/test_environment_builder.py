@@ -117,6 +117,17 @@ def test_build_spec_sorts_packages_stably(db_session_factory, test_settings):
         assert names == ["attrs", "zstd"]  # 按名称稳定排序
 
 
+def test_build_spec_includes_non_empty_kernel_runner_source(db_session_factory, test_settings):
+    """每个环境镜像都必须携带可执行的可信 runner 源码。"""
+    with db_session_factory() as db:
+        prof = _make_profile(db)
+        ver = _make_version(db, prof.id)
+        spec = canonical_build_spec(ver.base_image_ref, prof.slug, ver.version_number, [], test_settings)
+
+    assert spec.kernel_runner_source.strip()
+    assert "BlockingKernelClient" in spec.kernel_runner_source
+
+
 def test_manifest_hash_stable(db_session_factory, test_settings):
     with db_session_factory() as db:
         prof = _make_profile(db)
@@ -152,6 +163,8 @@ def test_dockerfile_rendering_rules(db_session_factory, test_settings):
     assert "/course" in dockerfile and "/work" in dockerfile and "/tmp" in dockerfile
     # 可信 kernel_runner.py 复制
     assert "kernel_runner.py" in dockerfile
+    assert "COPY kernel_runner.py /opt/dai/kernel_runner.py" in dockerfile
+    assert "test -s /opt/dai/kernel_runner.py" in dockerfile
     # 无任意安装命令输入面：不得出现裸 pip install 之外的 argv 注入
     assert "--index-url https://download.pytorch.org/whl/cpu" not in dockerfile  # basic 无 torch
 

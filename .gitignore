@@ -9,6 +9,7 @@ env/
 *.egg
 .pytest_cache/
 .pytest-tmp*/
+.pytest-temp*/
 
 # IDE
 .vscode/
@@ -45,6 +46,7 @@ Thumbs.db
 tmp-*.js
 design-qa.md
 teacher-grading-detail-*.png
+/*-current.jpg
 *.png
 
 # 临时计划文件

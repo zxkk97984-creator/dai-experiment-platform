@@ -52,6 +52,33 @@ def test_runner_argv_has_trusted_script_and_no_student_code():
     assert decoded['code'] == tricky_code
 
 
+def test_environment_session_uses_canonical_runner_path():
+    """绑定环境版本的 Kernel 必须调用环境镜像内的 canonical runner。"""
+    km = KernelManager()
+    session = KernelSession(
+        1,
+        "dai-kernel-rec-1",
+        {"ip": "127.0.0.1"},
+        image_ref="sha256:" + "a" * 64,
+        environment_version_id=2,
+    )
+    session._is_alive = True
+    km._sessions[1] = session
+
+    with patch('redis.from_url'), \
+         patch('subprocess.run') as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout='{"outputs":[]}')
+        km.execute(1, "print(1)")
+
+    exec_calls = [
+        c for c in mock_run.call_args_list
+        if len(c[0][0]) > 4 and c[0][0][0:2] == ["docker", "exec"]
+        and c[0][0][-2] == "python"
+    ]
+    assert len(exec_calls) == 1
+    assert exec_calls[0][0][0][-1] == "/opt/dai/kernel_runner.py"
+
+
 def test_two_executions_use_same_session():
     """连续两次 execute 针对同一 container/session"""
     km = KernelManager()

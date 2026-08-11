@@ -233,6 +233,49 @@ class TestSystemErrorNoScore:
 class TestOverrideScaledScore:
     """教师覆盖→scaled_score 始终按 ExamQuestion.points 重算"""
 
+    def test_override_final_score_preserves_raw_total(self, client, db_session_factory):
+        """教师只改最终分时，原始分仍保持 AI 分项合计"""
+        from conftest import create_user, login, auth_header
+        teacher = create_user(db_session_factory, "orp_t", "teacher")
+        student = create_user(db_session_factory, "orp_s", "student")
+
+        with db_session_factory() as db:
+            from app.models import Course, Exam, ExamQuestion, ExamSubmission, ExamAnswer, CodeGrade, QuestionRubric
+            course = Course(title="ORP", status="published", teacher_id=teacher.id)
+            db.add(course); db.flush()
+            exam = Exam(course_id=course.id, title="ORP exam", status="published", duration_minutes=60)
+            db.add(exam); db.flush()
+            eq = ExamQuestion(exam_id=exam.id, question_type="code", prompt="t",
+                             correct_answer={"test_file":""}, points=20, grading_mode="active")
+            db.add(eq); db.flush()
+            now = datetime.now(timezone.utc)
+            rub = QuestionRubric(exam_question_id=eq.id, version=1, status="locked",
+                                source_hash="orp", source_snapshot={}, rubric_json={},
+                                model_name="m", locked_at=now)
+            db.add(rub); db.flush()
+            es = ExamSubmission(exam_id=exam.id, student_id=student.id, status="grading")
+            db.add(es); db.flush()
+            ea = ExamAnswer(submission_id=es.id, question_id=eq.id, code_answer="x",
+                           grading_status="completed", score=4.8)
+            db.add(ea); db.flush()
+            cg = CodeGrade(exam_answer_id=ea.id, rubric_id=rub.id, mode="active",
+                          status="review_required", functional_score=0, robustness_score=0,
+                          algorithm_score=14, quality_score=10, raw_total=24,
+                          final_score_100=24, scaled_score=4.8)
+            db.add(cg); db.commit()
+            grade_id = cg.id
+
+        tok, _ = login(client, "orp_t")
+        resp = client.post(f"/api/v1/ai-grading/grades/{grade_id}/override",
+                          headers=auth_header(tok),
+                          json={"reason": "调整最终分", "final_score_100": 100})
+        assert resp.status_code == 200, f"覆盖应成功: {resp.status_code} {resp.text}"
+
+        with db_session_factory() as db:
+            cg_check = db.get(CodeGrade, grade_id)
+            assert cg_check.raw_total == 24
+            assert cg_check.final_score_100 == 100
+
     def test_override_final_score_recalculates_scaled(self, client, db_session_factory):
         """传 final_score_100 时 scaled_score 被正确重算"""
         from conftest import create_user, login, auth_header

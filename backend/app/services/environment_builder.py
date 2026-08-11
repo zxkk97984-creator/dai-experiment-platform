@@ -27,7 +27,7 @@ PLATFORM_PYTHON_VERSION = "3.12"
 # pytorch_cpu 官方 CPU wheel index——服务端内置，URL 绝不来自请求
 TORCH_CPU_INDEX_URL = "https://download.pytorch.org/whl/cpu"
 
-_KERNEL_RUNNER_PATH = Path(__file__).resolve().parents[1] / "docker" / "kernel" / "kernel_runner.py"
+_KERNEL_RUNNER_PATH = Path(__file__).resolve().parents[2] / "docker" / "kernel" / "kernel_runner.py"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -105,10 +105,14 @@ class BuildTimeout(BuildFailure):
 def _load_kernel_runner() -> str:
     """可信 kernel_runner.py 内容——构建时复制进镜像，不暴露给教师"""
     try:
-        return _KERNEL_RUNNER_PATH.read_text(encoding="utf-8")
-    except OSError:
-        # 允许测试环境无该文件（部署时随镜像提供）；manifest 哈希相应变化
-        return ""
+        source = _KERNEL_RUNNER_PATH.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(
+            f"kernel_runner.py source is unavailable: {_KERNEL_RUNNER_PATH}"
+        ) from exc
+    if not source.strip():
+        raise RuntimeError(f"kernel_runner.py source is empty: {_KERNEL_RUNNER_PATH}")
+    return source
 
 
 def canonical_build_spec(
@@ -202,6 +206,7 @@ def render_dockerfile(spec: BuildSpec) -> str:
     lines += [
         "# 可信 kernel_runner.py（平台基础设施，不暴露给教师）",
         "COPY kernel_runner.py /opt/dai/kernel_runner.py",
+        "RUN test -s /opt/dai/kernel_runner.py",
         "# 非 root UID 1000 用户与工作目录",
         "RUN useradd --uid 1000 --create-home student \\",
         "    && mkdir -p /course /work /tmp \\",
@@ -435,6 +440,11 @@ def execute_build(
         temp_tag = f"{spec.repository}:build-{spec.profile_slug}-{spec.version_number}-{int(time.time())}"
     dockerfile = dockerfile_text or render_dockerfile(spec)
     runner_text = kernel_runner_text if kernel_runner_text is not None else spec.kernel_runner_source
+    if not runner_text or not runner_text.strip():
+        raise BuildFailure(
+            "kernel_runner.py source is empty; refusing to build environment image",
+            code="KERNEL_RUNNER_MISSING",
+        )
 
     with tempfile.TemporaryDirectory(prefix="dai-env-build-") as tmp:
         context_dir = Path(tmp)

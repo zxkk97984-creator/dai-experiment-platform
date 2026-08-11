@@ -22,7 +22,8 @@ from app.config import Settings, get_settings
 logger = logging.getLogger("kernel_manager")
 
 KERNEL_HARD_TIMEOUT = 30
-RUNNER_PATH = "/.dai/kernel_runner.py"
+RUNNER_PATH = "/opt/dai/kernel_runner.py"
+LEGACY_RUNNER_PATH = "/.dai/kernel_runner.py"
 
 
 class KernelSession:
@@ -36,7 +37,8 @@ class KernelSession:
                  lesson_storage_dir: str = "",
                  initialized_template_version_id: int | None = None,
                  environment_version_id: int | None = None,
-                 image_ref: str | None = None):
+                 image_ref: str | None = None,
+                 runner_path: str | None = None):
         self.record_id = record_id
         self.container_name = container_name
         self.conn_info = conn_info
@@ -44,6 +46,7 @@ class KernelSession:
         self.initialized_template_version_id = initialized_template_version_id
         self.environment_version_id = environment_version_id
         self.image_ref = image_ref
+        self.runner_path = runner_path
         self.last_active_at = time.time()
 
     @property
@@ -77,6 +80,7 @@ class KernelSession:
             "initialized_template_version_id": self.initialized_template_version_id,
             "environment_version_id": self.environment_version_id,
             "image_ref": self.image_ref,
+            "runner_path": self.runner_path,
         }
 
     @classmethod
@@ -89,6 +93,7 @@ class KernelSession:
             initialized_template_version_id=data.get("initialized_template_version_id"),
             environment_version_id=data.get("environment_version_id"),
             image_ref=data.get("image_ref"),
+            runner_path=data.get("runner_path"),
         )
 
 
@@ -301,10 +306,25 @@ class KernelManager:
                 "Kernel 容器 exec 探测未就绪，降级继续 record_id=%d", record_id
             )
 
+        runner_path = LEGACY_RUNNER_PATH
+        if environment_version_id is not None:
+            runner_probe = subprocess.run(
+                ["docker", "exec", container_name, "test", "-s", RUNNER_PATH],
+                capture_output=True, text=True,
+            )
+            if runner_probe.returncode != 0:
+                detail = (runner_probe.stderr or runner_probe.stdout or "runner missing").strip()
+                subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
+                raise RuntimeError(
+                    f"环境镜像缺少可用 Kernel runner {RUNNER_PATH}: {detail}"
+                )
+            runner_path = RUNNER_PATH
+
         session = KernelSession(record_id, container_name, conn_info,
                                 lesson_storage_dir=lesson_storage_dir,
                                 environment_version_id=environment_version_id,
-                                image_ref=image_ref or self.settings.kernel_image)
+                                image_ref=image_ref or self.settings.kernel_image,
+                                runner_path=runner_path)
         try:
             self._write_session_redis(record_id, session)
         except Exception:
@@ -386,9 +406,13 @@ class KernelManager:
 
         try:
             # docker exec 运行 trusted runner，代码通过 stdin JSON 传入
+            runner_path = session.runner_path or (
+                RUNNER_PATH if session.environment_version_id is not None
+                else LEGACY_RUNNER_PATH
+            )
             exec_cmd = [
                 "docker", "exec", "-i", session.container_name,
-                "python", RUNNER_PATH,
+                "python", runner_path,
             ]
             start = time.perf_counter()
             try:

@@ -623,6 +623,7 @@ def test_kernel_create_session_uses_digest_and_env_labels():
             MagicMock(returncode=0, stdout="abc\n"),    # docker run
             MagicMock(returncode=0, stdout="abc\n"),    # docker ps alive
             MagicMock(returncode=0),                    # docker exec 就绪探测
+            MagicMock(returncode=0),                    # runner file probe
         ]
         session = km.create_session(
             1, image_ref=digest, environment_version_id=5, lesson_storage_dir="",
