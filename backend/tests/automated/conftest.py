@@ -7,6 +7,9 @@ from fastapi.testclient import TestClient
 import fakeredis
 
 ROOT = Path(__file__).resolve().parents[2]
+PYTEST_TEMP_ROOT = ROOT / ".pytest-temp-root"
+PYTEST_TEMP_ROOT.mkdir(exist_ok=True)
+os.environ.setdefault("PYTEST_DEBUG_TEMPROOT", str(PYTEST_TEMP_ROOT))
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
