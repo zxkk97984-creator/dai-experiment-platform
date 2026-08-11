@@ -3,6 +3,9 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
+import TeacherMetricGrid from '../../components/teacher/TeacherMetricGrid.vue'
+import TeacherPageHeader from '../../components/teacher/TeacherPageHeader.vue'
+import TeacherPagination from '../../components/teacher/TeacherPagination.vue'
 import { experimentsAPI } from '../../api/experiments.js'
 import { useAppStore } from '../../stores/app.js'
 import { useAuthStore } from '../../stores/auth.js'
@@ -104,21 +107,14 @@ onMounted(fetch)
 
 <template>
   <AppLayout>
-    <div class="page">
+    <div class="page teacher-management-page">
       <!-- ── Page Head ─────────────────────────────────────────────────── -->
-      <header class="page-head">
-        <div>
-          <h1 class="page-title">实验模块管理</h1>
-          <p class="page-sub">创建与维护实验模块，配置 JupyterLab 环境与入口</p>
-        </div>
-        <div class="page-meta">
-          <button class="btn-ghost" @click="goToSubmissions">查看提交</button>
-          <button class="btn-primary" @click="openCreateModal">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-            创建实验
-          </button>
-        </div>
-      </header>
+      <TeacherPageHeader title="实验模块管理" subtitle="创建与维护实验模块，配置 JupyterLab 环境与入口">
+        <template #actions>
+          <button class="btn-ghost teacher-page-action" @click="goToSubmissions"><AppIcon name="clipboard" :size="18" />查看提交</button>
+          <button class="btn-primary teacher-page-action" @click="openCreateModal"><AppIcon name="plus" :size="18" />创建实验</button>
+        </template>
+      </TeacherPageHeader>
 
       <!-- ── Create Modal ──────────────────────────────────────────────── -->
       <div v-if="createOpen" class="modal-backdrop create-backdrop" @click.self="closeCreateModal">
@@ -151,8 +147,8 @@ onMounted(fetch)
         </div>
       </div>
 
-      <section class="metric-grid"><article v-for="item in [{ key: 'total', label: '全部实验', icon: 'experiment', tone: 'blue' }, { key: 'published', label: '已发布', icon: 'send', tone: 'green' }, { key: 'draft', label: '草稿', icon: 'draft', tone: 'orange' }, { key: 'offline', label: '已下架', icon: 'clock', tone: 'purple' }]" :key="item.key" class="metric-card"><span class="metric-icon" :class="item.tone"><AppIcon :name="item.icon" :size="24" /></span><span><small>{{ item.label }}</small><strong>{{ summary[item.key] }}</strong><em>个</em></span></article></section>
-      <section class="data-panel"><div class="filter-bar"><label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索实验名称" @input="resetPage" /></label><select v-model="statusFilter" @change="resetPage"><option value="all">状态：全部</option><option value="published">已发布</option><option value="draft">草稿</option><option value="offline">已下架</option></select><select v-model="entryFilter" @change="resetPage"><option value="all">入口：全部入口</option><option value="jupyter">JupyterLab</option><option value="external">外部入口</option></select><select v-model="sortOrder" @change="resetPage"><option value="updated">排序：最近更新</option><option value="name">排序：实验名称</option></select></div><div v-if="loading" class="loading-list"><span v-for="i in 6" :key="i" class="skeleton"></span></div><div v-else-if="filteredModules.length === 0" class="empty-state"><p>🧪 暂无符合条件的实验</p></div><div v-else class="table-scroll"><table><thead><tr><th>实验名称</th><th>描述</th><th>入口</th><th>状态</th><th>最近更新</th><th>操作</th></tr></thead><tbody><tr v-for="module in pagedItems" :key="module.id"><td class="title-cell">{{ module.name }}</td><td>{{ module.description || '暂无实验描述' }}</td><td><code v-if="module.entry_url" class="entry-code">{{ module.entry_url }}</code><span v-else>JupyterLab</span></td><td><span class="status-pill" :class="moduleStatus(module)">{{ moduleStatus(module) === 'published' ? '已发布' : moduleStatus(module) === 'draft' ? '草稿' : '已下架' }}</span></td><td class="muted-cell">{{ formatDateTime(moduleUpdated(module)) }}</td><td class="actions-cell"><button class="text-action" data-action="edit-module" @click="openEditModal(module)">编辑模块</button><button class="text-action" @click="goToSubmissions">查看提交</button><button class="publish-action" @click="toggleStatus(module)">{{ module.status === 'published' ? '下架' : '发布' }}</button></td></tr></tbody></table></div><footer v-if="!loading && filteredModules.length" class="pagination-bar"><span>共 {{ filteredModules.length }} 条</span><span class="pagination"><button aria-label="上一页" :disabled="page === 1" @click="goToPage(page - 1)">‹</button><button v-for="number in pageCount" :key="number" :aria-label="'第 ' + number + ' 页'" :aria-current="page === number ? 'page' : undefined" :class="{ active: page === number }" @click="goToPage(number)">{{ number }}</button><button aria-label="下一页" :disabled="page === pageCount" @click="goToPage(page + 1)">›</button></span><span>{{ pageSize }} 条/页</span></footer></section>.
+      <TeacherMetricGrid aria-label="实验统计" :items="[{ key: 'total', label: '全部实验', icon: 'experiment', tone: 'blue', value: summary.total, unit: '个' }, { key: 'published', label: '已发布', icon: 'send', tone: 'green', value: summary.published, unit: '个' }, { key: 'draft', label: '草稿', icon: 'draft', tone: 'orange', value: summary.draft, unit: '个' }, { key: 'offline', label: '已下架', icon: 'clock', tone: 'purple', value: summary.offline, unit: '个' }]" />
+      <section class="data-panel"><div class="filter-bar"><label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索实验名称" @input="resetPage" /></label><select v-model="statusFilter" @change="resetPage"><option value="all">状态：全部</option><option value="published">已发布</option><option value="draft">草稿</option><option value="offline">已下架</option></select><select v-model="entryFilter" @change="resetPage"><option value="all">入口：全部入口</option><option value="jupyter">JupyterLab</option><option value="external">外部入口</option></select><select v-model="sortOrder" @change="resetPage"><option value="updated">排序：最近更新</option><option value="name">排序：实验名称</option></select></div><div v-if="loading" class="loading-list"><span v-for="i in 6" :key="i" class="skeleton"></span></div><div v-else-if="filteredModules.length === 0" class="empty-state"><AppIcon name="experiment" :size="32" /><strong>暂无符合条件的实验</strong><p>调整筛选条件，或创建一个新实验。</p></div><div v-else class="table-scroll"><table><thead><tr><th>实验名称</th><th>描述</th><th>入口</th><th>状态</th><th>最近更新</th><th>操作</th></tr></thead><tbody><tr v-for="module in pagedItems" :key="module.id"><td class="title-cell">{{ module.name }}</td><td>{{ module.description || '暂无实验描述' }}</td><td><code v-if="module.entry_url" class="entry-code">{{ module.entry_url }}</code><span v-else>JupyterLab</span></td><td><span class="status-pill" :class="moduleStatus(module)">{{ moduleStatus(module) === 'published' ? '已发布' : moduleStatus(module) === 'draft' ? '草稿' : '已下架' }}</span></td><td class="muted-cell">{{ formatDateTime(moduleUpdated(module)) }}</td><td class="actions-cell"><button class="text-action" data-action="edit-module" @click="openEditModal(module)">编辑模块</button><button class="text-action" @click="goToSubmissions">查看提交</button><button class="publish-action" @click="toggleStatus(module)">{{ module.status === 'published' ? '下架' : '发布' }}</button></td></tr></tbody></table></div><TeacherPagination v-if="!loading" :current-page="page" :page-count="pageCount" :total="filteredModules.length" :page-size="pageSize" aria-label="实验列表分页" @change="goToPage" /></section>
     </div>
   </AppLayout>
 </template>

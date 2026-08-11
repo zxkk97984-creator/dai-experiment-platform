@@ -3,6 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
+import TeacherMetricGrid from '../../components/teacher/TeacherMetricGrid.vue'
+import TeacherPageHeader from '../../components/teacher/TeacherPageHeader.vue'
+import TeacherPagination from '../../components/teacher/TeacherPagination.vue'
 import ExamCreateDialog from '../../components/teacher/exam/ExamCreateDialog.vue'
 import { examsAPI } from '../../api/exams.js'
 import { coursesAPI } from '../../api/courses.js'
@@ -91,23 +94,15 @@ onMounted(() => { fetchExams(); fetchCourses() })
 
 <template>
   <AppLayout>
-    <main class="exam-page">
-      <header class="page-head">
-        <div><h1>考试管理</h1><p>创建考试、配置题目、查看成绩与统计</p></div>
-        <button class="btn-primary create-button" @click="openCreateModal"><AppIcon name="plus" :size="19" />创建考试</button>
-      </header>
+    <main class="exam-page teacher-management-page">
+      <TeacherPageHeader title="考试管理" subtitle="创建考试、配置题目、查看成绩与统计" action-label="创建考试" @action="openCreateModal" />
 
-      <section class="metric-grid" aria-label="考试统计">
-        <article v-for="item in [
-          { key: 'total', label: '全部考试', icon: 'exam', tone: 'blue' },
-          { key: 'published', label: '已发布', icon: 'send', tone: 'green' },
-          { key: 'draft', label: '草稿', icon: 'draft', tone: 'orange' },
-          { key: 'ended', label: '已结束', icon: 'clock', tone: 'purple' },
-        ]" :key="item.key" class="metric-card">
-          <span class="metric-icon" :class="item.tone"><AppIcon :name="item.icon" :size="25" /></span>
-          <span><small>{{ item.label }}</small><strong>{{ summary[item.key] }}</strong></span>
-        </article>
-      </section>
+      <TeacherMetricGrid aria-label="考试统计" :items="[
+        { key: 'total', label: '全部考试', icon: 'exam', tone: 'blue', value: summary.total },
+        { key: 'published', label: '已发布', icon: 'send', tone: 'green', value: summary.published },
+        { key: 'draft', label: '草稿', icon: 'draft', tone: 'orange', value: summary.draft },
+        { key: 'ended', label: '已结束', icon: 'clock', tone: 'purple', value: summary.ended },
+      ]" />
 
       <section class="data-panel">
         <div class="filter-bar">
@@ -139,11 +134,7 @@ onMounted(() => { fetchExams(); fetchCourses() })
           </table>
         </div>
 
-        <footer v-if="!loading && filteredExams.length" class="pagination-bar">
-          <span>共 {{ filteredExams.length }} 条</span>
-          <div class="pagination"><button :disabled="page === 1" @click="page--">‹</button><button v-for="number in pageCount" :key="number" :class="{ active: page === number }" @click="page = number">{{ number }}</button><button :disabled="page === pageCount" @click="page++">›</button></div>
-          <select v-model.number="pageSize" aria-label="每页数量" @change="resetPage"><option :value="10">10 条/页</option><option :value="20">20 条/页</option></select>
-        </footer>
+        <TeacherPagination v-if="!loading" :current-page="page" :page-count="pageCount" :total="filteredExams.length" :page-size="pageSize" aria-label="考试列表分页" @change="page = $event" />
       </section>
     </main>
 
@@ -156,8 +147,8 @@ onMounted(() => { fetchExams(); fetchCourses() })
 .metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px}.metric-card{display:flex;align-items:center;gap:18px;min-height:106px;padding:20px;border:1px solid var(--border);border-radius:12px;background:var(--surface);box-shadow:var(--shadow-card)}.metric-icon{display:grid;place-items:center;width:54px;height:54px;border-radius:15px}.metric-icon.blue{color:var(--primary);background:#edf4ff}.metric-icon.green{color:#10a66a;background:#eaf9f2}.metric-icon.orange{color:#ef8b10;background:#fff4e7}.metric-icon.purple{color:#7c4ce0;background:#f3edff}.metric-card span:last-child{display:grid;gap:3px}.metric-card small{color:var(--text-secondary);font-size:14px}.metric-card strong{color:var(--ink);font-size:26px;line-height:1}
 .data-panel{min-width:0;overflow:hidden;border:1px solid var(--border);border-radius:12px;background:var(--surface);box-shadow:var(--shadow-card)}.filter-bar{display:grid;min-width:0;grid-template-columns:minmax(240px,1.25fr) repeat(3,minmax(150px,.7fr));gap:14px;padding:18px;border-bottom:1px solid var(--border)}.filter-bar select,.search-control{height:44px;min-width:0}.search-control{display:flex;align-items:center;gap:9px;min-width:0;padding:0 13px;border:1px solid var(--border);border-radius:8px;color:var(--text-tertiary);background:#fff}.search-control:focus-within{border-color:var(--primary);box-shadow:var(--shadow-glow-primary)}.search-control input{height:auto;min-width:0;padding:0;border:0;box-shadow:none!important}.filter-bar select{cursor:pointer;color:var(--text-secondary)}
 .table-scroll{min-width:0;overflow-x:hidden}.exam-table{width:100%;min-width:0;table-layout:fixed}.exam-table th{height:44px;padding:0 16px;overflow:hidden;text-transform:none;letter-spacing:0;text-overflow:ellipsis;white-space:nowrap;background:#f8fafc}.exam-table th:nth-child(1){width:22%}.exam-table th:nth-child(2){width:19%}.exam-table th:nth-child(3){width:10%}.exam-table th:nth-child(4){width:9%}.exam-table th:nth-child(5){width:11%}.exam-table th:nth-child(6){width:12%}.exam-table th:nth-child(7){width:15%}.exam-table th:nth-child(8){width:22%}.exam-table td{height:68px;min-width:0;padding:10px 16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.exam-table td:first-child{min-width:0}.exam-table td strong,.exam-table td small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.exam-table td strong{color:var(--ink);font-size:14px}.exam-table td small{margin-top:3px;color:var(--text-tertiary);font-size:12px}.muted-cell{color:var(--text-secondary);font-size:13px}.status-pill{display:inline-flex;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:600}.status-pill.published{color:#099b61;background:#e9f8f1}.status-pill.draft{color:#64748b;background:#f1f5f9}.status-pill.ended{color:#7443d5;background:#f1ebfd}.row-actions{display:flex;flex-wrap:wrap;align-items:center;gap:2px;white-space:normal}.row-actions button{padding:5px 7px;border:0;background:transparent;font-size:13px;white-space:nowrap}.text-action{color:var(--primary)}.publish-action{color:#ef8b10}.row-actions button:hover{background:var(--primary-light)}
-.pagination-bar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;padding:14px 18px;border-top:1px solid var(--border);color:var(--text-secondary);font-size:13px}.pagination{display:flex;gap:6px}.pagination button{width:34px;height:34px;padding:0}.pagination button.active{border-color:var(--primary);color:#fff;background:var(--primary)}.pagination-bar>select{justify-self:end;width:105px}.loading-list{display:grid;gap:1px;background:var(--border)}.loading-list .skeleton{height:68px;border-radius:0}.empty-state{display:grid;place-items:center;gap:8px}.empty-state strong{color:var(--ink)}.empty-state p{margin:0}
-@media(max-width:1200px){.metric-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{grid-template-columns:1fr 1fr}}@media(max-width:720px){.exam-page{gap:16px}.page-head{align-items:stretch;flex-direction:column}.page-head h1{font-size:26px}.metric-grid{grid-template-columns:1fr 1fr;gap:10px}.metric-card{min-height:88px;padding:14px;gap:12px}.metric-icon{width:44px;height:44px}.metric-card strong{font-size:22px}.filter-bar{grid-template-columns:1fr;padding:12px}.pagination-bar{grid-template-columns:1fr auto}.pagination{grid-column:1/-1;grid-row:1;justify-content:center}.pagination-bar>select{justify-self:end}}
+.pagination-bar{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-top:1px solid var(--border);color:var(--text-secondary);font-size:13px}.pagination{display:flex;gap:0}.pagination button{display:grid;place-items:center;width:62px;height:58px;padding:0;border:1px solid var(--border);color:var(--text-secondary);background:var(--surface);font-size:18px}.pagination button:first-child{border-radius:12px 0 0 12px}.pagination button:last-child{border-radius:0 12px 12px 0}.pagination button+button{border-left:0}.pagination button.active{border-color:#c7d8ef;color:var(--ink);background:var(--surface)}.pagination button:disabled{color:var(--text-tertiary);background:var(--surface)}.pagination-bar>span:last-child{justify-self:end}.loading-list{display:grid;gap:1px;background:var(--border)}.loading-list .skeleton{height:68px;border-radius:0}.empty-state{display:grid;place-items:center;gap:8px}.empty-state strong{color:var(--ink)}.empty-state p{margin:0}
+@media(max-width:1200px){.metric-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{grid-template-columns:1fr 1fr}}@media(max-width:720px){.exam-page{gap:16px}.page-head{align-items:stretch;flex-direction:column}.page-head h1{font-size:26px}.metric-grid{grid-template-columns:1fr 1fr;gap:10px}.metric-card{min-height:88px;padding:14px;gap:12px}.metric-icon{width:44px;height:44px}.metric-card strong{font-size:22px}.filter-bar{grid-template-columns:1fr;padding:12px}.pagination-bar{grid-template-columns:1fr auto}.pagination{grid-column:1/-1;grid-row:1;justify-content:center}.pagination-bar>span:last-child{justify-self:end}}
 @container (max-width:1050px){.filter-bar{grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,.7fr))}.exam-table th:nth-child(1){width:27%}.exam-table th:nth-child(2){width:23%}.exam-table th:nth-child(3){width:14%}.exam-table th:nth-child(5){width:12%}.exam-table th:nth-child(8){width:24%}.exam-table th:nth-child(4),.exam-table td:nth-child(4),.exam-table th:nth-child(6),.exam-table td:nth-child(6),.exam-table th:nth-child(7),.exam-table td:nth-child(7){display:none}.exam-table td:last-child{padding-left:8px;padding-right:8px}.row-actions{gap:0}.row-actions button{padding:4px;font-size:12px}}
 @container (max-width:760px){.filter-bar{grid-template-columns:1fr;padding:12px}.table-scroll{overflow:visible;padding:12px;background:#f8fafc}.exam-table,.exam-table tbody{display:block;width:100%}.exam-table thead{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.exam-table tbody{display:grid;gap:12px}.exam-table tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:hidden;border:1px solid var(--border);border-radius:10px;background:var(--surface)}.exam-table td,.exam-table td:nth-child(4),.exam-table td:nth-child(6),.exam-table td:nth-child(7){display:flex;width:auto;height:auto;min-height:58px;padding:10px 12px;flex-direction:column;justify-content:center;gap:5px;border-bottom:1px solid var(--border);overflow:visible;white-space:normal}.exam-table td::before{content:attr(data-label);color:var(--text-tertiary);font-size:11px;font-weight:500}.exam-table td:nth-child(1),.exam-table td:nth-child(2),.exam-table td:nth-child(8){grid-column:1/-1}.exam-table td:nth-child(7),.exam-table td:nth-last-child(-n+2){border-bottom:0}.exam-table td strong,.exam-table td small{overflow:visible;white-space:normal}.exam-table .row-actions{display:flex;flex-direction:row;align-items:center;justify-content:flex-end;gap:6px}.exam-table .row-actions::before{margin-right:auto}.row-actions button{padding:6px 8px}}
 </style>

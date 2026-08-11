@@ -48,6 +48,7 @@ import trophy from '@iconify-icons/ri/trophy-line'
 import pie from '@iconify-icons/ri/pie-chart-line'
 import download from '@iconify-icons/ri/download-2-line'
 import refresh from '@iconify-icons/ri/refresh-line'
+import brain from '@iconify-icons/ri/brain-line'
 
 // 语义键 → { data: 图标数据, set: 来源图标集 }；set 透传为 data-set 属性便于测试与排查
 const ICONS = {
@@ -93,6 +94,7 @@ const ICONS = {
   pie: { data: pie, set: 'ri' },
   download: { data: download, set: 'ri' },
   refresh: { data: refresh, set: 'ri' },
+  brain: { data: brain, set: 'ri' },
 }
 
 const props = defineProps({

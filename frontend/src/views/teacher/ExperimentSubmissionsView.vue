@@ -6,6 +6,9 @@ import { useAppStore } from '../../stores/app.js'
 import { useAuthStore } from '../../stores/auth.js'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
+import TeacherMetricGrid from '../../components/teacher/TeacherMetricGrid.vue'
+import TeacherPageHeader from '../../components/teacher/TeacherPageHeader.vue'
+import TeacherPagination from '../../components/teacher/TeacherPagination.vue'
 import { formatDateTime } from '../../utils/format.js'
 import { createLatestRequestGuard } from '../../utils/latestRequest.js'
 
@@ -38,13 +41,6 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize))
 const hasFilters = computed(() => Boolean(
   filters.q || filters.courseId || filters.entryId || filters.reviewStatus,
 ))
-const pageNumbers = computed(() => {
-  const count = totalPages.value
-  if (count <= 5) return Array.from({ length: count }, (_, index) => index + 1)
-  const start = Math.max(1, Math.min(page.value - 2, count - 4))
-  return Array.from({ length: 5 }, (_, index) => start + index)
-})
-
 async function load({ initial = false } = {}) {
   const token = requestGuard.begin()
   if (initial) loading.value = true
@@ -130,38 +126,14 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); requestGuard.invalidat
 
 <template>
   <AppLayout>
-    <div class="submissions-page">
-      <header class="page-head">
-        <h1>提交与评分</h1>
-        <p>查看学生实验提交情况，完成评分与反馈</p>
-      </header>
+    <div class="submissions-page teacher-management-page">
+      <TeacherPageHeader title="提交与评分" subtitle="查看学生实验提交情况，完成评分与反馈" />
 
-      <section class="stats-grid" aria-label="提交统计">
-        <article class="stat-card stat-card-primary">
-          <span class="stat-icon"><AppIcon name="assignment" :size="22" /></span>
-          <span class="stat-copy">
-            <span class="stat-label">全部提交</span>
-            <strong>{{ summary.total }}</strong>
-            <span class="stat-unit">条记录</span>
-          </span>
-        </article>
-        <article class="stat-card stat-card-warning">
-          <span class="stat-icon"><AppIcon name="clock" :size="22" /></span>
-          <span class="stat-copy">
-            <span class="stat-label">待评分</span>
-            <strong>{{ summary.pending }}</strong>
-            <span class="stat-unit">条记录</span>
-          </span>
-        </article>
-        <article class="stat-card stat-card-success">
-          <span class="stat-icon"><AppIcon name="check" :size="22" /></span>
-          <span class="stat-copy">
-            <span class="stat-label">已评分</span>
-            <strong>{{ summary.graded }}</strong>
-            <span class="stat-unit">条记录</span>
-          </span>
-        </article>
-      </section>
+      <TeacherMetricGrid aria-label="提交统计" :items="[
+        { key: 'total', label: '全部提交', icon: 'clipboard', tone: 'blue', value: summary.total, unit: '条记录' },
+        { key: 'pending', label: '待评分', icon: 'clock', tone: 'orange', value: summary.pending, unit: '条记录', emphasis: true },
+        { key: 'graded', label: '已评分', icon: 'check', tone: 'green', value: summary.graded, unit: '条记录', emphasis: true },
+      ]" />
 
       <section class="records-panel" aria-label="提交记录">
         <div class="filter-bar">
@@ -273,7 +245,7 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); requestGuard.invalidat
                   </td>
                   <td data-label="实验名称">
                     <span class="cell-stack">
-                      <strong>{{ submission.entry_name || '未命名实验' }}</strong>
+                      <strong class="experiment-name">{{ submission.entry_name || '未命名实验' }}</strong>
                       <small>{{ submission.entry_type === 'module' ? '实验模块' : 'Notebook 实验' }}</small>
                     </span>
                   </td>
@@ -303,28 +275,7 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); requestGuard.invalidat
             </table>
           </div>
 
-          <footer class="table-footer">
-            <span>共 {{ total }} 条记录</span>
-            <nav v-if="total > 0" class="pagination" aria-label="提交记录分页">
-              <button type="button" aria-label="上一页" :disabled="page === 1" @click="goPage(page - 1)">
-                <AppIcon name="back" :size="16" />
-              </button>
-              <button
-                v-for="pageNumber in pageNumbers"
-                :key="pageNumber"
-                type="button"
-                :class="{ active: pageNumber === page }"
-                :aria-current="pageNumber === page ? 'page' : undefined"
-                @click="goPage(pageNumber)"
-              >
-                {{ pageNumber }}
-              </button>
-              <button type="button" aria-label="下一页" :disabled="page === totalPages" @click="goPage(page + 1)">
-                <AppIcon name="chevron-right" :size="16" />
-              </button>
-            </nav>
-            <span class="page-size">{{ pageSize }} 条/页</span>
-          </footer>
+          <TeacherPagination :current-page="page" :page-count="totalPages" :total="total" :page-size="pageSize" aria-label="提交记录分页" total-suffix="条记录" @change="goPage" />
         </template>
       </section>
     </div>
@@ -415,16 +366,16 @@ tbody tr:hover { background: #FAFCFF; }
 .row-action.primary { border-color: var(--primary); color: #fff; background: var(--primary); }
 .row-action.primary:hover { border-color: var(--primary-dark); color: #fff; background: var(--primary-dark); }
 
-.table-footer { min-height: 66px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; padding: 12px 20px; color: var(--text-secondary); font-size: 12px; }
-.pagination { display: flex; align-items: center; gap: 6px; }
-.pagination button {
-  width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; color: var(--text-secondary); cursor: pointer;
-}
-.pagination button:hover:not(:disabled) { border-color: var(--border); background: var(--surface-raised); color: var(--ink); }
-.pagination button.active { border-color: var(--primary); background: var(--primary); color: #fff; }
-.pagination button:disabled { opacity: .35; cursor: not-allowed; }
-.page-size { grid-column: 3; justify-self: end; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-control); }
+.table-footer { min-height: 70px; display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 13px; }
+.pagination { display: flex; align-items: center; gap: 0; }
+.pagination button { display: grid; place-items: center; width: 62px; height: 58px; padding: 0; border: 1px solid var(--border); color: var(--text-secondary); background: var(--surface); cursor: pointer; font-size: 18px; }
+.pagination button:first-child { border-radius: 12px 0 0 12px; }
+.pagination button:last-child { border-radius: 0 12px 12px 0; }
+.pagination button + button { border-left: 0; }
+.pagination button:hover:not(:disabled) { background: var(--surface-raised); color: var(--ink); }
+.pagination button.active { border-color: #c7d8ef; background: var(--surface); color: var(--ink); }
+.pagination button:disabled { color: var(--text-tertiary); cursor: not-allowed; }
+.page-size { padding: 0; border: 0; color: var(--text-secondary); }
 
 .table-skeleton { border-top: 1px solid var(--border); }
 .skeleton-row { display: grid; grid-template-columns: 1.4fr 1fr 1.4fr 1fr 1fr; gap: 24px; padding: 20px; border-bottom: 1px solid var(--border); }

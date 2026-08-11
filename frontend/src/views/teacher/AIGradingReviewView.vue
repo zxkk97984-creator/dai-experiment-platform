@@ -1,27 +1,13 @@
 <template>
   <AppLayout>
-    <main class="ai-grading-review">
-      <header class="page-heading">
-        <div>
-          <h1>AI 评分复核</h1>
-          <p>查看自动评分结果，及时处理需要教师复核的记录</p>
-        </div>
-      </header>
+    <main class="ai-grading-review teacher-management-page">
+      <TeacherPageHeader title="AI 评分复核" subtitle="查看自动评分结果，及时处理需要教师复核的记录" />
 
-      <section class="summary-grid" aria-label="评分汇总">
-        <article class="summary-card">
-          <span class="summary-icon total-icon"><AppIcon name="assignment" :size="24" /></span>
-          <div><span>全部评分</span><strong>{{ summary.total }}</strong><small>条记录</small></div>
-        </article>
-        <article class="summary-card">
-          <span class="summary-icon review-icon"><AppIcon name="clock" :size="24" /></span>
-          <div><span>需复核</span><strong class="warning-number">{{ summary.review }}</strong><small>条记录</small></div>
-        </article>
-        <article class="summary-card">
-          <span class="summary-icon complete-icon"><AppIcon name="check" :size="26" /></span>
-          <div><span>已完成</span><strong class="success-number">{{ summary.completed }}</strong><small>条记录</small></div>
-        </article>
-      </section>
+      <TeacherMetricGrid aria-label="评分汇总" :items="[
+        { key: 'total', label: '全部评分', icon: 'brain', tone: 'blue', value: summary.total, unit: '条记录' },
+        { key: 'review', label: '需复核', icon: 'clock', tone: 'orange', value: summary.review, unit: '条记录', emphasis: true },
+        { key: 'completed', label: '已完成', icon: 'check', tone: 'green', value: summary.completed, unit: '条记录', emphasis: true },
+      ]" />
 
       <section class="records-panel">
         <form class="filter-bar" @submit.prevent="applyFilters">
@@ -117,15 +103,7 @@
             </table>
           </div>
 
-          <footer class="pagination-bar">
-            <span>共 {{ total }} 条记录</span>
-            <nav v-if="totalPages > 1" class="pagination" aria-label="评分记录分页">
-              <button type="button" :disabled="page === 1" aria-label="上一页" @click="goToPage(page - 1)">‹</button>
-              <button v-for="pageItem in pageItems" :key="pageItem.key" type="button" :class="{ active: pageItem.value === page }" :disabled="pageItem.value === null" @click="pageItem.value && goToPage(pageItem.value)">{{ pageItem.label }}</button>
-              <button type="button" :disabled="page === totalPages" aria-label="下一页" @click="goToPage(page + 1)">›</button>
-            </nav>
-            <span>{{ pageSize }} 条/页</span>
-          </footer>
+          <TeacherPagination :current-page="page" :page-count="totalPages" :total="total" :page-size="pageSize" aria-label="评分记录分页" total-suffix="条记录" @change="goToPage" />
         </template>
 
         <div v-else class="state-panel empty-state">
@@ -143,6 +121,9 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
+import TeacherMetricGrid from '../../components/teacher/TeacherMetricGrid.vue'
+import TeacherPageHeader from '../../components/teacher/TeacherPageHeader.vue'
+import TeacherPagination from '../../components/teacher/TeacherPagination.vue'
 import { useAuthStore } from '../../stores/auth.js'
 import { aiGradingAPI } from '../../api/aiGrading.js'
 import { createLatestRequestGuard } from '../../utils/latestRequest.js'
@@ -168,17 +149,6 @@ const statusMap = {
 const modeMap = { active: '正式评分', shadow: '影子评分', legacy: '传统评分' }
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const hasFilters = computed(() => Boolean(filterKind.value || filterStatus.value || filterStudent.value.trim()))
-const pageItems = computed(() => {
-  const count = totalPages.value
-  if (count <= 7) return Array.from({ length: count }, (_, index) => ({ key: index + 1, value: index + 1, label: index + 1 }))
-  const values = page.value <= 4
-    ? [1, 2, 3, 4, 5, null, count]
-    : page.value >= count - 3
-      ? [1, null, count - 4, count - 3, count - 2, count - 1, count]
-      : [1, null, page.value - 1, page.value, page.value + 1, null, count]
-  return values.map((value, index) => ({ key: `${value}-${index}`, value, label: value ?? '…' }))
-})
-
 function buildParams() {
   const params = { page: page.value, page_size: pageSize }
   if (filterKind.value) params.kind = filterKind.value
@@ -280,8 +250,8 @@ onBeforeUnmount(() => requestGuard.invalidate())
 .status-completed { color: var(--success); background: var(--success-light); }.status-pending, .status-queued { color: var(--warning); background: var(--warning-light); }.status-running { color: var(--primary); background: var(--primary-light); }.status-review_required, .status-system_error { color: var(--danger); background: var(--danger-light); }
 .review-badge { color: var(--text-secondary); background: var(--bg); }.review-badge.required { color: var(--warning); background: var(--warning-light); }
 .row-action { width: 100%; min-width: 0; max-width: 100%; height: 36px; box-sizing: border-box; padding: 0 4px; border: 1px solid var(--border); border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; color: var(--ink); text-decoration: none; white-space: nowrap; font-size: 12px; transition: .18s ease; }.row-action:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
-.pagination-bar { min-height: 70px; padding: 12px 22px; border-top: 1px solid var(--border); display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; color: var(--text-secondary); font-size: 13px; }.pagination-bar > span:last-child { justify-self: end; padding: 9px 12px; border: 1px solid var(--border); border-radius: 7px; color: var(--ink); }
-.pagination { display: flex; align-items: center; gap: 6px; }.pagination button { min-width: 34px; height: 34px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); cursor: pointer; }.pagination button:hover:not(:disabled) { background: var(--primary-light); color: var(--primary); }.pagination button.active { background: var(--primary); color: #fff; }.pagination button:disabled { color: var(--text-secondary); cursor: default; opacity: .5; }
+.pagination-bar { min-height: 70px; padding: 12px 18px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; color: var(--text-secondary); font-size: 13px; }.pagination-bar > span:last-child { justify-self: end; }
+.pagination { display: flex; align-items: center; gap: 0; }.pagination button { display: grid; place-items: center; width: 62px; height: 58px; padding: 0; border: 1px solid var(--border); border-radius: 0; background: var(--surface); color: var(--text-secondary); cursor: pointer; font-size: 18px; }.pagination button:first-child { border-radius: 12px 0 0 12px; }.pagination button:last-child { border-radius: 0 12px 12px 0; }.pagination button + button { border-left: 0; }.pagination button:hover:not(:disabled) { background: var(--surface-raised); color: var(--ink); }.pagination button.active { border-color: #c7d8ef; background: var(--surface); color: var(--ink); }.pagination button:disabled { color: var(--text-tertiary); cursor: not-allowed; opacity: 1; }
 .state-panel { min-height: 330px; padding: 48px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }.state-panel strong { margin-top: 16px; font-size: 18px; }.state-panel p { max-width: 440px; margin: 8px 0 20px; color: var(--text-secondary); }.state-panel button { min-width: 112px; padding: 0 18px; }.empty-icon, .state-icon { width: 62px; height: 62px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--primary-light); color: var(--primary); }.error-state .state-icon { background: var(--danger-light); color: var(--danger); font-size: 26px; font-weight: 700; }
 .table-skeleton { padding: 10px 20px 20px; }.skeleton-row { height: 76px; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 1.3fr 1.3fr 1.4fr .7fr .7fr .9fr .8fr; align-items: center; gap: 24px; }.skeleton-row span { height: 16px; border-radius: 6px; background: linear-gradient(90deg, var(--bg) 25%, color-mix(in srgb, var(--border) 65%, var(--surface)) 50%, var(--bg) 75%); background-size: 200% 100%; animation: shimmer 1.3s infinite; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

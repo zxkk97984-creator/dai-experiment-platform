@@ -28,8 +28,8 @@ const menuItems = computed(() => {
     { path: '/teacher/assignments', label: '作业',     sub: 'Assignments',  icon: 'assignment', key: 'assignments' },
     { path: '/teacher/exams',       label: '考试',     sub: 'Exams',        icon: 'exam',       key: 'exams' },
     { path: '/teacher/experiments', label: '实验',     sub: 'Experiments',  icon: 'experiment', key: 'experiments' },
-    { path: '/teacher/submissions', label: '提交列表', sub: 'Submissions',  icon: 'assignment', key: 'submissions' },
-    { path: '/teacher/ai-grading',  label: 'AI 评分',   sub: 'AI Grading',    icon: 'assignment', key: 'ai-grading' },
+    { path: '/teacher/submissions', label: '提交列表', sub: 'Submissions',  icon: 'clipboard',  key: 'submissions' },
+    { path: '/teacher/ai-grading',  label: 'AI 评分',   sub: 'AI Grading',    icon: 'brain',      key: 'ai-grading' },
   ]
   if (auth.isAdmin) return [
     { path: '/admin/users',         label: '用户',     sub: 'Users',       icon: 'user',       key: 'users' },
