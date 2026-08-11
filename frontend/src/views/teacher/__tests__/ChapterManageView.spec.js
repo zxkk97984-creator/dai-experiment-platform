@@ -640,7 +640,7 @@ describe('课程可见范围设置', () => {
     return wrapper
   }
 
-  const visSelect = (wrapper) => wrapper.findAll('.side-panel select')[1]
+  const visSelect = (wrapper) => wrapper.get('[data-testid="visibility-select"]')
 
   it('可见范围 select 提供 private / public / whitelist 三个选项', async () => {
     const wrapper = await mountWithSettings()

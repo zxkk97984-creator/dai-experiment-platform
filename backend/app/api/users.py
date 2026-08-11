@@ -48,8 +48,14 @@ def create_user(
         raise api_error(400, "INVALID_STATUS", "用户状态无效")
     if db.scalar(select(User).where(User.username == payload.username)):
         raise api_error(409, "USERNAME_EXISTS", "用户名已存在")
+    student_no = payload.student_no.strip() if payload.student_no else None
+    if payload.role == "student" and not student_no:
+        raise api_error(422, "STUDENT_NO_REQUIRED", "新建学生必须填写学号")
+    if student_no and db.scalar(select(User).where(User.student_no == student_no)):
+        raise api_error(409, "STUDENT_NO_EXISTS", "学号已存在")
     user = User(
         username=payload.username,
+        student_no=student_no,
         real_name=payload.real_name,
         role=payload.role,
         status=payload.status,
@@ -118,6 +124,15 @@ def update_user(
     updates = payload.model_dump(exclude_unset=True)
     if "role" in updates and current_user.role != "admin":
         raise api_error(403, "FORBIDDEN", "只有管理员可以修改角色")
+    if "student_no" in updates:
+        student_no = updates["student_no"].strip() if updates["student_no"] else None
+        target_role = updates.get("role", user.role)
+        if target_role == "student" and not student_no:
+            raise api_error(422, "STUDENT_NO_REQUIRED", "学生必须填写学号")
+        duplicate = db.scalar(select(User).where(User.student_no == student_no, User.id != user_id)) if student_no else None
+        if duplicate:
+            raise api_error(409, "STUDENT_NO_EXISTS", "学号已存在")
+        updates["student_no"] = student_no
     for key, value in updates.items():
         setattr(user, key, value)
     db.commit()

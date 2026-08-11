@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, CHAR, CheckConstraint, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, String, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, CHAR, CheckConstraint, Date, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -48,10 +48,76 @@ class User(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    student_no: Mapped[str | None] = mapped_column(String(80), unique=True, nullable=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     real_name: Mapped[str] = mapped_column(String(120))
     role: Mapped[str] = mapped_column(String(30), index=True)
     status: Mapped[str] = mapped_column(String(30), default="active", index=True)
+
+    teaching_class_memberships: Mapped[list["TeachingClassStudent"]] = relationship(
+        back_populates="student", cascade="all, delete-orphan"
+    )
+
+
+# ── 学期 / 教学班 ────────────────────────────────────────────
+
+
+class AcademicTerm(TimestampMixin, Base):
+    __tablename__ = "academic_terms"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    start_date: Mapped[date] = mapped_column(Date)
+    end_date: Mapped[date] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(20), default="planned", index=True)
+
+    teaching_classes: Mapped[list["TeachingClass"]] = relationship(back_populates="academic_term")
+    courses: Mapped[list["Course"]] = relationship(back_populates="academic_term")
+
+
+class TeachingClass(TimestampMixin, Base):
+    __tablename__ = "teaching_classes"
+    __table_args__ = (UniqueConstraint("academic_term_id", "code", name="uq_teaching_class_term_code"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    academic_term_id: Mapped[int] = mapped_column(ForeignKey("academic_terms.id"), index=True)
+    code: Mapped[str] = mapped_column(String(80), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+
+    academic_term: Mapped[AcademicTerm] = relationship(back_populates="teaching_classes")
+    student_memberships: Mapped[list["TeachingClassStudent"]] = relationship(
+        back_populates="teaching_class", cascade="all, delete-orphan"
+    )
+    course_links: Mapped[list["CourseTeachingClass"]] = relationship(
+        back_populates="teaching_class", cascade="all, delete-orphan"
+    )
+
+
+class TeachingClassStudent(TimestampMixin, Base):
+    __tablename__ = "teaching_class_students"
+    __table_args__ = (UniqueConstraint("teaching_class_id", "student_id", name="uq_teaching_class_student"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    teaching_class_id: Mapped[int] = mapped_column(ForeignKey("teaching_classes.id", ondelete="CASCADE"), index=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+
+    teaching_class: Mapped[TeachingClass] = relationship(back_populates="student_memberships")
+    student: Mapped[User] = relationship(back_populates="teaching_class_memberships")
+
+
+class CourseTeachingClass(TimestampMixin, Base):
+    __tablename__ = "course_teaching_classes"
+    __table_args__ = (UniqueConstraint("course_id", "teaching_class_id", name="uq_course_teaching_class"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), index=True)
+    teaching_class_id: Mapped[int] = mapped_column(ForeignKey("teaching_classes.id", ondelete="CASCADE"), index=True)
+
+    course: Mapped["Course"] = relationship(back_populates="teaching_class_links")
+    teaching_class: Mapped[TeachingClass] = relationship(back_populates="course_links")
 
 
 # ── 课程 / 章节 / 课时 ────────────────────────────────────────
@@ -65,6 +131,7 @@ class Course(TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
     teacher_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    academic_term_id: Mapped[int | None] = mapped_column(ForeignKey("academic_terms.id"), nullable=True, index=True)
     # ── 课程设置 ──────────────────────────────────────────────
     cover: Mapped[str | None] = mapped_column(String(500), nullable=True)
     start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -72,6 +139,10 @@ class Course(TimestampMixin, Base):
     default_score: Mapped[float] = mapped_column(Float, default=100.0, server_default="100")
 
     teacher: Mapped[User | None] = relationship()
+    academic_term: Mapped[AcademicTerm | None] = relationship(back_populates="courses")
+    teaching_class_links: Mapped[list[CourseTeachingClass]] = relationship(
+        back_populates="course", cascade="all, delete-orphan"
+    )
     chapters: Mapped[list["Chapter"]] = relationship(
         back_populates="course",
         cascade="all, delete-orphan",
@@ -138,6 +209,7 @@ class CourseEnrollment(TimestampMixin, Base):
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), index=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     status: Mapped[str] = mapped_column(String(30), default="enrolled")
+    origin: Mapped[str] = mapped_column(String(20), default="manual", server_default="manual", index=True)
 
     course: Mapped[Course] = relationship()
     student: Mapped[User] = relationship()

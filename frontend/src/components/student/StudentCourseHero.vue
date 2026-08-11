@@ -55,6 +55,8 @@ watch(() => props.course?.cover, () => { coverFailed.value = false })
       </div>
 
       <div class="hero-meta">
+        <span class="hero-chip">{{ course.academic_term?.name || '未设置学期' }}</span>
+        <span class="hero-chip">{{ course.teaching_classes?.map((item) => item.name).join('、') || '未设置教学班' }}</span>
         <span class="hero-chip">{{ totalChapters }} 章节</span>
         <span class="hero-chip">{{ totalLessons }} 课时</span>
         <div class="hero-progress">

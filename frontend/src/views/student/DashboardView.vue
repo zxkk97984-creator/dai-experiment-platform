@@ -133,6 +133,7 @@ onMounted(async () => {
         <div>
           <h1 class="greeting-title">你好，{{ firstName }}</h1>
           <p class="greeting-date">{{ todayText }}</p>
+          <p v-if="dashboard" class="student-identity">学号 {{ dashboard.student_no || auth.user?.student_no || '未设置' }} · {{ dashboard.teaching_classes?.join('、') || '未分配教学班' }}</p>
         </div>
       </header>
 
@@ -339,7 +340,7 @@ onMounted(async () => {
                     {{ course.title }}
                   </button>
                   <span class="course-row-meta">
-                    {{ course.pending_assignment_count }} 份待交 · {{ course.upcoming_exam_count }} 场考试
+                    {{ course.academic_term || '未设置学期' }} · {{ course.teaching_classes?.join('、') || '未设置教学班' }} · {{ course.pending_assignment_count }} 份待交
                   </span>
                 </li>
               </ul>
@@ -374,6 +375,7 @@ onMounted(async () => {
   font-size: var(--text-sm);
   color: var(--text-secondary);
 }
+.student-identity{margin:6px 0 0;color:var(--text-secondary);font-size:13px}
 
 /* ── 续学面板（132–136px 高） ───────────────────────────────── */
 .continue-panel {

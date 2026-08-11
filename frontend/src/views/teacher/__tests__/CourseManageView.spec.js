@@ -22,11 +22,16 @@ vi.mock('../../../api/courses', () => ({
   coursesAPI: { list: vi.fn(), create: vi.fn(), update: vi.fn() },
 }))
 
+vi.mock('../../../api/academics', () => ({
+  academicsAPI: { listTerms: vi.fn() },
+}))
+
 vi.mock('../../../stores/app', () => ({
   useAppStore: () => ({ showToast: showToastMock }),
 }))
 
 import { coursesAPI } from '../../../api/courses.js'
+import { academicsAPI } from '../../../api/academics.js'
 
 function makeCourses(count) {
   return Array.from({ length: count }, (_, index) => ({
@@ -34,7 +39,8 @@ function makeCourses(count) {
     title: `课程 ${index + 1}`,
     description: `简介 ${index + 1}`,
     status: 'published',
-    term: '2026 秋',
+    academic_term: { id: 1, name: '2026 秋' },
+    teaching_classes: [{ id: 1, name: '软件 2601 班' }],
     chapter_count: 3,
     lesson_count: 8,
     student_count: 30,
@@ -54,11 +60,18 @@ async function mountPage() {
 describe('课程管理页 CourseManageView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    coursesAPI.list.mockResolvedValue({ data: { items: [] } })
+    academicsAPI.listTerms.mockResolvedValue({ data: { items: [] } })
+    coursesAPI.list.mockResolvedValue({ data: { items: [], total: 0, summary: {} } })
   })
 
   it('12 门课程分两页展示：第 1 页 10 行，点「第 2 页」后 2 行', async () => {
-    coursesAPI.list.mockResolvedValue({ data: { items: makeCourses(12) } })
+    coursesAPI.list.mockImplementation(({ page }) => Promise.resolve({
+      data: {
+        items: page === 2 ? makeCourses(2).map((course, index) => ({ ...course, id: index + 11 })) : makeCourses(10),
+        total: 12,
+        summary: { total: 12, published: 12, draft: 0, archived: 0 },
+      },
+    }))
     const wrapper = await mountPage()
     await flushPromises()
 
@@ -70,7 +83,9 @@ describe('课程管理页 CourseManageView', () => {
   })
 
   it('切换筛选条件后回到第 1 页', async () => {
-    coursesAPI.list.mockResolvedValue({ data: { items: makeCourses(12) } })
+    coursesAPI.list.mockImplementation(({ page }) => Promise.resolve({
+      data: { items: page === 2 ? makeCourses(2) : makeCourses(10), total: 12, summary: { total: 12, published: 12 } },
+    }))
     const wrapper = await mountPage()
     await flushPromises()
 
@@ -85,11 +100,14 @@ describe('课程管理页 CourseManageView', () => {
   })
 
   it('筛选后无结果时展示空态', async () => {
-    coursesAPI.list.mockResolvedValue({ data: { items: makeCourses(2) } })
+    coursesAPI.list.mockImplementation(({ status_filter: status }) => Promise.resolve({
+      data: { items: status === 'archived' ? [] : makeCourses(2), total: status === 'archived' ? 0 : 2, summary: {} },
+    }))
     const wrapper = await mountPage()
     await flushPromises()
 
     await wrapper.get('[aria-label="状态筛选"]').setValue('archived')
+    await flushPromises()
     expect(wrapper.text()).toContain('暂无符合条件的课程')
   })
 
@@ -104,7 +122,7 @@ describe('课程管理页 CourseManageView', () => {
     await wrapper.findAll('button.btn-primary').find((b) => b.text().includes('确认创建')).trigger('click')
     await flushPromises()
 
-    expect(coursesAPI.create).toHaveBeenCalledWith({ title: '数据结构', description: '数据结构与算法' })
+    expect(coursesAPI.create).toHaveBeenCalledWith({ title: '数据结构', description: '数据结构与算法', academic_term_id: null })
     expect(coursesAPI.list).toHaveBeenCalledTimes(2)
   })
 })

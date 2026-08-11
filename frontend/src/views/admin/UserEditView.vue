@@ -10,7 +10,7 @@ const router = useRouter()
 const app = useAppStore()
 const isNew = ref(route.params.id === 'new')
 const user = ref(null)
-const form = ref({ username: '', real_name: '', role: 'student', password: '' })
+const form = ref({ username: '', student_no: '', real_name: '', role: 'student', password: '' })
 const saving = ref(false)
 
 onMounted(async () => {
@@ -20,6 +20,7 @@ onMounted(async () => {
       user.value = res.data
       form.value = {
         username: res.data.username,
+        student_no: res.data.student_no || '',
         real_name: res.data.real_name,
         role: res.data.role,
         password: '',
@@ -30,6 +31,7 @@ onMounted(async () => {
 
 async function handleSave() {
   if (!form.value.username) { app.showToast('请输入用户名', 'error'); return }
+  if (form.value.role === 'student' && !form.value.student_no.trim()) { app.showToast('学生必须填写学号', 'error'); return }
   saving.value = true
   try {
     if (isNew.value) {
@@ -38,8 +40,8 @@ async function handleSave() {
       app.showToast('用户已创建', 'success')
     } else {
       await usersAPI.update(route.params.id, {
-        username: form.value.username,
         real_name: form.value.real_name,
+        student_no: form.value.role === 'student' ? form.value.student_no : null,
         role: form.value.role,
       })
       if (form.value.password) {
@@ -65,7 +67,8 @@ async function handleSave() {
       </header>
 
       <div class="card form-card">
-        <div class="form-group"><label>用户名</label><input v-model="form.username" placeholder="输入用户名" /></div>
+        <div class="form-group"><label>登录用户名</label><input v-model="form.username" :disabled="!isNew" placeholder="输入用户名" /><small v-if="!isNew">登录用户名创建后不可修改</small></div>
+        <div v-if="form.role === 'student'" class="form-group"><label>学号</label><input v-model="form.student_no" required placeholder="输入唯一学号" /></div>
         <div class="form-group"><label>真实姓名</label><input v-model="form.real_name" placeholder="输入真实姓名" /></div>
         <div class="form-group">
           <label>角色</label>

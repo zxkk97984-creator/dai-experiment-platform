@@ -38,6 +38,8 @@ class ContinueLearning(BaseModel):
 class CourseSnapshot(BaseModel):
     id: int
     title: str
+    academic_term: str | None = None
+    teaching_classes: list[str] = Field(default_factory=list)
     pending_assignment_count: int = 0
     upcoming_exam_count: int = 0
     last_activity_at: datetime | None = None
@@ -56,6 +58,8 @@ class RecentFeedback(BaseModel):
 
 
 class StudentDashboardRead(BaseModel):
+    student_no: str | None = None
+    teaching_classes: list[str] = Field(default_factory=list)
     summary: StudentSummary = Field(default_factory=StudentSummary)
     priority_items: list[PriorityItem] = Field(default_factory=list)
     continue_learning: ContinueLearning | None = None

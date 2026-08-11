@@ -1,0 +1,196 @@
+from fastapi import APIRouter, Depends, status
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.dependencies import get_current_user, get_db, require_roles
+from app.errors import api_error
+from app.models import AcademicTerm, TeachingClass, TeachingClassStudent, User
+from app.schemas import (
+    AcademicTermCreate, AcademicTermRead, AcademicTermUpdate, PaginatedResponse,
+    TeachingClassCreate, TeachingClassStudentBatch, TeachingClassSummary,
+    TeachingClassUpdate, UserRead,
+)
+from app.services.roster_service import sync_courses_for_class
+
+router = APIRouter(tags=["academics"])
+
+
+def _term_writable(term: AcademicTerm) -> None:
+    if term.status == "closed":
+        raise api_error(409, "ACADEMIC_TERM_CLOSED", "已关闭学期不可修改教务数据")
+
+
+def _class_summary(db: Session, teaching_class: TeachingClass) -> TeachingClassSummary:
+    count = db.scalar(select(func.count()).select_from(TeachingClassStudent).where(
+        TeachingClassStudent.teaching_class_id == teaching_class.id,
+        TeachingClassStudent.status == "active",
+    )) or 0
+    data = TeachingClassSummary.model_validate(teaching_class).model_dump()
+    data["student_count"] = count
+    return TeachingClassSummary.model_validate(data)
+
+
+@router.get("/academic-terms", response_model=PaginatedResponse)
+def list_terms(page: int = 1, page_size: int = 100, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    query = select(AcademicTerm).order_by(AcademicTerm.start_date.desc(), AcademicTerm.id.desc())
+    total = db.scalar(select(func.count()).select_from(AcademicTerm)) or 0
+    rows = db.scalars(query.offset((page - 1) * page_size).limit(page_size)).all()
+    return PaginatedResponse(items=[AcademicTermRead.model_validate(x) for x in rows], page=page, page_size=page_size, total=total)
+
+
+@router.post("/academic-terms", response_model=AcademicTermRead, status_code=status.HTTP_201_CREATED)
+def create_term(payload: AcademicTermCreate, db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    term = AcademicTerm(**payload.model_dump())
+    db.add(term)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise api_error(409, "ACADEMIC_TERM_CODE_EXISTS", "学期编码已存在")
+    db.refresh(term)
+    return term
+
+
+@router.patch("/academic-terms/{term_id}", response_model=AcademicTermRead)
+def update_term(term_id: int, payload: AcademicTermUpdate, db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    term = db.get(AcademicTerm, term_id)
+    if not term:
+        raise api_error(404, "ACADEMIC_TERM_NOT_FOUND", "学期不存在")
+    updates = payload.model_dump(exclude_unset=True)
+    if term.status == "closed":
+        _term_writable(term)
+    start = updates.get("start_date", term.start_date)
+    end = updates.get("end_date", term.end_date)
+    if end < start:
+        raise api_error(422, "INVALID_TERM_DATES", "学期结束日期不能早于开始日期")
+    for key, value in updates.items():
+        setattr(term, key, value)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise api_error(409, "ACADEMIC_TERM_CODE_EXISTS", "学期编码已存在")
+    db.refresh(term)
+    return term
+
+
+@router.delete("/academic-terms/{term_id}", response_model=AcademicTermRead)
+def close_term(term_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    term = db.get(AcademicTerm, term_id)
+    if not term:
+        raise api_error(404, "ACADEMIC_TERM_NOT_FOUND", "学期不存在")
+    term.status = "closed"
+    db.commit(); db.refresh(term)
+    return term
+
+
+@router.get("/teaching-classes", response_model=PaginatedResponse)
+def list_classes(academic_term_id: int | None = None, q: str | None = None, page: int = 1, page_size: int = 100,
+                 db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    filters = []
+    if academic_term_id is not None:
+        filters.append(TeachingClass.academic_term_id == academic_term_id)
+    if q:
+        like = f"%{q}%"
+        filters.append(or_(TeachingClass.code.ilike(like), TeachingClass.name.ilike(like)))
+    query = select(TeachingClass).where(*filters)
+    total = db.scalar(select(func.count()).select_from(TeachingClass).where(*filters)) or 0
+    rows = db.scalars(query.order_by(TeachingClass.id).offset((page - 1) * page_size).limit(page_size)).all()
+    return PaginatedResponse(items=[_class_summary(db, row) for row in rows], page=page, page_size=page_size, total=total)
+
+
+@router.post("/teaching-classes", response_model=TeachingClassSummary, status_code=status.HTTP_201_CREATED)
+def create_class(payload: TeachingClassCreate, db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    term = db.get(AcademicTerm, payload.academic_term_id)
+    if not term:
+        raise api_error(404, "ACADEMIC_TERM_NOT_FOUND", "学期不存在")
+    _term_writable(term)
+    row = TeachingClass(**payload.model_dump())
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise api_error(409, "TEACHING_CLASS_CODE_EXISTS", "该学期班级编码已存在")
+    db.refresh(row)
+    return _class_summary(db, row)
+
+
+@router.patch("/teaching-classes/{class_id}", response_model=TeachingClassSummary)
+def update_class(class_id: int, payload: TeachingClassUpdate, db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    row = db.get(TeachingClass, class_id)
+    if not row:
+        raise api_error(404, "TEACHING_CLASS_NOT_FOUND", "教学班不存在")
+    _term_writable(row.academic_term)
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(row, key, value)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise api_error(409, "TEACHING_CLASS_CODE_EXISTS", "该学期班级编码已存在")
+    db.refresh(row)
+    return _class_summary(db, row)
+
+
+@router.delete("/teaching-classes/{class_id}", response_model=TeachingClassSummary)
+def archive_class(class_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    row = db.get(TeachingClass, class_id)
+    if not row:
+        raise api_error(404, "TEACHING_CLASS_NOT_FOUND", "教学班不存在")
+    _term_writable(row.academic_term)
+    row.status = "archived"
+    db.commit(); db.refresh(row)
+    return _class_summary(db, row)
+
+
+@router.get("/teaching-classes/{class_id}/students", response_model=PaginatedResponse)
+def list_class_students(class_id: int, page: int = 1, page_size: int = 100, db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    row = db.get(TeachingClass, class_id)
+    if not row:
+        raise api_error(404, "TEACHING_CLASS_NOT_FOUND", "教学班不存在")
+    filters = (TeachingClassStudent.teaching_class_id == class_id, TeachingClassStudent.status == "active")
+    total = db.scalar(select(func.count()).select_from(TeachingClassStudent).where(*filters)) or 0
+    students = db.scalars(select(User).join(TeachingClassStudent, TeachingClassStudent.student_id == User.id)
+        .where(*filters).order_by(User.student_no, User.id).offset((page - 1) * page_size).limit(page_size)).all()
+    return PaginatedResponse(items=[UserRead.model_validate(x) for x in students], page=page, page_size=page_size, total=total)
+
+
+@router.post("/teaching-classes/{class_id}/students", response_model=PaginatedResponse)
+def add_class_students(class_id: int, payload: TeachingClassStudentBatch, db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    row = db.get(TeachingClass, class_id)
+    if not row:
+        raise api_error(404, "TEACHING_CLASS_NOT_FOUND", "教学班不存在")
+    _term_writable(row.academic_term)
+    students = db.scalars(select(User).where(User.id.in_(payload.student_ids), User.role == "student", User.status == "active")).all()
+    if len(students) != len(set(payload.student_ids)):
+        raise api_error(422, "INVALID_STUDENTS", "名单包含不存在或不可用的学生")
+    existing = {x.student_id: x for x in db.scalars(select(TeachingClassStudent).where(
+        TeachingClassStudent.teaching_class_id == class_id,
+        TeachingClassStudent.student_id.in_(payload.student_ids),
+    )).all()}
+    for student_id in set(payload.student_ids):
+        if student_id in existing:
+            existing[student_id].status = "active"
+        else:
+            db.add(TeachingClassStudent(teaching_class_id=class_id, student_id=student_id, status="active"))
+    db.flush(); sync_courses_for_class(db, class_id); db.commit()
+    return list_class_students(class_id, db=db, _=_)
+
+
+@router.delete("/teaching-classes/{class_id}/students/{student_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_class_student(class_id: int, student_id: int, db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    row = db.get(TeachingClass, class_id)
+    if not row:
+        raise api_error(404, "TEACHING_CLASS_NOT_FOUND", "教学班不存在")
+    _term_writable(row.academic_term)
+    membership = db.scalar(select(TeachingClassStudent).where(
+        TeachingClassStudent.teaching_class_id == class_id,
+        TeachingClassStudent.student_id == student_id,
+    ))
+    if not membership:
+        raise api_error(404, "CLASS_STUDENT_NOT_FOUND", "学生不在该教学班")
+    membership.status = "removed"
+    db.flush(); sync_courses_for_class(db, class_id); db.commit()
+    return None

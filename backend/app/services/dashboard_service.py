@@ -3,12 +3,13 @@
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, distinct, exists, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
-    Assignment, Chapter, CodeGrade, Course, CourseEnrollment, Exam, ExamAnswer,
+    Assignment, Chapter, CodeGrade, Course, CourseEnrollment, CourseTeachingClass, Exam, ExamAnswer,
     ExamQuestion, ExamSubmission, ExperimentModule, ExperimentRecord,
-    ExperimentSubmission, JudgeQuestion, Lesson, Submission, User,
+    ExperimentSubmission, JudgeQuestion, Lesson, Submission, TeachingClass,
+    TeachingClassStudent, User,
 )
 from app.services.announcement_service import (
     list_visible_announcements, unread_announcement_count,
@@ -270,12 +271,17 @@ def build_student_dashboard(db: Session, user: User, now: datetime | None = None
             ).all()
         )
         course_rows = db.execute(
-            select(Course).where(Course.id.in_(enrolled_ids)).order_by(Course.title)
+            select(Course).options(
+                selectinload(Course.academic_term),
+                selectinload(Course.teaching_class_links).selectinload(CourseTeachingClass.teaching_class),
+            ).where(Course.id.in_(enrolled_ids)).order_by(Course.title)
         ).scalars().all()
         for course in course_rows:
             courses.append(
                 CourseSnapshot(
                     id=course.id, title=course.title,
+                    academic_term=course.academic_term.name if course.academic_term else None,
+                    teaching_classes=[link.teaching_class.name for link in course.teaching_class_links],
                     pending_assignment_count=pending_by_course.get(course.id, 0),
                     upcoming_exam_count=exams_by_course.get(course.id, 0),
                     last_activity_at=activity_by_course.get(course.id),
@@ -374,7 +380,14 @@ def build_student_dashboard(db: Session, user: User, now: datetime | None = None
     summary.unread_announcement_count = unread_announcement_count(db, user, now)
     priority_items = priority_items[:PRIORITY_CAP]
 
+    student_class_names = list(db.scalars(
+        select(TeachingClass.name).join(TeachingClassStudent, TeachingClassStudent.teaching_class_id == TeachingClass.id)
+        .where(TeachingClassStudent.student_id == user.id, TeachingClassStudent.status == "active", TeachingClass.status == "active")
+        .order_by(TeachingClass.name)
+    ).all())
     return StudentDashboardRead(
+        student_no=user.student_no,
+        teaching_classes=student_class_names,
         summary=summary, priority_items=priority_items,
         continue_learning=continue_learning, courses=courses,
         recent_feedback=feedback, announcements=announcements,

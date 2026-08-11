@@ -284,7 +284,7 @@ def exam_grades(
             "exam_id": exam.id,
             "student_id": student.id,
             "student_name": student.real_name,
-            "student_number": student.username,
+            "student_number": student.student_no or student.username,
             "submission_id": submission.id if submission else None,
             "status": submission.status if submission else "absent",
             "score": score,

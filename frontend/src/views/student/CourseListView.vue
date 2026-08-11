@@ -92,12 +92,18 @@ async function handleEnroll(course) {
   }
 }
 
+async function handleUnenroll(course) {
+  try { await coursesAPI.unenroll(course.id); app.showToast('已退选', 'success'); await fetchCourses() }
+  catch (e) { app.showToast(e.response?.data?.detail?.message || '退选失败', 'error') }
+}
+
 function goDetail(id) { router.push(`/student/courses/${id}`) }
 function goLesson(id, lesson) { router.push(`/student/courses/${id}/lessons/${lesson.id}`) }
 
 function metaText(row) {
-  if (row.enrolled) return row.chapterTitle || row.course.description || '已加入课程'
-  return row.course.description || '尚未加入这门课程'
+  const term = row.course.academic_term?.name || '未设置学期'
+  const classes = row.course.teaching_classes?.map((item) => item.name).join('、') || '未设置教学班'
+  return `${term} · ${classes}`
 }
 
 function nextText(row) {
@@ -200,6 +206,8 @@ onMounted(fetchCourses)
                 >
                   {{ row.nextLesson ? '继续学习' : '查看课程' }}
                 </button>
+                <button v-if="row.enrolled && row.course.enrollment_origin !== 'class'" type="button" class="btn-outline" @click="handleUnenroll(row.course)">退选</button>
+                <span v-else-if="row.course.enrollment_origin === 'class'" class="class-enrolled">班级统一加入</span>
                 <button type="button" class="btn-outline detail-btn" @click="goDetail(row.course.id)">
                   课程详情
                 </button>
@@ -213,6 +221,7 @@ onMounted(fetchCourses)
 </template>
 
 <style scoped>
+.class-enrolled{padding:6px 9px;border-radius:999px;background:var(--primary-light);color:var(--primary);font-size:12px;white-space:nowrap}
 .page { display: flex; flex-direction: column; gap: 20px; }
 
 /* ── 页头 ─────────────────────────────────────────────────────── */

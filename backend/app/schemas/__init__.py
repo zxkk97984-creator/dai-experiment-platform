@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 from uuid import UUID
 
@@ -32,6 +32,7 @@ class UserRead(BaseModel):
 
     id: int
     username: str
+    student_no: str | None = None
     real_name: str
     role: str
     status: str
@@ -49,12 +50,14 @@ class UserCreate(BaseModel):
     username: str
     password: str
     real_name: str
+    student_no: str | None = None
     role: str
     status: str = "active"
 
 
 class UserUpdate(BaseModel):
     real_name: str | None = None
+    student_no: str | None = None
     role: str | None = None
     status: str | None = None
 
@@ -70,6 +73,65 @@ class StatusUpdate(BaseModel):
 CourseVisibility = Literal["private", "public", "whitelist"]
 
 
+class AcademicTermCreate(BaseModel):
+    code: str
+    name: str
+    start_date: date
+    end_date: date
+    status: Literal["planned", "active", "closed"] = "planned"
+
+    @model_validator(mode="after")
+    def _dates_in_order(self):
+        if self.end_date < self.start_date:
+            raise ValueError("end_date 不能早于 start_date")
+        return self
+
+
+class AcademicTermUpdate(BaseModel):
+    code: str | None = None
+    name: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    status: Literal["planned", "active", "closed"] | None = None
+
+
+class AcademicTermRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    code: str
+    name: str
+    start_date: date
+    end_date: date
+    status: str
+
+
+class TeachingClassCreate(BaseModel):
+    academic_term_id: int
+    code: str
+    name: str
+    status: Literal["active", "archived"] = "active"
+
+
+class TeachingClassUpdate(BaseModel):
+    code: str | None = None
+    name: str | None = None
+    status: Literal["active", "archived"] | None = None
+
+
+class TeachingClassSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    academic_term_id: int
+    code: str
+    name: str
+    status: str
+    student_count: int = 0
+
+
+class TeachingClassStudentBatch(BaseModel):
+    student_ids: list[int]
+
+
 class CourseCreate(BaseModel):
     title: str
     description: str | None = None
@@ -78,6 +140,8 @@ class CourseCreate(BaseModel):
     start_time: datetime | None = None
     visibility: CourseVisibility = "private"  # 可见范围：仅自己 / 公开 / 指定学生
     default_score: float = 100.0  # 默认评分（满分制）
+    academic_term_id: int | None = None
+    teaching_class_ids: list[int] = Field(default_factory=list)
 
 
 class CourseUpdate(BaseModel):
@@ -89,6 +153,8 @@ class CourseUpdate(BaseModel):
     start_time: datetime | None = None
     visibility: CourseVisibility | None = None
     default_score: float | None = None
+    academic_term_id: int | None = None
+    teaching_class_ids: list[int] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -114,9 +180,43 @@ class CourseRead(BaseModel):
     start_time: datetime | None = None
     visibility: CourseVisibility = "private"
     default_score: float = 100.0
+    academic_term_id: int | None = None
+    academic_term: AcademicTermRead | None = None
+    teaching_classes: list[TeachingClassSummary] = Field(default_factory=list)
+    chapter_count: int = 0
+    lesson_count: int = 0
+    student_count: int = 0
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     # 学生视角选课状态（教师/管理员返回 false 默认值）
     is_enrolled: bool = False
     can_enroll: bool = False
+    enrollment_origin: str | None = None
+
+
+class CourseListSummary(BaseModel):
+    total: int = 0
+    published: int = 0
+    draft: int = 0
+    archived: int = 0
+
+
+class CourseListRead(PaginatedResponse):
+    summary: CourseListSummary = Field(default_factory=CourseListSummary)
+
+
+class CourseStudentRead(BaseModel):
+    id: int
+    username: str
+    student_no: str | None = None
+    real_name: str
+    status: str
+    enrollment_origin: str
+    teaching_classes: list[TeachingClassSummary] = Field(default_factory=list)
+
+
+class CourseStudentCreate(BaseModel):
+    student_id: int
 
 
 # ── 课程白名单 ─────────────────────────────────────────────────
@@ -642,6 +742,7 @@ class ExperimentModuleRead(BaseModel):
     template_id: int | None = None
     owner_id: int | None = None
     status: str
+    origin: str = "manual"
 
 
 class StudentExperimentModuleRead(BaseModel):

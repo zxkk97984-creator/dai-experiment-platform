@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
@@ -7,16 +7,21 @@ import TeacherMetricGrid from '../../components/teacher/TeacherMetricGrid.vue'
 import TeacherPageHeader from '../../components/teacher/TeacherPageHeader.vue'
 import TeacherPagination from '../../components/teacher/TeacherPagination.vue'
 import { coursesAPI } from '../../api/courses.js'
+import { academicsAPI } from '../../api/academics.js'
 import { useAppStore } from '../../stores/app.js'
 import { formatDateTime } from '../../utils/format.js'
-import { useClientPagination } from '../../composables/useClientPagination.js'
 
 const router = useRouter()
 const app = useAppStore()
 const courses = ref([])
+const terms = ref([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = 10
+const serverSummary = ref({ total: 0, published: 0, draft: 0, archived: 0 })
 const loading = ref(true)
 const showCreate = ref(false)
-const form = ref({ title: '', description: '' })
+const form = ref({ title: '', description: '', academic_term_id: null })
 const creating = ref(false)
 const query = ref('')
 const statusFilter = ref('all')
@@ -26,37 +31,35 @@ const sortOrder = ref('updated')
 const courseStatus = (course) => course.status || 'draft'
 const courseLabel = (status) => ({ published: '已发布', draft: '草稿', archived: '已归档' })[status] || status
 const courseUpdated = (course) => course.updated_at || course.created_at || course.updatedAt || ''
-const summary = computed(() => ({
-  total: courses.value.length,
-  published: courses.value.filter((course) => courseStatus(course) === 'published').length,
-  draft: courses.value.filter((course) => courseStatus(course) === 'draft').length,
-  archived: courses.value.filter((course) => courseStatus(course) === 'archived').length,
-}))
-const terms = computed(() => [...new Set(courses.value.map((course) => course.term || course.semester || course.academic_term).filter(Boolean))])
-const filteredCourses = computed(() => {
-  const keyword = query.value.trim().toLowerCase()
-  const result = courses.value.filter((course) => {
-    const matchesQuery = !keyword || `${course.title || ''} ${course.description || ''}`.toLowerCase().includes(keyword)
-    const matchesStatus = statusFilter.value === 'all' || courseStatus(course) === statusFilter.value
-    const term = course.term || course.semester || course.academic_term || ''
-    return matchesQuery && matchesStatus && (termFilter.value === 'all' || term === termFilter.value)
-  })
-  return [...result].sort((a, b) => sortOrder.value === 'title'
-    ? String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN')
-    : new Date(courseUpdated(b) || 0) - new Date(courseUpdated(a) || 0))
-})
-const { page, pageSize, pageCount, pagedItems, goToPage, resetPage } = useClientPagination(filteredCourses)
+const summary = computed(() => serverSummary.value)
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+const managePath = (course) => `${router.currentRoute?.value?.path?.startsWith('/admin') ? '/admin' : '/teacher'}/courses/${course.id}/manage`
+const classLabel = (course) => course.teaching_classes?.map((item) => item.name).join('、') || '未设置班级'
+
+function resetPage() { page.value = 1; fetchCourses() }
+function goToPage(next) { page.value = next; fetchCourses() }
 
 async function fetchCourses() {
   loading.value = true
-  try { const res = await coursesAPI.list(); courses.value = res.data.items || res.data || [] }
+  try {
+    const res = await coursesAPI.list({
+      page: page.value, page_size: pageSize,
+      q: query.value.trim() || undefined,
+      status_filter: statusFilter.value === 'all' ? undefined : statusFilter.value,
+      academic_term_id: termFilter.value === 'all' ? undefined : Number(termFilter.value),
+      sort_by: sortOrder.value,
+    })
+    courses.value = res.data.items || []
+    total.value = res.data.total || 0
+    serverSummary.value = res.data.summary || serverSummary.value
+  }
   catch { app.showToast('加载失败', 'error') }
   finally { loading.value = false }
 }
 async function handleCreate() {
   if (!form.value.title) return
   creating.value = true
-  try { await coursesAPI.create(form.value); app.showToast('创建成功', 'success'); showCreate.value = false; form.value = { title: '', description: '' }; fetchCourses() }
+  try { await coursesAPI.create(form.value); app.showToast('创建成功', 'success'); showCreate.value = false; form.value = { title: '', description: '', academic_term_id: null }; fetchCourses() }
   catch (e) { app.showToast(e.response?.data?.detail?.message || '创建失败', 'error') }
   finally { creating.value = false }
 }
@@ -64,7 +67,12 @@ async function handlePublish(course) {
   try { await coursesAPI.update(course.id, { status: 'published' }); app.showToast('已发布', 'success'); fetchCourses() }
   catch { app.showToast('操作失败', 'error') }
 }
-onMounted(fetchCourses)
+let queryTimer
+watch(query, () => { clearTimeout(queryTimer); queryTimer = setTimeout(resetPage, 250) })
+onMounted(async () => {
+  try { const res = await academicsAPI.listTerms({ page_size: 100 }); terms.value = res.data.items || [] } catch { terms.value = [] }
+  fetchCourses()
+})
 </script>
 
 <template>
@@ -73,9 +81,9 @@ onMounted(fetchCourses)
       <TeacherPageHeader title="课程管理" subtitle="创建与维护课程，管理章节、课时与教学安排">
         <template #actions><button class="btn-primary teacher-page-action" @click="showCreate = !showCreate"><AppIcon name="plus" :size="18" />{{ showCreate ? '取消' : '创建课程' }}</button></template>
       </TeacherPageHeader>
-      <div v-if="showCreate" class="card create-form"><div class="form-group"><label>课程名称</label><input v-model="form.title" placeholder="输入课程名称" /></div><div class="form-group"><label>课程简介</label><textarea v-model="form.description" rows="3" placeholder="输入课程简介"></textarea></div><button class="btn-primary" :disabled="creating" @click="handleCreate">{{ creating ? '创建中...' : '确认创建' }}</button></div>
+      <div v-if="showCreate" class="card create-form"><div class="form-group"><label>课程名称</label><input v-model="form.title" placeholder="输入课程名称" /></div><div class="form-group"><label>所属学期</label><select v-model="form.academic_term_id"><option :value="null">暂不设置</option><option v-for="term in terms" :key="term.id" :value="term.id">{{ term.name }}</option></select></div><div class="form-group"><label>课程简介</label><textarea v-model="form.description" rows="3" placeholder="输入课程简介"></textarea></div><button class="btn-primary" :disabled="creating" @click="handleCreate">{{ creating ? '创建中...' : '确认创建' }}</button></div>
       <TeacherMetricGrid aria-label="课程统计" :items="[{ key: 'total', label: '全部课程', icon: 'course', tone: 'blue', value: summary.total, unit: '门' }, { key: 'published', label: '已发布', icon: 'send', tone: 'green', value: summary.published, unit: '门' }, { key: 'draft', label: '草稿', icon: 'draft', tone: 'orange', value: summary.draft, unit: '门' }, { key: 'archived', label: '已归档', icon: 'clock', tone: 'purple', value: summary.archived, unit: '门' }]" />
-      <section class="data-panel"><div class="filter-bar"><label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索课程名称" @input="resetPage" /></label><select v-model="statusFilter" aria-label="状态筛选" @change="resetPage"><option value="all">状态：全部</option><option value="published">已发布</option><option value="draft">草稿</option><option value="archived">已归档</option></select><select v-model="termFilter" aria-label="学期筛选" @change="resetPage"><option value="all">学期：全部学期</option><option v-for="term in terms" :key="term" :value="term">{{ term }}</option></select><select v-model="sortOrder" aria-label="排序" @change="resetPage"><option value="updated">排序：最近更新</option><option value="title">排序：课程名称</option></select></div><div v-if="loading" class="loading-list"><span v-for="i in 6" :key="i" class="skeleton"></span></div><div v-else-if="filteredCourses.length === 0" class="empty-state"><AppIcon name="course" :size="32" /><strong>暂无符合条件的课程</strong><p>调整筛选条件，或创建一门新课程。</p></div><div v-else class="table-scroll"><table><thead><tr><th>课程名称</th><th>所属学期 / 班级</th><th>状态</th><th>章节 / 课时</th><th>学生人数</th><th>最近更新</th><th>操作</th></tr></thead><tbody><tr v-for="course in pagedItems" :key="course.id"><td><a class="course-link" @click="router.push(`/teacher/courses/${course.id}/manage`)">{{ course.title }}</a><small>{{ course.description || '课程教学内容与安排' }}</small></td><td>{{ course.term || course.semester || course.academic_term || '—' }}<small>{{ course.class_name || course.classroom || '未设置班级' }}</small></td><td><span class="status-pill" :class="courseStatus(course)">{{ courseLabel(courseStatus(course)) }}</span></td><td>{{ course.chapter_count ?? course.chapters_count ?? '—' }} 章 / {{ course.lesson_count ?? course.lessons_count ?? '—' }} 课时</td><td><span class="icon-value"><AppIcon name="user" :size="14" />{{ course.student_count ?? course.students_count ?? 0 }}</span></td><td class="muted-cell">{{ formatDateTime(courseUpdated(course)) }}</td><td class="actions-cell"><button class="text-action" @click="router.push(`/teacher/courses/${course.id}/manage`)">课程设置</button><button class="text-action" @click="router.push(`/teacher/courses/${course.id}/manage`)">章节课时</button><button v-if="course.status === 'draft'" class="publish-action" @click="handlePublish(course)">发布</button></td></tr></tbody></table></div><TeacherPagination v-if="!loading" :current-page="page" :page-count="pageCount" :total="filteredCourses.length" :page-size="pageSize" aria-label="课程列表分页" @change="goToPage" /></section>
+      <section class="data-panel"><div class="filter-bar"><label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索课程名称" /></label><select v-model="statusFilter" aria-label="状态筛选" @change="resetPage"><option value="all">状态：全部</option><option value="published">已发布</option><option value="draft">草稿</option><option value="archived">已归档</option></select><select v-model="termFilter" aria-label="学期筛选" @change="resetPage"><option value="all">学期：全部学期</option><option v-for="term in terms" :key="term.id" :value="String(term.id)">{{ term.name }}</option></select><select v-model="sortOrder" aria-label="排序" @change="resetPage"><option value="updated">排序：最近更新</option><option value="title">排序：课程名称</option></select></div><div v-if="loading" class="loading-list"><span v-for="i in 6" :key="i" class="skeleton"></span></div><div v-else-if="courses.length === 0" class="empty-state"><AppIcon name="course" :size="32" /><strong>暂无符合条件的课程</strong><p>调整筛选条件，或创建一门新课程。</p></div><div v-else class="table-scroll"><table><thead><tr><th>课程名称</th><th>所属学期 / 班级</th><th>状态</th><th>章节 / 课时</th><th>学生人数</th><th>最近更新</th><th>操作</th></tr></thead><tbody><tr v-for="course in courses" :key="course.id"><td><a class="course-link" @click="router.push(managePath(course))">{{ course.title }}</a><small>{{ course.description || '课程教学内容与安排' }}</small></td><td>{{ course.academic_term?.name || '未设置学期' }}<small>{{ classLabel(course) }}</small></td><td><span class="status-pill" :class="courseStatus(course)">{{ courseLabel(courseStatus(course)) }}</span></td><td>{{ course.chapter_count }} 章 / {{ course.lesson_count }} 课时</td><td><span class="icon-value"><AppIcon name="user" :size="14" />{{ course.student_count }}</span></td><td class="muted-cell">{{ formatDateTime(courseUpdated(course)) }}</td><td class="actions-cell"><button class="text-action" @click="router.push(managePath(course))">课程设置</button><button class="text-action" @click="router.push(managePath(course))">章节课时</button><button v-if="course.status === 'draft'" class="publish-action" @click="handlePublish(course)">发布</button></td></tr></tbody></table></div><TeacherPagination v-if="!loading" :current-page="page" :page-count="pageCount" :total="total" :page-size="pageSize" aria-label="课程列表分页" @change="goToPage" /></section>
     </main>
   </AppLayout>
 </template>

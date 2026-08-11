@@ -89,7 +89,7 @@ onMounted(fetch)
       <div v-else class="card table-card">
         <table>
           <thead>
-            <tr><th>ID</th><th>用户名</th><th>姓名</th><th>角色</th><th>状态</th><th>操作</th></tr>
+            <tr><th>ID</th><th>用户名</th><th>学号</th><th>姓名</th><th>角色</th><th>状态</th><th>操作</th></tr>
           </thead>
           <tbody>
             <tr v-for="u in users" :key="u.id">
@@ -97,6 +97,7 @@ onMounted(fetch)
               <td>
                 <a class="user-link" @click="router.push(`/admin/users/${u.id}/edit`)">{{ u.username }}</a>
               </td>
+              <td>{{ u.student_no || '—' }}</td>
               <td>{{ u.real_name }}</td>
               <td>
                 <span class="badge" :class="'badge-' + statusBadge(ROLE_MAP, u.role).color">

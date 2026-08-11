@@ -18,6 +18,7 @@ def test_admin_can_create_user_and_logout_blacklists_token(client, db_session_fa
             "username": "student001",
             "password": "Passw0rd!",
             "real_name": "Student One",
+            "student_no": "student001",
             "role": "student",
         },
     )

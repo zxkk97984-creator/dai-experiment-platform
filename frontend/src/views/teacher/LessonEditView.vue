@@ -21,7 +21,7 @@ const app = useAppStore()
 
 const courseId = computed(() => route.params.courseId || route.params.id)
 const lessonId = computed(() => route.params.lessonId)
-const managePath = computed(() => `/teacher/courses/${courseId.value}/manage`)
+const managePath = computed(() => `${route.path?.startsWith('/admin') ? '/admin' : '/teacher'}/courses/${courseId.value}/manage`)
 
 const loading = ref(true)
 const loadError = ref('')

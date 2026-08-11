@@ -33,6 +33,7 @@ const menuItems = computed(() => {
   ]
   if (auth.isAdmin) return [
     { path: '/admin/users',         label: '用户',     sub: 'Users',       icon: 'user',       key: 'users' },
+    { path: '/admin/academics',     label: '教务',     sub: 'Academics',   icon: 'course',     key: 'academics' },
     { path: '/admin/courses',       label: '课程',     sub: 'Courses',     icon: 'course',     key: 'courses' },
     { path: '/admin/experiments',   label: '实验',     sub: 'Experiments', icon: 'experiment', key: 'experiments' },
     { path: '/admin/environments',  label: '环境档位', sub: 'Environments', icon: 'experiment', key: 'environments' },

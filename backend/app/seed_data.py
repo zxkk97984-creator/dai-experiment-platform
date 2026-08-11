@@ -6,7 +6,7 @@
 所有数据幂等：先按外键依赖顺序清除旧数据，再插入新数据。
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
@@ -14,9 +14,11 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models import (
     Assignment,
+    AcademicTerm,
     Chapter,
     Course,
     CourseEnrollment,
+    CourseTeachingClass,
     Exam,
     ExamAnswer,
     ExamGrade,
@@ -30,6 +32,8 @@ from app.models import (
     NotebookTemplate,
     NotebookTemplateVersion,
     Submission,
+    TeachingClass,
+    TeachingClassStudent,
     User,
 )
 from app.security import hash_password
@@ -113,9 +117,13 @@ def create_users(db: Session) -> dict[str, User]:
     _clear_table(db, Exam)
     _clear_table(db, Assignment)
     _clear_table(db, CourseEnrollment)
+    _clear_table(db, CourseTeachingClass)
+    _clear_table(db, TeachingClassStudent)
     _clear_table(db, Lesson)
     _clear_table(db, Chapter)
     _clear_table(db, Course)
+    _clear_table(db, TeachingClass)
+    _clear_table(db, AcademicTerm)
     _clear_table(db, ExperimentModule)
 
     # 解除 Notebook 模板和版本的循环外键
@@ -159,9 +167,11 @@ def create_users(db: Session) -> dict[str, User]:
         ("student_charlie", "查理", "student"),
         ("developer_wang", "王开发", "developer"),
     ]
+    student_numbers = {"student_alice": "20260001", "student_bob": "20260002", "student_charlie": "20260003"}
     for username, real_name, role in user_defs:
         user = User(
             username=username,
+            student_no=student_numbers.get(username),
             password_hash=HASHED_PASSWORD,
             real_name=real_name,
             role=role,
@@ -174,6 +184,23 @@ def create_users(db: Session) -> dict[str, User]:
     db.commit()
     print("  ✓ 用户创建完成\n")
     return users
+
+
+def create_academics(db: Session, users: dict[str, User]):
+    print("[2/11] 创建学期、教学班与班级名单...")
+    term = AcademicTerm(code="2026-FALL", name="2026 秋季学期", start_date=date(2026, 9, 1), end_date=date(2027, 1, 20), status="active")
+    db.add(term); db.flush()
+    class_a = TeachingClass(academic_term_id=term.id, code="CS-2601", name="计算机 2601 班", status="active")
+    class_b = TeachingClass(academic_term_id=term.id, code="AI-2601", name="人工智能 2601 班", status="active")
+    db.add_all([class_a, class_b]); db.flush()
+    db.add_all([
+        TeachingClassStudent(teaching_class_id=class_a.id, student_id=users["student_alice"].id, status="active"),
+        TeachingClassStudent(teaching_class_id=class_a.id, student_id=users["student_bob"].id, status="active"),
+        TeachingClassStudent(teaching_class_id=class_b.id, student_id=users["student_charlie"].id, status="active"),
+    ])
+    db.commit()
+    print("  ✓ 教务基础数据创建完成\n")
+    return {"term": term, "class_a": class_a, "class_b": class_b}
 
 
 # ── 2. 创建模板与版本 ──────────────────────────────────────────
@@ -322,6 +349,7 @@ def create_courses(
     db: Session,
     users: dict[str, User],
     templates: dict[str, tuple[NotebookTemplate, NotebookTemplateVersion]],
+    academics: dict,
 ) -> dict[str, dict]:
     """创建 2 门课程及章节、课时。返回课程引用字典"""
     print("[3/10] 创建课程/章节/课时...")
@@ -340,9 +368,14 @@ def create_courses(
         description="从零开始学习 Python 编程，掌握数据结构与算法基础",
         status="published",
         teacher_id=teacher_john.id,
+        academic_term_id=academics["term"].id,
     )
     db.add(course1)
     db.flush()
+    db.add_all([
+        CourseTeachingClass(course_id=course1.id, teaching_class_id=academics["class_a"].id),
+        CourseTeachingClass(course_id=course1.id, teaching_class_id=academics["class_b"].id),
+    ])
 
     # 第1章：Python入门
     ch1 = Chapter(
@@ -402,9 +435,11 @@ def create_courses(
         description="机器学习基础知识与实战技能",
         status="published",
         teacher_id=teacher_li.id,
+        academic_term_id=academics["term"].id,
     )
     db.add(course2)
     db.flush()
+    db.add(CourseTeachingClass(course_id=course2.id, teaching_class_id=academics["class_a"].id))
 
     ch4 = Chapter(
         course_id=course2.id,
@@ -446,6 +481,7 @@ def create_enrollments(db: Session, users: dict[str, User], courses: dict[str, d
                 course_id=course.id,
                 student_id=student.id,
                 status="enrolled",
+                origin="class",
             )
             db.add(enrollment)
             print(f"  → {username} 选课: {course_name}")
@@ -1253,11 +1289,13 @@ def main():
         # 1. 用户
         users = create_users(db)
 
+        academics = create_academics(db, users)
+
         # 2. 模板与版本
         templates = create_templates(db, users)
 
         # 3. 课程/章节/课时
-        courses = create_courses(db, users, templates)
+        courses = create_courses(db, users, templates, academics)
 
         # 4. 选课
         create_enrollments(db, users, courses)

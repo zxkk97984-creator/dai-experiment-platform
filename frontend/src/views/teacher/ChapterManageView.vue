@@ -6,7 +6,9 @@ import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
 import CourseCoverUploader from '../../components/teacher/CourseCoverUploader.vue'
 import CourseWhitelistManager from '../../components/teacher/CourseWhitelistManager.vue'
+import CourseRosterManager from '../../components/teacher/CourseRosterManager.vue'
 import { coursesAPI } from '../../api/courses.js'
+import { academicsAPI } from '../../api/academics.js'
 import { studioAPI } from '../../api/studio.js'
 import EnvironmentProfilePicker from '../../components/common/EnvironmentProfilePicker.vue'
 import { useAppStore } from '../../stores/app.js'
@@ -75,11 +77,15 @@ const previewVideoError = ref('')
 const settingsOpen = ref(false)
 const savingSettings = ref(false)
 const settings = ref({})
+const academicTerms = ref([])
+const teachingClasses = ref([])
 // 封面上传/移除期间禁用保存按钮，避免与普通设置提交互相覆盖
 const coverBusy = ref(false)
 
 const courseId = computed(() => route.params.courseId || route.params.id)
+const rolePrefix = computed(() => route.path?.startsWith('/admin') ? '/admin' : '/teacher')
 const lessons = computed(() => chapters.value.flatMap((chapter) => chapter.lessons || []))
+const availableClasses = computed(() => teachingClasses.value.filter((item) => Number(item.academic_term_id) === Number(settings.value.academic_term_id)))
 
 const courseStatusLabel = computed(
   () => ({ published: '已发布', draft: '草稿', archived: '已归档' })[course.value?.status] || '待发布',
@@ -109,6 +115,8 @@ async function loadPage() {
       start_time: (course.value.start_time || '').slice(0, 16),
       visibility: course.value.visibility || 'private',
       default_score: course.value.default_score ?? 100,
+      academic_term_id: course.value.academic_term_id ?? null,
+      teaching_class_ids: (course.value.teaching_classes || []).map((item) => item.id),
     }
     restoreExpandedState()
   } catch {
@@ -360,7 +368,7 @@ async function createLesson() {
     }
     const response = await coursesAPI.createLesson(wizard.chapterId, payload)
     const lessonId = response.data?.id ?? response.id
-    let target = `/teacher/courses/${courseId.value}/lessons/${lessonId}/edit`
+    let target = `${rolePrefix.value}/courses/${courseId.value}/lessons/${lessonId}/edit`
     if (wizard.type === 'notebook') {
       // 创建模板并绑定课时（Phase 4：携带教师选择的环境与白名单）；编辑页凭 ?template 进入 Studio
       const template = await studioAPI.createTemplate({
@@ -388,7 +396,7 @@ async function createLesson() {
 function openEditLesson(lesson) {
   closeMenus()
   // 统一跳转专属编辑页（Notebook 模板解析由编辑页负责，不再依赖 template_id）
-  router.push(`/teacher/courses/${courseId.value}/lessons/${lesson.id}/edit`)
+  router.push(`${rolePrefix.value}/courses/${courseId.value}/lessons/${lesson.id}/edit`)
 }
 
 function openPreview(lesson) {
@@ -419,7 +427,7 @@ async function fetchPreviewVideoUrl(lessonId) {
 
 function openStudioForPreview(lesson) {
   if (lesson.template_id) {
-    router.push(`/teacher/courses/${courseId.value}/studio/${lesson.template_id}`)
+    router.push(`${rolePrefix.value}/courses/${courseId.value}/studio/${lesson.template_id}`)
   }
 }
 
@@ -610,6 +618,13 @@ function handleCoverUpdated(updatedCourse) {
 onMounted(() => {
   document.addEventListener('click', onDocumentClick)
   document.addEventListener('keydown', onKeydown)
+  Promise.all([
+    academicsAPI.listTerms({ page_size: 100 }),
+    academicsAPI.listClasses({ page_size: 100 }),
+  ]).then(([termsRes, classesRes]) => {
+    academicTerms.value = termsRes.data.items || []
+    teachingClasses.value = classesRes.data.items || []
+  }).catch(() => {})
   loadPage()
 })
 
@@ -830,6 +845,21 @@ onBeforeUnmount(() => {
             <option value="archived">已归档</option>
           </select>
         </label>
+        <div class="settings-grid">
+          <label>
+            所属学期
+            <select v-model="settings.academic_term_id" @change="settings.teaching_class_ids = []">
+              <option :value="null">未设置学期</option>
+              <option v-for="term in academicTerms" :key="term.id" :value="term.id" :disabled="term.status === 'closed'">{{ term.name }}</option>
+            </select>
+          </label>
+          <label>
+            教学班（可多选）
+            <select v-model="settings.teaching_class_ids" multiple size="4" :disabled="!settings.academic_term_id">
+              <option v-for="item in availableClasses" :key="item.id" :value="item.id">{{ item.name }}（{{ item.student_count }} 人）</option>
+            </select>
+          </label>
+        </div>
         <CourseCoverUploader
           v-if="course"
           :course-id="courseId"
@@ -844,7 +874,7 @@ onBeforeUnmount(() => {
           </label>
           <label>
             课程可见范围
-            <select v-model="settings.visibility">
+            <select v-model="settings.visibility" data-testid="visibility-select">
               <option value="private">仅自己可见</option>
               <option value="public">公开浏览</option>
               <option value="whitelist">指定学生可见</option>
@@ -874,6 +904,7 @@ onBeforeUnmount(() => {
           v-if="settings.visibility === 'whitelist'"
           :course-id="courseId"
         />
+        <CourseRosterManager :course-id="courseId" @changed="loadPage" />
         <div class="form-actions">
           <button class="button button-secondary" type="button" @click="settingsOpen = false">取消</button>
           <button class="button button-primary" type="submit" :disabled="savingSettings || coverBusy">

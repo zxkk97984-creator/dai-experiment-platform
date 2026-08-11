@@ -46,8 +46,8 @@ def find_exact(items: list[dict], field: str, value: Any) -> dict | None:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 DEMO_STUDENTS: list[dict[str, str]] = [
-    {"username": "accept_student_a", "real_name": "验收学生甲", "role": "student"},
-    {"username": "accept_student_b", "real_name": "验收学生乙", "role": "student"},
+    {"username": "accept_student_a", "student_no": "ACC2026001", "real_name": "验收学生甲", "role": "student"},
+    {"username": "accept_student_b", "student_no": "ACC2026002", "real_name": "验收学生乙", "role": "student"},
 ]
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1036,8 +1036,8 @@ def ensure_students(client: ApiClient, admin_username: str, admin_password: str,
         if found:
             # 确保角色和状态正确
             uid = found["id"]
-            if found.get("role") != "student" or found.get("status") != "active":
-                client.patch(f"/users/{uid}", {"role": "student", "status": "active"})
+            if found.get("role") != "student" or found.get("status") != "active" or found.get("student_no") != stu["student_no"]:
+                client.patch(f"/users/{uid}", {"role": "student", "status": "active", "student_no": stu["student_no"]})
             client.patch(f"/users/{uid}/password", {"password": student_password})
             stats.inc_reused()
         else:
@@ -1045,6 +1045,7 @@ def ensure_students(client: ApiClient, admin_username: str, admin_password: str,
                 "username": stu["username"],
                 "password": student_password,
                 "real_name": stu["real_name"],
+                "student_no": stu["student_no"],
                 "role": "student",
                 "status": "active",
             })
