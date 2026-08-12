@@ -34,6 +34,7 @@ NEW_REVISION = "b4c5d6e7f890"
 REVISION_A = "b4c5d6e7f890"
 REVISION_B = "c5d6e7f8a901"
 REVISION_FIX = "d6e7f8a9b012"
+CURRENT_HEAD = "20260812_0002"
 
 CONTROL_TABLES = [
     "package_catalog",
@@ -380,13 +381,13 @@ def _insert_basic_available_into_file(db_path: Path) -> None:
 
 
 def test_full_migration_chain_to_new_head(tmp_path):
-    """从 base 全链 upgrade 到 head（迁移 A + B + 题目环境可空修复），current 必须是 d6e7f8a9b012"""
+    """从 base 全链 upgrade 到仓库当前 head，并保留环境绑定修复语义。"""
     db_path = tmp_path / "migration_chain.db"
     _upgrade_full_chain(db_path)
 
     current = _run_alembic_command(db_path, "current")
     assert current.returncode == 0, current.stderr
-    assert REVISION_FIX in current.stdout, f"current 未到新 head: {current.stdout}"
+    assert CURRENT_HEAD in current.stdout, f"current 未到新 head: {current.stdout}"
 
     # 修复迁移语义：judge_questions.environment_version_id 可空（NULL=继承作业默认）；
     # 其余业务表绑定列保持 NOT NULL（创建链路均有服务层 basic 兜底或复制来源）
@@ -558,7 +559,7 @@ def test_revision_b_chain_points_to_head_a():
 
 
 def test_revision_fix_points_to_head_b():
-    """修复迁移 d6e7f8a9b012 挂在迁移 B 之后（当前 head）"""
+    """修复迁移 d6e7f8a9b012 挂在迁移 B 之后。"""
     migration = _load_migration_fix()
     assert migration.revision == REVISION_FIX
     assert migration.down_revision == REVISION_B

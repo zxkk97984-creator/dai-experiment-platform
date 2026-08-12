@@ -16,7 +16,7 @@ const DETAIL_FIXTURE = {
   id: 7, submission_id: 5, rubric_id: 3, mode: 'active', status: 'review_required',
   functional_score: 54, algorithm_score: 13, robustness_score: 7, quality_score: 5,
   raw_total: 79, score_cap: null, final_score_100: 79, scaled_score: 79,
-  student_name: '李同学', student_username: 'student_alice',
+  student_name: '李同学', student_username: 'student_24621600_01',
   question_title: '有效括号', course_title: 'Python 编程与算法实践',
   submitted_at: '2026-08-02T11:32:00', finished_at: '2026-08-02T11:35:00',
   execution_time_ms: 42,
@@ -105,7 +105,7 @@ test.describe('教师 AI 评分列表与详情', () => {
     // 上下文与标题
     await expect(page.locator('.grading-title')).toContainText('有效括号')
     await expect(page.locator('.grading-context')).toContainText('李同学')
-    await expect(page.locator('.grading-context')).toContainText('student_alice')
+    await expect(page.locator('.grading-context')).toContainText('student_24621600_01')
     await expect(page.locator('.grading-context')).toContainText('Python 编程与算法实践')
 
     // 最终得分与 F/A/R/Q

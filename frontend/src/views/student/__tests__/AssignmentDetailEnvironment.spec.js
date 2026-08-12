@@ -76,9 +76,15 @@ function question(overrides = {}) {
   }
 }
 
-async function mountPage({ assignmentSummary = basicSummary, questions = [question()], submissions = [] } = {}) {
+async function mountPage({ assignmentSummary = basicSummary, assignmentOverrides = {}, questions = [question()], submissions = [] } = {}) {
   assignmentsAPI.get.mockResolvedValue({
-    data: { id: 4, course_id: 1, title: '数据处理综合练习', environment_summary: assignmentSummary },
+    data: {
+      id: 4,
+      course_id: 1,
+      title: '数据处理综合练习',
+      environment_summary: assignmentSummary,
+      ...assignmentOverrides,
+    },
   })
   assignmentsAPI.getQuestions.mockResolvedValue({
     data: { items: questions },
@@ -132,6 +138,39 @@ describe('AssignmentDetailView Phase 5: 学生端环境提示与诊断', () => {
   it('无环境摘要时不显示环境提示', async () => {
     await mountPage({ assignmentSummary: null, questions: [question({ environment_summary: null })] })
     expect(wrapper.find('.env-banner').exists()).toBe(false)
+  })
+
+  it('截止后仍显示题目但禁用自测与提交，并给出明确提示', async () => {
+    await mountPage({ assignmentOverrides: { due_at: new Date(Date.now() - 60_000).toISOString() } })
+
+    expect(wrapper.find('.deadline-banner').text()).toContain('作业已截止')
+    expect(wrapper.find('.btn-self-test').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.btn-submit-code').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('数据分析题')
+  })
+
+  it('页面重新获得焦点后刷新时间，教师延长截止即可恢复操作', async () => {
+    const pastDue = new Date(Date.now() - 60_000).toISOString()
+    const futureDue = new Date(Date.now() + 3_600_000).toISOString()
+    await mountPage({ assignmentOverrides: { due_at: pastDue } })
+    expect(wrapper.find('.btn-submit-code').attributes('disabled')).toBeDefined()
+
+    assignmentsAPI.get.mockResolvedValueOnce({
+      data: {
+        id: 4,
+        course_id: 1,
+        title: '数据处理综合练习',
+        environment_summary: basicSummary,
+        due_at: futureDue,
+      },
+    })
+    window.dispatchEvent(new Event('focus'))
+    await flushPromises()
+
+    expect(assignmentsAPI.get).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.deadline-banner').text()).toContain('作业进行中')
+    expect(wrapper.find('.btn-self-test').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.btn-submit-code').attributes('disabled')).toBeUndefined()
   })
 
   it('判题结果优先显示结构化中文诊断，不含裸 traceback', async () => {

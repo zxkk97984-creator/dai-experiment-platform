@@ -217,10 +217,13 @@ def test_exam_list_returns_is_submitted_for_student(client, db_session_factory):
 
     # 额外两个考试，用于覆盖 grading / graded 两种交后状态（eid 走真实 start→submit 流程）
     extra_ids = []
+    now = datetime.datetime.now(timezone.utc)
     for title in ("E-grading", "E-graded"):
         extra_id = client.post(
             f"{API}/exams", headers=_h(t_tok),
-            json={"course_id": cid, "title": title, "duration_minutes": 60},
+            json={"course_id": cid, "title": title, "duration_minutes": 60,
+                  "start_at": (now - timedelta(hours=1)).isoformat(),
+                  "end_at": (now + timedelta(hours=1)).isoformat()},
         ).json()["id"]
         r = client.post(
             f"{API}/exams/{extra_id}/questions", headers=_h(t_tok),

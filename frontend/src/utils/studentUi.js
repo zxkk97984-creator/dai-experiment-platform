@@ -2,12 +2,14 @@
 // storage 与 now 由调用方注入，绝不读取全局 localStorage 或 Date.now；
 // 任何缺失/损坏的日期、分数、存储数据都不会抛异常。
 
+import { parseApiDateTime } from './format.js'
+
 const DAY_MS = 24 * 60 * 60 * 1000
 
 /** 解析日期为毫秒时间戳；缺失/非法返回 null（绝不抛异常） */
 function parseDate(value) {
   if (value == null || value === '') return null
-  const d = new Date(value)
+  const d = parseApiDateTime(value)
   return Number.isNaN(d.getTime()) ? null : d.getTime()
 }
 

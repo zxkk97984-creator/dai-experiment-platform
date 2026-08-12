@@ -25,6 +25,7 @@ from app.schemas import (
     JudgeQuestionUpdate,
     PaginatedResponse,
 )
+from app.services.time_utils import utc_now
 
 router = APIRouter(prefix="/assignments", tags=["assignments"])
 
@@ -165,6 +166,8 @@ def create_assignment(
     if data["environment_version_id"] is None:
         basic = resolve_basic_available_version(db)
         data["environment_version_id"] = basic.id if basic else None
+    if data.get("status") == "published":
+        data["published_at"] = utc_now()
     assignment = Assignment(**data, created_by_id=current_user.id)
     db.add(assignment)
     db.commit()
@@ -207,6 +210,8 @@ def update_assignment(
         validate_environment_selection(db, updates["environment_version_id"])
     for key, value in updates.items():
         setattr(assignment, key, value)
+    if assignment.status == "published" and assignment.published_at is None:
+        assignment.published_at = utc_now()
     db.commit()
     db.refresh(assignment)
     return assignment
@@ -245,6 +250,8 @@ def publish_assignment(
             raise api_error(503, "AI_RUBRIC_UNAVAILABLE", f"Rubric 生成失败: {exc}")
 
     assignment.status = "published"
+    if assignment.published_at is None:
+        assignment.published_at = utc_now()
     db.commit()
     db.refresh(assignment)
     return assignment

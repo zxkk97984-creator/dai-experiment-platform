@@ -32,7 +32,7 @@ def _normalize_detail(detail):
 
 
 async def _expiry_scanner():
-    """定期扫描：过期考试自动交卷 + grading finalize（约 30 秒一轮）。
+    """定期扫描：过期考试自动交卷 + grading finalize（约 5 秒一轮）。
 
     多 API 实例下通过 exam-expiry DB 租约保证同一时刻只有一个实例执行；
     judge/AI stale recovery 由 Judge Worker 在 grading-recovery 租约下负责，
@@ -47,10 +47,10 @@ async def _expiry_scanner():
     owner_id = f"api:{socket.gethostname()}:{os.getpid()}:{_instance_id}"
     while True:
         try:
-            await asyncio.sleep(30)
+            await asyncio.sleep(5)
             with SessionLocal() as db:
                 from app.services.scheduler_lease import try_acquire_lease
-                if not try_acquire_lease(db, "exam-expiry", owner_id, ttl_seconds=90):
+                if not try_acquire_lease(db, "exam-expiry", owner_id, ttl_seconds=20):
                     continue  # 其他实例持有租约
                 from app.services.time_utils import utc_now
                 metrics = scan_expired_exams(db, utc_now())

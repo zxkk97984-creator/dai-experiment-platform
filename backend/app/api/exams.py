@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -9,8 +9,8 @@ from app.config import Settings, get_settings
 from app.dependencies import get_current_user, get_db, require_roles
 from app.errors import api_error
 from app.models import Course, CourseEnrollment, Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission, QuestionRubric, User
-from app.schemas import ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionTeacherRead, ExamQuestionUpdate, ExamRead, ExamRetryRequest, ExamSubmitRequest, ExamSubmissionRead, ExamUpdate, PaginatedResponse
-from app.services.exam_service import create_question, delete_question, get_my_grade, get_question, list_questions, require_exam_editable, retry_exam_submission as retry_exam_submission_service, save_answer, start_exam as svc_start_exam, submit_exam as svc_submit_exam, update_question, validate_publish
+from app.schemas import ExamAnswerBatchRequest, ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionTeacherRead, ExamQuestionUpdate, ExamRead, ExamRetryRequest, ExamSessionRead, ExamSubmitRequest, ExamSubmissionRead, ExamTimeExtensionRequest, ExamUpdate, PaginatedResponse
+from app.services.exam_service import build_student_exam_session, build_student_exam_summary, create_question, delete_question, exam_max_score, extend_exam_submission, force_submit_exam_submission, get_my_grade, get_question, list_questions, release_exam_review, require_exam_editable, retry_exam_submission as retry_exam_submission_service, save_answer, start_exam as svc_start_exam, student_exam_status, submit_exam as svc_submit_exam, update_question, validate_publish
 
 router = APIRouter(prefix="/exams", tags=["exams"])
 
@@ -36,7 +36,7 @@ def _submitted_ids(db: Session, exams: list[Exam], student_id: int) -> set[int]:
             select(ExamSubmission.exam_id).where(
                 ExamSubmission.exam_id.in_(exam_ids),
                 ExamSubmission.student_id == student_id,
-                ExamSubmission.status.in_(("submitted", "grading", "graded")),
+                ExamSubmission.status.in_(("submitted", "grading", "graded", "review_required")),
             )
         ).all()
     )
@@ -77,14 +77,21 @@ def list_exams(
         count_query = count_query.where(Exam.id == -1)
     total = db.scalar(count_query) or 0
     exams = db.scalars(query.order_by(Exam.id).offset((page - 1) * page_size).limit(page_size)).all()
-    # 仅学生视角计算已交状态，供任务中心区分已交/待办（教师/管理员保持默认 False）
-    submitted_ids = _submitted_ids(db, exams, current_user.id) if current_user.role == "student" else set()
+    student_submissions = {}
+    from app.services.time_utils import utc_now
+    server_now = utc_now()
+    if current_user.role == "student" and exams:
+        rows = db.scalars(select(ExamSubmission).where(
+            ExamSubmission.student_id == current_user.id,
+            ExamSubmission.exam_id.in_([exam.id for exam in exams]),
+        )).all()
+        student_submissions = {submission.exam_id: submission for submission in rows}
     items = []
     for exam in exams:
-        data = ExamRead.model_validate(exam).model_dump()
         if current_user.role == "student":
-            data["is_submitted"] = exam.id in submitted_ids
+            data = build_student_exam_summary(exam, student_submissions.get(exam.id), db, server_now)
         else:
+            data = ExamRead.model_validate(exam).model_dump()
             data.update({
                 "course_title": exam.course.title if exam.course else "",
                 "question_count": db.scalar(
@@ -104,6 +111,8 @@ def list_exams(
                 ) or 0,
                 "created_at": exam.created_at,
                 "updated_at": exam.updated_at,
+                "max_score": exam_max_score(exam.id, db),
+                "server_now": server_now,
             })
         items.append(data)
     return PaginatedResponse(items=items, page=page, page_size=page_size, total=total)
@@ -122,6 +131,8 @@ def create_exam(
     # 创建考试时强制 draft，发布需通过 update 接口触发 validate_publish()
     exam_data = payload.model_dump()
     exam_data["status"] = "draft"
+    if exam_data.get("show_answers_after_review"):
+        exam_data["show_questions_after_review"] = True
     exam = Exam(**exam_data, created_by_id=current_user.id)
     db.add(exam)
     db.commit()
@@ -136,7 +147,15 @@ def get_exam(exam_id: int, db: Session = Depends(get_db), current_user: User = D
         raise api_error(403, "FORBIDDEN", "没有权限查看该考试")
     if current_user.role == "student" and exam.status != "published":
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
-    return exam
+    if current_user.role == "student":
+        submission = db.scalar(select(ExamSubmission).where(
+            ExamSubmission.exam_id == exam.id,
+            ExamSubmission.student_id == current_user.id,
+        ))
+        return build_student_exam_summary(exam, submission, db)
+    data = ExamRead.model_validate(exam).model_dump()
+    data["max_score"] = exam_max_score(exam.id, db)
+    return data
 
 
 @router.patch("/{exam_id}", response_model=ExamRead)
@@ -149,12 +168,29 @@ def update_exam(
 ):
     exam = require_exam(exam_id, db)
     ensure_course_manager(exam.course, current_user)
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    previous_status = exam.status
+    changes = payload.model_dump(exclude_unset=True)
+    has_attempts = db.scalar(select(ExamSubmission.id).where(ExamSubmission.exam_id == exam_id).limit(1)) is not None
+    if has_attempts:
+        from app.services.time_utils import as_utc
+        duration_changed = "duration_minutes" in changes and changes["duration_minutes"] != exam.duration_minutes
+        start_changed = "start_at" in changes and as_utc(changes["start_at"]) != as_utc(exam.start_at)
+        if duration_changed or start_changed:
+            raise api_error(409, "EXAM_ALREADY_STARTED", "已有学生开始考试，不能修改开始时间或考试时长")
+        if changes.get("status") == "draft":
+            raise api_error(409, "EXAM_ALREADY_STARTED", "已有学生开始考试，不能取消发布")
+        if "end_at" in changes:
+            if changes["end_at"] is None or (exam.end_at is not None and as_utc(changes["end_at"]) < as_utc(exam.end_at)):
+                raise api_error(409, "EXAM_ALREADY_STARTED", "已有学生开始考试，最晚进入时间只能延后")
+    if changes.get("show_answers_after_review"):
+        changes["show_questions_after_review"] = True
+    for key, value in changes.items():
         setattr(exam, key, value)
     # 发布时强制校验
     if exam.status == "published":
         validate_publish(exam, db)
-        # AI 评分门禁：非 legacy 编程题必须由教师检查并锁定 Rubric。
+        # AI 评分门禁只在草稿首次发布时执行；之后调整公开策略或延后
+        # 最晚进入时间不应因为运行期配置变化而被无关门禁阻塞。
         code_questions = db.scalars(
             select(ExamQuestion).where(
                 ExamQuestion.exam_id == exam_id,
@@ -162,7 +198,7 @@ def update_exam(
                 ExamQuestion.grading_mode != "legacy",
             )
         ).all()
-        if code_questions:
+        if code_questions and previous_status != "published":
             if not settings.ai_ready:
                 raise api_error(503, "AI_NOT_READY", "发布含 AI 评分的考试需要配置 DAI_AI_API_KEY")
             missing = []
@@ -180,7 +216,27 @@ def update_exam(
     return exam
 
 
-@router.post("/{exam_id}/start", response_model=ExamSubmissionRead, status_code=status.HTTP_201_CREATED)
+@router.get("/{exam_id}/session", response_model=ExamSessionRead)
+def get_exam_session(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("student")),
+):
+    exam = require_exam(exam_id, db)
+    if exam.status != "published" or not can_access_course_content(exam.course, current_user, db):
+        raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布或无权参加")
+    session = build_student_exam_session(exam, current_user, db)
+    submission = session.get("submission") or {}
+    session.update({
+        "id": submission.get("id"),
+        "status": submission.get("status"),
+        "expires_at": submission.get("expires_at"),
+        "score": submission.get("score"),
+    })
+    return session
+
+
+@router.post("/{exam_id}/start", response_model=ExamSessionRead, status_code=status.HTTP_201_CREATED)
 def start_exam(
     exam_id: int,
     db: Session = Depends(get_db),
@@ -193,18 +249,27 @@ def start_exam(
     if exam.status != "published":
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
 
-    # 检查时间窗口（统一使用 as_utc 规范化）
+    existing = db.scalar(select(ExamSubmission).where(
+        ExamSubmission.exam_id == exam_id,
+        ExamSubmission.student_id == current_user.id,
+    ))
+    # 只有首次开始受全局进入窗口限制。开始请求若因断网重试，已有进行中记录
+    # 仍可幂等恢复，不能因为此时已过最晚进入时间而丢失会话。
     from app.services.time_utils import as_utc, utc_now
     now = utc_now()
-    if exam.start_at is not None and as_utc(exam.start_at) > now:
-        raise api_error(403, "EXAM_NOT_STARTED", "考试尚未开始")
-    if exam.end_at is not None and as_utc(exam.end_at) <= now:
-        raise api_error(403, "EXAM_EXPIRED", "考试已结束")
+    if existing is None:
+        if exam.start_at is not None and as_utc(exam.start_at) > now:
+            raise api_error(403, "EXAM_NOT_STARTED", "考试尚未开始")
+        if exam.end_at is not None and as_utc(exam.end_at) <= now:
+            raise api_error(403, "EXAM_EXPIRED", "考试已结束")
 
-    return svc_start_exam(exam, current_user, db)
+    submission = svc_start_exam(exam, current_user, db)
+    session = build_student_exam_session(exam, current_user, db)
+    session.update({"id": submission.id, "status": submission.status, "expires_at": submission.expires_at, "score": None})
+    return session
 
 
-@router.post("/{exam_id}/submit", response_model=ExamSubmissionRead, status_code=status.HTTP_201_CREATED)
+@router.post("/{exam_id}/submit", response_model=ExamSessionRead, status_code=status.HTTP_201_CREATED)
 def submit_exam(
     exam_id: int,
     db: Session = Depends(get_db),
@@ -227,8 +292,13 @@ def submit_exam(
         raise api_error(403, "EXAM_NOT_STARTED", "请先开始考试")
     # 幂等：重复提交返回当前状态，不报错（review_required 不自动重试）
     if sub.status in ("submitted", "grading", "graded", "review_required"):
-        return ExamSubmissionRead.model_validate(sub)
-    return svc_submit_exam(exam, current_user, db)
+        session = build_student_exam_session(exam, current_user, db)
+        session.update({"id": sub.id, "status": sub.status, "expires_at": sub.expires_at, "score": session.get("submission", {}).get("score")})
+        return session
+    submission = svc_submit_exam(exam, current_user, db)
+    session = build_student_exam_session(exam, current_user, db)
+    session.update({"id": submission.id, "status": submission.status, "expires_at": submission.expires_at, "score": session.get("submission", {}).get("score")})
+    return session
 
 
 @router.post("/{exam_id}/submissions/{submission_id}/retry", response_model=ExamSubmissionRead)
@@ -248,12 +318,56 @@ def retry_exam_submission(
     return retry_exam_submission_service(submission_id, payload.answer_ids, current_user, db)
 
 
+@router.post("/{exam_id}/review-release", response_model=ExamRead)
+def publish_exam_review(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("teacher", "admin")),
+):
+    exam = require_exam(exam_id, db)
+    ensure_course_manager(exam.course, current_user)
+    return release_exam_review(exam, current_user, db)
+
+
+@router.patch("/{exam_id}/submissions/{submission_id}/extend", response_model=ExamSubmissionRead)
+def extend_submission_time(
+    exam_id: int,
+    submission_id: int,
+    payload: ExamTimeExtensionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("teacher", "admin")),
+):
+    exam = require_exam(exam_id, db)
+    ensure_course_manager(exam.course, current_user)
+    submission = db.get(ExamSubmission, submission_id)
+    if not submission or submission.exam_id != exam_id:
+        raise api_error(404, "SUBMISSION_NOT_FOUND", "考试提交不存在")
+    return extend_exam_submission(submission, payload.minutes, current_user, db)
+
+
+@router.post("/{exam_id}/submissions/{submission_id}/force-submit", response_model=ExamSubmissionRead)
+def force_submit_submission(
+    exam_id: int,
+    submission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("teacher", "admin")),
+):
+    exam = require_exam(exam_id, db)
+    ensure_course_manager(exam.course, current_user)
+    submission = db.get(ExamSubmission, submission_id)
+    if not submission or submission.exam_id != exam_id:
+        raise api_error(404, "SUBMISSION_NOT_FOUND", "考试提交不存在")
+    return force_submit_exam_submission(submission, current_user, db)
+
+
 @router.get("/{exam_id}/grades")
 def exam_grades(
     exam_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("teacher", "admin")),
 ):
+    from app.services.time_utils import utc_now
+    server_now = utc_now()
     exam = require_exam(exam_id, db)
     if current_user.role == "teacher":
         ensure_course_manager(exam.course, current_user)
@@ -279,6 +393,7 @@ def exam_grades(
     for student in students_by_id.values():
         submission = submission_by_student.get(student.id)
         score = submission.score if submission else None
+        derived_status = submission.status if submission else student_exam_status(exam, None, server_now)[0]
         items.append({
             "id": submission.id if submission else f"absent-{student.id}",
             "exam_id": exam.id,
@@ -286,9 +401,12 @@ def exam_grades(
             "student_name": student.real_name,
             "student_number": student.student_no or student.username,
             "submission_id": submission.id if submission else None,
-            "status": submission.status if submission else "absent",
+            "status": derived_status,
             "score": score,
             "started_at": submission.started_at if submission else None,
+            "expires_at": submission.expires_at if submission else None,
+            "last_saved_at": submission.last_saved_at if submission else None,
+            "submission_reason": submission.submission_reason if submission else None,
             "submitted_at": submission.submitted_at if submission else None,
             "graded_at": submission.graded_at if submission else None,
             "review_reason": submission.review_reason if submission else None,
@@ -296,6 +414,9 @@ def exam_grades(
 
     scored = [float(item["score"]) for item in items if item["score"] is not None]
     submitted_count = sum(1 for item in items if item["status"] in ("submitted", "grading", "graded", "review_required"))
+    status_counts = {key: sum(1 for item in items if item["status"] == key) for key in (
+        "scheduled", "ready", "in_progress", "submitted", "grading", "graded", "review_required", "missed"
+    )}
     pass_count = sum(1 for score in scored if score >= 60)
     distribution = []
     for label, low, high in (("90–100", 90, 101), ("80–89", 80, 90), ("70–79", 70, 80), ("60–69", 60, 70), ("0–59", 0, 60)):
@@ -321,6 +442,13 @@ def exam_grades(
             "duration_minutes": exam.duration_minutes,
             "question_count": question_count,
             "total_score": float(total_score),
+            "start_at": exam.start_at,
+            "end_at": exam.end_at,
+            "show_score_after_grading": exam.show_score_after_grading,
+            "show_questions_after_review": exam.show_questions_after_review,
+            "show_answers_after_review": exam.show_answers_after_review,
+            "review_released_at": exam.review_released_at,
+            "server_now": server_now,
         },
         "summary": {
             "expected_count": len(items),
@@ -330,6 +458,7 @@ def exam_grades(
             "highest_score": max(scored) if scored else None,
             "pass_rate": round(pass_count * 100 / len(scored), 1) if scored else 0,
             "excellent_rate": round(sum(1 for score in scored if score >= 90) * 100 / len(scored), 1) if scored else 0,
+            "status_counts": status_counts,
         },
         "distribution": distribution,
     }
@@ -383,6 +512,9 @@ def exam_grade_detail(
             "status": submission.status,
             "score": submission.score,
             "started_at": submission.started_at,
+            "expires_at": submission.expires_at,
+            "last_saved_at": submission.last_saved_at,
+            "submission_reason": submission.submission_reason,
             "submitted_at": submission.submitted_at,
             "graded_at": submission.graded_at,
             "elapsed_minutes": elapsed_minutes,
@@ -408,6 +540,7 @@ def exam_grade_detail(
                 "grading_status": answer.grading_status,
                 "selected_options": answer.selected_options,
                 "code_answer": answer.code_answer,
+                "text_answers": answer.text_answers,
                 "system_error": answer.system_error,
             }
             for answer in answers
@@ -426,15 +559,12 @@ def get_questions(exam_id: int, db: Session = Depends(get_db), current_user: Use
             raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
         if not can_access_course_content(exam.course, current_user, db):
             raise api_error(403, "FORBIDDEN", "请先选课")
-        # 学生必须已开始考试
-        sub = db.scalar(
-            select(ExamSubmission).where(
-                ExamSubmission.exam_id == exam_id,
-                ExamSubmission.student_id == current_user.id,
-            )
+        session = build_student_exam_session(exam, current_user, db)
+        if not session["questions"]:
+            raise api_error(403, "EXAM_NOT_STARTED", "请先开始考试或等待教师发布讲评")
+        return PaginatedResponse(
+            items=session["questions"], page=1, page_size=len(session["questions"]), total=len(session["questions"])
         )
-        if not sub or sub.status != "started":
-            raise api_error(403, "EXAM_NOT_STARTED", "请先开始考试")
     elif current_user.role == "teacher":
         # 教师只能看自己课程的考试题目
         course = db.get(Course, exam.course_id)
@@ -476,8 +606,46 @@ def del_question(exam_id: int, question_id: int, db: Session = Depends(get_db), 
 
 @router.put("/{exam_id}/answers/{question_id}", status_code=status.HTTP_201_CREATED)
 def put_answer(exam_id: int, question_id: int, payload: dict, db: Session = Depends(get_db), current_user: User = Depends(require_roles("student"))):
+    exam = require_exam(exam_id, db)
+    if exam.status != "published" or not can_access_course_content(exam.course, current_user, db):
+        raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布或无权参加")
     return save_answer(db, exam_id, question_id, current_user, payload)
+
+
+@router.put("/{exam_id}/answers", status_code=status.HTTP_200_OK)
+def put_answers_batch(
+    exam_id: int,
+    payload: ExamAnswerBatchRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("student")),
+):
+    from app.services.time_utils import utc_now
+    exam = require_exam(exam_id, db)
+    if exam.status != "published" or not can_access_course_content(exam.course, current_user, db):
+        raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布或无权参加")
+    results = []
+    for item in payload.answers:
+        try:
+            answer = save_answer(db, exam_id, item.question_id, current_user, item.model_dump(exclude_none=True))
+            results.append({
+                "question_id": item.question_id,
+                "ok": True,
+                "version": answer.version,
+                "saved_at": answer.updated_at,
+            })
+        except HTTPException as exc:
+            db.rollback()
+            results.append({
+                "question_id": item.question_id,
+                "ok": False,
+                "code": exc.detail.get("code", "SAVE_FAILED") if isinstance(exc.detail, dict) else "SAVE_FAILED",
+                "message": exc.detail.get("message", str(exc.detail)) if isinstance(exc.detail, dict) else str(exc.detail),
+            })
+    return {"results": results, "server_now": utc_now()}
 
 @router.get("/{exam_id}/my-grade")
 def my_grade(exam_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_roles("student"))):
+    exam = require_exam(exam_id, db)
+    if exam.status != "published" or not can_access_course_content(exam.course, current_user, db):
+        raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布或无权参加")
     return get_my_grade(exam_id, current_user, db)

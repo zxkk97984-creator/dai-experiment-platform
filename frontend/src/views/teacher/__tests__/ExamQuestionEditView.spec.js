@@ -10,7 +10,7 @@ vi.mock('vue-router', async (importOriginal) => ({
 
 vi.mock('../../../api/exams.js', () => ({
   examsAPI: {
-    get: vi.fn(), getQuestions: vi.fn(), createQuestion: vi.fn(), updateQuestion: vi.fn(), deleteQuestion: vi.fn(),
+    get: vi.fn(), getQuestions: vi.fn(), createQuestion: vi.fn(), updateQuestion: vi.fn(), deleteQuestion: vi.fn(), update: vi.fn(),
   },
 }))
 
@@ -24,6 +24,30 @@ describe('ExamQuestionEditView', () => {
     examsAPI.get.mockResolvedValue({ data: { id: 8, title: '期中考试', status: 'draft' } })
     examsAPI.getQuestions.mockResolvedValue({ data: { items: [] } })
     examsAPI.createQuestion.mockResolvedValue({ data: { id: 91 } })
+    examsAPI.update.mockResolvedValue({ data: { id: 8, title: '期中考试', status: 'draft' } })
+  })
+
+  it('使用双栏布局，并通过两个下拉框配置公开策略', async () => {
+    const wrapper = mount(ExamQuestionEditView, {
+      global: { stubs: { AppLayout: { template: '<main><slot /></main>' } } },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.editor-shell').exists()).toBe(true)
+    expect(wrapper.find('.question-workspace').exists()).toBe(true)
+    expect(wrapper.find('.control-rail').exists()).toBe(true)
+    expect(wrapper.findAll('.visibility-block input[type="checkbox"]')).toHaveLength(0)
+
+    await wrapper.find('#score-visibility').setValue('after_grading')
+    await wrapper.find('#review-visibility').setValue('questions_and_answers')
+    await wrapper.find('.save-settings').trigger('click')
+    await flushPromises()
+
+    expect(examsAPI.update).toHaveBeenCalledWith('8', expect.objectContaining({
+      show_score_after_grading: true,
+      show_questions_after_review: true,
+      show_answers_after_review: true,
+    }))
   })
 
   it('新建编程题默认 active，首次保存后原地解锁 AI 配置', async () => {

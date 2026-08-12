@@ -1,97 +1,109 @@
-// ExamView：review_required 学生提示 + started/grading/graded 行为回归
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
+const router = { push: vi.fn(), replace: vi.fn() }
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { id: '3' } }),
-  onBeforeRouteLeave: (fn) => fn,
-  createRouter: vi.fn(() => ({
-    beforeEach: vi.fn(), afterEach: vi.fn(), beforeResolve: vi.fn(),
-    push: vi.fn(), replace: vi.fn(),
-    currentRoute: { value: { path: '/student/exams/3' } },
-  })),
+  useRouter: () => router,
+  onBeforeRouteLeave: vi.fn(),
+  createRouter: vi.fn(() => ({ beforeEach: vi.fn(), afterEach: vi.fn(), beforeResolve: vi.fn(), push: vi.fn(), replace: vi.fn(), currentRoute: { value: { path: '/student/exams/3' } } })),
   createWebHistory: vi.fn(() => ({})),
 }))
 
 vi.mock('../../../api/exams.js', () => ({
   examsAPI: {
-    get: vi.fn(),
-    getQuestions: vi.fn(),
-    getMyGrade: vi.fn(),
-    saveAnswer: vi.fn(),
-    submit: vi.fn(),
-    start: vi.fn(),
+    getSession: vi.fn(), saveAnswers: vi.fn(), submit: vi.fn(), start: vi.fn(),
   },
 }))
 
-vi.mock('../../../stores/app.js', () => ({
-  useAppStore: () => ({ showToast: vi.fn() }),
-}))
+vi.mock('../../../stores/app.js', () => ({ useAppStore: () => ({ showToast: vi.fn() }) }))
 
 import { examsAPI } from '../../../api/exams.js'
+import ExamView from '../ExamView.vue'
 
-const EXAM = { id: 3, title: '期中考试', duration_minutes: 60, total_points: 30 }
-const QUESTIONS = {
-  data: {
-    items: [
-      { id: 1, question_type: 'single_choice', points: 10 },
-      { id: 2, question_type: 'code', points: 20 },
-    ],
-  },
+const SERVER_NOW = '2026-08-12T04:00:00Z'
+const QUESTIONS = [
+  { id: 1, question_type: 'single_choice', prompt: '2 + 2 = ?', options: { A: '4', B: '5' }, points: 10 },
+  { id: 2, question_type: 'fill_blank', prompt: '作者是 [[blank:blank1]]', points: 20 },
+]
+
+function sessionFor(status, extra = {}) {
+  const active = status === 'started'
+  return {
+    server_now: SERVER_NOW,
+    exam: { id: 3, title: '期中考试', duration_minutes: 60, max_score: 30, student_status: active ? 'in_progress' : 'graded', ...extra.exam },
+    submission: {
+      id: 7, status, score: null, score_visible: false,
+      expires_at: active ? '2026-08-12T04:10:00Z' : '2026-08-12T04:00:00Z',
+      submitted_at: active ? null : SERVER_NOW, submission_reason: 'manual', ...extra.submission,
+    },
+    questions: active || extra.visibility?.questions ? QUESTIONS : [],
+    saved_answers: [],
+    visibility: { score: false, questions: false, answers: false, review_released: false, ...extra.visibility },
+  }
 }
 
 async function mountExam(status, extra = {}) {
-  examsAPI.get.mockResolvedValue({ data: EXAM })
-  examsAPI.getQuestions.mockResolvedValue(QUESTIONS)
-  examsAPI.getMyGrade.mockResolvedValue({
-    data: { submission_id: 7, status, score: null, answers: [], ...extra },
-  })
-  const mod = await import('../ExamView.vue')
-  const wrapper = mount(mod.default, {
-    global: {
-      stubs: {
-        AppLayout: { template: '<div><slot /></div>' },
-        StudentAIGradingResult: { template: '<div class="ai-result-stub" />' },
-      },
-    },
-  })
+  examsAPI.getSession.mockResolvedValue({ data: sessionFor(status, extra) })
+  const wrapper = mount(ExamView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, ConfirmDialog: { template: '<div class="confirm-stub" />' } } } })
   await flushPromises()
   return wrapper
 }
 
-describe('ExamView 状态展示', () => {
+describe('ExamView 安全状态与结果展示', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    examsAPI.saveAnswers.mockResolvedValue({ data: { server_now: SERVER_NOW, results: [{ question_id: 1, ok: true, version: 1 }] } })
   })
+  afterEach(() => vi.useRealTimers())
 
-  it('review_required：显示人工处理提示，不显示"等待评分"', async () => {
+  it('待复核显示人工处理提示，不泄露系统细节', async () => {
     const wrapper = await mountExam('review_required')
-    const text = wrapper.text()
-    expect(text).toContain('评分遇到系统问题，已转人工处理，不会按 0 分计入')
-    expect(text).not.toContain('已交卷，等待评分')
-    // 不泄露内部信息
-    expect(text).not.toContain('system_error')
-    expect(text).not.toContain('hidden')
+    expect(wrapper.text()).toContain('已交卷，等待教师复核')
+    expect(wrapper.text()).toContain('不会按 0 分计入')
+    expect(wrapper.text()).not.toContain('system_error')
+    wrapper.unmount()
   })
 
-  it('graded：显示最终得分（回归）', async () => {
-    const wrapper = await mountExam('graded', { score: 25 })
-    expect(wrapper.text()).toContain('已评分：25 分')
+  it('成绩未公开时不把 null 渲染成 0 分', async () => {
+    const wrapper = await mountExam('graded', { submission: { score: null, score_visible: false } })
+    expect(wrapper.text()).toContain('成绩暂未开放')
+    expect(wrapper.text()).not.toContain('0 / 30')
+    wrapper.unmount()
   })
 
-  it('grading：仍显示"已交卷，等待评分"（回归）', async () => {
-    const wrapper = await mountExam('grading')
-    expect(wrapper.text()).toContain('已交卷，等待评分')
+  it('成绩公开时使用服务端 max_score', async () => {
+    const wrapper = await mountExam('graded', { submission: { score: 25, score_visible: true }, visibility: { score: true } })
+    expect(wrapper.text()).toContain('25 / 30 分')
+    wrapper.unmount()
   })
 
-  it('started：无提交记录时不显示评分提示，出现考试主体（回归）', async () => {
-    const wrapper = await mountExam('started', {
-      expires_at: new Date(Date.now() + 600000).toISOString(),
-    })
-    expect(wrapper.text()).not.toContain('已交卷')
-    expect(wrapper.text()).not.toContain('评分遇到系统问题')
-    expect(wrapper.find('.exam-body').exists()).toBe(true)
+  it('进行中恢复题目并安全渲染填空输入框', async () => {
+    const wrapper = await mountExam('started')
+    expect(wrapper.find('.workspace').exists()).toBe(true)
+    expect(wrapper.find('input[aria-label="填空 blank1"]').exists()).toBe(true)
+    expect(wrapper.html()).not.toContain('v-html')
+    wrapper.unmount()
+  })
+
+  it('答案变更在 800ms 防抖后走批量保存并携带版本', async () => {
+    vi.useFakeTimers()
+    const wrapper = await mountExam('started')
+    await wrapper.get('input[type="radio"]').trigger('change')
+    await vi.advanceTimersByTimeAsync(801)
+    await flushPromises()
+    expect(examsAPI.saveAnswers).toHaveBeenCalledWith(3, [expect.objectContaining({ question_id: 1, selected_options: ['A'], expected_version: 0 })])
+    wrapper.unmount()
+  })
+
+  it('刷新后若剩余不足一分钟立即提醒，并在 3 秒后关闭', async () => {
+    vi.useFakeTimers()
+    const wrapper = await mountExam('started', { submission: { expires_at: '2026-08-12T04:00:50Z' } })
+    expect(wrapper.find('.minute-warning').exists()).toBe(true)
+    await vi.advanceTimersByTimeAsync(3001)
+    expect(wrapper.find('.minute-warning').exists()).toBe(false)
+    wrapper.unmount()
   })
 })

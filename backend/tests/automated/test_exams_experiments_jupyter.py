@@ -1,5 +1,8 @@
 """考试 + Jupyter 旧集成测试（适配 v5 模型）"""
+from datetime import timedelta
+
 from conftest import auth_header, create_user, login
+from app.services.time_utils import utc_now
 
 
 def test_exam_submission_and_grade_visibility(client, db_session_factory):
@@ -15,6 +18,7 @@ def test_exam_submission_and_grade_visibility(client, db_session_factory):
     ).json()["id"]
     client.post(f"/api/v1/courses/{course_id}/enroll", headers=auth_header(student_token))
 
+    now = utc_now()
     exam_response = client.post(
         "/api/v1/exams",
         headers=auth_header(teacher_token),
@@ -22,6 +26,8 @@ def test_exam_submission_and_grade_visibility(client, db_session_factory):
             "course_id": course_id,
             "title": "期末考试",
             "duration_minutes": 90,
+            "start_at": (now - timedelta(minutes=10)).isoformat(),
+            "end_at": (now + timedelta(minutes=60)).isoformat(),
         },
     )
     assert exam_response.status_code == 201

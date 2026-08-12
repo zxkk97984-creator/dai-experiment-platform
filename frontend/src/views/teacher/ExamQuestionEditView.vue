@@ -2,8 +2,10 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
+import AppIcon from '../../components/ui/AppIcon.vue'
 import AIQuestionConfig from '../../components/ai/AIQuestionConfig.vue'
 import ChoiceOptionsEditor from '../../components/teacher/exam/ChoiceOptionsEditor.vue'
+import FillBlankEditor from '../../components/teacher/exam/FillBlankEditor.vue'
 import QeTestCases from '../../components/teacher/question-editor/QeTestCases.vue'
 import { examsAPI } from '../../api/exams.js'
 import { useAppStore } from '../../stores/app.js'
@@ -14,20 +16,46 @@ const aiConfigQid = ref(null)  // 当前展开 AI 配置的题目 ID
 const choiceEditor = ref(null)
 const testCasesKey = ref(0)
 const modalAiExpanded = ref(true)
+const settings = ref({ title: '', duration_minutes: 60, start_at: '', end_at: '', show_score_after_grading: false, show_questions_after_review: false, show_answers_after_review: false })
+const settingsReady = ref(false)
+const settingsSaving = ref(false)
 
 function blankChoice() {
   return { options: [{ key: 'A', text: '', correct: false }, { key: 'B', text: '', correct: false }], scoring_mode: 'all_or_nothing' }
 }
 function blankForm(type = 'single_choice') {
   return {
-    question_type: type, prompt: '', points: 1, choice: blankChoice(),
+    question_type: type, prompt: '', points: 1, choice: blankChoice(), fill_blanks: [],
     starter_code: '', public_cases: [], hidden_tests: '', time_limit_ms: 10000,
     memory_limit_mb: 256, grading_mode: type === 'code' ? 'active' : 'legacy',
   }
 }
 const form = ref(blankForm())
 
-async function load() { loading.value = true; try { const [eR,qR] = await Promise.all([examsAPI.get(examId), examsAPI.getQuestions(examId)]); exam.value = eR.data; questions.value = qR.data.items || [] } catch { app.showToast('加载失败', 'error') } finally { loading.value = false } }
+function toLocalInput(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 16)
+}
+async function load() {
+  loading.value = true
+  try {
+    const [eR, qR] = await Promise.all([examsAPI.get(examId), examsAPI.getQuestions(examId)])
+    exam.value = eR.data
+    questions.value = qR.data.items || []
+    if (!settingsReady.value) {
+      settings.value = {
+        title: exam.value.title || '', duration_minutes: exam.value.duration_minutes || 60,
+        start_at: toLocalInput(exam.value.start_at), end_at: toLocalInput(exam.value.end_at),
+        show_score_after_grading: Boolean(exam.value.show_score_after_grading),
+        show_questions_after_review: Boolean(exam.value.show_questions_after_review),
+        show_answers_after_review: Boolean(exam.value.show_answers_after_review),
+      }
+      settingsReady.value = true
+    }
+  } catch { app.showToast('加载失败', 'error') } finally { loading.value = false }
+}
 function openAdd() {
   editingQ.value = null
   form.value = blankForm()
@@ -44,11 +72,12 @@ function openEdit(q) {
       options: Object.entries(q.options || {}).map(([key, text]) => ({ key, text, correct: correct.has(key) })),
       scoring_mode: q.correct_answer?.scoring_mode || 'all_or_nothing',
     },
+    fill_blanks: (q.correct_answer?.blanks || []).map(blank => ({ ...blank, accepted_answers: [...(blank.accepted_answers || [])] })),
     starter_code: q.starter_code || '', public_cases: q.public_cases || [], hidden_tests: q.hidden_tests || '',
     time_limit_ms: q.time_limit_ms || 10000, memory_limit_mb: q.memory_limit_mb || 256,
     grading_mode: q.grading_mode || (q.question_type === 'code' ? 'active' : 'legacy'),
   }
-  if (q.question_type !== 'code' && form.value.choice.options.length < 2) form.value.choice = blankChoice()
+  if (['single_choice', 'multi_choice'].includes(q.question_type) && form.value.choice.options.length < 2) form.value.choice = blankChoice()
   modalAiExpanded.value = true
   testCasesKey.value++
   showForm.value = true
@@ -73,13 +102,25 @@ async function save() {
     if (!form.value.prompt.trim()) throw new Error('请输入题目内容')
     if (!(Number(form.value.points) > 0)) throw new Error('分值必须大于 0')
     const p = { question_type: form.value.question_type, prompt: form.value.prompt.trim(), points: form.value.points, order_index: editingQ.value ? undefined : questions.value.length }
-    if (form.value.question_type !== 'code') {
+    if (['single_choice', 'multi_choice'].includes(form.value.question_type)) {
       const validationError = choiceEditor.value?.validate()
       if (validationError) throw new Error(validationError)
       p.options = Object.fromEntries(form.value.choice.options.map((row) => [row.key.trim(), row.text.trim()]))
       p.correct_answer = {
         correct: form.value.choice.options.filter((row) => row.correct).map((row) => row.key.trim()),
         scoring_mode: form.value.question_type === 'multi_choice' ? form.value.choice.scoring_mode : 'all_or_nothing',
+      }
+      p.grading_mode = 'legacy'
+    } else if (form.value.question_type === 'fill_blank') {
+      if (!form.value.fill_blanks.length) throw new Error('请至少插入一个空格')
+      if (form.value.fill_blanks.some(blank => !blank.accepted_answers.length || blank.accepted_answers.some(answer => !answer.trim()))) throw new Error('每个空格都必须填写至少一个标准答案')
+      p.options = null
+      p.correct_answer = {
+        blanks: form.value.fill_blanks.map(blank => ({
+          id: blank.id,
+          accepted_answers: blank.accepted_answers.map(answer => answer.trim()),
+          case_sensitive: Boolean(blank.case_sensitive),
+        })),
       }
       p.grading_mode = 'legacy'
     } else {
@@ -102,6 +143,51 @@ async function save() {
 }
 function finishEditing() { showForm.value = false; load() }
 async function remove(qId) { if(confirm('确认删除此题？')) { try { await examsAPI.deleteQuestion(examId, qId); load() } catch { app.showToast('删除失败', 'error') } } }
+
+const publishChecks = computed(() => [
+  { label: '已设置考试名称', ok: Boolean(settings.value.title.trim()) },
+  { label: '开始时间早于最晚进入时间', ok: Boolean(settings.value.start_at && settings.value.end_at && new Date(settings.value.start_at) < new Date(settings.value.end_at)) },
+  { label: '考试时长有效', ok: Number(settings.value.duration_minutes) > 0 },
+  { label: '至少包含一道合格题目', ok: questions.value.length > 0 },
+])
+const readyToPublish = computed(() => publishChecks.value.every(check => check.ok))
+const totalPoints = computed(() => questions.value.reduce((sum, item) => sum + Number(item.points || 0), 0))
+const scoreVisibility = computed({
+  get: () => settings.value.show_score_after_grading ? 'after_grading' : 'hidden',
+  set: value => { settings.value.show_score_after_grading = value === 'after_grading' },
+})
+const reviewVisibility = computed({
+  get: () => settings.value.show_answers_after_review
+    ? 'questions_and_answers'
+    : settings.value.show_questions_after_review ? 'questions_only' : 'hidden',
+  set: value => {
+    settings.value.show_questions_after_review = ['questions_only', 'questions_and_answers'].includes(value)
+    settings.value.show_answers_after_review = value === 'questions_and_answers'
+  },
+})
+
+async function saveSettings({ publish = false, unpublish = false } = {}) {
+  settingsSaving.value = true
+  try {
+    const payload = {
+      title: settings.value.title.trim(), duration_minutes: Number(settings.value.duration_minutes),
+      start_at: settings.value.start_at ? new Date(settings.value.start_at).toISOString() : null,
+      end_at: settings.value.end_at ? new Date(settings.value.end_at).toISOString() : null,
+      show_score_after_grading: settings.value.show_score_after_grading,
+      show_questions_after_review: settings.value.show_questions_after_review || settings.value.show_answers_after_review,
+      show_answers_after_review: settings.value.show_answers_after_review,
+    }
+    if (publish) payload.status = 'published'
+    if (unpublish) payload.status = 'draft'
+    const response = await examsAPI.update(examId, payload)
+    exam.value = response.data
+    settings.value.show_questions_after_review = Boolean(response.data.show_questions_after_review)
+    app.showToast(publish ? '考试已发布，学生将按服务器时间看到考试' : unpublish ? '已取消发布，可以继续编辑试题' : '考试设置已保存', 'success')
+    await load()
+  } catch (error) {
+    app.showToast(error.response?.data?.detail?.message || '保存考试设置失败', 'error')
+  } finally { settingsSaving.value = false }
+}
 onMounted(load)
 </script>
 
@@ -112,17 +198,16 @@ onMounted(load)
       <header class="page-head">
         <div>
           <button class="btn-ghost btn-sm back-btn" @click="router.push('/teacher/exams')">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <AppIcon name="back" :size="15" />
             返回考试列表
           </button>
-          <h1 class="page-title">{{ exam?.title || '考试题目管理' }}</h1>
-          <p class="page-sub">编辑考试题目，支持单选题、多选题和编程题</p>
-        </div>
-        <div class="page-meta">
-          <button class="btn-accent" @click="openAdd" :disabled="exam?.status !== 'draft'" :title="exam?.status !== 'draft' ? '已发布考试不可修改题目' : ''">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-            添加题目
-          </button>
+          <div class="title-line">
+            <h1 class="page-title">{{ exam?.title || '考试题目管理' }}</h1>
+            <span v-if="exam" class="status-badge" :class="exam.status === 'draft' ? 'is-draft' : 'is-published'">
+              {{ exam.status === 'draft' ? '草稿' : '已发布' }}
+            </span>
+          </div>
+          <p class="page-sub">集中编辑试题，右侧完成考试时间、公开策略与发布检查</p>
         </div>
       </header>
 
@@ -132,32 +217,149 @@ onMounted(load)
         <div class="skeleton" style="height:14px;width:360px;margin:0 auto"></div>
       </div>
 
-      <!-- ── Empty ──────────────────────────────────────────────────────── -->
-      <div v-else-if="questions.length === 0" class="empty-state">
-        <p>📝 暂无题目，点击「添加题目」创建</p>
-      </div>
+      <div v-else class="editor-shell">
+        <main class="question-workspace">
+          <section class="question-section" aria-labelledby="question-section-title">
+            <div class="section-toolbar">
+              <div>
+                <p class="section-kicker">试题内容</p>
+                <h2 id="question-section-title">题目列表</h2>
+                <p>共 {{ questions.length }} 道题，满分 {{ totalPoints }} 分</p>
+              </div>
+              <button class="btn-accent add-question" @click="openAdd" :disabled="exam?.status !== 'draft'" :title="exam?.status !== 'draft' ? '已发布考试不可修改题目' : ''">
+                <AppIcon name="plus" :size="17" />
+                添加题目
+              </button>
+            </div>
 
-      <!-- ── Question List ──────────────────────────────────────────────── -->
-      <div v-for="(q,i) in questions" :key="q.id" class="card question-card">
-        <div class="qh">
-          <strong>#{{ i + 1 }}</strong>
-          <span class="badge" :class="q.question_type === 'single_choice' ? 'badge-primary' : q.question_type === 'multi_choice' ? 'badge-info' : 'badge-neutral'">
-            {{ { single_choice:'单选题', multi_choice:'多选题', code:'编程题' }[q.question_type] }}
-          </span>
-          <span class="qp">{{ q.points }} 分</span>
-          <span v-if="q.question_type === 'code'" class="badge-mode" :class="{ incomplete: !configStatus(q).ok }">
-            {{ configStatus(q).text }}{{ configStatus(q).ok ? '' : ' · 配置未完成' }}
-          </span>
-          <span class="qa">
-            <button v-if="q.question_type === 'code'" class="btn-ghost btn-sm btn-ai" @click="aiConfigQid = aiConfigQid === q.id ? null : q.id">
-              {{ aiConfigQid === q.id ? '收起 AI 配置' : '🤖 AI 配置' }}
-            </button>
-            <button class="btn-ghost btn-sm" @click="openEdit(q)">编辑</button>
-            <button class="btn-ghost btn-sm btn-del" @click="remove(q.id)">删除</button>
-          </span>
-        </div>
-        <p class="qd">{{ q.prompt }}</p>
-        <AIQuestionConfig v-if="aiConfigQid === q.id && q.question_type === 'code'" :kind="'exam'" :question-id="q.id" :expanded="true" @close="aiConfigQid = null" />
+            <div v-if="questions.length === 0" class="question-empty">
+              <AppIcon name="exam" :size="30" />
+              <strong>还没有试题</strong>
+              <p>添加第一道题目后，可在右侧完成发布前检查。</p>
+              <button class="btn-accent" :disabled="exam?.status !== 'draft'" @click="openAdd">
+                <AppIcon name="plus" :size="16" />
+                添加题目
+              </button>
+            </div>
+
+            <div v-else class="question-list">
+              <article v-for="(q,i) in questions" :key="q.id" class="question-row">
+                <div class="question-row-main">
+                  <div class="question-meta">
+                    <strong class="question-index">{{ String(i + 1).padStart(2, '0') }}</strong>
+                    <span class="badge" :class="q.question_type === 'single_choice' ? 'badge-primary' : q.question_type === 'multi_choice' ? 'badge-info' : 'badge-neutral'">
+                      {{ { single_choice:'单选题', multi_choice:'多选题', fill_blank:'填空题', code:'编程题' }[q.question_type] }}
+                    </span>
+                    <span class="qp">{{ q.points }} 分</span>
+                    <span v-if="q.question_type === 'code'" class="badge-mode" :class="{ incomplete: !configStatus(q).ok }">
+                      {{ configStatus(q).text }}{{ configStatus(q).ok ? '' : ' · 配置未完成' }}
+                    </span>
+                  </div>
+                  <p class="qd">{{ q.prompt }}</p>
+                </div>
+                <div class="question-actions">
+                  <button v-if="q.question_type === 'code'" class="text-action btn-ai" @click="aiConfigQid = aiConfigQid === q.id ? null : q.id">
+                    <AppIcon name="brain" :size="15" />
+                    {{ aiConfigQid === q.id ? '收起配置' : 'AI 配置' }}
+                  </button>
+                  <button class="icon-action" :disabled="exam?.status !== 'draft'" aria-label="编辑题目" title="编辑题目" @click="openEdit(q)">
+                    <AppIcon name="edit" :size="16" />
+                  </button>
+                  <button class="icon-action is-danger" :disabled="exam?.status !== 'draft'" aria-label="删除题目" title="删除题目" @click="remove(q.id)">
+                    <AppIcon name="trash" :size="16" />
+                  </button>
+                </div>
+                <AIQuestionConfig v-if="aiConfigQid === q.id && q.question_type === 'code'" class="question-ai-config" :kind="'exam'" :question-id="q.id" :expanded="true" @close="aiConfigQid = null" />
+              </article>
+            </div>
+          </section>
+        </main>
+
+        <aside class="control-rail" aria-label="考试设置与发布检查">
+          <section class="rail-section settings-panel" aria-labelledby="exam-settings-title">
+            <div class="rail-heading">
+              <div>
+                <p class="section-kicker">考试配置</p>
+                <h2 id="exam-settings-title">考试设置</h2>
+              </div>
+              <AppIcon name="settings" :size="19" />
+            </div>
+
+            <div class="rail-form">
+              <div class="form-group">
+                <label for="exam-title">考试名称</label>
+                <input id="exam-title" v-model="settings.title" :disabled="exam?.status !== 'draft'">
+              </div>
+              <div class="form-group">
+                <label for="exam-duration">考试时长（分钟）</label>
+                <input id="exam-duration" v-model.number="settings.duration_minutes" type="number" min="1" :disabled="exam?.status !== 'draft'">
+              </div>
+              <div class="form-group">
+                <label for="exam-start">开始时间</label>
+                <input id="exam-start" v-model="settings.start_at" type="datetime-local" :disabled="exam?.status !== 'draft'">
+              </div>
+              <div class="form-group">
+                <label for="exam-end">最晚进入时间</label>
+                <input id="exam-end" v-model="settings.end_at" type="datetime-local" :disabled="exam?.status !== 'draft'">
+              </div>
+            </div>
+
+            <div class="timing-note">
+              <AppIcon name="info" :size="16" />
+              <span>学生在最晚进入时间前开始，即可获得完整的 {{ settings.duration_minutes || 0 }} 分钟。</span>
+            </div>
+
+            <div class="strategy-section">
+              <div class="strategy-heading">
+                <h3>公开策略</h3>
+                <p>默认隐藏，避免成绩和答案提前泄露。</p>
+              </div>
+              <div class="form-group">
+                <label for="score-visibility">成绩公开方式</label>
+                <select id="score-visibility" v-model="scoreVisibility">
+                  <option value="hidden">暂不公开</option>
+                  <option value="after_grading">评分完成后公开总成绩</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="review-visibility">讲评公开范围</label>
+                <select id="review-visibility" v-model="reviewVisibility">
+                  <option value="hidden">暂不公开题目与答案</option>
+                  <option value="questions_only">仅公开题目</option>
+                  <option value="questions_and_answers">公开题目与标准答案</option>
+                </select>
+              </div>
+              <p class="strategy-note">讲评范围仅在教师手动发布讲评后生效。</p>
+            </div>
+
+            <div class="rail-actions">
+              <button class="btn-accent save-settings" :disabled="settingsSaving" @click="saveSettings()">
+                <AppIcon name="save" :size="16" />
+                {{ settingsSaving ? '正在保存…' : '保存设置' }}
+              </button>
+              <button v-if="exam?.status === 'published'" class="unpublish-button" :disabled="settingsSaving" @click="saveSettings({ unpublish: true })">取消发布后编辑</button>
+            </div>
+          </section>
+
+          <section class="rail-section publish-panel" aria-labelledby="publish-check-title">
+            <div class="rail-heading compact">
+              <div>
+                <p class="section-kicker">发布前确认</p>
+                <h2 id="publish-check-title">发布检查</h2>
+              </div>
+            </div>
+            <div class="checklist">
+              <div v-for="check in publishChecks" :key="check.label" class="check-row" :class="{ ok: check.ok }">
+                <span class="check-icon" aria-hidden="true"><AppIcon :name="check.ok ? 'check' : 'warning'" :size="14" /></span>
+                <span>{{ check.label }}</span>
+                <small>{{ check.ok ? '通过' : '待完善' }}</small>
+              </div>
+            </div>
+            <p class="server-check-note">发布时，服务端还会校验标准答案、填空占位符、隐藏测试和 AI 评分规则。</p>
+            <button v-if="exam?.status === 'draft'" class="btn-accent publish-button" :disabled="!readyToPublish || settingsSaving" @click="saveSettings({ publish: true })">检查通过并发布考试</button>
+            <p v-else class="published-note">考试已发布；如有学生开始作答，关键考试内容将由服务端锁定。</p>
+          </section>
+        </aside>
       </div>
 
       <!-- ── Modal Form ─────────────────────────────────────────────────── -->
@@ -180,10 +382,11 @@ onMounted(load)
             <select v-model="form.question_type" @change="form.grading_mode = form.question_type === 'code' ? 'active' : 'legacy'">
               <option value="single_choice">单选题</option>
               <option value="multi_choice">多选题</option>
+              <option value="fill_blank">填空题</option>
               <option value="code">编程题</option>
             </select>
           </div>
-          <div class="form-group">
+          <div v-if="form.question_type !== 'fill_blank'" class="form-group">
             <label>题目内容</label>
             <textarea v-model="form.prompt" rows="3" placeholder="输入题目内容"></textarea>
           </div>
@@ -194,8 +397,12 @@ onMounted(load)
           </section>
 
           <!-- 选择题字段 -->
-          <template v-if="form.question_type !== 'code'">
+          <template v-if="['single_choice', 'multi_choice'].includes(form.question_type)">
             <ChoiceOptionsEditor ref="choiceEditor" v-model="form.choice" :question-type="form.question_type" />
+          </template>
+
+          <template v-else-if="form.question_type === 'fill_blank'">
+            <FillBlankEditor v-model="form.fill_blanks" :prompt="form.prompt" @update:prompt="form.prompt = $event" />
           </template>
 
           <!-- 编程题字段 -->
@@ -259,7 +466,7 @@ onMounted(load)
 .page {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
   /* Keep this editor aligned with the platform's blue primary action color. */
   --exam-action: var(--primary);
   --exam-action-hover: var(--primary-dark);
@@ -287,33 +494,93 @@ onMounted(load)
   display: flex; justify-content: space-between; align-items: flex-start;
   gap: 16px;
 }
-.back-btn { margin-bottom: 8px; color: var(--text-secondary); }
+.back-btn { display:inline-flex; align-items:center; gap:6px; margin-bottom: 9px; color: var(--text-secondary); }
+.title-line { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
 .page-title {
-  font-size: 28px; font-weight: 700;
+  font-size: 27px; font-weight: 700;
   color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
-  margin: 0 0 6px;
+  margin: 0;
 }
 .page-sub {
-  font-size: var(--text-sm); color: var(--text-secondary); margin: 0;
+  font-size: var(--text-sm); color: var(--text-secondary); margin: 7px 0 0;
 }
+.status-badge { display:inline-flex; align-items:center; min-height:24px; padding:2px 9px; border-radius:999px; font-size:11px; font-weight:650; }
+.status-badge.is-draft { background:#f1f5f9; color:#475569; }
+.status-badge.is-published { background:#ecfdf5; color:#047857; }
 
-/* ── Question Cards ────────────────────────────────────────────────── */
-.question-card { padding: 20px; }
-.qh { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.qh strong { font-size: var(--text-sm); color: var(--ink); }
+/* ── Two-column editor workspace ───────────────────────────────────── */
+.editor-shell { display:grid; grid-template-columns:minmax(0, 1fr) minmax(330px, 370px); gap:20px; align-items:start; }
+.question-workspace { min-width:0; }
+.question-section,.control-rail { border:1px solid var(--border); border-radius:14px; background:var(--surface); box-shadow:0 8px 24px rgba(15,23,42,.04); }
+.question-section { overflow:hidden; }
+.section-toolbar { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; padding:22px 24px; border-bottom:1px solid var(--border); }
+.section-kicker { margin:0 0 5px; color:#2563eb; font-size:10px; font-weight:750; letter-spacing:.11em; text-transform:uppercase; }
+.section-toolbar h2,.rail-heading h2 { margin:0; color:var(--ink); font-size:17px; line-height:1.3; }
+.section-toolbar > div > p:last-child { margin:5px 0 0; color:var(--text-secondary); font-size:12px; }
+.add-question { display:inline-flex; align-items:center; gap:6px; flex:none; }
+.question-empty { display:flex; min-height:300px; flex-direction:column; align-items:center; justify-content:center; padding:40px 24px; text-align:center; color:#94a3b8; }
+.question-empty strong { margin-top:12px; color:var(--ink); font-size:15px; }
+.question-empty p { margin:6px 0 18px; color:var(--text-secondary); font-size:12px; }
+.question-empty .btn-accent { display:inline-flex; align-items:center; gap:6px; }
+.question-list { display:flex; flex-direction:column; }
+.question-row { display:grid; grid-template-columns:minmax(0,1fr) auto; column-gap:18px; padding:20px 24px; border-bottom:1px solid var(--border); }
+.question-row:last-child { border-bottom:0; }
+.question-row:hover { background:#fbfdff; }
+.question-meta { display:flex; align-items:center; flex-wrap:wrap; gap:9px; }
+.question-index { color:#94a3b8; font-size:12px; font-variant-numeric:tabular-nums; letter-spacing:.06em; }
 .qp { font-size: var(--text-xs); color: var(--text-secondary); }
-.qa { margin-left: auto; display: flex; gap: 4px; }
-.btn-del { color: var(--danger); }
-.btn-del:hover { background: var(--danger-light); }
-.qd { color: var(--text-secondary); font-size: var(--text-sm); margin: 0; line-height: 1.5; }
+.qd { color:#334155; font-size:var(--text-sm); margin:10px 0 0; line-height:1.65; overflow-wrap:anywhere; }
+.question-actions { display:flex; align-items:flex-start; gap:4px; }
+.text-action,.icon-action { border:0; background:transparent; cursor:pointer; transition:background .16s ease,color .16s ease; }
+.text-action { display:inline-flex; align-items:center; gap:5px; min-height:32px; padding:0 8px; border-radius:7px; color:#2563eb; font-size:12px; }
+.text-action:hover { background:#eff6ff; }
+.icon-action { display:grid; place-items:center; width:32px; height:32px; border-radius:7px; color:#64748b; }
+.icon-action:hover { background:#f1f5f9; color:#1e293b; }
+.icon-action.is-danger { color:#dc2626; }
+.icon-action.is-danger:hover { background:#fef2f2; }
+.icon-action:disabled,.text-action:disabled { opacity:.38; cursor:not-allowed; }
+.question-ai-config { grid-column:1 / -1; margin-top:18px; }
 .badge-mode {
   display: inline-block; padding: 1px 8px; border-radius: 10px;
   font-size: 11px; font-weight: 500;
   background: #dbeafe; color: #1e40af;
 }
 .badge-mode.incomplete { background:#fff7ed; color:#c2410c; }
-.btn-ai { color: #3b82f6; }
-.btn-ai:hover { background: #eff6ff; }
+
+/* ── Settings rail ─────────────────────────────────────────────────── */
+.control-rail { position:sticky; top:20px; max-height:calc(100vh - 40px); overflow:auto; }
+.rail-section { padding:20px; }
+.rail-section + .rail-section { border-top:1px solid var(--border); }
+.rail-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:18px; }
+.rail-heading > .app-icon { color:#64748b; }
+.rail-heading.compact { margin-bottom:14px; }
+.rail-form { display:grid; gap:13px; }
+.rail-form .form-group,.strategy-section .form-group { margin:0; }
+.rail-form label,.strategy-section label { display:block; margin-bottom:6px; color:#334155; font-size:11px; font-weight:600; }
+.rail-form input,.strategy-section select { width:100%; min-height:38px; box-sizing:border-box; font-size:12px; }
+.rail-form input:disabled { background:#f8fafc; color:#64748b; }
+.timing-note { display:flex; align-items:flex-start; gap:8px; margin:15px 0 0; padding:10px 11px; border-radius:8px; background:#fff7ed; color:#9a3412; font-size:10px; line-height:1.55; }
+.timing-note .app-icon { flex:none; margin-top:1px; }
+.strategy-section { margin-top:18px; padding-top:18px; border-top:1px solid var(--border); }
+.strategy-heading { margin-bottom:13px; }
+.strategy-heading h3 { margin:0; color:var(--ink); font-size:13px; }
+.strategy-heading p { margin:4px 0 0; color:#64748b; font-size:10px; line-height:1.5; }
+.strategy-section .form-group + .form-group { margin-top:12px; }
+.strategy-note { margin:9px 0 0; color:#64748b; font-size:10px; line-height:1.5; }
+.rail-actions { display:grid; gap:8px; margin-top:18px; }
+.save-settings { display:flex; width:100%; align-items:center; justify-content:center; gap:6px; min-height:40px; }
+.unpublish-button { min-height:34px; border:0; background:transparent; color:#475569; font-size:12px; cursor:pointer; }
+.unpublish-button:hover { color:#1d4ed8; }
+.unpublish-button:disabled { opacity:.45; cursor:not-allowed; }
+.checklist { display:grid; gap:8px; }
+.check-row { display:grid; grid-template-columns:24px minmax(0,1fr) auto; align-items:center; gap:8px; min-height:38px; padding:7px 9px; border:1px solid #fee2e2; border-radius:8px; background:#fffafa; color:#7f1d1d; font-size:11px; }
+.check-row.ok { border-color:#d1fae5; background:#f7fefb; color:#065f46; }
+.check-icon { display:grid; place-items:center; width:24px; height:24px; border-radius:7px; background:#fee2e2; color:#dc2626; }
+.check-row.ok .check-icon { background:#d1fae5; color:#059669; }
+.check-row small { color:inherit; font-size:9px; font-weight:650; }
+.server-check-note { margin:12px 0 0; color:#64748b; font-size:10px; line-height:1.55; }
+.publish-button { width:100%; min-height:40px; margin-top:15px; }
+.published-note { margin:13px 0 0; padding:10px 11px; border-radius:8px; background:#f0fdf4; color:#166534; font-size:10px; line-height:1.55; }
 
 /* ── Modal ─────────────────────────────────────────────────────────── */
 .modal-overlay {
@@ -365,12 +632,33 @@ onMounted(load)
   background: var(--surface-sunken); line-height: 1.6;
 }
 
+@media (max-width: 1080px) {
+  .editor-shell { grid-template-columns:1fr; }
+  .control-rail { position:static; max-height:none; overflow:visible; }
+  .rail-form { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .strategy-section { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:14px; }
+  .strategy-heading,.strategy-note { grid-column:1 / -1; }
+  .strategy-section .form-group + .form-group { margin-top:0; }
+}
+
 @media (max-width: 768px) {
   .page-head { flex-direction: column; }
   .page-title { font-size: 24px; }
+  .section-toolbar { padding:18px; }
+  .question-row { grid-template-columns:1fr; padding:18px; }
+  .question-actions { margin-top:12px; }
+  .rail-form,.strategy-section { grid-template-columns:1fr; }
+  .strategy-heading,.strategy-note { grid-column:auto; }
+  .strategy-section .form-group + .form-group { margin-top:12px; }
   .modal-overlay { padding:0; align-items:stretch; }
   .modal-card { width:100vw; max-height:100vh; border-radius:0; }
   .modal-header, .modal-body, .modal-actions { padding-left:16px; padding-right:16px; }
   .limit-grid { grid-template-columns:1fr; gap:0; }
+}
+
+@media (max-width: 480px) {
+  .section-toolbar { align-items:stretch; flex-direction:column; }
+  .add-question { justify-content:center; width:100%; }
+  .question-meta { gap:7px; }
 }
 </style>

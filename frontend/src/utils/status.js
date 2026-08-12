@@ -36,12 +36,16 @@ export const EXAM_STATUS_MAP = {
 }
 
 export const EXAM_GRADE_STATUS_MAP = {
+  scheduled: { label: '未开始', color: 'neutral' },
+  ready: { label: '可开始', color: 'neutral' },
+  in_progress: { label: '进行中', color: 'info' },
   graded: { label: '已评分', color: 'success' },
   review_required: { label: '待复核', color: 'warning' },
   grading: { label: '评分中', color: 'info' },
   submitted: { label: '已交卷', color: 'info' },
   started: { label: '进行中', color: 'info' },
   absent: { label: '缺考', color: 'danger' },
+  missed: { label: '缺考', color: 'danger' },
 }
 
 export const ENROLL_STATUS_MAP = {

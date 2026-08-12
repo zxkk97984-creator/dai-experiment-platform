@@ -26,10 +26,9 @@ const sortOrder = ref('updated')
 const page = ref(1)
 const pageSize = ref(10)
 
-const now = () => Date.now()
 function displayStatus(exam) {
   if (exam.status === 'draft') return 'draft'
-  if (exam.end_at && new Date(exam.end_at).getTime() < now()) return 'ended'
+  if (exam.end_at && exam.server_now && new Date(exam.end_at).getTime() < new Date(exam.server_now).getTime()) return 'ended'
   return 'published'
 }
 const summary = computed(() => ({
@@ -71,24 +70,20 @@ async function fetchCourses() {
 function resetPage() { page.value = 1 }
 function openCreateModal() { createOpen.value = true }
 function closeCreateModal() { createOpen.value = false }
-async function handleSave({ title, course_id, duration_minutes, start_at, end_at }) {
+async function handleSave(payload) {
+  const { title, course_id, duration_minutes, start_at, end_at } = payload
   if (!title) return app.showToast('请输入考试名称', 'error')
   if (!Number.isInteger(course_id) || course_id <= 0) return app.showToast('请选择课程', 'error')
   if (!Number.isInteger(duration_minutes) || duration_minutes <= 0) return app.showToast('考试时长必须大于 0 分钟', 'error')
-  if (start_at && end_at && new Date(start_at) >= new Date(end_at)) return app.showToast('结束时间必须晚于开始时间', 'error')
+  if (start_at && end_at && new Date(start_at) >= new Date(end_at)) return app.showToast('最晚进入时间必须晚于开始时间', 'error')
   try {
-    const res = await examsAPI.create({ title, course_id, duration_minutes, start_at, end_at })
+    const res = await examsAPI.create(payload)
     app.showToast('创建成功', 'success')
     createOpen.value = false
     await fetchExams()
     if (res?.data?.id) router.push(`/teacher/exams/${res.data.id}/edit`)
   } catch (error) { app.showToast(error.response?.data?.detail?.message || '创建失败', 'error') }
 }
-async function publishExam(id) {
-  try { await examsAPI.update(id, { status: 'published' }); app.showToast('已发布', 'success'); await fetchExams() }
-  catch (error) { app.showToast(error.response?.data?.detail?.message || '操作失败', 'error') }
-}
-
 onMounted(() => { fetchExams(); fetchCourses() })
 </script>
 
@@ -126,9 +121,9 @@ onMounted(() => { fetchExams(); fetchCourses() })
               <td data-label="参与人数">{{ exam.participant_count ?? 0 }}<span v-if="exam.expected_count"> / {{ exam.expected_count }}</span></td>
               <td data-label="最近更新" class="muted-cell">{{ formatDateTime(exam.updated_at || exam.created_at) }}</td>
               <td data-label="操作" class="row-actions">
-                <button class="text-action" @click="router.push(`/teacher/exams/${exam.id}/edit`)">编辑题目</button>
+                <button class="text-action" @click="router.push(`/teacher/exams/${exam.id}/edit`)">编辑试卷</button>
                 <button class="text-action" @click="router.push(`/teacher/exams/${exam.id}/grades`)">成绩分析</button>
-                <button v-if="displayStatus(exam) === 'draft'" class="publish-action" @click="publishExam(exam.id)">发布</button>
+                <button v-if="displayStatus(exam) === 'draft'" class="publish-action" @click="router.push(`/teacher/exams/${exam.id}/edit`)">发布检查</button>
               </td>
             </tr></tbody>
           </table>

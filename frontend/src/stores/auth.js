@@ -109,6 +109,14 @@ export const useAuthStore = defineStore('auth', () => {
     accessToken.value = ''
     user.value = null
     localStorage.removeItem('user')
+    // 未同步考试答案只属于当前登录会话，退出后必须清理，避免下一位
+    // 使用同一台教学电脑的学生看到或误同步上一位学生的本地队列。
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index)
+      if (key?.startsWith('exam-answer-queue:') || key?.startsWith('exam-tab-lock:')) {
+        localStorage.removeItem(key)
+      }
+    }
     return request
   }
 

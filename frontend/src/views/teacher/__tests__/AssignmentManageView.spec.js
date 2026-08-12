@@ -22,7 +22,7 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('../../../api/assignments', () => ({
-  assignmentsAPI: { list: vi.fn(), create: vi.fn(), publish: vi.fn(), deleteAssignment: vi.fn(), unpublishAssignment: vi.fn() },
+  assignmentsAPI: { list: vi.fn(), create: vi.fn(), update: vi.fn(), publish: vi.fn(), deleteAssignment: vi.fn(), unpublishAssignment: vi.fn() },
 }))
 
 vi.mock('../../../api/courses', () => ({
@@ -434,7 +434,13 @@ describe('作业管理页 AssignmentManageView', () => {
 
   const mixed = [
     { id: 1, title: '草稿作业', status: 'draft', due_at: null },
-    { id: 2, title: '已发布作业', status: 'published', due_at: null },
+    {
+      id: 2,
+      title: '已发布作业',
+      status: 'published',
+      published_at: '2026-08-01T01:00:00Z',
+      due_at: '2099-12-01T12:00:00Z',
+    },
   ]
 
   function rowButtons(wrapper, rowIndex) {
@@ -458,6 +464,75 @@ describe('作业管理页 AssignmentManageView', () => {
     const publishedText = wrapper.findAll('tbody tr')[1].text()
     expect(publishedText).toContain('取消发布')
     expect(publishedText).not.toContain('删除')
+  })
+
+  it('列表同时展示首次发布时间与截止时间，并为每行提供调整入口', async () => {
+    assignmentsAPI.list.mockResolvedValue({ data: { items: mixed } })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    const draftText = wrapper.findAll('tbody tr')[0].text()
+    expect(draftText).toContain('未发布')
+    expect(draftText).toContain('长期开放')
+    const publishedText = wrapper.findAll('tbody tr')[1].text()
+    expect(publishedText).toContain('发布')
+    expect(publishedText).toContain('截止')
+    expect(publishedText).toContain('调整截止')
+  })
+
+  it('延后已发布作业截止时间可直接保存，并转换为带时区 ISO 时间', async () => {
+    assignmentsAPI.list.mockResolvedValue({ data: { items: mixed } })
+    assignmentsAPI.update.mockResolvedValue({ data: mixed[1] })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    await clickButton(rowButtons(wrapper, 1), '调整截止')
+    expect(wrapper.find('.schedule-modal').text()).toContain('首次发布时间')
+    await wrapper.find('#schedule-due-at').setValue('2099-12-20T20:30')
+    await clickButton(wrapper.findAll('.schedule-modal button'), '保存时间设置')
+    await flushPromises()
+
+    expect(assignmentsAPI.update).toHaveBeenCalledWith(2, {
+      due_at: new Date('2099-12-20T20:30').toISOString(),
+    })
+    expect(showToastMock).toHaveBeenCalledWith('截止时间已更新', 'success')
+  })
+
+  it('提前已发布作业截止时间时先展示影响确认，再执行保存', async () => {
+    assignmentsAPI.list.mockResolvedValue({ data: { items: mixed } })
+    assignmentsAPI.update.mockResolvedValue({ data: mixed[1] })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    await clickButton(rowButtons(wrapper, 1), '调整截止')
+    await wrapper.find('#schedule-due-at').setValue('2099-11-01T20:30')
+    await clickButton(wrapper.findAll('.schedule-modal button'), '保存时间设置')
+    await flushPromises()
+
+    expect(assignmentsAPI.update).not.toHaveBeenCalled()
+    expect(wrapper.find('.confirm-panel').text()).toContain('缩短学生作答时间')
+    await clickButton(wrapper.findAll('.confirm-panel button'), '确认保存')
+    await flushPromises()
+    expect(assignmentsAPI.update).toHaveBeenCalledWith(2, {
+      due_at: new Date('2099-11-01T20:30').toISOString(),
+    })
+  })
+
+  it('发布状态与时限状态独立筛选，已发布数量包含已截止作业', async () => {
+    const rows = [
+      { id: 1, title: '草稿作业', status: 'draft', due_at: null },
+      { id: 2, title: '已截止作业', status: 'published', due_at: '2020-01-01T00:00:00Z' },
+      { id: 3, title: '进行中作业', status: 'published', due_at: '2099-01-01T00:00:00Z' },
+    ]
+    assignmentsAPI.list.mockResolvedValue({ data: { items: rows } })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    expect(wrapper.findAll('.teacher-metric-card')[1].text()).toContain('2')
+    expect(wrapper.findAll('.teacher-metric-card')[3].text()).toContain('1')
+    await wrapper.find('select[aria-label="时限状态筛选"]').setValue('ended')
+    expect(wrapper.findAll('tbody tr')).toHaveLength(1)
+    expect(wrapper.find('tbody').text()).toContain('已截止作业')
   })
 
   it('点击「删除」弹出确认框，取消不调用删除接口', async () => {

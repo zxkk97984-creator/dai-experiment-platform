@@ -22,6 +22,7 @@ import { environmentsAPI } from '../../api/environments.js'
 import { judgeAPI } from '../../api/judge.js'
 import { aiGradingAPI } from '../../api/aiGrading.js'
 import { useAppStore } from '../../stores/app.js'
+import { formatDateTime, fromDateTimeLocal, parseApiDateTime, toDateTimeLocal } from '../../utils/format.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -42,6 +43,10 @@ const confirmPublish = ref(false)  // 发布作业确认弹窗
 const runResult = ref(null)
 const fullscreenCode = ref(false)
 const sideTab = ref('run')   // 右侧栏 tab：run | ai
+const scheduleDueLocal = ref('')
+const scheduleSaving = ref(false)
+const scheduleConfirmOpen = ref(false)
+const pendingScheduleDue = ref(null)
 
 // ── AI 评分配置草稿（新建题无 id 时使用；随「保存题目」一起提交） ──
 // 新建题默认 legacy（显式传值，不依赖后端默认 active，避免未开 AI 却 503）
@@ -83,6 +88,9 @@ const aiGateNotice = computed(() => {
  if (currentGradingMode.value === 'legacy') return ''
  return `当前题目为 ${currentGradingMode.value} 模式，若 Rubric 未生成并锁定，发布将被后端拒绝。`
 })
+const publishDeadlineNotice = computed(() => assignment.value?.due_at
+  ? ` 当前截止时间：${formatDateTime(assignment.value.due_at)}。`
+  : ' 当前未设置截止时间，学生可持续提交。')
 
 const form = ref({
  title: '', description: '', function_name: '', signature: '',
@@ -177,6 +185,7 @@ async function fetch() {
      assignmentsAPI.getQuestions(route.params.id),
    ])
    assignment.value = aRes.data
+   scheduleDueLocal.value = toDateTimeLocal(aRes.data.due_at)
    questions.value = qRes.data.items || qRes.data
    assignmentEnvId.value = aRes.data.environment_version_id ?? null
    assignmentPolicy.value = aRes.data.import_policy_mode || 'unrestricted'
@@ -189,6 +198,51 @@ async function fetch() {
    loading.value = false
    // 默认进入「新建第一道题目」编辑态：作业尚无题目时自动开始新题（避免停在空状态）
    if (!activeId.value && questions.value.length === 0) startNew()
+ }
+}
+
+function scheduleNeedsConfirmation(nextDue) {
+ if (!assignment.value || assignment.value.status !== 'published') return false
+ const currentDue = assignment.value.due_at
+ if (nextDue === null) return currentDue != null
+ const nextTime = parseApiDateTime(nextDue).getTime()
+ const currentTime = currentDue ? parseApiDateTime(currentDue).getTime() : null
+ return nextTime <= Date.now()
+   || (currentTime != null && !Number.isNaN(currentTime) && nextTime < currentTime)
+}
+
+const scheduleConfirmMessage = computed(() => {
+ if (pendingScheduleDue.value === null) return '清空截止时间后，学生将可以长期运行和提交这份作业。确定继续吗？'
+ if (parseApiDateTime(pendingScheduleDue.value).getTime() <= Date.now()) {
+   return '新的截止时间已经过去，保存后学生将立即无法运行或提交。确定继续吗？'
+ }
+ return '新的截止时间早于当前设置，可能缩短学生作答时间。确定继续吗？'
+})
+
+async function requestScheduleSave() {
+ const nextDue = fromDateTimeLocal(scheduleDueLocal.value)
+ if (scheduleNeedsConfirmation(nextDue)) {
+   pendingScheduleDue.value = nextDue
+   scheduleConfirmOpen.value = true
+   return
+ }
+ await saveSchedule(nextDue)
+}
+
+async function saveSchedule(nextDue = pendingScheduleDue.value) {
+ if (scheduleSaving.value) return
+ scheduleSaving.value = true
+ try {
+   const res = await assignmentsAPI.update(route.params.id, { due_at: nextDue })
+   assignment.value = res.data
+   scheduleDueLocal.value = toDateTimeLocal(res.data.due_at)
+   scheduleConfirmOpen.value = false
+   pendingScheduleDue.value = null
+   app.showToast('截止时间已更新', 'success')
+ } catch (e) {
+   app.showToast(e.response?.data?.detail?.message || '截止时间更新失败', 'error')
+ } finally {
+   scheduleSaving.value = false
  }
 }
 
@@ -433,6 +487,26 @@ onMounted(() => { fetch(); fetchEnv() })
         </div>
       </header>
 
+      <section v-if="assignment" class="card qe-schedule-card" aria-labelledby="assignment-schedule-title">
+        <div class="qe-schedule-copy">
+          <div class="qe-side-sec-head">
+            <h2 id="assignment-schedule-title" class="qe-card-title">发布与截止</h2>
+            <span class="status-pill" :class="assignment.status">{{ assignment.status === 'published' ? '已发布' : '草稿' }}</span>
+          </div>
+          <p>发布时间用于记录首次发布；截止后学生仍可查看题目，但不能自测或提交。</p>
+        </div>
+        <dl class="qe-schedule-meta">
+          <div><dt>首次发布时间</dt><dd>{{ assignment.published_at ? formatDateTime(assignment.published_at) : '尚未发布' }}</dd></div>
+          <div class="qe-schedule-due">
+            <dt><label for="assignment-due-at">截止时间</label></dt>
+            <dd><input id="assignment-due-at" v-model="scheduleDueLocal" type="datetime-local" /></dd>
+          </div>
+        </dl>
+        <button type="button" class="btn btn-sm btn-primary qe-schedule-save" :disabled="scheduleSaving" @click="requestScheduleSave">
+          {{ scheduleSaving ? '保存中...' : '保存时间设置' }}
+        </button>
+      </section>
+
       <!-- ── 题目列表（保留「添加题目」入口，选中后进入编辑） ─────── -->
       <section class="card qe-list-card">
         <div class="qe-list-head">
@@ -564,7 +638,7 @@ onMounted(() => { fetch(); fetchEnv() })
               <div class="qe-side-sec qe-side-sec--assignment">
                 <div class="qe-side-sec-head">
                   <h3 class="qe-side-title">作业默认环境</h3>
-                  <span v-if="!assignmentDraft" class="badge badge-neutral">已发布（不可修改）</span>
+                  <span v-if="!assignmentDraft" class="badge badge-neutral">环境已锁定</span>
                 </div>
                 <p class="qe-side-sub">所有题目默认在此环境运行；发布后绑定不可变</p>
                 <div class="form-group qe-side-assignment-env">
@@ -732,12 +806,22 @@ onMounted(() => { fetch(); fetchEnv() })
       <ConfirmDialog
         v-if="confirmPublish"
         title="发布整个作业？"
-        :message="'将发布整个作业，全部题目对学生可见；发布后作业环境与白名单绑定不可修改。' + aiGateNotice"
+        :message="'将发布整个作业，全部题目对学生可见；发布后作业环境与白名单绑定不可修改。' + publishDeadlineNotice + aiGateNotice"
         confirm-text="确认发布"
         cancel-text="取消"
         :busy="publishing"
         @confirm="publishAssignment()"
         @cancel="confirmPublish = false"
+      />
+      <ConfirmDialog
+        v-if="scheduleConfirmOpen"
+        title="确认调整截止时间"
+        :message="scheduleConfirmMessage"
+        confirm-text="确认保存"
+        :danger="true"
+        :busy="scheduleSaving"
+        @confirm="saveSchedule()"
+        @cancel="scheduleConfirmOpen = false"
       />
     </div>
   </AppLayout>
@@ -1789,5 +1873,37 @@ onMounted(() => { fetch(); fetchEnv() })
   .qe-bottom-left { display: none; }
   .qe-bottom-actions { width: 100%; }
   .qe-bottom-actions .btn { flex: 1 1 0; min-width: 0; }
+}
+
+/* 作业级时间安排与题目/环境编辑分层，已发布后仍可单独调整截止时间。 */
+.qe-schedule-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(420px, 1.4fr) auto;
+  align-items: center;
+  gap: 20px;
+  padding: 16px 18px;
+  border-radius: var(--radius-card, 12px);
+  box-shadow: none;
+}
+.qe-schedule-copy .qe-side-sec-head { justify-content: flex-start; margin-bottom: 4px; }
+.qe-schedule-copy p { margin: 0; color: var(--text-tertiary); font-size: 12px; line-height: 1.55; }
+.qe-schedule-card .status-pill { display: inline-flex; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+.qe-schedule-card .status-pill.published { color: #099b61; background: #e9f8f1; }
+.qe-schedule-card .status-pill.draft { color: #ef8b10; background: #fff4e7; }
+.qe-schedule-meta { display: grid; grid-template-columns: minmax(170px,.8fr) minmax(220px,1fr); gap: 12px; margin: 0; }
+.qe-schedule-meta>div { min-width: 0; }
+.qe-schedule-meta dt { margin-bottom: 5px; color: var(--text-tertiary); font-size: 11px; }
+.qe-schedule-meta dd { margin: 0; color: var(--ink); font-size: 13px; font-weight: 600; }
+.qe-schedule-due input { width: 100%; height: 36px; min-width: 0; padding: 6px 9px; }
+.qe-schedule-save { min-width: 112px; justify-content: center; white-space: nowrap; }
+@media (max-width: 1050px) {
+  .qe-schedule-card { grid-template-columns: 1fr auto; }
+  .qe-schedule-copy { grid-column: 1 / -1; }
+}
+@media (max-width: 767.98px) {
+  .qe-schedule-card { grid-template-columns: 1fr; gap: 14px; padding: 16px; }
+  .qe-schedule-copy { grid-column: auto; }
+  .qe-schedule-meta { grid-template-columns: 1fr; }
+  .qe-schedule-save { width: 100%; }
 }
 </style>

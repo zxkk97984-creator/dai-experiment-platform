@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppIcon from '../ui/AppIcon.vue'
 
 const props = defineProps({
@@ -12,21 +12,49 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['change'])
+const jumpPage = ref(String(props.currentPage))
 
 const pageItems = computed(() => {
   const count = Math.max(1, props.pageCount)
-  if (count <= 7) return Array.from({ length: count }, (_, index) => ({ key: index + 1, value: index + 1, label: index + 1 }))
-  const values = props.currentPage <= 4
-    ? [1, 2, 3, 4, 5, null, count]
-    : props.currentPage >= count - 3
-      ? [1, null, count - 4, count - 3, count - 2, count - 1, count]
-      : [1, null, props.currentPage - 1, props.currentPage, props.currentPage + 1, null, count]
-  return values.map((value, index) => ({ key: `${value}-${index}`, value, label: value ?? '…' }))
+  if (count <= 3) {
+    return Array.from({ length: count }, (_, index) => ({
+      key: index + 1,
+      value: index + 1,
+      label: index + 1,
+    }))
+  }
+
+  const start = Math.min(Math.max(props.currentPage - 1, 1), count - 2)
+  return [start, start + 1, start + 2].map((value) => ({
+    key: value,
+    value,
+    label: value,
+  }))
+})
+
+watch(() => [props.currentPage, props.pageCount], () => {
+  jumpPage.value = String(props.currentPage)
 })
 
 function change(nextPage) {
   if (!nextPage || nextPage < 1 || nextPage > props.pageCount || nextPage === props.currentPage) return
   emit('change', nextPage)
+}
+
+function jumpToPage() {
+  const value = jumpPage.value.trim()
+  if (!/^\d+$/.test(value)) {
+    jumpPage.value = String(props.currentPage)
+    return
+  }
+
+  const nextPage = Number(value)
+  if (nextPage < 1 || nextPage > props.pageCount) {
+    jumpPage.value = String(props.currentPage)
+    return
+  }
+
+  change(nextPage)
 }
 </script>
 
@@ -41,9 +69,8 @@ function change(nextPage) {
         v-for="item in pageItems"
         :key="item.key"
         type="button"
-        :class="{ active: item.value === currentPage, ellipsis: item.value === null }"
-        :disabled="item.value === null"
-        :aria-label="item.value ? `第 ${item.value} 页` : undefined"
+        :class="{ active: item.value === currentPage }"
+        :aria-label="`第 ${item.value} 页`"
         :aria-current="item.value === currentPage ? 'page' : undefined"
         @click="change(item.value)"
       >
@@ -53,14 +80,27 @@ function change(nextPage) {
         <AppIcon name="chevron-right" :size="16" />
       </button>
     </nav>
-    <span>{{ pageSize }} 条/页</span>
+    <div class="teacher-pagination-jump">
+      <label class="teacher-pagination-jump-field">
+        <span>跳转至</span>
+        <input
+          v-model="jumpPage"
+          type="text"
+          inputmode="numeric"
+          aria-label="跳转页码"
+          @keydown.enter.prevent="jumpToPage"
+        />
+        <span>页</span>
+      </label>
+      <span>{{ pageSize }} 条/页</span>
+    </div>
   </footer>
 </template>
 
 <style scoped>
 .teacher-pagination.pagination-bar {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 16px;
   min-height: 64px;
@@ -70,7 +110,6 @@ function change(nextPage) {
   font-size: 13px;
 }
 
-.teacher-pagination > span:last-child { justify-self: end; }
 .teacher-pagination-controls { display: flex; align-items: center; gap: 6px; }
 .teacher-pagination-controls button {
   display: grid;
@@ -86,12 +125,26 @@ function change(nextPage) {
 }
 .teacher-pagination-controls button:hover:not(:disabled) { border-color: var(--border); color: var(--ink); background: var(--surface-raised); }
 .teacher-pagination-controls button.active { border-color: var(--primary); color: #fff; background: var(--primary); }
-.teacher-pagination-controls button.ellipsis { color: var(--text-tertiary); background: transparent; opacity: 1; }
-.teacher-pagination-controls button:disabled:not(.ellipsis) { opacity: .35; }
+.teacher-pagination-controls button:disabled { opacity: .35; }
+.teacher-pagination-jump { display: flex; align-items: center; justify-self: end; gap: 14px; white-space: nowrap; }
+.teacher-pagination-jump-field { display: inline-flex; align-items: center; gap: 5px; }
+.teacher-pagination-jump input {
+  width: 52px;
+  height: 32px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--ink);
+  background: var(--surface);
+  text-align: center;
+  font-size: 13px;
+}
+.teacher-pagination-jump input:focus { border-color: var(--primary); outline: 0; box-shadow: var(--shadow-glow-primary); }
 
 @media (max-width: 720px) {
   .teacher-pagination { grid-template-columns: 1fr auto; gap: 10px; }
   .teacher-pagination-controls { grid-column: 1 / -1; grid-row: 1; justify-content: center; }
   .teacher-pagination-controls button { min-width: 32px; height: 32px; }
+  .teacher-pagination-jump { justify-self: end; gap: 8px; }
 }
 </style>

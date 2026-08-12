@@ -97,4 +97,24 @@ onMounted(async () => {
 <style scoped>
 .page{display:flex;flex-direction:column;gap:22px}.page-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.page-head h1{margin:0 0 6px;color:var(--ink);font-size:30px}.page-head p{margin:0;color:var(--text-secondary)}.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px}.metric-card{display:flex;align-items:center;gap:18px;min-height:106px;padding:20px;border:1px solid var(--border);border-radius:12px;background:var(--surface);box-shadow:var(--shadow-card)}.metric-icon{display:grid;place-items:center;width:54px;height:54px;border-radius:15px}.metric-icon.blue{color:var(--primary);background:#edf4ff}.metric-icon.green{color:#10a66a;background:#eaf9f2}.metric-icon.orange{color:#ef8b10;background:#fff4e7}.metric-icon.purple{color:#7c4ce0;background:#f3edff}.metric-card span:last-child{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}.metric-card small{width:100%;color:var(--text-secondary);font-size:14px}.metric-card strong{color:var(--ink);font-size:27px;line-height:1}.metric-card em{color:var(--text-secondary);font-size:13px;font-style:normal}.data-panel{overflow:hidden;border:1px solid var(--border);border-radius:12px;background:var(--surface);box-shadow:var(--shadow-card)}.filter-bar{display:grid;grid-template-columns:minmax(220px,1.4fr) repeat(3,minmax(150px,.8fr));gap:14px;padding:18px;border-bottom:1px solid var(--border)}.search-control{display:flex;align-items:center;gap:9px;padding:0 13px;border:1px solid var(--border);border-radius:8px;color:var(--text-tertiary)}.search-control input{min-width:0;padding:0;border:0;box-shadow:none!important}.filter-bar select{height:44px;min-width:0}.table-scroll{overflow-x:auto}.table-scroll table{width:100%;min-width:900px;margin:0}.table-scroll th{height:44px;background:#f8fafc}.table-scroll td{height:68px;padding:10px 16px}.table-scroll td:first-child{font-weight:600}.table-scroll td small{display:block;margin-top:3px;color:var(--text-tertiary);font-size:12px;font-weight:400;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.status-pill{display:inline-flex;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:600}.status-pill.published{color:#099b61;background:#e9f8f1}.status-pill.draft{color:#ef8b10;background:#fff4e7}.status-pill.archived{color:#7443d5;background:#f1ebfd}.muted-cell{color:var(--text-secondary);font-size:13px}.actions-cell{display:flex;gap:2px;white-space:nowrap}.text-action,.publish-action{padding:5px 7px;border:0;background:transparent;color:var(--primary);font-size:13px}.publish-action{color:var(--warning)}.pagination-bar{display:flex;justify-content:space-between;padding:14px 18px;border-top:1px solid var(--border);color:var(--text-secondary);font-size:13px}.active-page{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:7px;color:#fff;background:var(--primary)}.loading-list{display:grid;gap:1px;background:var(--border)}.loading-list .skeleton{height:68px}.create-form{padding:24px}@media(max-width:1100px){.metric-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{grid-template-columns:1fr 1fr}}@media(max-width:700px){.page-head{flex-direction:column}.metric-grid{grid-template-columns:1fr 1fr;gap:10px}.filter-bar{grid-template-columns:1fr}.metric-card{padding:14px;gap:12px}.table-scroll table{min-width:820px}}
 .status-pill{white-space:nowrap}
+
+/* 课程列表跟随卡片宽度排布，避免桌面端出现横向滚动。 */
+.table-scroll table{width:100%;min-width:0;table-layout:fixed}
+.table-scroll th{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
+.table-scroll td{min-width:0;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+.table-scroll th:nth-child(1){width:24%}
+.table-scroll th:nth-child(2){width:17%}
+.table-scroll th:nth-child(3){width:8%}
+.table-scroll th:nth-child(4){width:11%}
+.table-scroll th:nth-child(5){width:8%}
+.table-scroll th:nth-child(6){width:12%}
+.table-scroll th:nth-child(7){width:20%}
+.table-scroll td:nth-child(2),
+.table-scroll td:nth-child(4),
+.table-scroll td:nth-child(5),
+.table-scroll td:nth-child(6),
+.table-scroll td:nth-child(7){white-space:nowrap}
+.table-scroll td:first-child .course-link{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.table-scroll td:last-child{display:table-cell;white-space:nowrap}
+.table-scroll td:last-child button{display:inline-flex;align-items:center;white-space:nowrap}
 </style>

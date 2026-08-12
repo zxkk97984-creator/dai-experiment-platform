@@ -16,7 +16,7 @@ const manualCourseId = ref('')
 const selectedCourse = computed(
   () => props.courses.find((course) => String(course.id) === String(form.value.course_id)) || null,
 )
-const canSave = computed(() => Boolean(form.value.title.trim() && form.value.course_id))
+const canSave = computed(() => Boolean(form.value.title.trim() && form.value.course_id && Number(form.value.duration_minutes) > 0))
 
 function openCourseModal() {
   manualCourseId.value = form.value.course_id ? String(form.value.course_id) : ''
@@ -56,8 +56,8 @@ function save() {
       <header class="create-heading"><strong>创建考试</strong><button class="create-close" aria-label="关闭" @click="emit('close')"><AppIcon name="close" :size="18" /></button></header>
       <div class="form-group"><label>考试名称</label><input v-model="form.title" name="title" placeholder="输入考试名称" /></div>
       <div class="grid-2"><div class="form-group"><label>课程</label><button type="button" class="course-picker" @click="openCourseModal"><span v-if="selectedCourse">{{ selectedCourse.title }}（ID: {{ selectedCourse.id }}）</span><span v-else-if="form.course_id">课程 ID: {{ form.course_id }}</span><span v-else class="placeholder">选择课程</span><AppIcon name="chevron-down" :size="17" /></button></div><div class="form-group"><label>时长（分钟）</label><input v-model.number="form.duration_minutes" name="duration-minutes" type="number" min="1" /></div></div>
-      <div class="grid-2"><div class="form-group"><label>开始时间（可选）</label><input v-model="form.start_at" type="datetime-local" /></div><div class="form-group"><label>结束时间（可选）</label><input v-model="form.end_at" type="datetime-local" /></div></div>
-      <p class="form-hint">基本信息确认后将进入题目编辑页面，完成题目配置后才能发布考试。</p>
+      <div class="grid-2"><div class="form-group"><label>开始时间</label><input v-model="form.start_at" type="datetime-local" /></div><div class="form-group"><label>最晚进入时间</label><input v-model="form.end_at" type="datetime-local" /></div></div>
+      <p class="form-hint">“最晚进入时间”只限制新学生进入；已开始的学生始终获得完整考试时长。成绩、题目和答案默认不公开。</p>
       <div class="create-actions"><button class="btn-ghost" @click="emit('close')">取消</button><button class="btn-primary" data-action="save-exam" :disabled="!canSave" @click="save">确定</button></div>
     </div>
 

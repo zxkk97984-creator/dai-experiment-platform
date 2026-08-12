@@ -1,5 +1,6 @@
 """考试系统业务逻辑"""
 import logging
+import re
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy import func, select
@@ -9,6 +10,9 @@ from app.models import Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission
 from app.services.student_ai_results import build_student_grading_breakdown
 
 logger = logging.getLogger("dai.exam_service")
+
+_BLANK_PATTERN = re.compile(r"\[\[blank:([A-Za-z0-9_-]+)\]\]")
+_COMPLETED_SUBMISSION_STATUSES = ("submitted", "grading", "graded", "review_required")
 
 def require_exam_editable(exam, user):
     if user.role != "admin" and exam.created_by_id != user.id:
@@ -34,6 +38,32 @@ def score_choice_answer(question, selected_options) -> float:
     return round_score(float(question.points)) if correct == selected else 0.0
 
 
+def _normalized_fill_value(value, *, case_sensitive: bool) -> str:
+    normalized = str(value or "").strip()
+    return normalized if case_sensitive else normalized.casefold()
+
+
+def score_fill_blank_answer(question, text_answers) -> float:
+    """多空填空题按空等分；每空支持多个可接受答案与大小写设置。"""
+    blanks = (question.correct_answer or {}).get("blanks", [])
+    if not blanks:
+        return 0.0
+    per_blank = float(question.points) / len(blanks)
+    earned = 0.0
+    provided = text_answers or {}
+    for blank in blanks:
+        blank_id = str(blank.get("id", ""))
+        case_sensitive = bool(blank.get("case_sensitive", False))
+        actual = _normalized_fill_value(provided.get(blank_id, ""), case_sensitive=case_sensitive)
+        accepted = {
+            _normalized_fill_value(candidate, case_sensitive=case_sensitive)
+            for candidate in blank.get("accepted_answers", [])
+        }
+        if actual and actual in accepted:
+            earned += per_blank
+    return round_score(earned)
+
+
 def validate_question(question, *, publish: bool = False) -> list[str]:
     """逐题校验，返回错误列表（空=通过）"""
     errors = []
@@ -46,7 +76,7 @@ def validate_question(question, *, publish: bool = False) -> list[str]:
         options = question.options or {}
         if len(options) < 2:
             errors.append(f"题目 {question.order_index}: 选项至少需要 2 个，当前 {len(options)} 个")
-        correct = question.correct_answer.get("correct", [])
+        correct = (question.correct_answer or {}).get("correct", [])
         if question.question_type == "single_choice":
             if len(correct) != 1:
                 errors.append(f"题目 {question.order_index}: 单选题必须有恰好 1 个正确答案，当前 {len(correct)} 个")
@@ -63,6 +93,21 @@ def validate_question(question, *, publish: bool = False) -> list[str]:
             errors.append(f"题目 {question.order_index}: 不支持的多选计分方式 '{scoring_mode}'")
         if question.question_type == "single_choice" and scoring_mode != "all_or_nothing":
             errors.append(f"题目 {question.order_index}: 单选题只支持完全匹配计分")
+
+    elif question.question_type == "fill_blank":
+        markers = _BLANK_PATTERN.findall(question.prompt or "")
+        configured = (question.correct_answer or {}).get("blanks", [])
+        configured_ids = [str(blank.get("id", "")) for blank in configured]
+        if not markers:
+            errors.append(f"题目 {question.order_index}: 填空题至少需要插入一个空格")
+        if len(markers) != len(set(markers)):
+            errors.append(f"题目 {question.order_index}: 填空题空格标识不能重复")
+        if markers != configured_ids:
+            errors.append(f"题目 {question.order_index}: 填空题占位符与答案配置不一致")
+        for blank in configured:
+            accepted = [str(value).strip() for value in blank.get("accepted_answers", [])]
+            if not accepted or any(not value for value in accepted):
+                errors.append(f"题目 {question.order_index}: 每个空格至少需要一个非空可接受答案")
 
     elif question.question_type == "code":
         mode = question.grading_mode or "active"
@@ -85,8 +130,12 @@ def validate_question(question, *, publish: bool = False) -> list[str]:
 
 
 def validate_publish(exam, db):
+    if not exam.start_at or not exam.end_at:
+        raise api_error(422, "PUBLISH_INVALID", "发布考试前必须设置开始时间和最晚进入时间")
     if exam.start_at and exam.end_at and exam.start_at >= exam.end_at:
         raise api_error(422, "PUBLISH_INVALID", "开始时间必须早于结束时间")
+    if exam.show_answers_after_review and not exam.show_questions_after_review:
+        raise api_error(422, "PUBLISH_INVALID", "公开标准答案时必须同时公开题目")
     if not exam.duration_minutes or exam.duration_minutes <= 0:
         raise api_error(422, "PUBLISH_INVALID", "考试时长必须大于0")
     questions = db.scalars(select(ExamQuestion).where(ExamQuestion.exam_id == exam.id)).all()
@@ -108,15 +157,12 @@ def start_exam(exam, student, db):
         ExamSubmission.exam_id == exam.id, ExamSubmission.student_id == student.id))
     if existing:
         if existing.status == "started":
-            if existing.expires_at and as_utc(existing.expires_at) < now:
+            if existing.expires_at and as_utc(existing.expires_at) <= now:
                 _auto_submit(existing, db, now)
-                raise api_error(403, "EXAM_EXPIRED", "考试已过期")
+                db.refresh(existing)
             return existing
         raise api_error(403, "EXAM_ALREADY_SUBMITTED", "考试已提交")
     expires_at = now + timedelta(minutes=exam.duration_minutes)
-    end = as_utc(exam.end_at)
-    if end and expires_at > end:
-        expires_at = end
     sub = ExamSubmission(exam_id=exam.id, student_id=student.id, status="started",
                          started_at=now, expires_at=expires_at)
     db.add(sub)
@@ -141,12 +187,33 @@ def save_answer(db, exam_id, question_id, student, payload):
     ans = db.scalar(select(ExamAnswer).where(
         ExamAnswer.submission_id == sub.id, ExamAnswer.question_id == question_id))
     if not ans:
+        expected_version = payload.get("expected_version")
+        if expected_version not in (None, 0):
+            raise api_error(409, "ANSWER_VERSION_CONFLICT", "答案版本已变化，请刷新后重试")
         ans = ExamAnswer(submission_id=sub.id, question_id=question_id)
         db.add(ans)
+    else:
+        expected_version = payload.get("expected_version")
+        incoming_matches = (
+            (q.question_type == "code" and ans.code_answer == payload.get("code_answer", ""))
+            or (q.question_type == "fill_blank" and (ans.text_answers or {}) == (payload.get("text_answers") or {}))
+            or (q.question_type in ("single_choice", "multi_choice") and (ans.selected_options or []) == (payload.get("selected_options") or []))
+        )
+        if expected_version is not None and expected_version != ans.version:
+            if incoming_matches:
+                return ans
+            raise api_error(409, "ANSWER_VERSION_CONFLICT", "答案已在其他页面更新，请刷新后重试")
     if q.question_type == "code":
         ans.code_answer = payload.get("code_answer", "")
+    elif q.question_type == "fill_blank":
+        raw_answers = payload.get("text_answers", {})
+        configured_ids = {str(blank.get("id")) for blank in (q.correct_answer or {}).get("blanks", [])}
+        ans.text_answers = {str(key): str(value) for key, value in raw_answers.items() if str(key) in configured_ids}
     else:
         ans.selected_options = payload.get("selected_options", [])
+    if ans.id is not None:
+        ans.version += 1
+    sub.last_saved_at = now
     db.commit()
     db.refresh(ans)
     return ans
@@ -170,13 +237,15 @@ def submit_exam(exam, student, db):
     if sub.status in ("submitted", "grading", "graded", "review_required"):
         return sub
 
-    # 检查是否已过期，过期则自动交卷并拒绝
+    # 截止时的交卷请求也必须幂等成功：服务端按超时原因收卷后直接返回
+    # 当前提交，避免客户端在零秒不断重试并把成功状态误报为失败。
     if sub.status == "started" and sub.expires_at:
         if as_utc(sub.expires_at) <= now:
             _auto_submit(sub, db, now)
-            raise api_error(403, "EXAM_EXPIRED", "考试已过期")
+            db.refresh(sub)
+            return sub
 
-    sub, code_answers = _submit_and_prepare(sub, db, now)
+    sub, code_answers = _submit_and_prepare(sub, db, now, reason="manual")
     _enqueue_and_finalize(sub.id, code_answers, db)
     db.refresh(sub)
     return sub
@@ -200,6 +269,9 @@ def _prepare_answers(sub, db):
         if q.question_type in ("single_choice", "multi_choice"):
             ans.score = score_choice_answer(q, ans.selected_options)
             ans.grading_status = "completed"
+        elif q.question_type == "fill_blank":
+            ans.score = score_fill_blank_answer(q, ans.text_answers)
+            ans.grading_status = "completed"
         elif q.question_type == "code":
             if ans.code_answer:
                 ans.grading_status = "pending"
@@ -210,7 +282,7 @@ def _prepare_answers(sub, db):
     return code_answers
 
 
-def _submit_and_prepare(sub, db, now):
+def _submit_and_prepare(sub, db, now, *, reason: str | None = None):
     """手动/自动交卷统一路径：CAS started→submitted → 评分准备 → CAS submitted→grading。
 
     短事务：认领、评分、父状态转换一次提交；返回 (sub, code_answers)。
@@ -221,7 +293,7 @@ def _submit_and_prepare(sub, db, now):
         result = db.execute(
             update(ExamSubmission).execution_options(synchronize_session=False)
             .where(ExamSubmission.id == sub.id, ExamSubmission.status == "started")
-            .values(status="submitted", submitted_at=now)
+            .values(status="submitted", submitted_at=now, submission_reason=reason or sub.submission_reason)
         )
         if result.rowcount == 0:
             db.rollback()
@@ -255,11 +327,10 @@ def _enqueue_and_finalize(submission_id, code_answers, db, metrics=None):
         metrics[r.outcome.value] += 1
 
 
-def _auto_submit(sub, db, now):
+def _auto_submit(sub, db, now, *, reason: str = "time_expired"):
     """自动交卷（调用方检测到已过期）：CAS 认领 → 准备 → grading → 入队 → 汇总"""
-    sub, code_answers = _submit_and_prepare(sub, db, now)
-    if code_answers:
-        _enqueue_and_finalize(sub.id, code_answers, db)
+    sub, code_answers = _submit_and_prepare(sub, db, now, reason=reason)
+    _enqueue_and_finalize(sub.id, code_answers, db)
 
 def _finalize_grade(sub, score, db):
     """[已废弃] 直接写入成绩——请改用 exam_grading.finalize_if_ready。
@@ -395,6 +466,7 @@ def retry_exam_submission(submission_id: int, answer_ids: list[int], actor, db):
 
 def get_my_grade(exam_id, student, db):
     from app.models import CodeGrade
+    exam = db.get(Exam, exam_id)
     sub = db.scalar(select(ExamSubmission).where(
         ExamSubmission.exam_id == exam_id, ExamSubmission.student_id == student.id))
     if not sub:
@@ -402,11 +474,12 @@ def get_my_grade(exam_id, student, db):
     answers = db.scalars(select(ExamAnswer).where(ExamAnswer.submission_id == sub.id)).all()
 
     answer_list = []
+    answers_visible = bool(exam and exam.review_released_at and exam.show_answers_after_review)
     for a in answers:
         # 安全返回：system_error 只暴露通用状态，绝不返回内部错误原文
         # （禁止泄露 hidden tests、学生代码、密钥、堆栈）
         item = {"question_id": a.question_id, "grading_status": a.grading_status,
-                "score": a.score,
+                "score": a.score if answers_visible else None,
                 "system_error": "评分遇到系统问题，请联系教师" if a.system_error else None}
         # active 模式：返回安全的学生反馈（F/A/R/Q、扣分依据、测试结果、代码建议）
         # shadow 模式：不泄露 AI 数据，仅返回确定性分数
@@ -417,17 +490,209 @@ def get_my_grade(exam_id, student, db):
                 CodeGrade.status == "completed",
             )
         )
-        if cg and cg.ai_result:
+        if answers_visible and cg and cg.ai_result:
             item["grading_breakdown"] = build_student_grading_breakdown(cg)
         answer_list.append(item)
 
-    return {"submission_id": sub.id, "status": sub.status, "score": sub.score,
+    score_visible = bool(exam and exam.show_score_after_grading and sub.status == "graded")
+    max_score = float(db.scalar(select(func.sum(ExamQuestion.points)).where(ExamQuestion.exam_id == exam_id)) or 0)
+    return {"submission_id": sub.id, "status": sub.status, "score": sub.score if score_visible else None,
+            "score_visible": score_visible, "max_score": max_score,
             "started_at": sub.started_at.isoformat() if sub.started_at else None,
             "expires_at": sub.expires_at.isoformat() if sub.expires_at else None,
             "submitted_at": sub.submitted_at.isoformat() if sub.submitted_at else None,
             "review_reason": sub.review_reason,
             "review_required_at": sub.review_required_at.isoformat() if sub.review_required_at else None,
             "answers": answer_list}
+
+
+def exam_max_score(exam_id: int, db: Session) -> float:
+    return float(db.scalar(select(func.sum(ExamQuestion.points)).where(ExamQuestion.exam_id == exam_id)) or 0)
+
+
+def student_exam_status(exam: Exam, submission: ExamSubmission | None, now=None) -> tuple[str, bool, bool]:
+    """返回 (student_status, is_completed, can_start)，只依赖服务器时间。"""
+    from app.services.time_utils import as_utc, utc_now
+    now = now or utc_now()
+    if submission:
+        mapping = {
+            "started": "in_progress",
+            "submitted": "submitted",
+            "grading": "grading",
+            "graded": "graded",
+            "review_required": "review_required",
+        }
+        status = mapping.get(submission.status, submission.status)
+        return status, submission.status in _COMPLETED_SUBMISSION_STATUSES, False
+    start_at = as_utc(exam.start_at)
+    latest_start_at = as_utc(exam.end_at)
+    if start_at and now < start_at:
+        return "scheduled", False, False
+    if latest_start_at and now >= latest_start_at:
+        return "missed", False, False
+    return "ready", False, exam.status == "published"
+
+
+def build_student_exam_summary(exam: Exam, submission: ExamSubmission | None, db: Session, now=None) -> dict:
+    from app.services.time_utils import utc_now
+    now = now or utc_now()
+    status, is_completed, can_start = student_exam_status(exam, submission, now)
+    return {
+        "id": exam.id,
+        "course_id": exam.course_id,
+        "title": exam.title,
+        "status": exam.status,
+        "duration_minutes": exam.duration_minutes,
+        "start_at": exam.start_at,
+        "end_at": exam.end_at,
+        "student_status": status,
+        "is_completed": is_completed,
+        "is_submitted": is_completed,
+        "can_start": can_start,
+        "max_score": exam_max_score(exam.id, db),
+        "server_now": now,
+        "attempt_expires_at": submission.expires_at if submission and submission.status == "started" else None,
+        "review_released_at": exam.review_released_at,
+    }
+
+
+def _student_question_payload(question: ExamQuestion, *, include_correct_answers: bool = False) -> dict:
+    payload = {
+        "id": question.id,
+        "exam_id": question.exam_id,
+        "question_type": question.question_type,
+        "prompt": question.prompt,
+        "options": question.options,
+        "points": float(question.points),
+        "order_index": question.order_index,
+        "starter_code": question.starter_code,
+        "public_cases": question.public_cases,
+    }
+    if include_correct_answers:
+        payload["correct_answer"] = question.correct_answer or {}
+    return payload
+
+
+def _saved_answer_payload(answer: ExamAnswer, *, include_score: bool = False) -> dict:
+    payload = {
+        "id": answer.id,
+        "question_id": answer.question_id,
+        "selected_options": answer.selected_options,
+        "code_answer": answer.code_answer,
+        "text_answers": answer.text_answers,
+        "version": answer.version,
+        "saved_at": answer.updated_at,
+    }
+    if include_score:
+        payload["score"] = answer.score
+        payload["grading_status"] = answer.grading_status
+    return payload
+
+
+def build_student_exam_session(exam: Exam, student: User, db: Session) -> dict:
+    """统一构建候考、作答恢复与结果页会话；任何正确答案公开都在此处集中控制。"""
+    from app.services.time_utils import as_utc, utc_now
+    now = utc_now()
+    submission = db.scalar(select(ExamSubmission).where(
+        ExamSubmission.exam_id == exam.id,
+        ExamSubmission.student_id == student.id,
+    ))
+    if submission and submission.status == "started" and submission.expires_at and as_utc(submission.expires_at) <= now:
+        _auto_submit(submission, db, now)
+        db.refresh(submission)
+
+    summary = build_student_exam_summary(exam, submission, db, now)
+    score_visible = bool(submission and submission.status == "graded" and exam.show_score_after_grading)
+    questions_visible = bool(exam.review_released_at and exam.show_questions_after_review)
+    answers_visible = bool(questions_visible and exam.show_answers_after_review)
+    active = bool(submission and submission.status == "started")
+    include_questions = active or questions_visible
+    questions = list_questions(db, exam.id) if include_questions else []
+    saved_answers = []
+    if submission and include_questions:
+        answers = db.scalars(select(ExamAnswer).where(ExamAnswer.submission_id == submission.id)).all()
+        saved_answers = [_saved_answer_payload(answer, include_score=answers_visible) for answer in answers]
+
+    submission_payload = None
+    if submission:
+        submission_payload = {
+            "id": submission.id,
+            "exam_id": submission.exam_id,
+            "student_id": submission.student_id,
+            "status": submission.status,
+            "score": submission.score if score_visible else None,
+            "score_visible": score_visible,
+            "started_at": submission.started_at,
+            "expires_at": submission.expires_at,
+            "last_saved_at": submission.last_saved_at,
+            "submitted_at": submission.submitted_at,
+            "submission_reason": submission.submission_reason,
+            "review_reason": submission.review_reason,
+        }
+    return {
+        "exam": summary,
+        "submission": submission_payload,
+        "questions": [_student_question_payload(q, include_correct_answers=answers_visible) for q in questions],
+        "saved_answers": saved_answers,
+        "visibility": {
+            "score": score_visible,
+            "questions": questions_visible,
+            "answers": answers_visible,
+            "review_released": bool(exam.review_released_at),
+        },
+        "server_now": now,
+    }
+
+
+def release_exam_review(exam: Exam, actor: User, db: Session) -> Exam:
+    from app.services.time_utils import as_utc, utc_now
+    now = utc_now()
+    if not exam.end_at or now < as_utc(exam.end_at):
+        raise api_error(409, "REVIEW_TOO_EARLY", "最晚进入时间尚未结束，不能发布讲评")
+    active_rows = db.scalars(select(ExamSubmission).where(
+        ExamSubmission.exam_id == exam.id,
+        ExamSubmission.status == "started",
+    )).all()
+    for submission in active_rows:
+        if submission.expires_at and as_utc(submission.expires_at) <= now:
+            _auto_submit(submission, db, now)
+    active = db.scalar(select(ExamSubmission.id).where(
+        ExamSubmission.exam_id == exam.id,
+        ExamSubmission.status == "started",
+    ).limit(1))
+    if active is not None:
+        raise api_error(409, "ACTIVE_EXAMS_EXIST", "仍有学生正在考试，不能发布讲评")
+    exam.review_released_at = now
+    exam.review_released_by_id = actor.id
+    db.commit()
+    db.refresh(exam)
+    logger.info("exam_review_released exam=%s actor=%s", exam.id, actor.id)
+    return exam
+
+
+def extend_exam_submission(submission: ExamSubmission, minutes: int, actor: User, db: Session) -> ExamSubmission:
+    from app.services.time_utils import as_utc, utc_now
+    now = utc_now()
+    if submission.status != "started":
+        raise api_error(409, "SUBMISSION_NOT_ACTIVE", "仅进行中的考试可以延长时间")
+    if not submission.expires_at or as_utc(submission.expires_at) <= now:
+        _auto_submit(submission, db, now)
+        raise api_error(409, "EXAM_EXPIRED", "考试已经到期，无法延长")
+    submission.expires_at = as_utc(submission.expires_at) + timedelta(minutes=minutes)
+    db.commit()
+    db.refresh(submission)
+    logger.info("exam_time_extended submission=%s minutes=%s actor=%s", submission.id, minutes, actor.id)
+    return submission
+
+
+def force_submit_exam_submission(submission: ExamSubmission, actor: User, db: Session) -> ExamSubmission:
+    from app.services.time_utils import utc_now
+    if submission.status != "started":
+        return submission
+    _auto_submit(submission, db, utc_now(), reason="teacher_forced")
+    db.refresh(submission)
+    logger.info("exam_force_submitted submission=%s actor=%s", submission.id, actor.id)
+    return submission
 
 
 def scan_expired_exams(db, now) -> dict:
@@ -451,7 +716,7 @@ def scan_expired_exams(db, now) -> dict:
     # 1. 过期认领：started + 已过期 → 条件 UPDATE 转 submitted（带过期阈值，双实例只一个成功）
     expired = db.scalars(select(ExamSubmission).where(
         ExamSubmission.status == "started",
-        ExamSubmission.expires_at < now)).all()
+        ExamSubmission.expires_at <= now)).all()
     claimed_ids = set()
     for sub in expired:
         result = db.execute(
@@ -459,9 +724,9 @@ def scan_expired_exams(db, now) -> dict:
             .where(
                 ExamSubmission.id == sub.id,
                 ExamSubmission.status == "started",
-                ExamSubmission.expires_at < now,
+                ExamSubmission.expires_at <= now,
             )
-            .values(status="submitted", submitted_at=now)
+            .values(status="submitted", submitted_at=now, submission_reason="time_expired")
         )
         if result.rowcount == 0:
             db.rollback()

@@ -1,442 +1,467 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { useRoute, onBeforeRouteLeave } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
-import StudentAIGradingResult from '../../components/ai/StudentAIGradingResult.vue'
+import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import { examsAPI } from '../../api/exams.js'
 import { useAppStore } from '../../stores/app.js'
-const route = useRoute(); const app = useAppStore()
-const exam = ref(null); const questions = ref([]); const submission = ref(null)
-const started = ref(false); const submitted = ref(false); const graded = ref(false)
-const reviewRequired = ref(false)
-const timeLeft = ref(0); const answers = ref({}); const loading = ref(true)
-let timer = null
+import { useServerClock } from '../../composables/useServerClock.js'
+import { formatDateTime } from '../../utils/format.js'
 
-// ── 防抖保存 ─────────────────────────────────────────────────────────
-const DEBOUNCE_MS = 1000   // 1 秒防抖
-const FALLBACK_MS = 30000  // 30 秒兜底
-const saveTimers = {}       // qId → setTimeout
-const pendingSaves = {}     // qId → value（待发送的数据）
+const route = useRoute()
+const router = useRouter()
+const app = useAppStore()
+const examId = Number(route.params.id)
+
+const loading = ref(true)
+const session = ref(null)
+const exam = computed(() => session.value?.exam || null)
+const submission = computed(() => session.value?.submission || null)
+const questions = computed(() => session.value?.questions || [])
+const visibility = computed(() => session.value?.visibility || {})
+const answers = ref({})
+const versions = ref({})
+const pending = ref({})
+const saveState = ref('saved')
+const locked = ref(false)
+const warningVisible = ref(false)
+const dialog = ref(null)
+const secondaryTab = ref(false)
+const autoSubmitting = ref(false)
+const currentQuestion = ref(null)
+let debounceTimer = null
 let fallbackTimer = null
+let warningTimer = null
+let channel = null
+const joinedAt = performance.now()
+const tabId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
 
-/** 刷新单个题目的待保存数据，返回 true=成功 */
-async function flushSave(qId) {
-  if (saveTimers[qId]) { clearTimeout(saveTimers[qId]); delete saveTimers[qId] }
-  const value = pendingSaves[qId]
-  if (value === undefined) return true  // 无待保存数据，视为成功
-  delete pendingSaves[qId]
-  try {
-    if (typeof value === 'string') {
-      await examsAPI.saveAnswer(route.params.id, qId, { code_answer: value })
-    } else {
-      await examsAPI.saveAnswer(route.params.id, qId, { selected_options: value })
-    }
-    return true
-  } catch (e) {
-    // 仅在用户未做新编辑时恢复旧值，避免覆盖新输入
-    if (pendingSaves[qId] === undefined) {
-      pendingSaves[qId] = value
-    }
-    const detail = e.response?.data?.detail?.message
-    app.showToast(detail || '自动保存失败，请检查网络连接', 'error')
-    return false
-  }
-}
+const queueKey = computed(() => `exam-answer-queue:${examId}:${submission.value?.id || 'pending'}`)
+const active = computed(() => submission.value?.status === 'started')
+const completed = computed(() => Boolean(submission.value && submission.value.status !== 'started'))
+const scoreVisible = computed(() => Boolean(submission.value?.score_visible && submission.value?.score != null))
+const canEdit = computed(() => active.value && !locked.value && !secondaryTab.value && !autoSubmitting.value)
+const saveLabel = computed(() => ({
+  saving: '保存中…', saved: '已保存', pending: '等待保存', offline: '离线待同步', error: '保存失败',
+}[saveState.value] || '已保存'))
+const saveTone = computed(() => ['offline', 'error'].includes(saveState.value) ? 'danger' : saveState.value)
 
-/** 刷新所有待保存答案，返回 { hasFailures } */
-async function flushAllSaves() {
-  const ids = Object.keys(pendingSaves)
-  if (ids.length === 0) return { hasFailures: false }
-  const results = await Promise.all(ids.map(id => flushSave(id)))
-  return { hasFailures: results.some(r => !r) }
-}
-
-/** 防抖保存入口：立即更新本地状态，1 秒后发送到服务端 */
-function saveAnswer(qId, value) {
-  // 立即更新本地 UI
-  answers.value = { ...answers.value, [qId]: value }
-  // 记录待保存数据
-  pendingSaves[qId] = value
-  // 清除已有定时器，重新计时
-  if (saveTimers[qId]) clearTimeout(saveTimers[qId])
-  saveTimers[qId] = setTimeout(() => flushSave(qId), DEBOUNCE_MS)
-}
-
-/** 启动 30 秒兜底定时器 */
-function startFallbackTimer() {
-  if (fallbackTimer) clearInterval(fallbackTimer)
-  fallbackTimer = setInterval(() => flushAllSaves(), FALLBACK_MS)
-}
-
-/** 清理所有定时器 */
-function cleanupTimers() {
-  clearInterval(timer)
-  if (fallbackTimer) { clearInterval(fallbackTimer); fallbackTimer = null }
-  Object.values(saveTimers).forEach(t => clearTimeout(t))
-}
-
-// ── 题型标签 ─────────────────────────────────────────────────────────
-const typeLabel = (t) => ({ single_choice: '单选题', multi_choice: '多选题', code: '编程题' }[t] || t)
-const answeredCount = computed(() => Object.keys(answers.value).filter(k => answers.value[k] !== '' && answers.value[k] != null && (!Array.isArray(answers.value[k]) || answers.value[k].length > 0)).length)
-const totalPoints = computed(() => questions.value.reduce((s,q) => s + (q.points||0), 0))
-const progressPercent = computed(() => questions.value.length ? Math.round(answeredCount.value / questions.value.length * 100) : 0)
-const timeDisplay = computed(() => { const m = Math.floor(timeLeft.value / 60); const s = timeLeft.value % 60; return m + ':' + s.toString().padStart(2, '0') })
-const statusText = computed(() => {
-  if (graded.value) return '已评分：' + (submission.value?.score ?? 0) + ' 分'
-  if (reviewRequired.value) return '评分遇到系统问题，已转人工处理，不会按 0 分计入'
-  if (submitted.value) return '已交卷，等待评分'
-  return ''
+const { nowMs, calibrate } = useServerClock(async () => {
+  if (loading.value) return null
+  const response = await examsAPI.getSession(examId)
+  return response.data.server_now
 })
-const hasBreakdown = computed(() => (submission.value?.answers || []).some(a => a.grading_breakdown))
 
-// ── 生命周期 ─────────────────────────────────────────────────────────
+const secondsLeft = computed(() => {
+  if (!submission.value?.expires_at || !nowMs.value || !active.value) return 0
+  return Math.max(0, Math.ceil((new Date(submission.value.expires_at).getTime() - nowMs.value) / 1000))
+})
+const timeDisplay = computed(() => {
+  const hours = Math.floor(secondsLeft.value / 3600)
+  const minutes = Math.floor((secondsLeft.value % 3600) / 60)
+  const seconds = secondsLeft.value % 60
+  return [hours, minutes, seconds].map(value => String(value).padStart(2, '0')).join(':')
+})
+const answeredCount = computed(() => questions.value.filter(question => isAnswered(question, answers.value[question.id])).length)
+const progressPercent = computed(() => questions.value.length ? Math.round(answeredCount.value * 100 / questions.value.length) : 0)
+
+const resultTitle = computed(() => {
+  if (submission.value?.status === 'review_required') return '已交卷，等待教师复核'
+  if (['submitted', 'grading'].includes(submission.value?.status)) return '已交卷，等待评分'
+  if (scoreVisible.value) return '成绩已开放'
+  return '考试已完成'
+})
+const resultMessage = computed(() => {
+  if (submission.value?.status === 'review_required') return '评分遇到异常，已转教师人工处理，不会按 0 分计入。'
+  if (['submitted', 'grading'].includes(submission.value?.status)) return '系统正在处理试卷，成绩完成后仍需由教师决定是否公开。'
+  if (!scoreVisible.value) return '成绩暂未开放，请等待教师通知。'
+  return visibility.value.review_released ? '讲评已开放，可在下方查看教师允许公开的内容。' : '逐题讲评尚未开放。'
+})
+
+function isAnswered(question, value) {
+  if (question.question_type === 'fill_blank') {
+    const ids = blankIds(question)
+    return ids.length > 0 && ids.every(id => String(value?.[id] || '').trim())
+  }
+  if (Array.isArray(value)) return value.length > 0
+  return String(value || '').trim().length > 0
+}
+
+function blankIds(question) {
+  return [...String(question.prompt || '').matchAll(/\[\[blank:([A-Za-z0-9_-]+)\]\]/g)].map(match => match[1])
+}
+
+function promptSegments(question) {
+  const text = String(question.prompt || '')
+  const segments = []
+  let lastIndex = 0
+  for (const match of text.matchAll(/\[\[blank:([A-Za-z0-9_-]+)\]\]/g)) {
+    if (match.index > lastIndex) segments.push({ type: 'text', text: text.slice(lastIndex, match.index) })
+    segments.push({ type: 'blank', id: match[1] })
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < text.length) segments.push({ type: 'text', text: text.slice(lastIndex) })
+  return segments
+}
+
+function typeLabel(type) {
+  return { single_choice: '单选题', multi_choice: '多选题', fill_blank: '填空题', code: '编程题' }[type] || type
+}
+
+function hydrate(payload, { mergeQueue = true } = {}) {
+  session.value = payload
+  calibrate(payload.server_now)
+  const nextAnswers = {}
+  const nextVersions = {}
+  for (const question of payload.questions || []) {
+    nextAnswers[question.id] = question.question_type === 'fill_blank' ? {} : question.question_type === 'code' ? (question.starter_code || '') : []
+  }
+  for (const saved of payload.saved_answers || []) {
+    const question = (payload.questions || []).find(item => item.id === saved.question_id)
+    if (!question) continue
+    if (question.question_type === 'fill_blank') nextAnswers[saved.question_id] = saved.text_answers || {}
+    else if (question.question_type === 'code') nextAnswers[saved.question_id] = saved.code_answer || ''
+    else nextAnswers[saved.question_id] = saved.selected_options || []
+    nextVersions[saved.question_id] = saved.version || 0
+  }
+  answers.value = nextAnswers
+  versions.value = nextVersions
+  currentQuestion.value = payload.questions?.[0]?.id || null
+  if (mergeQueue && payload.submission?.status === 'started') restoreLocalQueue()
+  if (payload.submission?.status !== 'started') clearLocalQueue()
+  if (payload.submission?.status === 'started') activateTabCoordination()
+}
+
 async function load() {
   loading.value = true
   try {
-    const [eRes, qRes] = await Promise.all([examsAPI.get(route.params.id), examsAPI.getQuestions(route.params.id).catch(() => ({ data: { items: [] } }))])
-    exam.value = eRes.data; questions.value = qRes.data?.items || qRes.data || []
-    try {
-      const gRes = await examsAPI.getMyGrade(route.params.id)
-      submission.value = gRes.data
-      if (gRes.data.status === 'graded') { graded.value = true; submitted.value = true }
-      else if (gRes.data.status === 'review_required') { reviewRequired.value = true; submitted.value = true }
-      else if (gRes.data.status !== 'started') { submitted.value = true }
-      else { started.value = true; timeLeft.value = Math.max(0, Math.floor((new Date(gRes.data.expires_at).getTime() - Date.now()) / 1000)); startTimer(); startFallbackTimer() }
-    } catch { /* 首次进入无提交记录，正常情况 */ }
-  } catch { app.showToast('加载失败', 'error') }
-  finally { loading.value = false }
+    const response = await examsAPI.getSession(examId)
+    hydrate(response.data)
+    if (response.data.exam?.student_status === 'scheduled') {
+      dialog.value = { kind: 'scheduled' }
+    }
+  } catch (error) {
+    app.showToast(error.response?.data?.detail?.message || '考试信息加载失败', 'error')
+  } finally {
+    loading.value = false
+  }
 }
-function startTimer() { clearInterval(timer); timer = setInterval(() => { if (timeLeft.value > 0) timeLeft.value-- }, 1000) }
-onMounted(load)
-onUnmounted(() => cleanupTimers())
 
-// 路由离开前刷新待保存数据
-onBeforeRouteLeave(async (_to, _from, next) => {
-  if (started.value && !submitted.value) {
-    await flushAllSaves()
+function answerPayload(questionId, value) {
+  const question = questions.value.find(item => item.id === Number(questionId))
+  const base = { question_id: Number(questionId), expected_version: versions.value[questionId] || 0 }
+  if (question?.question_type === 'fill_blank') return { ...base, text_answers: value || {} }
+  if (question?.question_type === 'code') return { ...base, code_answer: value || '' }
+  return { ...base, selected_options: value || [] }
+}
+
+function stageAnswer(questionId, value) {
+  if (!canEdit.value) return
+  answers.value = { ...answers.value, [questionId]: value }
+  pending.value = { ...pending.value, [questionId]: value }
+  saveState.value = navigator.onLine ? 'pending' : 'offline'
+  persistLocalQueue()
+  window.clearTimeout(debounceTimer)
+  debounceTimer = window.setTimeout(flushPending, 800)
+}
+
+function stageBlank(questionId, blankId, value) {
+  stageAnswer(questionId, { ...(answers.value[questionId] || {}), [blankId]: value })
+}
+
+async function flushPending() {
+  const entries = Object.entries(pending.value)
+  if (!entries.length || !active.value || secondaryTab.value) return { ok: true }
+  if (!navigator.onLine) { saveState.value = 'offline'; return { ok: false } }
+  saveState.value = 'saving'
+  const snapshot = Object.fromEntries(entries)
+  try {
+    const response = await examsAPI.saveAnswers(examId, entries.map(([id, value]) => answerPayload(id, value)))
+    calibrate(response.data.server_now)
+    let allOk = true
+    const nextPending = { ...pending.value }
+    for (const result of response.data.results || []) {
+      if (result.ok) {
+        versions.value = { ...versions.value, [result.question_id]: result.version }
+        if (JSON.stringify(nextPending[result.question_id]) === JSON.stringify(snapshot[result.question_id])) delete nextPending[result.question_id]
+      } else {
+        allOk = false
+        if (result.code === 'ANSWER_VERSION_CONFLICT') {
+          app.showToast('检测到另一页面更新了答案，请刷新后核对', 'error')
+        }
+      }
+    }
+    pending.value = nextPending
+    saveState.value = Object.keys(nextPending).length ? (allOk ? 'pending' : 'error') : 'saved'
+    persistLocalQueue()
+    return { ok: allOk && Object.keys(nextPending).length === 0 }
+  } catch (error) {
+    saveState.value = navigator.onLine ? 'error' : 'offline'
+    persistLocalQueue()
+    return { ok: false, error }
+  }
+}
+
+function persistLocalQueue() {
+  if (!submission.value?.id) return
+  if (!Object.keys(pending.value).length) { localStorage.removeItem(queueKey.value); return }
+  localStorage.setItem(queueKey.value, JSON.stringify({ submissionId: submission.value.id, answers: answers.value, pending: pending.value }))
+}
+
+function restoreLocalQueue() {
+  try {
+    const raw = localStorage.getItem(queueKey.value)
+    if (!raw) return
+    const saved = JSON.parse(raw)
+    if (saved.submissionId !== submission.value?.id) { clearLocalQueue(); return }
+    answers.value = { ...answers.value, ...(saved.answers || {}) }
+    pending.value = saved.pending || {}
+    if (Object.keys(pending.value).length) {
+      saveState.value = navigator.onLine ? 'pending' : 'offline'
+      window.setTimeout(flushPending, 100)
+    }
+  } catch { clearLocalQueue() }
+}
+
+function clearLocalQueue() {
+  localStorage.removeItem(queueKey.value)
+  pending.value = {}
+  saveState.value = 'saved'
+}
+
+function activateTabCoordination() {
+  if (channel || !('BroadcastChannel' in window)) return
+  channel = new BroadcastChannel(`exam-attempt:${examId}:${submission.value?.id}`)
+  channel.onmessage = ({ data }) => {
+    if (!data || data.sender === tabId) return
+    if (data.type === 'hello' && joinedAt <= data.joinedAt) {
+      channel.postMessage({ type: 'active', target: data.sender, sender: tabId })
+    }
+    if (data.type === 'active' && data.target === tabId) secondaryTab.value = true
+  }
+  channel.postMessage({ type: 'hello', sender: tabId, joinedAt })
+}
+
+async function startExam() {
+  dialog.value = null
+  try {
+    const response = await examsAPI.start(examId)
+    hydrate(response.data)
+    app.showToast('考试已开始，计时以服务器时间为准', 'success')
+  } catch (error) {
+    app.showToast(error.response?.data?.detail?.message || '暂时无法开始考试', 'error')
+    await load()
+  }
+}
+
+async function submitExam({ forced = false, confirmed = false } = {}) {
+  if (autoSubmitting.value || completed.value) return
+  if (!forced && !confirmed) { dialog.value = { kind: 'submit' }; return }
+  dialog.value = null
+  autoSubmitting.value = true
+  locked.value = true
+  if (secondsLeft.value > 0) {
+    const saved = await flushPending()
+    if (!saved.ok && !forced) {
+      app.showToast('仍有答案未成功保存，请检查网络后再交卷', 'error')
+      locked.value = false
+      autoSubmitting.value = false
+      return
+    }
+  }
+  try {
+    const response = await examsAPI.submit(examId)
+    hydrate(response.data, { mergeQueue: false })
+    clearLocalQueue()
+    app.showToast(secondsLeft.value === 0 ? '考试时间已到，系统已自动交卷' : '交卷成功', 'success')
+  } catch (error) {
+    app.showToast(error.response?.data?.detail?.message || '交卷请求失败，系统会继续重试', 'error')
+    if (secondsLeft.value === 0) window.setTimeout(() => submitExam({ forced: true }), 1500)
+    else locked.value = false
+  } finally {
+    autoSubmitting.value = false
+  }
+}
+
+function confirmDialog() {
+  if (dialog.value?.kind === 'start') return startExam()
+  if (dialog.value?.kind === 'submit') return submitExam({ confirmed: true })
+  if (dialog.value?.kind === 'leave') {
+    const target = dialog.value.target
+    dialog.value = null
+    flushPending().finally(() => router.push(target))
+    return
+  }
+  dialog.value = null
+  if (exam.value?.student_status === 'scheduled') router.replace('/student/exams')
+}
+
+function cancelDialog() {
+  if (dialog.value?.kind === 'scheduled') router.replace('/student/exams')
+  dialog.value = null
+}
+
+function scrollToQuestion(id) {
+  currentQuestion.value = id
+  document.getElementById(`question-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function onBeforeUnload(event) {
+  if (!active.value || !Object.keys(pending.value).length) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+function onOnline() { if (active.value) flushPending() }
+
+watch(secondsLeft, (seconds, previous) => {
+  if (!active.value) return
+  const warningKey = `exam-one-minute-warning:${submission.value?.id}`
+  if (seconds > 0 && seconds <= 60 && (previous > 60 || previous === undefined || !sessionStorage.getItem(warningKey))) {
+    sessionStorage.setItem(warningKey, '1')
+    warningVisible.value = true
+    window.clearTimeout(warningTimer)
+    warningTimer = window.setTimeout(() => { warningVisible.value = false }, 3000)
+  }
+  if (seconds === 0) submitExam({ forced: true })
+}, { immediate: true })
+
+onBeforeRouteLeave((to, _from, next) => {
+  if (active.value && Object.keys(pending.value).length) {
+    next(false)
+    dialog.value = { kind: 'leave', target: to.fullPath }
+    return
   }
   next()
 })
 
-// 页面关闭/刷新前尝试保存（浏览器尽力而为）
-window.addEventListener('beforeunload', () => {
-  if (started.value && !submitted.value) {
-    flushAllSaves()
-  }
+onMounted(() => {
+  load()
+  fallbackTimer = window.setInterval(() => { if (active.value) flushPending() }, 10_000)
+  window.addEventListener('beforeunload', onBeforeUnload)
+  window.addEventListener('online', onOnline)
 })
 
-// ── 操作 ─────────────────────────────────────────────────────────────
-async function startExam() {
-  try {
-    const res = await examsAPI.start(route.params.id)
-    submission.value = res.data; started.value = true
-    timeLeft.value = Math.max(0, Math.floor((new Date(res.data.expires_at).getTime() - Date.now()) / 1000))
-    startTimer(); startFallbackTimer()
-
-    // 开始成功后重新加载题目（此时已获得查看权限）
-    try {
-      const qRes = await examsAPI.getQuestions(route.params.id)
-      questions.value = qRes.data?.items || qRes.data || []
-    } catch {
-      app.showToast('题目加载失败，请刷新页面', 'error')
-    }
-  } catch(e) {
-    app.showToast(e.response?.data?.detail?.message || '开始失败', 'error')
-  }
-}
-
-async function submitExam() {
-  if (!confirm('确定要交卷吗？交卷后无法修改答案。')) return
-  // 交卷前刷新所有待保存数据
-  const flushResult = await flushAllSaves()
-  if (flushResult.hasFailures) {
-    app.showToast('部分答案保存失败，请检查网络后重试交卷', 'error')
-    return
-  }
-  try {
-    const res = await examsAPI.submit(route.params.id, {})
-    submission.value = res.data; submitted.value = true
-    cleanupTimers()
-    app.showToast('交卷成功', 'success')
-  } catch(e) {
-    app.showToast(e.response?.data?.detail?.message || '交卷失败', 'error')
-  }
-}
-
-function isSelected(qId, optKey) { const ans = answers.value[qId]; return ans && ans.includes(optKey) }
+onBeforeUnmount(() => {
+  window.clearTimeout(debounceTimer)
+  window.clearTimeout(warningTimer)
+  window.clearInterval(fallbackTimer)
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  window.removeEventListener('online', onOnline)
+  channel?.close()
+})
 </script>
 
 <template>
   <AppLayout>
-    <!-- ── Loading ──────────────────────────────────────────────────────── -->
-    <div v-if="loading" class="card" style="padding:48px;text-align:center">
-      <div class="skeleton" style="height:22px;width:240px;margin:0 auto 16px"></div>
-      <div class="skeleton" style="height:14px;width:360px;margin:0 auto"></div>
-    </div>
+    <div v-if="loading" class="loading-card"><div class="skeleton title-line"></div><div class="skeleton text-line"></div></div>
 
-    <template v-else>
-      <!-- ── Page Head ─────────────────────────────────────────────────── -->
-      <div class="exam-header">
-        <div class="header-left">
-          <h1 class="exam-title">{{ exam?.title }}</h1>
-          <p v-if="statusText" class="status-text">{{ statusText }}</p>
+    <main v-else-if="exam" class="exam-page">
+      <header class="exam-heading">
+        <div>
+          <button type="button" class="back-link" @click="router.push('/student/exams')">← 返回考试中心</button>
+          <p class="eyebrow">{{ completed ? '考试结果' : active ? '答题进行中' : '考试说明' }}</p>
+          <h1>{{ exam.title }}</h1>
         </div>
-        <div v-if="started && !submitted" class="header-right">
-          <div class="timer-box">
-            <span class="timer-label">剩余时间</span>
-            <span class="timer-value">{{ timeDisplay }}</span>
-          </div>
+        <div v-if="active" class="timer" :class="{ urgent: secondsLeft <= 60 }">
+          <span>剩余时间</span><strong>{{ timeDisplay }}</strong><small>服务器计时</small>
         </div>
+      </header>
+
+      <div v-if="warningVisible" class="minute-warning" role="alert">
+        <strong>考试即将结束</strong><span>剩余不足 1 分钟，请尽快完成并检查答案。</span>
       </div>
 
-      <!-- ── Graded Result ─────────────────────────────────────────────── -->
-      <div v-if="graded" class="card result-card">
-        <div class="result-score">{{ submission?.score ?? 0 }} <span class="result-unit">/ {{ totalPoints }} 分</span></div>
-        <p class="result-text">考试已完成</p>
-      </div>
-
-      <!-- ── Active AI 评分逐题明细（仅对学生显示安全信息） ────────────── -->
-      <section v-if="graded && hasBreakdown" class="breakdown-section">
-        <h3 class="breakdown-title">AI 评分详情</h3>
-        <div v-for="(ans, ai) in (submission?.answers || [])" :key="ai">
-          <StudentAIGradingResult
-            v-if="ans.grading_breakdown"
-            :breakdown="ans.grading_breakdown"
-            :heading="'第 ' + (ai + 1) + ' 题'"
-          />
-        </div>
+      <section v-if="secondaryTab && active" class="tab-warning">
+        <strong>此页面已切换为只读</strong>
+        <span>检测到同一场考试已在另一个标签页打开，请回到原标签继续作答，避免答案互相覆盖。</span>
       </section>
 
-      <!-- ── Submitted ─────────────────────────────────────────────────── -->
-      <div v-else-if="submitted" class="card result-card">
-        <div class="result-icon">&#10003;</div>
-        <p v-if="reviewRequired" class="result-text">
-          评分遇到系统问题，已转人工处理，不会按 0 分计入
-        </p>
-        <p v-else class="result-text">已交卷，等待评分...</p>
+      <section v-if="completed" class="result-panel">
+        <div class="result-mark">✓</div>
+        <div class="result-copy"><p class="result-kicker">{{ resultTitle }}</p><h2 v-if="scoreVisible">{{ submission.score }} <span>/ {{ exam.max_score }} 分</span></h2><h2 v-else>已完成</h2><p>{{ resultMessage }}</p></div>
+        <dl><div><dt>交卷时间</dt><dd>{{ formatDateTime(submission.submitted_at) }}</dd></div><div><dt>交卷方式</dt><dd>{{ submission.submission_reason === 'time_expired' ? '到时自动交卷' : submission.submission_reason === 'teacher_forced' ? '教师强制交卷' : '主动交卷' }}</dd></div></dl>
+      </section>
+
+      <section v-if="completed && visibility.questions" class="review-section">
+        <div class="section-head"><div><p class="eyebrow">REVIEW</p><h2>试题讲评</h2></div><span class="review-badge">{{ visibility.answers ? '题目与答案已开放' : '仅题目已开放' }}</span></div>
+        <article v-for="(question, index) in questions" :key="question.id" class="review-card">
+          <header><strong>第 {{ index + 1 }} 题</strong><span>{{ typeLabel(question.question_type) }} · {{ question.points }} 分</span></header>
+          <p class="review-prompt">{{ question.prompt }}</p>
+          <div v-if="visibility.answers" class="standard-answer"><span>标准答案</span><code>{{ question.correct_answer }}</code></div>
+        </article>
+      </section>
+
+      <section v-else-if="!active && exam.student_status === 'ready'" class="start-panel">
+        <div class="start-icon">▶</div><h2>准备开始考试</h2>
+        <p>确认开始后，系统会立即创建考试记录并按完整时长计时。刷新或退出后可继续，但倒计时不会暂停。</p>
+        <dl><div><dt>考试时长</dt><dd>{{ exam.duration_minutes }} 分钟</dd></div><div><dt>满分</dt><dd>{{ exam.max_score }} 分</dd></div><div><dt>最晚进入</dt><dd>{{ formatDateTime(exam.end_at) }}</dd></div></dl>
+        <button type="button" class="btn-primary start-button" @click="dialog = { kind: 'start' }">确认并开始考试</button>
+      </section>
+
+      <section v-else-if="!active && exam.student_status === 'missed'" class="start-panel missed">
+        <div class="start-icon">!</div><h2>已错过最晚进入时间</h2><p>你尚未开始本场考试，系统已将状态标记为缺考。如有特殊情况，请联系任课教师。</p>
+      </section>
+
+      <div v-else-if="active" class="workspace">
+        <aside class="exam-sidebar">
+          <div class="save-row"><span class="save-dot" :class="saveTone"></span><strong>{{ saveLabel }}</strong></div>
+          <div class="progress-line"><span :style="{ width: progressPercent + '%' }"></span></div>
+          <p>已答 {{ answeredCount }} / {{ questions.length }} 题</p>
+          <nav aria-label="题目导航">
+            <button v-for="(question, index) in questions" :key="question.id" type="button" :class="{ answered: isAnswered(question, answers[question.id]), current: currentQuestion === question.id }" @click="scrollToQuestion(question.id)">{{ index + 1 }}</button>
+          </nav>
+          <button type="button" class="submit-button" :disabled="autoSubmitting || secondaryTab" @click="submitExam()">{{ autoSubmitting ? '正在交卷…' : '提交试卷' }}</button>
+          <small>交卷前会先同步待保存答案</small>
+        </aside>
+
+        <section class="questions-column">
+          <article v-for="(question, index) in questions" :id="`question-${question.id}`" :key="question.id" class="question-card" @focusin="currentQuestion = question.id">
+            <header><div><span class="question-index">{{ String(index + 1).padStart(2, '0') }}</span><span class="type-chip">{{ typeLabel(question.question_type) }}</span></div><strong>{{ question.points }} 分</strong></header>
+            <p v-if="question.question_type !== 'fill_blank'" class="prompt">{{ question.prompt }}</p>
+            <div v-else class="fill-prompt">
+              <template v-for="(segment, segmentIndex) in promptSegments(question)" :key="`${segment.type}-${segmentIndex}`">
+                <span v-if="segment.type === 'text'">{{ segment.text }}</span>
+                <input v-else :value="answers[question.id]?.[segment.id] || ''" :disabled="!canEdit" :aria-label="`填空 ${segment.id}`" autocomplete="off" @input="stageBlank(question.id, segment.id, $event.target.value)" @blur="flushPending" />
+              </template>
+            </div>
+
+            <div v-if="question.question_type === 'single_choice'" class="options">
+              <label v-for="(option, key) in question.options" :key="key" :class="{ selected: (answers[question.id] || []).includes(key) }"><input type="radio" :name="`q-${question.id}`" :disabled="!canEdit" :checked="(answers[question.id] || []).includes(key)" @change="stageAnswer(question.id, [key])"><b>{{ key }}</b><span>{{ option }}</span></label>
+            </div>
+            <div v-else-if="question.question_type === 'multi_choice'" class="options">
+              <label v-for="(option, key) in question.options" :key="key" :class="{ selected: (answers[question.id] || []).includes(key) }"><input type="checkbox" :disabled="!canEdit" :checked="(answers[question.id] || []).includes(key)" @change="stageAnswer(question.id, (answers[question.id] || []).includes(key) ? answers[question.id].filter(item => item !== key) : [...(answers[question.id] || []), key])"><b>{{ key }}</b><span>{{ option }}</span></label>
+            </div>
+            <textarea v-else-if="question.question_type === 'code'" class="code-editor" :value="answers[question.id] || ''" :disabled="!canEdit" rows="12" spellcheck="false" @input="stageAnswer(question.id, $event.target.value)" @blur="flushPending"></textarea>
+          </article>
+        </section>
       </div>
+    </main>
 
-      <!-- ── Start ─────────────────────────────────────────────────────── -->
-      <div v-else-if="!started" class="card start-card">
-        <div class="start-info">
-          <p>考试时长：<strong>{{ exam?.duration_minutes }} 分钟</strong></p>
-          <p>题目数量：<strong>{{ questions.length }} 题</strong></p>
-          <p>总分：<strong>{{ totalPoints }} 分</strong></p>
-        </div>
-        <button class="btn-accent start-btn" @click="startExam">开始考试</button>
-      </div>
-
-      <!-- ── Exam Body ─────────────────────────────────────────────────── -->
-      <div v-else class="exam-body">
-        <div class="progress-wrap">
-          <div class="progress-bar">
-            <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
-          </div>
-          <span class="progress-text">已答 {{ answeredCount }} / {{ questions.length }} 题（{{ progressPercent }}%）</span>
-        </div>
-
-        <div v-for="(q,i) in questions" :key="q.id" class="card question-card" :id="'q-' + q.id">
-          <div class="question-header">
-            <span class="question-num">第 {{ i + 1 }} 题</span>
-            <span class="question-type badge" :class="q.question_type === 'single_choice' ? 'badge-primary' : q.question_type === 'multi_choice' ? 'badge-info' : 'badge-neutral'">
-              {{ typeLabel(q.question_type) }}
-            </span>
-            <span class="question-points">{{ q.points }} 分</span>
-          </div>
-          <p class="question-prompt">{{ q.prompt }}</p>
-
-          <!-- 单选题 -->
-          <div v-if="q.question_type === 'single_choice'" class="options-list">
-            <label v-for="(opt,k) in q.options" :key="k" class="option-row" :class="{ selected: isSelected(q.id, k) }">
-              <input type="radio" :name="'q'+q.id" class="option-radio" :checked="isSelected(q.id, k)" @change="saveAnswer(q.id, [k])" />
-              <span class="option-letter">{{ k }}.</span>
-              <span class="option-text">{{ opt }}</span>
-            </label>
-          </div>
-
-          <!-- 多选题 -->
-          <div v-else-if="q.question_type === 'multi_choice'" class="options-list">
-            <label v-for="(opt,k) in q.options" :key="k" class="option-row" :class="{ selected: isSelected(q.id, k) }">
-              <input type="checkbox" class="option-checkbox" :checked="isSelected(q.id, k)" @change="saveAnswer(q.id, isSelected(q.id, k) ? (answers[q.id]||[]).filter(v=>v!==k) : [...(answers[q.id]||[]),k])" />
-              <span class="option-letter">{{ k }}.</span>
-              <span class="option-text">{{ opt }}</span>
-            </label>
-          </div>
-
-          <!-- 编程题 -->
-          <div v-else class="code-area">
-            <textarea :value="answers[q.id] || q.starter_code || ''" @input="saveAnswer(q.id, $event.target.value)" class="code-editor" rows="8" :placeholder="q.starter_code || '在此编写代码...'"></textarea>
-          </div>
-        </div>
-
-        <div class="submit-area">
-          <button class="btn-accent submit-btn" @click="submitExam">交卷</button>
-        </div>
-      </div>
-    </template>
+    <ConfirmDialog
+      v-if="dialog"
+      :title="dialog.kind === 'scheduled' ? '考试尚未开始' : dialog.kind === 'start' ? '确认开始考试' : dialog.kind === 'submit' ? '确认提交试卷' : '仍有答案尚未同步'"
+      :message="dialog.kind === 'scheduled' ? `本场考试将于 ${formatDateTime(exam?.start_at)} 开放，系统以服务器时间为准。` : dialog.kind === 'start' ? `开始后将获得 ${exam?.duration_minutes} 分钟完整作答时间，倒计时不会因退出或刷新暂停。` : dialog.kind === 'submit' ? '系统会先保存最新答案。交卷完成后将无法继续修改。' : '离开前系统会尝试同步答案；网络异常时建议留在本页等待恢复。'"
+      :confirm-text="dialog.kind === 'scheduled' ? '返回考试中心' : dialog.kind === 'start' ? '开始计时' : dialog.kind === 'submit' ? '确认交卷' : '保存并离开'"
+      :cancel-text="dialog.kind === 'scheduled' ? '关闭' : '取消'"
+      :danger="dialog.kind === 'submit'"
+      @confirm="confirmDialog"
+      @cancel="cancelDialog"
+    />
   </AppLayout>
 </template>
 
 <style scoped>
-/* ═══════════════════════════════════════════════════════════════════════
-   Exam View — Code Studio
-   page-head + timer + option cards + code editor + submit
-   ═══════════════════════════════════════════════════════════════════════ */
-
-/* ── Page Head ─────────────────────────────────────────────────────── */
-.exam-header {
-  display: flex; justify-content: space-between; align-items: flex-start;
-  margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
-}
-.exam-title {
-  font-size: 28px; font-weight: 700;
-  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
-  margin: 0 0 4px;
-}
-.status-text {
-  font-size: var(--text-sm); color: var(--text-secondary);
-}
-
-/* ── Timer ─────────────────────────────────────────────────────────── */
-.timer-box {
-  display: flex; flex-direction: column; align-items: center;
-  background: var(--accent); color: var(--surface);
-  padding: 10px 24px; border-radius: var(--radius-lg);
-  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.25);
-}
-.timer-label { font-size: 11px; opacity: 0.85; }
-.timer-value {
-  font-family: var(--font-mono); font-size: 24px; font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-/* ── Result / Start cards ──────────────────────────────────────────── */
-.result-card {
-  text-align: center; padding: 48px 24px;
-}
-.result-score {
-  font-size: 36px; font-weight: 700; color: var(--success);
-}
-.result-unit {
-  font-size: 18px; color: var(--text-secondary); font-weight: 400;
-}
-.result-text {
-  color: var(--text-secondary); margin-top: 8px; font-size: var(--text-sm);
-}
-.result-icon {
-  font-size: 48px; color: var(--success); margin-bottom: 8px;
-}
-
-.start-card {
-  text-align: center; padding: 56px 24px;
-}
-.start-info { margin-bottom: 24px; line-height: 2.2; color: var(--ink); font-size: 15px; }
-.start-info strong { font-weight: 600; color: var(--ink); }
-.start-btn {
-  padding: 12px 48px; font-size: 16px; font-weight: 600;
-}
-
-/* ── Exam body ─────────────────────────────────────────────────────── */
-.exam-body { max-width: 800px; }
-
-/* Progress */
-.progress-wrap {
-  display: flex; align-items: center; gap: 12px; margin-bottom: 24px;
-}
-.progress-bar {
-  flex: 1; height: 6px; background: var(--surface-raised);
-  border-radius: var(--radius-full); overflow: hidden;
-}
-.progress-fill {
-  height: 100%; background: var(--accent);
-  border-radius: var(--radius-full);
-  transition: width var(--duration-slow) var(--ease-out);
-}
-.progress-text {
-  font-size: var(--text-xs); color: var(--text-secondary); white-space: nowrap;
-}
-
-/* Question card */
-.question-card {
-  padding: 24px; margin-bottom: 16px;
-}
-.question-header {
-  display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
-}
-.question-num {
-  font-size: var(--text-sm); font-weight: 600; color: var(--ink);
-}
-.question-points {
-  font-size: var(--text-xs); color: var(--text-secondary); margin-left: auto;
-}
-.question-prompt {
-  font-size: var(--text-sm); color: var(--ink); line-height: 1.7; margin-bottom: 18px;
-}
-
-/* Options */
-.options-list { display: flex; flex-direction: column; gap: 2px; }
-.option-row {
-  display: grid; grid-template-columns: auto auto 1fr; align-items: center;
-  gap: 10px; padding: 12px 14px; border-radius: var(--radius-md);
-  cursor: pointer; border: 1px solid transparent;
-  transition: background var(--duration-fast) var(--ease-out),
-              border-color var(--duration-fast) var(--ease-out);
-}
-.option-row:hover { background: var(--surface-raised); }
-.option-row.selected {
-  background: var(--primary-light);
-  border-color: var(--primary-soft);
-}
-.option-radio, .option-checkbox {
-  width: 16px; height: 16px; margin: 0;
-  accent-color: var(--primary); flex-shrink: 0;
-}
-.option-letter {
-  font-weight: 600; font-size: var(--text-sm); color: var(--ink);
-  min-width: 20px;
-}
-.option-text {
-  font-size: var(--text-sm); color: var(--ink);
-  line-height: 1.5; word-break: break-word;
-}
-
-/* Code editor */
-.code-area { margin-top: 8px; }
-.code-editor {
-  width: 100%; background: #0F172A; color: #E2E8F0;
-  border: 1px solid #1E293B; border-radius: var(--radius-md);
-  padding: 14px;
-  font-family: var(--font-mono); font-size: 13px;
-  line-height: 1.65; resize: vertical;
-  transition: border-color var(--duration-fast) var(--ease-out);
-}
-.code-editor:focus {
-  outline: none; border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.12);
-}
-
-/* Submit */
-.submit-area { text-align: center; padding: 32px 0 48px; }
-.submit-btn { padding: 12px 56px; font-size: 16px; font-weight: 600; }
-
-/* ── Active AI 评分逐题明细（学生安全展示） ─────────────────────── */
-.breakdown-section {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  margin-top: 20px;
-}
-.breakdown-title {
-  margin: 0;
-  color: var(--ink);
-  font-size: 15px;
-  font-weight: 600;
-}
-
-@media (max-width: 640px) {
-  .exam-header { flex-direction: column; }
-  .option-row { padding: 10px 10px; gap: 8px; }
-  .question-card { padding: 18px; }
-  .exam-title { font-size: 24px; }
-}
+.loading-card { padding: 56px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }.title-line{height:22px;width:260px;margin-bottom:14px}.text-line{height:13px;width:380px}
+.exam-page { display: flex; flex-direction: column; gap: 24px; }.exam-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; }.back-link { margin: 0 0 20px; padding: 0; border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; }.eyebrow { margin: 0 0 7px; color: var(--primary); font: 700 11px/1 var(--font-mono); letter-spacing: .14em; }.exam-heading h1 { margin: 0; color: var(--ink); font-size: 29px; letter-spacing: -.03em; }
+.timer { min-width: 174px; padding: 12px 18px; border: 1px solid #fed7aa; border-radius: 14px; background: #fff7ed; text-align: center; color: #9a3412; }.timer span,.timer small { display:block;font-size:10px;letter-spacing:.08em}.timer strong { display:block;margin:2px 0;font:750 25px/1.2 var(--font-mono);letter-spacing:.05em}.timer.urgent { color:#b91c1c;border-color:#fecaca;background:#fef2f2;animation:pulse 1.4s ease-in-out infinite }
+.minute-warning { position:fixed;z-index:70;top:22px;left:50%;transform:translateX(-50%);display:flex;gap:14px;align-items:center;min-width:min(520px,calc(100vw - 32px));padding:15px 18px;border-radius:13px;background:#9f1239;color:white;box-shadow:0 14px 35px rgba(159,18,57,.25); }.minute-warning span { font-size:13px;opacity:.9 }.tab-warning { display:flex;align-items:center;gap:12px;padding:14px 18px;border:1px solid #fde68a;border-radius:12px;background:#fffbeb;color:#92400e;font-size:13px}.tab-warning span{color:#a16207}
+.result-panel { display:grid;grid-template-columns:auto 1fr minmax(220px,auto);align-items:center;gap:22px;padding:28px;border:1px solid var(--border);border-radius:18px;background:var(--surface);box-shadow:0 10px 30px rgba(15,23,42,.04)}.result-mark{display:grid;place-items:center;width:52px;height:52px;border-radius:16px;background:#ecfdf5;color:#059669;font-size:26px}.result-kicker{margin:0 0 5px;color:#64748b;font-size:12px;font-weight:650}.result-copy h2{margin:0;color:var(--ink);font-size:30px}.result-copy h2 span{font-size:16px;color:#64748b;font-weight:500}.result-copy>p:last-child{margin:6px 0 0;color:#64748b;font-size:13px}.result-panel dl,.start-panel dl{margin:0;display:grid;gap:8px}.result-panel dl div,.start-panel dl div{display:flex;justify-content:space-between;gap:30px;font-size:12px}.result-panel dt,.start-panel dt{color:#94a3b8}.result-panel dd,.start-panel dd{margin:0;color:var(--ink);font-weight:600}
+.start-panel{max-width:640px;margin:34px auto;padding:42px;border:1px solid var(--border);border-radius:18px;background:var(--surface);text-align:center}.start-icon{display:grid;place-items:center;width:52px;height:52px;margin:0 auto 15px;border-radius:16px;background:#eff6ff;color:#2563eb;font-size:18px}.start-panel h2{margin:0 0 10px;color:var(--ink);font-size:21px}.start-panel>p{max-width:510px;margin:0 auto 24px;color:#64748b;font-size:13px;line-height:1.8}.start-panel dl{padding:18px;border-radius:12px;background:#f8fafc;text-align:left}.start-button{margin-top:22px;padding:11px 30px}.start-panel.missed .start-icon{background:#fef2f2;color:#dc2626}
+.workspace{display:grid;grid-template-columns:220px minmax(0,780px);gap:22px;align-items:start}.exam-sidebar{position:sticky;top:24px;padding:20px;border:1px solid var(--border);border-radius:15px;background:var(--surface)}.save-row{display:flex;align-items:center;gap:8px;color:var(--ink);font-size:12px}.save-dot{width:7px;height:7px;border-radius:50%;background:#16a34a}.save-dot.saving,.save-dot.pending{background:#f59e0b}.save-dot.danger{background:#ef4444}.progress-line{height:6px;margin:16px 0 8px;border-radius:999px;background:#e2e8f0;overflow:hidden}.progress-line span{display:block;height:100%;border-radius:inherit;background:#2563eb;transition:width .25s}.exam-sidebar>p,.exam-sidebar>small{color:#64748b;font-size:11px}.exam-sidebar nav{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:20px 0}.exam-sidebar nav button{aspect-ratio:1;border:1px solid #dbe3ee;border-radius:7px;background:white;color:#64748b;cursor:pointer}.exam-sidebar nav button.answered{border-color:#86efac;background:#f0fdf4;color:#15803d}.exam-sidebar nav button.current{outline:2px solid #93c5fd}.submit-button{width:100%;padding:10px;border:0;border-radius:9px;background:#0f172a;color:white;font-weight:650;cursor:pointer}.submit-button:disabled{opacity:.5}.exam-sidebar>small{display:block;margin-top:9px;text-align:center;line-height:1.5}
+.questions-column{display:grid;gap:16px}.question-card{scroll-margin-top:20px;padding:25px;border:1px solid var(--border);border-radius:15px;background:var(--surface)}.question-card>header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.question-card>header>div{display:flex;align-items:center;gap:9px}.question-index{font:750 18px/1 var(--font-mono);color:var(--ink)}.type-chip{padding:4px 8px;border-radius:999px;background:#eff6ff;color:#1d4ed8;font-size:10px;font-weight:700}.question-card>header>strong{color:#64748b;font-size:12px}.prompt,.fill-prompt{margin:0 0 20px;color:var(--ink);font-size:14px;line-height:1.9;white-space:pre-wrap}.fill-prompt input{display:inline-block;width:150px;margin:3px 7px;padding:7px 9px;border:0;border-bottom:2px solid #93c5fd;background:#eff6ff;color:var(--ink);font:600 13px var(--font-sans);outline:none}.fill-prompt input:focus{border-color:#2563eb;background:#dbeafe}.options{display:grid;gap:8px}.options label{display:grid;grid-template-columns:auto 28px 1fr;align-items:center;gap:9px;padding:11px 13px;border:1px solid #e2e8f0;border-radius:10px;cursor:pointer}.options label.selected{border-color:#93c5fd;background:#eff6ff}.options input{accent-color:#2563eb}.options b{color:#475569;font-size:12px}.options span{color:var(--ink);font-size:13px}.code-editor{box-sizing:border-box;width:100%;padding:16px;border:1px solid #1e293b;border-radius:10px;background:#0f172a;color:#e2e8f0;font:13px/1.65 var(--font-mono);resize:vertical;outline:none}.code-editor:focus{border-color:#f97316;box-shadow:0 0 0 3px rgba(249,115,22,.14)}
+.review-section{display:grid;gap:14px}.section-head{display:flex;justify-content:space-between;align-items:end}.section-head h2{margin:0;color:var(--ink)}.review-badge{padding:6px 10px;border-radius:999px;background:#ecfdf5;color:#047857;font-size:11px}.review-card{padding:20px;border:1px solid var(--border);border-radius:13px;background:var(--surface)}.review-card header{display:flex;justify-content:space-between}.review-card header span{color:#64748b;font-size:12px}.review-prompt{white-space:pre-wrap;line-height:1.7}.standard-answer{display:flex;gap:12px;padding:12px;border-radius:9px;background:#f0fdf4}.standard-answer span{color:#15803d;font-size:12px}.standard-answer code{white-space:pre-wrap;word-break:break-all;color:#166534}
+@keyframes pulse{50%{transform:scale(1.025)}}
+@media(max-width:860px){.workspace{grid-template-columns:1fr}.exam-sidebar{position:static}.exam-sidebar nav{grid-template-columns:repeat(8,1fr)}.result-panel{grid-template-columns:auto 1fr}.result-panel dl{grid-column:1/-1;padding-top:15px;border-top:1px solid var(--border)}}
+@media(max-width:620px){.exam-heading{align-items:flex-start;flex-direction:column}.timer{width:100%;box-sizing:border-box}.workspace{display:block}.questions-column{margin-top:14px}.exam-sidebar nav{grid-template-columns:repeat(6,1fr)}.question-card{padding:18px}.result-panel{grid-template-columns:1fr;text-align:center}.result-mark{margin:auto}.minute-warning{align-items:flex-start;flex-direction:column;gap:4px}.start-panel{padding:28px 20px}.fill-prompt input{width:120px}}
 </style>

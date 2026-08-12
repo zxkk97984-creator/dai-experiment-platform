@@ -150,8 +150,8 @@ def test_exam_starts_exactly_at_start_at(client, db_session_factory):
     assert r.status_code == 201, f"考试窗口中应可开始: {r.status_code}"
 
 
-def test_exam_no_time_window_allowed(client, db_session_factory):
-    """start_at/end_at 为 None 时允许开始（无时间窗口）"""
+def test_exam_without_time_window_cannot_publish(client, db_session_factory):
+    """正式考试必须设置开始时间与最晚进入时间。"""
     create_user(db_session_factory, "ntw_t", "teacher")
     create_user(db_session_factory, "ntw_s", "student")
     t_tok, _ = login(client, "ntw_t")
@@ -168,7 +168,9 @@ def test_exam_no_time_window_allowed(client, db_session_factory):
         "question_type": "single_choice", "prompt": "Q",
         "options": {"A": "A", "B": "B"}, "correct_answer": {"correct": ["A"]}, "points": 10,
     })
-    client.patch(f"{API}/exams/{eid}", headers=auth_header(t_tok),
-                 json={"status": "published"})
+    publish = client.patch(f"{API}/exams/{eid}", headers=auth_header(t_tok),
+                           json={"status": "published"})
+    assert publish.status_code == 422
+    assert "开始时间" in publish.text
     r = client.post(f"{API}/exams/{eid}/start", headers=auth_header(s_tok))
-    assert r.status_code == 201, f"无时间窗口应可开始: {r.status_code}"
+    assert r.status_code == 403

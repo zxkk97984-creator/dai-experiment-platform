@@ -18,7 +18,10 @@ def _setup(client, db_sf):
     eid = e.json()["id"]
     q = client.post(f"{API}/exams/{eid}/questions", headers=_h(t_tok), json={"question_type":"code","prompt":"Q","points":30,"order_index":0,"hidden_tests":"def test():\n    assert add(1,2)==3","starter_code":"def add(a,b):\n    ","correct_answer":{},"grading_mode":"legacy"})
     assert q.status_code == 201
-    client.patch(f"{API}/exams/{eid}", headers=_h(t_tok), json={"status":"published"})
+    client.patch(
+        f"{API}/exams/{eid}", headers=_h(t_tok),
+        json={"status":"published", "show_score_after_grading": True},
+    )
     return {"t_tok":t_tok,"s_tok":s_tok,"eid":eid,"qid":q.json()["id"]}
 
 def _process_sync(answer_id, db_session_factory):

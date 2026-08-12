@@ -7,6 +7,7 @@ import { assignmentsAPI } from '../../api/assignments.js'
 import { judgeAPI } from '../../api/judge.js'
 import { useAppStore } from '../../stores/app.js'
 import { sanitizeHtml } from '../../utils/sanitize.js'
+import { formatDateTime, parseApiDateTime } from '../../utils/format.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,6 +22,7 @@ const testing = ref(false)
 const bottomTab = ref('self-test')
 const showProblem = ref(true)
 const testResult = ref(null)
+const deadlineClock = ref(Date.now())
 
 const MAX_POLL_COUNT = 120
 
@@ -88,6 +90,33 @@ const envAllowedText = computed(() => {
 // 判题/自测结果优先显示结构化 diagnostic（安全中文文案，无裸 traceback）
 const submitDiagnostic = computed(() => submitResult.value?.diagnostic || null)
 const testDiagnostic = computed(() => testResult.value?.diagnostic || null)
+const deadlineClosed = computed(() => {
+  if (!assignment.value?.due_at) return false
+  const due = parseApiDateTime(assignment.value.due_at).getTime()
+  return !Number.isNaN(due) && deadlineClock.value >= due
+})
+
+function refreshDeadlineClock() {
+  deadlineClock.value = Date.now()
+}
+
+async function refreshAssignment() {
+  refreshDeadlineClock()
+  try {
+    const response = await assignmentsAPI.get(route.params.id)
+    assignment.value = response.data
+  } catch {
+    // 焦点刷新失败不清空当前页面，后续提交仍由服务端门禁兜底。
+  }
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') refreshAssignment()
+}
+
+function isDeadlineError(error) {
+  return error.response?.data?.detail?.code === 'ASSIGNMENT_DEADLINE_PASSED'
+}
 
 onMounted(async () => {
   const results = await Promise.allSettled([
@@ -120,6 +149,9 @@ onMounted(async () => {
     code.value = questions.value[0].starter_code || ''
     await restoreLatestSubmission(questions.value[0])
   }
+  window.addEventListener('focus', refreshAssignment)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  deadlineTimer = window.setInterval(refreshDeadlineClock, 30000)
 })
 
 const currentCompleted = computed(() => {
@@ -127,7 +159,13 @@ const currentCompleted = computed(() => {
   return qid != null && completedQuestions.value.has(qid)
 })
 
-onUnmounted(() => { stopSubmitPolling() })
+let deadlineTimer = null
+onUnmounted(() => {
+  stopSubmitPolling()
+  if (deadlineTimer) window.clearInterval(deadlineTimer)
+  window.removeEventListener('focus', refreshAssignment)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+})
 
 async function selectQuestion(idx) {
   stopSubmitPolling()
@@ -173,6 +211,11 @@ function syncScroll() {
 async function handleSelfTest() {
   const q = questions.value[activeQ.value]
   if (!q) return
+  refreshDeadlineClock()
+  if (deadlineClosed.value) {
+    app.showToast('作业已截止，请联系教师延长截止时间后再试', 'error')
+    return
+  }
   testing.value = true
   testResult.value = null
   try {
@@ -184,6 +227,7 @@ async function handleSelfTest() {
     testResult.value = res.data
     testing.value = false
   } catch (e) {
+    if (isDeadlineError(e)) await refreshAssignment()
     const msg = e.response?.data?.detail?.message || '自测请求失败'
     app.showToast(msg, 'error')
     testing.value = false
@@ -194,6 +238,11 @@ async function handleSelfTest() {
 async function handleSubmit() {
   const q = questions.value[activeQ.value]
   if (!q) return
+  refreshDeadlineClock()
+  if (deadlineClosed.value) {
+    app.showToast('作业已截止，请联系教师延长截止时间后再试', 'error')
+    return
+  }
   submitting.value = true
   submitResult.value = null
   bottomTab.value = 'submit'
@@ -207,6 +256,7 @@ async function handleSubmit() {
       submitting.value = false
     }
   } catch (e) {
+    if (isDeadlineError(e)) await refreshAssignment()
     const msg = e.response?.data?.detail?.message || '提交失败'
     app.showToast(msg, 'error')
     submitting.value = false
@@ -322,6 +372,14 @@ function stopSubmitPolling() {
             >{{ i + 1 }}</button>
           </span>
         </div>
+      </div>
+
+      <div class="deadline-banner" :class="{ closed: deadlineClosed }" role="status">
+        <div>
+          <strong>{{ deadlineClosed ? '作业已截止' : (assignment.due_at ? '作业进行中' : '长期开放') }}</strong>
+          <span>{{ assignment.due_at ? `截止时间：${formatDateTime(assignment.due_at)}` : '本作业未设置截止时间' }}</span>
+        </div>
+        <small v-if="deadlineClosed">教师延长截止时间后，重新聚焦或刷新页面即可继续自测和提交。</small>
       </div>
 
       <!-- ── Problem Description ─────────────────────────────────────── -->
@@ -540,7 +598,7 @@ function stopSubmitPolling() {
         <template v-else>
         <button
           class="btn-self-test"
-          :disabled="testing || submitting"
+          :disabled="testing || submitting || deadlineClosed"
           @click="handleSelfTest"
         >
           <svg v-if="!testing" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -551,7 +609,7 @@ function stopSubmitPolling() {
         </button>
         <button
           class="btn-submit-code"
-          :disabled="testing || submitting"
+          :disabled="testing || submitting || deadlineClosed"
           @click="handleSubmit"
         >
           <svg v-if="!submitting" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -638,6 +696,24 @@ function stopSubmitPolling() {
   border-color: var(--success);
   color: var(--success);
 }
+
+.deadline-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+  padding: 11px 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-md, 8px);
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+.deadline-banner>div { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.deadline-banner strong { font-size: var(--text-sm); white-space: nowrap; }
+.deadline-banner span,.deadline-banner small { font-size: var(--text-xs, 12px); line-height: 1.5; }
+.deadline-banner.closed { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+.deadline-banner.closed small { color: #991b1b; text-align: right; }
 
 /* ── Problem Card ────────────────────────────────────────────────────── */
 .problem-card {
@@ -1193,6 +1269,8 @@ function stopSubmitPolling() {
 
 /* ── Responsive ──────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
+  .deadline-banner,.deadline-banner>div { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .deadline-banner.closed small { text-align: left; }
   .editor-body { min-height: 120px; }
   .editor-textarea { font-size: 12px; }
   .editor-gutter pre { font-size: 12px; }

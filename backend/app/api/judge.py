@@ -20,10 +20,22 @@ from app.services.environment_service import (
     resolve_run_image_ref,
 )
 from app.services.import_policy import classify_imports
+from app.services.time_utils import as_utc, utc_now
 from app.worker.judge_worker import _get_timeout, _run_docker_pytest, _status_from_pytest
 from app.services.student_ai_results import build_student_grading_breakdown
 
 router = APIRouter(prefix="/judge", tags=["judge"])
+
+
+def require_assignment_before_deadline(assignment: Assignment) -> None:
+    """拒绝截止时刻及之后的新自测/提交；无截止时间的作业保持开放。"""
+    due_at = as_utc(assignment.due_at)
+    if due_at is not None and utc_now() >= due_at:
+        raise api_error(
+            403,
+            "ASSIGNMENT_DEADLINE_PASSED",
+            "作业已截止，请联系教师延长截止时间后再试",
+        )
 
 
 def require_submission(submission_id: int, db: Session) -> Submission:
@@ -67,6 +79,7 @@ def create_submission(
     course = db.get(Course, assignment.course_id)
     if not course or not can_access_course_content(course, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限提交该题目")
+    require_assignment_before_deadline(assignment)
     # check max attempts
     if question.max_attempts is not None:
         count = db.scalar(
@@ -215,6 +228,7 @@ def sample_run(
     )
     if not enrollment:
         raise api_error(403, "NOT_ENROLLED", "请先选课")
+    require_assignment_before_deadline(assignment)
 
     public_cases = question.public_cases or []
     if not public_cases:

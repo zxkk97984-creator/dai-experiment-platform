@@ -1,11 +1,22 @@
 // CodeViewer：只读代码展示（CodeMirror）正常路径测试。
 // jsdom 中动态 import 可加载 CodeMirror（与 CodeCell.spec.js 同一模式）。
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import CodeViewer from '../CodeViewer.vue'
 
 const wrappers = []
+
+beforeAll(() => {
+  // CodeMirror 会在 requestAnimationFrame 中测量 Range；该回调可能晚于单个用例结束，
+  // 因此在整个 jsdom 文件环境内保留 polyfill，避免产生未处理异步异常。
+  if (!Range.prototype.getClientRects) {
+    Object.defineProperty(Range.prototype, 'getClientRects', {
+      configurable: true,
+      value: () => [],
+    })
+  }
+})
 
 async function waitForCodeMirror(wrapper) {
   await flushPromises()

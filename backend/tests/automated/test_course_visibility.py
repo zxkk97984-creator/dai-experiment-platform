@@ -1,12 +1,13 @@
 """课程可见范围：三种 visibility / 白名单管理 / 学生候选 / 权限隔离回归"""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from conftest import auth_header, create_user, login
 from sqlalchemy import select
 
 from app.models import AcademicTerm, TeachingClass, TeachingClassStudent, User
+from app.services.time_utils import utc_now
 
 API = "/api/v1"
 
@@ -709,9 +710,14 @@ def _setup_activity_course(client, db_session_factory, visibility):
     )
     qid = resp.json()["id"]
 
+    now = utc_now()
     resp = client.post(
         f"{API}/exams", headers=auth_header(t_tok),
-        json={"course_id": course["id"], "title": "考试", "duration_minutes": 30},
+        json={
+            "course_id": course["id"], "title": "考试", "duration_minutes": 30,
+            "start_at": (now - timedelta(minutes=5)).isoformat(),
+            "end_at": (now + timedelta(minutes=30)).isoformat(),
+        },
     )
     eid = resp.json()["id"]
     client.post(f"{API}/exams/{eid}/questions", headers=auth_header(t_tok), json={

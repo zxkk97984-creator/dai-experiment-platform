@@ -247,6 +247,7 @@ class Assignment(TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     # ── 环境档位绑定（Phase 3：迁移 B） ────────────────────────
     # 作业默认环境；发布后不可直接修改（Phase 4 门禁），历史提交保留自己的快照
@@ -353,6 +354,11 @@ class Exam(TimestampMixin, Base):
     duration_minutes: Mapped[int] = mapped_column(Integer, default=60)
     start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    show_score_after_grading: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    show_questions_after_review: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    show_answers_after_review: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    review_released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_released_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     course: Mapped[Course] = relationship()
@@ -369,6 +375,7 @@ class ExamSubmission(TimestampMixin, Base):
     __tablename__ = "exam_submissions"
     __table_args__ = (
         UniqueConstraint("exam_id", "student_id", name="uq_exam_student"),
+        Index("ix_exam_submissions_status_expires", "status", "expires_at"),
         CheckConstraint(
             "status IN ('started', 'submitted', 'grading', 'graded', 'review_required')",
             name="ck_exam_submission_status",
@@ -383,6 +390,8 @@ class ExamSubmission(TimestampMixin, Base):
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_saved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    submission_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     graded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # ── 自动评分终止（需人工处理） ────────────────────────────
@@ -429,14 +438,14 @@ class ExamQuestion(TimestampMixin, Base):
     __tablename__ = "exam_questions"
     __table_args__ = (
         CheckConstraint(
-            "question_type IN ('single_choice', 'multi_choice', 'code')",
+            "question_type IN ('single_choice', 'multi_choice', 'fill_blank', 'code')",
             name="ck_exam_question_type",
         ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     exam_id: Mapped[int] = mapped_column(ForeignKey("exams.id"), index=True)
-    question_type: Mapped[str] = mapped_column(String(20))  # single_choice / multi_choice / code
+    question_type: Mapped[str] = mapped_column(String(20))  # single_choice / multi_choice / fill_blank / code
     prompt: Mapped[str] = mapped_column(Text)
     options: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     correct_answer: Mapped[dict] = mapped_column(JSON)  # {"correct":["A"]} 或 {"test_file":"..."}
@@ -469,6 +478,8 @@ class ExamAnswer(TimestampMixin, Base):
     question_id: Mapped[int] = mapped_column(ForeignKey("exam_questions.id"), index=True)
     selected_options: Mapped[list | None] = mapped_column(JSON, nullable=True)  # 选择题答案
     code_answer: Mapped[str | None] = mapped_column(Text, nullable=True)  # 编程题答案
+    text_answers: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # 填空题答案：blank id -> text
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     # ── 判题队列状态机（Task 1） ──────────────────────────────
     grading_status: Mapped[str] = mapped_column(String(20), default="pending", index=True)

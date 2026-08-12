@@ -9,6 +9,7 @@ import { useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import DashboardAsyncState from '../../components/dashboard/DashboardAsyncState.vue'
 import UiStatusPill from '../../components/ui/UiStatusPill.vue'
+import StudentPagination from '../../components/student/StudentPagination.vue'
 import { assignmentsAPI } from '../../api/assignments.js'
 import { examsAPI } from '../../api/exams.js'
 import { experimentsAPI } from '../../api/experiments.js'
@@ -121,12 +122,6 @@ const paginatedTasks = computed(() => {
   const start = (page.value - 1) * pageSize
   return filteredTasks.value.slice(start, start + pageSize)
 })
-const visiblePages = computed(() => {
-  const start = Math.max(1, Math.min(page.value - 2, pageCount.value - 4))
-  const end = Math.min(pageCount.value, start + 4)
-  return Array.from({ length: end - start + 1 }, (_, index) => start + index)
-})
-
 const courseOptions = computed(() => {
   const seen = new Map()
   for (const task of tasks.value) {
@@ -157,9 +152,7 @@ function resetFilters() {
   filters.sort = 'due'
 }
 
-function goToPage(value) {
-  page.value = Math.min(Math.max(value, 1), pageCount.value)
-}
+function goToPage(value) { page.value = Math.min(Math.max(value, 1), pageCount.value) }
 
 function go(route) {
   if (route === '/student' || route.startsWith('/student/')) {
@@ -306,41 +299,7 @@ onMounted(loadAll)
           </table>
         </div>
 
-        <nav class="pagination" aria-label="任务分页">
-          <span class="pagination-total">共 {{ filteredTasks.length }} 条</span>
-          <div class="pagination-controls">
-            <button
-              type="button"
-              class="page-arrow"
-              :disabled="page === 1"
-              aria-label="上一页"
-              @click="goToPage(page - 1)"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
-            </button>
-            <button
-              v-for="pageNumber in visiblePages"
-              :key="pageNumber"
-              type="button"
-              class="page-number"
-              :class="{ active: pageNumber === page }"
-              :aria-current="pageNumber === page ? 'page' : undefined"
-              @click="goToPage(pageNumber)"
-            >
-              {{ pageNumber }}
-            </button>
-            <button
-              type="button"
-              class="page-arrow"
-              :disabled="page === pageCount"
-              aria-label="下一页"
-              @click="goToPage(page + 1)"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
-            </button>
-          </div>
-          <span class="page-size">10 条/页</span>
-        </nav>
+        <StudentPagination :current-page="page" :page-count="pageCount" :total="filteredTasks.length" :page-size="pageSize" aria-label="任务分页" @change="goToPage" />
       </DashboardAsyncState>
     </div>
   </AppLayout>

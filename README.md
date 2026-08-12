@@ -74,27 +74,65 @@ npm run dev
 - Swagger 文档：<http://localhost:8000/docs>
 - 健康检查：<http://localhost:8000/api/v1/health/ready>
 
-### 6. 默认账号
+### 6. 生产前内测全量数据
 
-配置统一密码，登录后按角色进入不同页面。
+全量内测种子会清理业务演示数据，保留管理员和环境控制面数据。脚本拒绝在
+`DAI_ENVIRONMENT=production` 下执行，并且必须显式确认重置。
 
-| 用户名 | 密码 | 角色 | 说明 |
-|--------|------|------|------|
-| `admin` | `Test1234!` | 管理员 | 管理用户、课程和实验模块 |
-| `teacher_john` | `Test1234!` | 教师 | 张教授，管理课程与作业 |
-| `teacher_li` | `Test1234!` | 教师 | 李老师，管理课程与作业 |
-| `student_alice` | `Test1234!` | 学生 | 已选课、已完成部分作业和考试 |
-| `student_bob` | `Test1234!` | 学生 | 已选课、部分作业答错 |
-| `student_charlie` | `Test1234!` | 学生 | 已选课 |
-| `developer_wang` | `Test1234!` | 开发者 | 管理实验模板和模块 |
+首次使用前，先初始化并构建三类运行环境：
 
-> 基础种子数据包含 2 门课程（8 个课时含完整教学内容）、3 个作业（7 道编程题含答案）、2 个考试、2 个实验模块。如果没有种子数据，运行：
-> ```bash
-> cd backend
-> .venv\Scripts\python.exe -m app.seed_data
-> ```
->
-> **注意**：以上为基础演示数据。如需创建包含完整作业/考试/判题/AI 评分的验收数据，请使用下方的「完整验收数据」脚本。
+```bash
+cd backend
+.venv\Scripts\python.exe -m app.cli seed-environments --enqueue
+```
+
+等待 `basic`、`data`、`torch-cpu` 三个版本均为 `available` 后运行：
+
+```bash
+.venv\Scripts\python.exe -m app.seed_data --confirm-internal-reset
+```
+
+如果全量内测数据已经存在，只想补充典型课程的 AI 评分演示数据，可执行：
+
+```bash
+.venv\Scripts\python.exe -m app.seed_data --augment-ai-demo
+```
+
+该增量命令不会清理现有业务数据，会幂等补充 3 个已发布 AI 评分作业和 3 个已发布考试；
+每场考试包含 1 道选择题和 1 道已锁定 Rubric 的 AI 评分编程题。学生端使用
+`student_24621600_01 / Test1234!` 登录后即可查看。
+
+也可以使用 Windows 一键内测启动模式。它会启动环境构建 Worker，等待三类环境
+构建完成，写入全量内测数据，然后启动 API、判题 Worker 和前端：
+
+```bat
+start.bat --internal
+```
+
+普通执行 `start.bat` 不会重置数据库；`start.bat --internal` 每次执行都会重建
+内测业务数据，请只在本地或预生产测试库使用。
+
+数据规模：3 位教师、400 位学生、10 个教学班（每班 40 人）、30 门课程、12 个
+Notebook 实验模块。典型课程包含至少 6 个章节、24 个课时、10 个作业和 10 场考试。
+
+账号示例：
+
+| 用户名 | 默认密码 | 角色 |
+|--------|----------|------|
+| `admin` | `Test1234!` | 管理员 |
+| `teacher_zhang` | `Test1234!` | 典型教师 |
+| `teacher_chen` | `Test1234!` | 教师 |
+| `teacher_zhao` | `Test1234!` | 教师 |
+| `developer_lab` | `Test1234!` | 实验开发者 |
+| `student_24621600_01` | `Test1234!` | 学生 |
+
+密码可通过以下环境变量覆盖：
+`DAI_SEED_ADMIN_PASSWORD`、`DAI_SEED_TEACHER_PASSWORD`、
+`DAI_SEED_STUDENT_PASSWORD`、`DAI_SEED_DEVELOPER_PASSWORD`。
+
+学生学号使用 `24621600` 至 `24621609` 作为班级前缀，最后两位为 `01` 至 `40`。
+
+**注意**：这是预生产/内测重置脚本，不应在正式生产库执行。
 
 ---
 

@@ -22,7 +22,7 @@ test.describe('学生参考 UI 冒烟（非破坏）', () => {
   test('五个学生路由可导航且无 404/500', async ({ page }) => {
     // ── 登录 ──────────────────────────────────────────────────
     await page.goto('/login')
-    await page.fill('#login-username', 'student_alice')
+    await page.fill('#login-username', 'student_24621600_01')
     await page.fill('#login-password', 'Test1234!')
     await page.click('button[type="submit"]')
     await expect(page).toHaveURL(/\/student$/, { timeout: 15000 })
@@ -97,7 +97,7 @@ test.describe('学生参考 UI 冒烟（非破坏）', () => {
 
   test('实验目录快速连续搜索保留最新结果（防抖与防竞态）', async ({ page }) => {
     await page.goto('/login')
-    await page.fill('#login-username', 'student_alice')
+    await page.fill('#login-username', 'student_24621600_01')
     await page.fill('#login-password', 'Test1234!')
     await page.click('button[type="submit"]')
     await expect(page).toHaveURL(/\/student$/, { timeout: 15000 })

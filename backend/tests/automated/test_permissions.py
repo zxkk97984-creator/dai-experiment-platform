@@ -1,4 +1,5 @@
 """后端权限与错误协议 RED 测试"""
+from datetime import UTC, datetime, timedelta
 from app import models
 from conftest import auth_header, create_user, login
 
@@ -33,8 +34,13 @@ def _setup_full(client, db_session_factory, course_status="published"):
         "title": "Q", "function_name": "f", "hidden_tests": "SECRET",
     })
     qid = q.json()["id"]
+    now = datetime.now(UTC)
     e = client.post(f"{API}/exams", headers=auth_header(t_tok), json={
-        "course_id": cid, "title": "Exam", "duration_minutes": 30,
+        "course_id": cid,
+        "title": "Exam",
+        "duration_minutes": 30,
+        "start_at": (now - timedelta(minutes=5)).isoformat(),
+        "end_at": (now + timedelta(hours=1)).isoformat(),
     })
     eid = e.json()["id"]
     # 添加一道选择题满足 validate_publish 要求，然后发布
@@ -278,8 +284,13 @@ def test_error_developer_has_no_course_access(client, db_session_factory):
         "course_id": cid, "title": "A1", "status": "published",
     })
     aid = a.json()["id"]
+    now = datetime.now(UTC)
     e = client.post(f"{API}/exams", headers=auth_header(t_tok), json={
-        "course_id": cid, "title": "E1", "duration_minutes": 30,
+        "course_id": cid,
+        "title": "E1",
+        "duration_minutes": 30,
+        "start_at": (now - timedelta(minutes=5)).isoformat(),
+        "end_at": (now + timedelta(hours=1)).isoformat(),
     })
     eid = e.json()["id"]
     client.post(f"{API}/exams/{eid}/questions", headers=auth_header(t_tok), json={

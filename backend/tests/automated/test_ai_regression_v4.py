@@ -541,11 +541,12 @@ class TestShadowNoLeak:
         create_user(db_session_factory, "snl_s", "student")
 
         with db_session_factory() as db:
-            from app.models import Course, Exam, ExamQuestion, ExamSubmission, ExamAnswer, CodeGrade, QuestionRubric, User
+            from app.models import Course, CourseEnrollment, Exam, ExamQuestion, ExamSubmission, ExamAnswer, CodeGrade, QuestionRubric, User
             t = db.query(User).filter(User.username == "snl_t").first()
             s = db.query(User).filter(User.username == "snl_s").first()
             c = Course(title="SNL", status="published", teacher_id=t.id)
             db.add(c); db.flush()
+            db.add(CourseEnrollment(course_id=c.id, student_id=s.id, status="enrolled"))
             e = Exam(course_id=c.id, title="SNL", status="published", duration_minutes=60)
             db.add(e); db.flush()
             eq = ExamQuestion(exam_id=e.id, question_type="code", prompt="t",

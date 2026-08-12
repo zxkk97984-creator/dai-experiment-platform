@@ -401,6 +401,9 @@ class AssignmentRead(BaseModel):
     description: str | None = None
     status: str
     due_at: datetime | None = None
+    published_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     # 作业默认环境与 import 教学策略（教师读响应返回；学生端摘要由 Phase 5 提供）
     environment_version_id: int | None = None
     import_policy_mode: str = "unrestricted"
@@ -562,6 +565,9 @@ class ExamCreate(BaseModel):
     duration_minutes: int = 60
     start_at: datetime | None = None
     end_at: datetime | None = None
+    show_score_after_grading: bool = False
+    show_questions_after_review: bool = False
+    show_answers_after_review: bool = False
 
 
 class ExamUpdate(BaseModel):
@@ -570,6 +576,9 @@ class ExamUpdate(BaseModel):
     duration_minutes: int | None = None
     start_at: datetime | None = None
     end_at: datetime | None = None
+    show_score_after_grading: bool | None = None
+    show_questions_after_review: bool | None = None
+    show_answers_after_review: bool | None = None
 
 
 class ExamRead(BaseModel):
@@ -582,6 +591,15 @@ class ExamRead(BaseModel):
     duration_minutes: int
     start_at: datetime | None = None
     end_at: datetime | None = None
+    show_score_after_grading: bool = False
+    show_questions_after_review: bool = False
+    show_answers_after_review: bool = False
+    review_released_at: datetime | None = None
+    max_score: float = 0
+    server_now: datetime | None = None
+    student_status: str | None = None
+    is_completed: bool = False
+    can_start: bool = False
     # 当前学生对考试的已交状态：存在 submitted/grading/graded 任一状态的提交记录即视为已考
     # （与 dashboard 待办语义一致）。仅学生考试列表接口计算该值；教师/管理员视图与详情接口保持默认 False。
     is_submitted: bool = False
@@ -589,6 +607,35 @@ class ExamRead(BaseModel):
 
 class ExamSubmitRequest(BaseModel):
     score: float = 0
+
+
+class ExamAnswerSaveItem(BaseModel):
+    question_id: int
+    selected_options: list[str] | None = None
+    code_answer: str | None = None
+    text_answers: dict[str, str] | None = None
+    expected_version: int = 0
+
+
+class ExamAnswerBatchRequest(BaseModel):
+    answers: list[ExamAnswerSaveItem] = Field(default_factory=list, max_length=200)
+
+
+class ExamTimeExtensionRequest(BaseModel):
+    minutes: int = Field(gt=0, le=180)
+
+
+class ExamSessionRead(BaseModel):
+    id: int | None = None
+    status: str | None = None
+    expires_at: datetime | None = None
+    score: float | None = None
+    exam: dict
+    submission: dict | None = None
+    questions: list[dict] = Field(default_factory=list)
+    saved_answers: list[dict] = Field(default_factory=list)
+    visibility: dict = Field(default_factory=dict)
+    server_now: datetime
 
 
 class ExamQuestionCreate(BaseModel):
@@ -658,7 +705,11 @@ class ExamSubmissionRead(BaseModel):
     student_id: int
     status: str
     score: float | None = None
+    started_at: datetime | None = None
     expires_at: datetime | None = None
+    last_saved_at: datetime | None = None
+    submission_reason: str | None = None
+    submitted_at: datetime | None = None
     review_reason: str | None = None
     review_required_at: datetime | None = None
 

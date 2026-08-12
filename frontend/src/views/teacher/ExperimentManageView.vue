@@ -270,4 +270,46 @@ onMounted(fetch)
   .page-head { flex-direction: column; }
   .page-title { font-size: 24px; }
 }
+
+/* 实验列表列宽固定，状态标签和时间等紧凑字段不能被拆成竖排。 */
+.table-scroll table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+.table-scroll th {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.table-scroll td {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+.table-scroll th:nth-child(1) { width: 21%; }
+.table-scroll th:nth-child(2) { width: 25%; }
+.table-scroll th:nth-child(3) { width: 12%; }
+.table-scroll th:nth-child(4) { width: 10%; }
+.table-scroll th:nth-child(5) { width: 10%; }
+.table-scroll th:nth-child(6) { width: 22%; }
+.table-scroll td:nth-child(4),
+.table-scroll td:nth-child(5) { white-space: nowrap; }
+.table-scroll .status-pill {
+  display: inline-flex;
+  min-width: max-content;
+  white-space: nowrap;
+  word-break: keep-all;
+}
+.table-scroll td:last-child {
+  display: table-cell;
+  white-space: nowrap;
+}
+.table-scroll td:last-child button {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
 </style>

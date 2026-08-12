@@ -1,6 +1,6 @@
 /** 展示格式化工具测试：日期时间的空值/无效值/秒级精度处理 */
 import { describe, it, expect } from 'vitest'
-import { formatDate, formatDateTime, formatDuration, formatBytes } from '../format.js'
+import { formatDate, formatDateTime, formatDuration, formatBytes, fromDateTimeLocal, toDateTimeLocal } from '../format.js'
 
 describe('formatDateTime', () => {
   it('空值返回占位符', () => {
@@ -22,6 +22,23 @@ describe('formatDateTime', () => {
     expect(formatDateTime('2026-08-10T08:00:30+08:00', { seconds: true })).toMatch(/30/)
     expect(formatDateTime('2026-08-10T08:00:30+08:00', { seconds: true })).toBe('2026-08-10 08:00:30')
     expect(formatDateTime('2026-08-10T08:00:30+08:00')).not.toMatch(/30/)
+  })
+})
+
+describe('datetime-local conversion', () => {
+  it('round-trips a local input through an ISO timestamp', () => {
+    const local = '2026-08-12T18:30'
+    expect(toDateTimeLocal(fromDateTimeLocal(local))).toBe(local)
+  })
+
+  it('treats timezone-less API datetimes as UTC before converting to local time', () => {
+    expect(toDateTimeLocal('2026-08-12T10:30:00')).toBe(toDateTimeLocal('2026-08-12T10:30:00Z'))
+    expect(formatDateTime('2026-08-12T10:30:00')).toBe(formatDateTime('2026-08-12T10:30:00Z'))
+  })
+
+  it('uses empty/null values for an unset deadline', () => {
+    expect(toDateTimeLocal(null)).toBe('')
+    expect(fromDateTimeLocal('')).toBeNull()
   })
 })
 

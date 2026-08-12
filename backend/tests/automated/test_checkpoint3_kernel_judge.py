@@ -136,6 +136,8 @@ def test_redis_lock_failure_prevents_execution():
         'shell_port': 1, 'iopub_port': 2, 'stdin_port': 3,
         'control_port': 4, 'hb_port': 5, 'ip': '127.0.0.1',
     }
+    session.runner_path = None
+    session.environment_version_id = None
     km._sessions[1] = session
 
     # Redis 连接失败
@@ -154,6 +156,8 @@ def test_redis_lock_token_safe_release():
         'shell_port': 1, 'iopub_port': 2, 'stdin_port': 3,
         'control_port': 4, 'hb_port': 5, 'ip': '127.0.0.1',
     }
+    session.runner_path = None
+    session.environment_version_id = None
     km._sessions[1] = session
 
     fake_redis = MagicMock()

@@ -84,6 +84,7 @@ const envOptions = [
 const assignmentDraft = {
   id: 7, title: '环境作业', status: 'draft', course_id: 1,
   environment_version_id: 11, import_policy_mode: 'unrestricted', allowed_imports: [],
+  published_at: null, due_at: null,
 }
 
 // jsdom 未实现 scrollTo（页面编辑状态切换时调用），静默掉避免噪音
@@ -165,9 +166,57 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     assignmentsAPI.get.mockResolvedValue({ data: { ...assignmentDraft, status: 'published' } })
     const wrapper = await mountPage()
     await flushPromises()
-    expect(wrapper.text()).toContain('已发布（不可修改）')
+    expect(wrapper.text()).toContain('环境已锁定')
     // 已发布时作业环境选择器禁用
     expect(wrapper.find('.env-picker-select').attributes('disabled')).toBeDefined()
+  })
+
+  it('编辑页展示首次发布时间，延后已发布作业截止时间可直接保存', async () => {
+    const published = {
+      ...assignmentDraft,
+      status: 'published',
+      published_at: '2026-08-01T01:00:00Z',
+      due_at: '2099-10-01T12:00:00Z',
+    }
+    assignmentsAPI.get.mockResolvedValue({ data: published })
+    assignmentsAPI.update.mockResolvedValue({ data: { ...published, due_at: '2099-11-01T12:00:00Z' } })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('.qe-schedule-card').text()).toContain('首次发布时间')
+    await wrapper.find('#assignment-due-at').setValue('2099-11-01T20:00')
+    await clickBtn(wrapper, '保存时间设置')
+    await flushPromises()
+
+    expect(assignmentsAPI.update).toHaveBeenCalledWith('7', {
+      due_at: new Date('2099-11-01T20:00').toISOString(),
+    })
+    expect(wrapper.find('.confirm-panel').exists()).toBe(false)
+  })
+
+  it('编辑页提前截止时间时要求二次确认', async () => {
+    const published = {
+      ...assignmentDraft,
+      status: 'published',
+      published_at: '2026-08-01T01:00:00Z',
+      due_at: '2099-12-01T12:00:00Z',
+    }
+    assignmentsAPI.get.mockResolvedValue({ data: published })
+    assignmentsAPI.update.mockResolvedValue({ data: published })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    await wrapper.find('#assignment-due-at').setValue('2099-11-01T20:00')
+    await clickBtn(wrapper, '保存时间设置')
+    await flushPromises()
+    expect(assignmentsAPI.update).not.toHaveBeenCalled()
+    expect(wrapper.find('.confirm-panel').text()).toContain('缩短学生作答时间')
+
+    await clickBtn(wrapper.find('.confirm-panel'), '确认保存')
+    await flushPromises()
+    expect(assignmentsAPI.update).toHaveBeenCalledWith('7', {
+      due_at: new Date('2099-11-01T20:00').toISOString(),
+    })
   })
 
   it('保存作业环境设置调用 update，payload 携带环境与策略', async () => {

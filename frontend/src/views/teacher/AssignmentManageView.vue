@@ -11,7 +11,7 @@ import { coursesAPI } from '../../api/courses.js'
 import EnvironmentProfilePicker from '../../components/common/EnvironmentProfilePicker.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import { useAppStore } from '../../stores/app.js'
-import { formatDateTime } from '../../utils/format.js'
+import { formatDateTime, fromDateTimeLocal, parseApiDateTime, toDateTimeLocal } from '../../utils/format.js'
 import { useClientPagination } from '../../composables/useClientPagination.js'
 
 const router = useRouter()
@@ -29,6 +29,7 @@ const allowedImports = ref([])
 const courses = ref([])
 const query = ref('')
 const statusFilter = ref('all')
+const deadlineFilter = ref('all')
 const courseFilter = ref('all')
 const sortOrder = ref('updated')
 const courseModalOpen = ref(false)
@@ -60,7 +61,24 @@ const importMismatchWarning = computed(() => {
 
 async function fetch() {
   loading.value = true
-  try { const res = await assignmentsAPI.list(); assignments.value = res.data.items || res.data }
+  try {
+    // 页面筛选、排序和底部分页都基于前端数据，因此先按接口分页把教师的完整作业集合加载进来。
+    // 不能只请求接口默认的 20 条，否则页码只会对不完整的数据分页。
+    const pageSize = 100
+    const firstRes = await assignmentsAPI.list({ page: 1, page_size: pageSize })
+    const firstData = firstRes.data || {}
+    const total = Number(firstData.total || firstData.items?.length || 0)
+    const pageCount = Math.ceil(total / pageSize)
+    const rest = pageCount > 1
+      ? await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) =>
+        assignmentsAPI.list({ page: index + 2, page_size: pageSize }),
+      ))
+      : []
+    assignments.value = [
+      ...(firstData.items || firstData || []),
+      ...rest.flatMap((response) => response.data?.items || response.data || []),
+    ]
+  }
   catch { app.showToast('加载失败', 'error') }
   finally { loading.value = false }
 }
@@ -74,16 +92,30 @@ async function fetchCourses() {
 
 // 展示框显示：已选课程在列表中 → 「课程名（ID: n）」；手输未在列表 → 「课程 ID: n」
 const assignmentStatus = (assignment) => assignment.status || 'draft'
+const deadlineState = (assignment) => {
+  if (!assignment.due_at) return 'none'
+  const due = parseApiDateTime(assignment.due_at).getTime()
+  if (Number.isNaN(due)) return 'none'
+  return due <= Date.now() ? 'ended' : 'open'
+}
 const assignmentUpdated = (assignment) => assignment.updated_at || assignment.created_at || ''
-const summary = computed(() => ({ total: assignments.value.length, published: assignments.value.filter((item) => assignmentStatus(item) === 'published').length, draft: assignments.value.filter((item) => assignmentStatus(item) === 'draft').length, ended: assignments.value.filter((item) => assignmentStatus(item) === 'ended' || (item.due_at && new Date(item.due_at) < new Date())).length }))
+const summary = computed(() => ({
+  total: assignments.value.length,
+  published: assignments.value.filter((item) => assignmentStatus(item) === 'published').length,
+  draft: assignments.value.filter((item) => assignmentStatus(item) === 'draft').length,
+  ended: assignments.value.filter((item) => assignmentStatus(item) === 'published' && deadlineState(item) === 'ended').length,
+}))
 const filteredAssignments = computed(() => {
   const keyword = query.value.trim().toLowerCase()
   const result = assignments.value.filter((item) => {
     const course = courses.value.find((candidate) => String(candidate.id) === String(item.course_id))
     const courseTitle = item.course_title || course?.title || ''
-    return (!keyword || `${item.title || ''} ${courseTitle}`.toLowerCase().includes(keyword)) && (statusFilter.value === 'all' || assignmentStatus(item) === statusFilter.value) && (courseFilter.value === 'all' || String(item.course_id) === courseFilter.value)
+    return (!keyword || `${item.title || ''} ${courseTitle}`.toLowerCase().includes(keyword))
+      && (statusFilter.value === 'all' || assignmentStatus(item) === statusFilter.value)
+      && (deadlineFilter.value === 'all' || deadlineState(item) === deadlineFilter.value)
+      && (courseFilter.value === 'all' || String(item.course_id) === courseFilter.value)
   })
-  return [...result].sort((a, b) => sortOrder.value === 'title' ? String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN') : new Date(assignmentUpdated(b) || 0) - new Date(assignmentUpdated(a) || 0))
+  return [...result].sort((a, b) => sortOrder.value === 'title' ? String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN') : parseApiDateTime(assignmentUpdated(b) || 0) - parseApiDateTime(assignmentUpdated(a) || 0))
 })
 const { page, pageSize, pageCount, pagedItems, goToPage, resetPage } = useClientPagination(filteredAssignments)
 const courseName = (assignment) => assignment.course_title || courses.value.find((course) => String(course.id) === String(assignment.course_id))?.title || '未关联课程'
@@ -156,7 +188,7 @@ async function doCreate() {
     const payload = {
       ...form.value,
       course_id: parseInt(form.value.course_id) || undefined,
-      due_at: form.value.due_at || null,
+      due_at: fromDateTimeLocal(form.value.due_at),
       environment_version_id: form.value.environment_version_id,
       import_policy_mode: importPolicy.value,
       allowed_imports: importPolicy.value === 'restricted' ? [...allowedImports.value] : [],
@@ -174,6 +206,72 @@ async function doCreate() {
 async function handlePublish(a) {
   try { await assignmentsAPI.publish(a.id); app.showToast('已发布', 'success'); fetch() }
   catch { app.showToast('操作失败', 'error') }
+}
+
+// ── 作业时间安排（发布时间只读，截止时间可调整）────────────────────
+const scheduleTarget = ref(null)
+const scheduleDueLocal = ref('')
+const scheduleSaving = ref(false)
+const scheduleConfirmOpen = ref(false)
+const pendingScheduleDue = ref(null)
+
+function openSchedule(a) {
+  scheduleTarget.value = a
+  scheduleDueLocal.value = toDateTimeLocal(a.due_at)
+}
+
+function closeSchedule() {
+  if (scheduleSaving.value) return
+  scheduleTarget.value = null
+  scheduleConfirmOpen.value = false
+  pendingScheduleDue.value = null
+}
+
+function scheduleNeedsConfirmation(nextDue) {
+  if (scheduleTarget.value?.status !== 'published') return false
+  const currentDue = scheduleTarget.value?.due_at
+  if (nextDue === null) return currentDue != null
+  const nextTime = parseApiDateTime(nextDue).getTime()
+  const currentTime = currentDue ? parseApiDateTime(currentDue).getTime() : null
+  return nextTime <= Date.now()
+    || (currentTime != null && !Number.isNaN(currentTime) && nextTime < currentTime)
+}
+
+const scheduleConfirmMessage = computed(() => {
+  if (pendingScheduleDue.value === null) {
+    return '清空截止时间后，学生将可以长期运行和提交这份作业。确定继续吗？'
+  }
+  if (parseApiDateTime(pendingScheduleDue.value).getTime() <= Date.now()) {
+    return '新的截止时间已经过去，保存后学生将立即无法运行或提交。确定继续吗？'
+  }
+  return '新的截止时间早于当前设置，可能缩短学生作答时间。确定继续吗？'
+})
+
+async function requestScheduleSave() {
+  const nextDue = fromDateTimeLocal(scheduleDueLocal.value)
+  if (scheduleNeedsConfirmation(nextDue)) {
+    pendingScheduleDue.value = nextDue
+    scheduleConfirmOpen.value = true
+    return
+  }
+  await saveSchedule(nextDue)
+}
+
+async function saveSchedule(nextDue = pendingScheduleDue.value) {
+  if (!scheduleTarget.value || scheduleSaving.value) return
+  scheduleSaving.value = true
+  try {
+    await assignmentsAPI.update(scheduleTarget.value.id, { due_at: nextDue })
+    app.showToast('截止时间已更新', 'success')
+    scheduleConfirmOpen.value = false
+    scheduleTarget.value = null
+    pendingScheduleDue.value = null
+    await fetch()
+  } catch (e) {
+    app.showToast(e.response?.data?.detail?.message || '截止时间更新失败', 'error')
+  } finally {
+    scheduleSaving.value = false
+  }
 }
 
 // ── 删除草稿作业（确认弹窗） ────────────────────────────────────────
@@ -222,9 +320,74 @@ onMounted(() => { fetch(); fetchCourses() })
       <TeacherPageHeader title="作业管理" subtitle="布置作业、编写判题题目与测试用例" action-label="布置作业" @action="openCreateModal" />
 
       <TeacherMetricGrid aria-label="作业统计" :items="[{ key: 'total', label: '全部作业', icon: 'assignment', tone: 'blue', value: summary.total, unit: '个' }, { key: 'published', label: '已发布', icon: 'send', tone: 'green', value: summary.published, unit: '个' }, { key: 'draft', label: '草稿', icon: 'draft', tone: 'orange', value: summary.draft, unit: '个' }, { key: 'ended', label: '已截止', icon: 'clock', tone: 'purple', value: summary.ended, unit: '个' }]" />
-      <section class="data-panel"><div class="filter-bar"><label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索作业名称" @input="resetPage" /></label><select v-model="statusFilter" @change="resetPage"><option value="all">状态：全部</option><option value="published">已发布</option><option value="draft">草稿</option><option value="ended">已截止</option></select><select v-model="courseFilter" @change="resetPage"><option value="all">课程：全部课程</option><option v-for="course in courses" :key="course.id" :value="String(course.id)">{{ course.title }}</option></select><select v-model="sortOrder" @change="resetPage"><option value="updated">排序：最近更新</option><option value="title">排序：作业名称</option></select></div><div v-if="loading" class="loading-list"><span v-for="i in 6" :key="i" class="skeleton"></span></div><div v-else-if="filteredAssignments.length === 0" class="empty-state"><AppIcon name="assignment" :size="32" /><strong>暂无符合条件的作业</strong><p>调整筛选条件，或布置一份新作业。</p></div><div v-else class="table-scroll"><table><thead><tr><th>作业名称</th><th>所属课程 / 班级</th><th>状态</th><th>截止时间</th><th>提交进度</th><th>最近更新</th><th>操作</th></tr></thead><tbody><tr v-for="assignment in pagedItems" :key="assignment.id"><td class="title-cell">{{ assignment.title }}<small>{{ assignment.description || '暂无作业描述' }}</small></td><td>{{ courseName(assignment) }}<small>{{ courseClassLabel(assignment) }}</small></td><td><span class="status-pill" :class="assignmentStatus(assignment)">{{ assignmentStatus(assignment) === 'published' ? '已发布' : assignmentStatus(assignment) === 'draft' ? '草稿' : '已截止' }}</span></td><td>{{ formatDateTime(assignment.due_at) }}</td><td>{{ assignment.submitted_count != null ? `${assignment.submitted_count} / ${assignment.student_count || '—'}` : '—' }}</td><td class="muted-cell">{{ formatDateTime(assignmentUpdated(assignment)) }}</td><td class="actions-cell"><button class="text-action" @click="router.push(`/teacher/assignments/${assignment.id}/edit`)">编辑题目</button><button v-if="assignment.status === 'draft'" class="publish-action" @click="handlePublish(assignment)">发布</button><button v-if="assignment.status === 'draft'" class="delete-action" @click="askDelete(assignment)">删除</button><button v-if="assignment.status === 'published'" class="text-action" @click="askUnpublish(assignment)">取消发布</button></td></tr></tbody></table></div><TeacherPagination v-if="!loading" :current-page="page" :page-count="pageCount" :total="filteredAssignments.length" :page-size="pageSize" aria-label="作业列表分页" @change="goToPage" /></section>
+      <section class="data-panel">
+        <div class="filter-bar">
+          <label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索作业名称" @input="resetPage" /></label>
+          <select v-model="statusFilter" aria-label="发布状态筛选" @change="resetPage"><option value="all">发布：全部</option><option value="published">已发布</option><option value="draft">草稿</option></select>
+          <select v-model="deadlineFilter" aria-label="时限状态筛选" @change="resetPage"><option value="all">时限：全部</option><option value="open">进行中</option><option value="ended">已截止</option><option value="none">无截止</option></select>
+          <select v-model="courseFilter" aria-label="课程筛选" @change="resetPage"><option value="all">课程：全部课程</option><option v-for="course in courses" :key="course.id" :value="String(course.id)">{{ course.title }}</option></select>
+          <select v-model="sortOrder" aria-label="排序" @change="resetPage"><option value="updated">排序：最近更新</option><option value="title">排序：作业名称</option></select>
+        </div>
+        <div v-if="loading" class="loading-list"><span v-for="i in 6" :key="i" class="skeleton"></span></div>
+        <div v-else-if="filteredAssignments.length === 0" class="empty-state"><AppIcon name="assignment" :size="32" /><strong>暂无符合条件的作业</strong><p>调整筛选条件，或布置一份新作业。</p></div>
+        <div v-else class="table-scroll">
+          <table>
+            <thead><tr><th>作业名称</th><th>所属课程 / 班级</th><th>状态</th><th>时间安排</th><th>提交进度</th><th>最近更新</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr v-for="assignment in pagedItems" :key="assignment.id">
+                <td class="title-cell">{{ assignment.title }}<small>{{ assignment.description || '暂无作业描述' }}</small></td>
+                <td>{{ courseName(assignment) }}<small>{{ courseClassLabel(assignment) }}</small></td>
+                <td>
+                  <span class="status-pill" :class="assignmentStatus(assignment)">{{ assignmentStatus(assignment) === 'published' ? '已发布' : '草稿' }}</span>
+                  <small v-if="assignment.status === 'published' && deadlineState(assignment) === 'ended'" class="deadline-ended">已截止</small>
+                </td>
+                <td class="schedule-cell">
+                  <span><em>发布</em>{{ assignment.published_at ? formatDateTime(assignment.published_at) : '未发布' }}</span>
+                  <span :class="{ 'deadline-ended': deadlineState(assignment) === 'ended' }"><em>截止</em>{{ assignment.due_at ? formatDateTime(assignment.due_at) : '长期开放' }}</span>
+                </td>
+                <td>{{ assignment.submitted_count != null ? `${assignment.submitted_count} / ${assignment.student_count || '—'}` : '—' }}</td>
+                <td class="muted-cell">{{ formatDateTime(assignmentUpdated(assignment)) }}</td>
+                <td class="actions-cell">
+                  <button class="text-action" @click="router.push(`/teacher/assignments/${assignment.id}/edit`)">编辑题目</button>
+                  <button class="text-action" data-action="edit-schedule" @click="openSchedule(assignment)">调整截止</button>
+                  <button v-if="assignment.status === 'draft'" class="publish-action" @click="handlePublish(assignment)">发布</button>
+                  <button v-if="assignment.status === 'draft'" class="delete-action" @click="askDelete(assignment)">删除</button>
+                  <button v-if="assignment.status === 'published'" class="text-action" @click="askUnpublish(assignment)">取消发布</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <TeacherPagination v-if="!loading" :current-page="page" :page-count="pageCount" :total="filteredAssignments.length" :page-size="pageSize" aria-label="作业列表分页" @change="goToPage" />
+      </section>
 
       <!-- ── 创建作业弹窗（点「布置作业」打开：基本信息 + 环境配置，确定后创建并跳转题目编辑页） ── -->
+    </div>
+
+    <div v-if="scheduleTarget" class="modal-backdrop create-backdrop" @click.self="closeSchedule">
+      <div class="create-panel schedule-modal" role="dialog" aria-modal="true" aria-labelledby="schedule-modal-title">
+        <header class="create-heading">
+          <div><strong id="schedule-modal-title">发布与截止</strong><small>{{ scheduleTarget.title }}</small></div>
+          <button class="create-close" type="button" aria-label="关闭" @click="closeSchedule">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
+        </header>
+        <div class="schedule-modal-body">
+          <dl class="schedule-summary">
+            <div><dt>发布状态</dt><dd>{{ scheduleTarget.status === 'published' ? '已发布' : '草稿' }}</dd></div>
+            <div><dt>首次发布时间</dt><dd>{{ scheduleTarget.published_at ? formatDateTime(scheduleTarget.published_at) : '尚未发布' }}</dd></div>
+          </dl>
+          <div class="form-group">
+            <label for="schedule-due-at">截止时间</label>
+            <input id="schedule-due-at" v-model="scheduleDueLocal" type="datetime-local" />
+            <p class="form-hint">清空表示长期开放。作业截止后学生仍可查看，但不能自测或提交。</p>
+          </div>
+          <div class="create-actions">
+            <button class="btn-ghost btn-sm" type="button" @click="closeSchedule">取消</button>
+            <button class="btn-primary btn-sm" type="button" :disabled="scheduleSaving" @click="requestScheduleSave">{{ scheduleSaving ? '保存中...' : '保存时间设置' }}</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ── 创建作业弹窗（点「布置作业」打开：基本信息 + 环境配置，确定后创建并跳转题目编辑页） ── -->
@@ -334,6 +497,17 @@ onMounted(() => { fetch(); fetchCourses() })
     </div>
 
     <!-- ── 删除草稿作业确认 ──────────────────────────────────────────── -->
+    <ConfirmDialog
+      v-if="scheduleConfirmOpen"
+      title="确认调整截止时间"
+      :message="scheduleConfirmMessage"
+      confirm-text="确认保存"
+      :danger="true"
+      :busy="scheduleSaving"
+      @confirm="saveSchedule()"
+      @cancel="scheduleConfirmOpen = false"
+    />
+
     <ConfirmDialog
       v-if="deleteTarget"
       title="删除作业"
@@ -583,4 +757,21 @@ onMounted(() => { fetch(); fetchCourses() })
 .table-scroll td{white-space:nowrap}.table-scroll td strong,.table-scroll td small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.actions-cell{display:flex;flex-wrap:wrap;align-items:center;gap:0;white-space:normal}.actions-cell button{flex:0 0 auto;padding:4px 5px;font-size:12px;white-space:nowrap}
 @container (max-width:1050px){.filter-bar{grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,.7fr))}.table-scroll th:nth-child(1){width:28%}.table-scroll th:nth-child(2){width:25%}.table-scroll th:nth-child(3){width:15%}.table-scroll th:nth-child(7){width:32%}.table-scroll th:nth-child(4),.table-scroll td:nth-child(4),.table-scroll th:nth-child(5),.table-scroll td:nth-child(5),.table-scroll th:nth-child(6),.table-scroll td:nth-child(6){display:none}.table-scroll td:last-child{padding-left:8px;padding-right:8px}.actions-cell button{padding:4px;font-size:12px}}
 @container (max-width:760px){.filter-bar{grid-template-columns:1fr;padding:12px}.table-scroll{overflow:visible;padding:12px;background:#f8fafc}.table-scroll table,.table-scroll tbody{display:block;width:100%;min-width:0!important}.table-scroll thead{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.table-scroll tbody{display:grid;gap:12px}.table-scroll tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:hidden;border:1px solid var(--border);border-radius:10px;background:var(--surface)}.table-scroll td,.table-scroll td:nth-child(4),.table-scroll td:nth-child(5),.table-scroll td:nth-child(6){display:flex;width:auto;height:auto;min-height:58px;padding:10px 12px;flex-direction:column;justify-content:center;gap:5px;border-bottom:1px solid var(--border);overflow:visible;white-space:normal}.table-scroll td::before{color:var(--text-tertiary);font-size:11px;font-weight:500}.table-scroll td:nth-child(1)::before{content:'作业名称'}.table-scroll td:nth-child(2)::before{content:'所属课程 / 班级'}.table-scroll td:nth-child(3)::before{content:'状态'}.table-scroll td:nth-child(4)::before{content:'截止时间'}.table-scroll td:nth-child(5)::before{content:'提交进度'}.table-scroll td:nth-child(6)::before{content:'最近更新'}.table-scroll td:nth-child(7)::before{content:'操作'}.table-scroll td:nth-child(1),.table-scroll td:nth-child(2),.table-scroll td:nth-child(7){grid-column:1/-1}.table-scroll td:nth-child(6),.table-scroll td:nth-last-child(-n+2){border-bottom:0}.table-scroll td strong,.table-scroll td small{overflow:visible;white-space:normal}.table-scroll .actions-cell{display:flex;flex-direction:row;align-items:center;justify-content:flex-end;gap:6px}.table-scroll .actions-cell::before{margin-right:auto}.actions-cell button{padding:6px 8px}}
+
+/* 发布与截止：发布状态和时限状态分维度展示，避免把“已截止”误当发布状态 */
+.filter-bar{grid-template-columns:minmax(220px,1.35fr) repeat(4,minmax(125px,.72fr))}
+.schedule-cell{display:flex;flex-direction:column;justify-content:center;gap:4px;white-space:normal!important}
+.schedule-cell span{display:flex;align-items:center;gap:5px;font-size:12px;line-height:1.35}
+.schedule-cell em{min-width:28px;color:var(--text-tertiary);font-size:11px;font-style:normal}
+.deadline-ended{color:var(--danger)!important}
+.schedule-modal{width:min(520px,calc(100vw - 32px))}
+.schedule-modal .create-heading>div{display:flex;min-width:0;flex-direction:column;gap:3px}
+.schedule-modal .create-heading small{max-width:380px;overflow:hidden;color:var(--text-tertiary);font-size:12px;text-overflow:ellipsis;white-space:nowrap}
+.schedule-modal-body{padding:20px 22px}
+.schedule-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 18px}
+.schedule-summary div{padding:12px;border:1px solid var(--border);border-radius:9px;background:#f8fafc}
+.schedule-summary dt{color:var(--text-tertiary);font-size:12px}
+.schedule-summary dd{margin:5px 0 0;color:var(--ink);font-size:14px;font-weight:600}
+@container (max-width:1050px){.filter-bar{grid-template-columns:repeat(2,minmax(0,1fr))}.search-control{grid-column:1/-1}}
+@container (max-width:760px){.filter-bar{grid-template-columns:1fr}.search-control{grid-column:auto}.table-scroll td:nth-child(4)::before{content:'时间安排'}.schedule-summary{grid-template-columns:1fr}}
 </style>

@@ -2,6 +2,7 @@
 /** 学生实验目录展示组件：状态 tab、搜索排序、表格与分页。数据与请求全部由父组件驱动。 */
 import { computed } from 'vue'
 import UiStatusPill from '../ui/UiStatusPill.vue'
+import StudentPagination from './StudentPagination.vue'
 import { formatDateTime } from '../../utils/format.js'
 import { EXPERIMENT_STATUS_MAP, statusBadge } from '../../utils/status.js'
 
@@ -27,11 +28,6 @@ const statusTabs = computed(() => [
   { value: 'submitted', label: '已提交', count: props.summary.submitted },
   { value: 'graded', label: '已评分', count: props.summary.graded },
 ])
-const visiblePages = computed(() => {
-  const start = Math.max(1, Math.min(props.page - 2, props.pageCount - 4))
-  const end = Math.min(props.pageCount, start + 4)
-  return Array.from({ length: end - start + 1 }, (_, index) => start + index)
-})
 const isFiltered = computed(() => Boolean(props.query || props.activeStatus))
 
 function statusMeta(value) {
@@ -143,42 +139,7 @@ function actionLabel(value) {
       </table>
     </div>
 
-    <nav v-if="!loading && !failed && total > 0" class="pagination" aria-label="实验模块分页">
-      <span class="pagination-total">共 {{ total }} 条</span>
-      <div class="pagination-controls">
-        <button
-          type="button"
-          class="page-arrow"
-          :disabled="page === 1"
-          aria-label="上一页"
-          @click="emit('page', page - 1)"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
-        </button>
-        <button
-          v-for="pageNumber in visiblePages"
-          :key="pageNumber"
-          type="button"
-          class="page-number"
-          :class="{ active: pageNumber === page }"
-          :aria-label="'第 ' + pageNumber + ' 页'"
-          :aria-current="pageNumber === page ? 'page' : undefined"
-          @click="emit('page', pageNumber)"
-        >
-          {{ pageNumber }}
-        </button>
-        <button
-          type="button"
-          class="page-arrow"
-          :disabled="page === pageCount"
-          aria-label="下一页"
-          @click="emit('page', page + 1)"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
-        </button>
-      </div>
-      <span class="page-size">10 条/页</span>
-    </nav>
+    <StudentPagination :current-page="page" :page-count="pageCount" :total="total" :page-size="10" aria-label="实验模块分页" @change="emit('page', $event)" />
   </section>
 </template>
 
