@@ -54,11 +54,36 @@ def db_session_factory(test_settings):
     engine = create_engine_from_url(test_settings.database_url)
     Base.metadata.create_all(bind=engine)
     SessionLocal = sessionmaker_for_engine(engine)
+    _seed_basic_environment(SessionLocal)
     try:
         yield SessionLocal
     finally:
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+def _seed_basic_environment(SessionLocal):
+    """TASK-010：模型环境绑定列 NOT NULL 后，测试库提供 basic 可用版本，
+    供 resolve_basic_env_version_id 惰性默认与发布门禁解析（与迁移 B 的生产前置一致）。"""
+    from app.models import EnvironmentProfile, EnvironmentVersion
+
+    with SessionLocal() as db:
+        if db.query(EnvironmentProfile).filter_by(slug="basic").first():
+            return
+        profile = EnvironmentProfile(slug="basic", display_name="基础档位", status="active")
+        db.add(profile)
+        db.flush()
+        version = EnvironmentVersion(
+            profile_id=profile.id,
+            version_number=1,
+            base_image_ref="python:3.12-slim",
+            minimum_memory_mb=128,
+            manifest_sha256="a" * 64,
+            status="available",
+            image_digest="sha256:" + "b" * 64,
+        )
+        db.add(version)
+        db.commit()
 
 
 @pytest.fixture()
