@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import { coursesAPI } from '../../api/courses.js'
+import { progressAPI } from '../../api/progress.js'
 import { useAppStore } from '../../stores/app.js'
 import { sanitizeHtml } from '../../utils/sanitize.js'
 import { marked } from 'marked'
@@ -18,6 +19,9 @@ const lesson = ref(null)
 const loading = ref(true)
 const forbidden = ref(false)
 const dropdownOpen = ref(false)
+// TASK-018：本课时服务端进度状态（in_progress/completed，''=未知）
+const lessonStatus = ref('')
+const progressBusy = ref(false)
 
 // 本地视频播放：签名 URL / 加载中 / 错误态
 const videoPlaybackUrl = ref('')
@@ -133,17 +137,42 @@ function retryVideo() {
   fetchVideoPlayback(lesson.value?.id)
 }
 
-function markComplete() {
+async function recordStart() {
+  // TASK-018：打开课时只记录 in_progress 与最后访问时间（服务端事实）。
+  // 静默失败不阻断学习；已完成的课时保持 completed（服务端保证）。
   if (!lesson.value) return
   try {
-    const key = `course_${courseId.value}_completed`
-    const raw = localStorage.getItem(key)
-    const ids = raw ? JSON.parse(raw) : []
-    if (!ids.includes(lesson.value.id)) {
-      ids.push(lesson.value.id)
-      localStorage.setItem(key, JSON.stringify(ids))
-    }
+    const res = await progressAPI.start(lesson.value.id)
+    lessonStatus.value = res.data.status
   } catch { /* ignore */ }
+}
+
+async function completeLesson() {
+  if (!lesson.value || progressBusy.value) return
+  progressBusy.value = true
+  try {
+    const res = await progressAPI.complete(lesson.value.id)
+    lessonStatus.value = res.data.status
+    app.showToast('已标记完成本课时', 'success')
+  } catch (e) {
+    app.showToast(e.response?.data?.detail?.message || '操作失败', 'error')
+  } finally {
+    progressBusy.value = false
+  }
+}
+
+async function revertLesson() {
+  if (!lesson.value || progressBusy.value) return
+  progressBusy.value = true
+  try {
+    const res = await progressAPI.revert(lesson.value.id)
+    lessonStatus.value = res.data.status
+    app.showToast('已撤回完成标记', 'success')
+  } catch (e) {
+    app.showToast(e.response?.data?.detail?.message || '操作失败', 'error')
+  } finally {
+    progressBusy.value = false
+  }
 }
 
 async function fetchData() {
@@ -157,8 +186,9 @@ async function fetchData() {
     const raw = chRes.data
     chapters.value = Array.isArray(raw) ? raw : (raw.items || [])
     course.value = cRes.data
+    lessonStatus.value = ''
     findLesson()
-    if (lesson.value) markComplete()
+    if (lesson.value) recordStart()
   } catch (e) {
     if (e.response?.status === 403) {
       // 未选课 / 已移出白名单 / 课程不可见：给出明确错误态而非仅 toast
@@ -316,8 +346,9 @@ watch([lessonId, courseId], async ([, newCid], [, oldCid]) => {
   if (newCid !== oldCid || chapters.value.length === 0) {
     await fetchData()
   } else {
+    lessonStatus.value = ''
     findLesson()
-    if (lesson.value) markComplete()
+    if (lesson.value) recordStart()
   }
 })
 </script>
@@ -470,6 +501,20 @@ watch([lessonId, courseId], async ([, newCid], [, oldCid]) => {
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9 3L4 7l5 5"/></svg>
               <span class="nav-label">上一课</span>
             </div>
+
+            <!-- TASK-018：显式完成/撤回——打开课时只记录 in_progress，不自动完成 -->
+            <button
+              type="button"
+              class="nav-btn nav-complete"
+              :class="{ 'is-completed': lessonStatus === 'completed' }"
+              :disabled="progressBusy || !lessonStatus"
+              :aria-label="lessonStatus === 'completed' ? '撤回完成标记' : '标记完成本课时'"
+              @click="lessonStatus === 'completed' ? revertLesson() : completeLesson()"
+            >
+              <svg v-if="lessonStatus === 'completed'" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="7"/><path d="M5.5 8.5l2 2 3-4"/></svg>
+              <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="7"/></svg>
+              <span class="nav-label">{{ lessonStatus === 'completed' ? '已学完 · 点击撤回' : '完成本课时' }}</span>
+            </button>
 
             <button v-if="nextLesson" class="nav-btn nav-next" @click="goNext" :title="nextLesson.lesson.title">
               <span class="nav-title">{{ nextLesson.lesson.title }}</span>
@@ -754,6 +799,14 @@ watch([lessonId, courseId], async ([, newCid], [, oldCid]) => {
   cursor: pointer; transition: all var(--duration-fast) var(--ease-out);
   flex: 1; max-width: 48%; color: var(--text); text-align: left;
 }
+.nav-complete {
+  flex: 0 0 auto; max-width: none; justify-content: center;
+  white-space: nowrap;
+}
+.nav-complete.is-completed {
+  color: #099b61; border-color: #b7ead1; background: #e9f8f1;
+}
+.nav-complete:disabled { opacity: .6; cursor: default; }
 .nav-btn:hover {
   border-color: var(--border-strong); background: var(--surface-raised);
   box-shadow: var(--shadow-md);

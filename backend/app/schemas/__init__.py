@@ -14,6 +14,28 @@ class PaginatedResponse(BaseModel):
     total: int = 0
 
 
+# ── 学习进度（TASK-018 / F-06） ────────────────────────────────
+
+
+class LessonProgressRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    lesson_id: int
+    status: Literal["in_progress", "completed"]
+    last_accessed_at: datetime | None
+
+
+class CourseProgressRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    course_id: int
+    total: int
+    completed: int
+    percent: int
+    next_lesson_id: int | None
+    items: list[LessonProgressRead]
+
+
 # ── 分层输入上限（TASK-004 / F-10） ─────────────────────────────
 # 判题/提交代码：≤50,000 字符且 UTF-8 ≤64 KiB；考试文本答案单项：≤20,000 字符且 ≤64 KiB。
 # 超限在 Schema 层拒绝（422），保证不写库、不入队、不启动 Docker。

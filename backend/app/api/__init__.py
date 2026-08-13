@@ -13,6 +13,7 @@ from .exams import router as exams_router
 from .experiments import router as experiments_router
 from .judge import router as judge_router
 from .jupyter import router as jupyter_router
+from .lesson_progress import router as lesson_progress_router
 from .lesson_videos import router as lesson_videos_router
 from .notebooks import router as notebooks_router
 from .studio import router as studio_router
@@ -30,6 +31,7 @@ api_router.include_router(assignments_router)
 api_router.include_router(ai_grading_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(judge_router)
+api_router.include_router(lesson_progress_router)
 api_router.include_router(lesson_videos_router)
 api_router.include_router(exams_router)
 api_router.include_router(experiments_router)

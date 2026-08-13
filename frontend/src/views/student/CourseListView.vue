@@ -12,9 +12,9 @@ import DashboardAsyncState from '../../components/dashboard/DashboardAsyncState.
 import AppIcon from '../../components/ui/AppIcon.vue'
 import UiProgress from '../../components/ui/UiProgress.vue'
 import { coursesAPI } from '../../api/courses.js'
+import { progressAPI } from '../../api/progress.js'
 import { useAppStore } from '../../stores/app.js'
 import { getCourseCoverUrl } from '../../utils/courseCover.js'
-import { getCourseProgress, getFirstIncompleteLesson } from '../../utils/studentUi.js'
 
 const router = useRouter()
 const app = useAppStore()
@@ -41,26 +41,32 @@ async function fetchCourses() {
 }
 
 async function loadRows() {
-  // 选课状态以后端 is_enrolled 为准：只对已选课程抓取章节，
-  // 不再用章节 403 猜测是否已选课。
+  // 选课状态以后端 is_enrolled 为准：只对已选课程抓取章节与服务端进度，
+  // 不再用章节 403 猜测是否已选课；进度以服务端为事实（TASK-018）。
   const results = await Promise.allSettled(
     courses.value.map((c) =>
-      c.is_enrolled ? coursesAPI.getChapters(c.id) : Promise.resolve({ data: { items: [] } }),
+      c.is_enrolled
+        ? Promise.all([coursesAPI.getChapters(c.id), progressAPI.getCourse(c.id)])
+        : Promise.resolve([{ data: { items: [] } }, { data: null }]),
     ),
   )
   rows.value = courses.value.map((course, i) => {
     const res = results[i]
     const enrolled = course.is_enrolled === true
-    const chapters = enrolled ? (res.value?.data?.items || []) : []
-    const progress = enrolled ? getCourseProgress(course.id, chapters, localStorage) : 0
-    const nextLesson = enrolled
-      ? getFirstIncompleteLesson(course.id, chapters, localStorage)
-      : null
+    const chapters = enrolled ? (res.value?.[0]?.data?.items || []) : []
+    const serverProgress = enrolled ? (res.value?.[1]?.data || null) : null
+    const nextLessonId = serverProgress?.next_lesson_id
+    let nextLesson = null
+    for (const ch of chapters) {
+      for (const l of ch?.lessons || []) {
+        if (l.id === nextLessonId) nextLesson = l
+      }
+    }
     return {
       course,
       enrolled,
       chapters,
-      progress,
+      progress: serverProgress?.percent ?? 0,
       nextLesson,
       chapterTitle: chapters[0]?.title || '',
     }

@@ -4,8 +4,6 @@ import {
   clampProgress,
   feedbackStatus,
   filterFeedback,
-  getCourseProgress,
-  getFirstIncompleteLesson,
   groupTasksByDeadline,
   normalizeAssignmentTask,
   normalizeExamTask,
@@ -16,13 +14,6 @@ import {
 // 本地时区 2026-07-30（周四）12:00 —— 本周日 8-02，可覆盖全部截止桶
 const NOW = new Date(2026, 6, 30, 12, 0, 0)
 const iso = (y, m, d, h = 0) => new Date(y, m, d, h).toISOString()
-
-const CHAPTERS = [
-  { id: 1, lessons: [{ id: 10, title: '第一课' }, { id: 11, title: '第二课' }] },
-  { id: 2, lessons: [{ id: 12, title: '第三课' }, { id: 13, title: '第四课' }] },
-]
-
-const memoryStorage = (raw) => ({ getItem: () => raw })
 
 describe('clampProgress', () => {
   it('低于 0 钳制到 0，高于 100 钳制到 100', () => {
@@ -36,37 +27,6 @@ describe('clampProgress', () => {
   })
   it('数字字符串可解析', () => {
     expect(clampProgress('42')).toBe(42)
-  })
-})
-
-describe('getCourseProgress', () => {
-  it('按本地存储的已完成课时计算百分比', () => {
-    expect(getCourseProgress(9, CHAPTERS, memoryStorage('[10,11,12]'))).toBe(75)
-  })
-  it('存储 JSON 损坏时返回 0 进度', () => {
-    expect(getCourseProgress(9, CHAPTERS, memoryStorage('{oops'))).toBe(0)
-    expect(getCourseProgress(9, CHAPTERS, memoryStorage(null))).toBe(0)
-  })
-  it('无课时返回 0', () => {
-    expect(getCourseProgress(9, [], memoryStorage('[10]'))).toBe(0)
-  })
-  it('已完成列表只统计本课程课时', () => {
-    // 10 属于本课程，999 属于其他课程，不参与计数
-    expect(getCourseProgress(9, CHAPTERS, memoryStorage('[10,999]'))).toBe(25)
-  })
-})
-
-describe('getFirstIncompleteLesson', () => {
-  it('返回第一个未完成课时', () => {
-    const lesson = getFirstIncompleteLesson(9, CHAPTERS, memoryStorage('[10]'))
-    expect(lesson.id).toBe(11)
-  })
-  it('全部完成后返回 null', () => {
-    expect(getFirstIncompleteLesson(9, CHAPTERS, memoryStorage('[10,11,12,13]'))).toBeNull()
-  })
-  it('存储损坏时视为未学习', () => {
-    const lesson = getFirstIncompleteLesson(9, CHAPTERS, memoryStorage('nope'))
-    expect(lesson.id).toBe(10)
   })
 })
 

@@ -1,4 +1,4 @@
-// 我的课程（参考图 02）：标题 + 状态标签页 + 搜索 + 横向课程行 + 真实进度
+// 我的课程（参考图 02）：标题 + 状态标签页 + 搜索 + 横向课程行 + 服务端进度（TASK-018）
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -17,9 +17,11 @@ vi.mock('vue-router', async (importOriginal) => {
 })
 
 const coursesMock = vi.hoisted(() => ({ list: vi.fn(), getChapters: vi.fn(), enroll: vi.fn() }))
+const progressMock = vi.hoisted(() => ({ getCourse: vi.fn() }))
 const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }))
 
 vi.mock('../../../api/courses.js', () => ({ coursesAPI: coursesMock }))
+vi.mock('../../../api/progress.js', () => ({ progressAPI: progressMock }))
 vi.mock('../../../stores/app.js', () => ({
   useAppStore: () => toastMock,
 }))
@@ -45,6 +47,22 @@ function mockChaptersPerCourse() {
   )
 }
 
+/** 默认服务端进度：课程 1 完成 1/2（50%），下一步第二课；未指定时 0 */
+function mockProgress(percentFor1 = 50) {
+  progressMock.getCourse.mockImplementation((courseId) =>
+    Promise.resolve({
+      data: {
+        course_id: courseId,
+        total: 2,
+        completed: percentFor1 === 100 ? 2 : percentFor1 === 50 ? 1 : 0,
+        percent: percentFor1,
+        next_lesson_id: percentFor1 === 100 ? null : courseId * 100 + 1 + (percentFor1 === 50 ? 1 : 0),
+        items: [],
+      },
+    }),
+  )
+}
+
 function mountView() {
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -58,17 +76,18 @@ function mountView() {
 }
 
 beforeEach(() => {
-  localStorage.clear()
   vi.clearAllMocks()
   coursesMock.list.mockReset()
   coursesMock.getChapters.mockReset()
   coursesMock.enroll.mockReset()
+  progressMock.getCourse.mockReset()
 })
 
 describe('我的课程 CourseListView（参考图 02）', () => {
   it('标题为“我的课程”并带副标题', async () => {
     coursesMock.list.mockResolvedValue({ data: coursesData() })
     mockChaptersPerCourse()
+    mockProgress()
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.get('.page-title').text()).toBe('我的课程')
@@ -78,6 +97,7 @@ describe('我的课程 CourseListView（参考图 02）', () => {
   it('提供 进行中 / 已完成 / 全部课程 三个标签页', async () => {
     coursesMock.list.mockResolvedValue({ data: coursesData() })
     mockChaptersPerCourse()
+    mockProgress()
     const wrapper = mountView()
     await flushPromises()
     const tabs = wrapper.findAll('.tab-btn').map((t) => t.text())
@@ -89,6 +109,7 @@ describe('我的课程 CourseListView（参考图 02）', () => {
   it('搜索按课程标题过滤', async () => {
     coursesMock.list.mockResolvedValue({ data: coursesData() })
     mockChaptersPerCourse()
+    mockProgress()
     const wrapper = mountView()
     await flushPromises()
     await wrapper.get('.search-input').setValue('Python')
@@ -97,10 +118,10 @@ describe('我的课程 CourseListView（参考图 02）', () => {
     expect(wrapper.text()).not.toContain('机器学习导论')
   })
 
-  it('每个课程行包含 identity、进度与下一步动作', async () => {
+  it('每个课程行包含 identity、进度与下一步动作（进度来自服务端）', async () => {
     coursesMock.list.mockResolvedValue({ data: coursesData() })
     mockChaptersPerCourse()
-    localStorage.setItem('course_1_completed', JSON.stringify([101]))
+    mockProgress(50)
     const wrapper = mountView()
     await flushPromises()
     const row = wrapper.get('.course-row')
@@ -108,27 +129,32 @@ describe('我的课程 CourseListView（参考图 02）', () => {
     expect(row.find('.ui-progress').exists()).toBe(true)
     expect(row.text()).toContain('50%')
     expect(row.find('.course-row-action').exists()).toBe(true)
+    // 下一步指向服务端 next_lesson_id
+    expect(progressMock.getCourse).toHaveBeenCalledWith(1)
   })
 
-  it('本地存储损坏时进度降级为 0 且课程仍然显示', async () => {
+  it('进度请求失败降级为 0 且课程仍然显示', async () => {
     coursesMock.list.mockResolvedValue({ data: coursesData() })
     mockChaptersPerCourse()
-    localStorage.setItem('course_1_completed', '{broken')
+    progressMock.getCourse.mockRejectedValue(new Error('boom'))
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.findAll('.course-row').length).toBe(2)
     expect(wrapper.text()).toContain('Python 编程基础')
   })
 
-  it('未选课程（is_enrolled=false）不发章节请求：显示选课按钮且进度为 0', async () => {
+  it('未选课程（is_enrolled=false）不发章节与进度请求：显示选课按钮且进度为 0', async () => {
     coursesMock.list.mockResolvedValue({ data: coursesData() })
-    coursesMock.getChapters.mockResolvedValue({ data: chaptersFor(1) })
+    mockChaptersPerCourse()
+    mockProgress()
     coursesMock.enroll.mockResolvedValue({})
     const wrapper = mountView()
     await flushPromises()
-    // 只对已选课程（id=1）请求章节
+    // 只对已选课程（id=1）请求章节与进度
     expect(coursesMock.getChapters).toHaveBeenCalledTimes(1)
     expect(coursesMock.getChapters).toHaveBeenCalledWith(1)
+    expect(progressMock.getCourse).toHaveBeenCalledTimes(1)
+    expect(progressMock.getCourse).toHaveBeenCalledWith(1)
     const rows = wrapper.findAll('.course-row')
     expect(rows.length).toBe(2)
     const unenrolled = rows[1]
@@ -149,6 +175,7 @@ describe('我的课程 CourseListView（参考图 02）', () => {
         },
       })
     coursesMock.getChapters.mockResolvedValue({ data: chaptersFor(1) })
+    mockProgress()
     coursesMock.enroll.mockResolvedValue({})
     const wrapper = mountView()
     await flushPromises()
@@ -157,15 +184,17 @@ describe('我的课程 CourseListView（参考图 02）', () => {
     await rows[1].get('.enroll-btn').trigger('click')
     await flushPromises()
     expect(coursesMock.enroll).toHaveBeenCalledWith(2)
-    // 重新拉取列表后再抓取章节
+    // 重新拉取列表后再抓取章节与进度
     expect(coursesMock.list).toHaveBeenCalledTimes(2)
     expect(coursesMock.getChapters).toHaveBeenCalledWith(2)
+    expect(progressMock.getCourse).toHaveBeenCalledWith(2)
     expect(wrapper.findAll('.course-row')[1].text()).not.toContain('选课')
   })
 
   it('选课被拒绝显示服务端错误且保留当前列表', async () => {
     coursesMock.list.mockResolvedValue({ data: coursesData() })
-    coursesMock.getChapters.mockResolvedValue({ data: chaptersFor(1) })
+    mockChaptersPerCourse()
+    mockProgress()
     coursesMock.enroll.mockRejectedValue(
       Object.assign(new Error('forbidden'), { response: { status: 403, data: { detail: { message: '你已被移出白名单' } } } }),
     )
@@ -181,7 +210,7 @@ describe('我的课程 CourseListView（参考图 02）', () => {
   it('“进行中”标签页只显示有真实进度的课程', async () => {
     coursesMock.list.mockResolvedValue({ data: coursesData() })
     mockChaptersPerCourse()
-    localStorage.setItem('course_1_completed', JSON.stringify([101]))
+    mockProgress(50)
     const wrapper = mountView()
     await flushPromises()
     await wrapper.findAll('.tab-btn').find((t) => t.text() === '进行中').trigger('click')
@@ -192,7 +221,7 @@ describe('我的课程 CourseListView（参考图 02）', () => {
   it('“已完成”标签页显示 100% 进度课程', async () => {
     coursesMock.list.mockResolvedValue({ data: coursesData() })
     mockChaptersPerCourse()
-    localStorage.setItem('course_1_completed', JSON.stringify([101, 102]))
+    mockProgress(100)
     const wrapper = mountView()
     await flushPromises()
     await wrapper.findAll('.tab-btn').find((t) => t.text() === '已完成').trigger('click')
@@ -203,6 +232,7 @@ describe('我的课程 CourseListView（参考图 02）', () => {
   it('已选课课程行跳转课程详情', async () => {
     coursesMock.list.mockResolvedValue({ data: coursesData() })
     mockChaptersPerCourse()
+    mockProgress()
     const wrapper = mountView()
     await flushPromises()
     await wrapper.findAll('.course-row-link')[0].trigger('click')
@@ -214,6 +244,7 @@ describe('我的课程 CourseListView（参考图 02）', () => {
       .mockRejectedValueOnce(new Error('network'))
       .mockResolvedValueOnce({ data: coursesData() })
     mockChaptersPerCourse()
+    mockProgress()
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.text()).toContain('加载失败')
@@ -231,6 +262,7 @@ describe('我的课程 CourseListView（参考图 02）', () => {
 
   it('单个课程章节失败不导致整页错误（其余行正常）', async () => {
     coursesMock.list.mockResolvedValue({ data: coursesData() })
+    mockProgress()
     coursesMock.getChapters
       .mockResolvedValueOnce({ data: chaptersFor(1) })
       .mockRejectedValueOnce(new Error('boom'))
@@ -251,6 +283,7 @@ describe('我的课程 CourseListView（参考图 02）', () => {
       },
     })
     mockChaptersPerCourse()
+    mockProgress()
     const wrapper = mountView()
     await flushPromises()
 
@@ -272,6 +305,7 @@ describe('我的课程 CourseListView（参考图 02）', () => {
       },
     })
     coursesMock.getChapters.mockResolvedValue({ data: { items: [] } })
+    progressMock.getCourse.mockResolvedValue({ data: null })
     const wrapper = mountView()
     await flushPromises()
 

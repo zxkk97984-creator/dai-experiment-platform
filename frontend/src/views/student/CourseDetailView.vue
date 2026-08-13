@@ -12,11 +12,11 @@ import StudentCourseTabs from '../../components/student/StudentCourseTabs.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
 import UiPanel from '../../components/ui/UiPanel.vue'
 import { coursesAPI } from '../../api/courses.js'
+import { progressAPI } from '../../api/progress.js'
 import { assignmentsAPI } from '../../api/assignments.js'
 import { examsAPI } from '../../api/exams.js'
 import { dashboardAPI } from '../../api/dashboard.js'
 import { useAppStore } from '../../stores/app.js'
-import { getCourseProgress, getFirstIncompleteLesson } from '../../utils/studentUi.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -40,11 +40,13 @@ const courseId = computed(() => route.params.id)
 const timeFmt = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 const kindLabel = { assignment: '作业', exam: '考试', experiment: '实验' }
 
+// TASK-018：学习进度以服务端为事实（跨设备一致），不读取 localStorage 历史
+const courseProgress = ref(null)
+
 const completedLessonIds = computed(() => {
-  try {
-    const raw = localStorage.getItem(`course_${courseId.value}_completed`)
-    return raw ? JSON.parse(raw) : []
-  } catch { return [] }
+  return (courseProgress.value?.items || [])
+    .filter((item) => item.status === 'completed')
+    .map((item) => item.lesson_id)
 })
 
 const totalLessons = computed(() => {
@@ -53,11 +55,17 @@ const totalLessons = computed(() => {
   return count
 })
 
-const progressPercent = computed(() => getCourseProgress(courseId.value, chapters.value, localStorage))
+const progressPercent = computed(() => courseProgress.value?.percent ?? 0)
 
 const nextLesson = computed(() => {
-  if (!chapters.value.length) return null
-  return getFirstIncompleteLesson(courseId.value, chapters.value, localStorage)
+  const nextId = courseProgress.value?.next_lesson_id
+  if (nextId == null) return null
+  for (const ch of chapters.value) {
+    for (const l of ch?.lessons || []) {
+      if (l.id === nextId) return l
+    }
+  }
+  return null
 })
 
 /** 课时状态：completed / current（第一个未完成）/ locked（后续） */
@@ -159,6 +167,7 @@ async function fetchAll() {
       assignmentsAPI.list({ course_id: courseId.value }),
       examsAPI.list({ course_id: courseId.value }),
       dashboardAPI.student(),
+      progressAPI.getCourse(courseId.value),
     ])
     if (results[0].status === 'fulfilled') {
       chapters.value = results[0].value.data?.items || results[0].value.data || []
@@ -171,6 +180,9 @@ async function fetchAll() {
     }
     if (results[3].status === 'fulfilled') {
       dashboard.value = results[3].value.data
+    }
+    if (results[4].status === 'fulfilled') {
+      courseProgress.value = results[4].value.data
     }
   } else {
     // 未选课：不请求章节/作业/考试/dashboard，避免预期中的 403

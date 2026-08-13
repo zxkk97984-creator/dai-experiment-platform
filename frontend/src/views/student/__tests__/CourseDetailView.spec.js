@@ -20,12 +20,14 @@ const coursesMock = vi.hoisted(() => ({ get: vi.fn(), getChapters: vi.fn(), enro
 const assignmentsMock = vi.hoisted(() => ({ list: vi.fn() }))
 const examsMock = vi.hoisted(() => ({ list: vi.fn() }))
 const dashboardMock = vi.hoisted(() => ({ student: vi.fn() }))
+const progressMock = vi.hoisted(() => ({ getCourse: vi.fn() }))
 const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }))
 
 vi.mock('../../../api/courses.js', () => ({ coursesAPI: coursesMock }))
 vi.mock('../../../api/assignments.js', () => ({ assignmentsAPI: assignmentsMock }))
 vi.mock('../../../api/exams.js', () => ({ examsAPI: examsMock }))
 vi.mock('../../../api/dashboard.js', () => ({ dashboardAPI: dashboardMock }))
+vi.mock('../../../api/progress.js', () => ({ progressAPI: progressMock }))
 vi.mock('../../../stores/app.js', () => ({ useAppStore: () => toastMock }))
 
 import CourseDetailView from '../CourseDetailView.vue'
@@ -80,11 +82,28 @@ function mountView() {
   })
 }
 
+const serverProgress = (percent, completedIds, nextId) => ({
+  data: {
+    course_id: 7,
+    total: 3,
+    completed: completedIds.length,
+    percent,
+    next_lesson_id: nextId,
+    items: [701, 711, 712].map((id) => ({
+      lesson_id: id,
+      status: completedIds.includes(id) ? 'completed' : 'in_progress',
+      last_accessed_at: null,
+    })),
+  },
+})
+
 function mockOk({ withDashboard = true } = {}) {
   coursesMock.get.mockResolvedValue({ data: course })
   coursesMock.getChapters.mockResolvedValue({ data: { items: chapters } })
   assignmentsMock.list.mockResolvedValue({ data: { items: assignments } })
   examsMock.list.mockResolvedValue({ data: { items: exams } })
+  // TASK-018：进度以服务端为事实（默认 3 课时完成 1 → 33%，下一步 711）
+  progressMock.getCourse.mockResolvedValue(serverProgress(33, [701], 711))
   if (withDashboard) dashboardMock.student.mockResolvedValue({ data: dashboardData() })
 }
 
@@ -97,13 +116,13 @@ beforeEach(() => {
   assignmentsMock.list.mockReset()
   examsMock.list.mockReset()
   dashboardMock.student.mockReset()
+  progressMock.getCourse.mockReset()
 })
 
 describe('课程概览 CourseDetailView（参考图 03）', () => {
   it('面包屑、英雄元数据、进度与 CTA 渲染真实值', async () => {
     mockOk()
-    // 课程共 3 课时，本地完成 1 个 → 33%
-    localStorage.setItem('course_7_completed', JSON.stringify([701]))
+    // 课程共 3 课时，服务端完成 1 个 → 33%
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.text()).toContain('机器学习导论')
@@ -126,7 +145,6 @@ describe('课程概览 CourseDetailView（参考图 03）', () => {
 
   it('概览左侧展示章节路径', async () => {
     mockOk()
-    localStorage.setItem('course_7_completed', JSON.stringify([701]))
     const wrapper = mountView()
     await flushPromises()
     const rows = wrapper.findAll('.chapter-row')
@@ -136,7 +154,6 @@ describe('课程概览 CourseDetailView（参考图 03）', () => {
 
   it('章节状态区分已完成/当前/锁定且可访问', async () => {
     mockOk()
-    localStorage.setItem('course_7_completed', JSON.stringify([701]))
     const wrapper = mountView()
     await flushPromises()
     const rows = wrapper.findAll('.chapter-row')
@@ -148,7 +165,6 @@ describe('课程概览 CourseDetailView（参考图 03）', () => {
 
   it('点击章节行进入既有课时路由', async () => {
     mockOk()
-    localStorage.setItem('course_7_completed', JSON.stringify([701]))
     const wrapper = mountView()
     await flushPromises()
     await wrapper.findAll('.chapter-row')[0].trigger('click')
@@ -195,6 +211,7 @@ describe('课程概览 CourseDetailView（参考图 03）', () => {
     expect(coursesMock.getChapters).not.toHaveBeenCalled()
     expect(assignmentsMock.list).not.toHaveBeenCalled()
     expect(examsMock.list).not.toHaveBeenCalled()
+    expect(progressMock.getCourse).not.toHaveBeenCalled()
     await wrapper.get('.back-list-btn').trigger('click')
     expect(routerState.push).toHaveBeenCalledWith('/student/courses')
   })
@@ -211,11 +228,12 @@ describe('课程概览 CourseDetailView（参考图 03）', () => {
     expect(wrapper.text()).toContain('监督学习与模型评估')
     expect(wrapper.text()).toContain('还未选这门课')
     expect(wrapper.get('.hero-enroll-btn').exists()).toBe(true)
-    // 未选课不请求章节/作业/考试/dashboard
+    // 未选课不请求章节/作业/考试/dashboard/进度
     expect(coursesMock.getChapters).not.toHaveBeenCalled()
     expect(assignmentsMock.list).not.toHaveBeenCalled()
     expect(examsMock.list).not.toHaveBeenCalled()
     expect(dashboardMock.student).not.toHaveBeenCalled()
+    expect(progressMock.getCourse).not.toHaveBeenCalled()
   })
 
   it('选课成功后重新加载并进入已选状态', async () => {
@@ -226,6 +244,7 @@ describe('课程概览 CourseDetailView（参考图 03）', () => {
     assignmentsMock.list.mockResolvedValue({ data: { items: assignments } })
     examsMock.list.mockResolvedValue({ data: { items: exams } })
     dashboardMock.student.mockResolvedValue({ data: dashboardData() })
+    progressMock.getCourse.mockResolvedValue(serverProgress(33, [701], 711))
     coursesMock.enroll.mockResolvedValue({})
     const wrapper = mountView()
     await flushPromises()
@@ -256,6 +275,7 @@ describe('课程概览 CourseDetailView（参考图 03）', () => {
     assignmentsMock.list.mockResolvedValue({ data: { items: assignments } })
     examsMock.list.mockResolvedValue({ data: { items: exams } })
     dashboardMock.student.mockResolvedValue({ data: dashboardData() })
+    progressMock.getCourse.mockResolvedValue(serverProgress(33, [701], 711))
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.text()).toContain('加载课程失败')
