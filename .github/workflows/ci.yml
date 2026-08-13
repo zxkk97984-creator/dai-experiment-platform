@@ -160,6 +160,7 @@ jobs:
       DAI_SECRET_KEY: ci-e2e-secret-key
       DAI_CORS_ORIGINS: http://localhost:8080
       DAI_JUDGE_HOST_WORK_DIR: ${{ github.workspace }}/judge-work
+      DAI_ENV_BASE_IMAGE: python:3.12-slim@sha256:0000000000000000000000000000000000000000000000000000000000000000
     defaults:
       run:
         working-directory: frontend
@@ -175,12 +176,31 @@ jobs:
         run: |
           npm ci
           npx playwright install chromium --with-deps
-      - name: 启动全栈服务
+      - name: 构建判题镜像
         run: |
           cd ..
           mkdir -p judge-work
           docker build -t dai-judge-python:latest backend/docker/judge
           docker build -t dai-kernel-python:latest backend/docker/kernel
+      - name: 启动数据库与缓存
+        run: |
+          cd ..
+          docker compose -f docker-compose.prod.yml up -d --wait mysql redis
+      - name: 迁移第一步（环境控制面迁移 A）
+        run: |
+          cd ..
+          docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade b4c5d6e7f890
+      - name: 种入 basic 可用版本（迁移 B 前置，等价生产构建完成后状态）
+        run: |
+          cd ..
+          docker compose -f docker-compose.prod.yml exec -T mysql mysql -uroot -proot_secret dai_platform -e "INSERT INTO environment_profiles (slug, display_name, status, created_at, updated_at) VALUES ('basic', '基础档位', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP); INSERT INTO environment_versions (profile_id, version_number, base_image_ref, minimum_memory_mb, manifest_sha256, status, image_digest, created_at, updated_at) SELECT id, 1, 'python:3.12-slim', 128, REPEAT('a',64), 'available', CONCAT('sha256:',REPEAT('b',64)), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM environment_profiles WHERE slug='basic';"
+      - name: 迁移到 head
+        run: |
+          cd ..
+          docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade head
+      - name: 启动全栈服务
+        run: |
+          cd ..
           docker compose -f docker-compose.prod.yml up -d --wait
           docker compose -f docker-compose.prod.yml exec -T api python - < scripts/seed_e2e.py
       - name: 运行 E2E 测试
@@ -201,10 +221,18 @@ jobs:
       DAI_SECRET_KEY: ci-smoke-secret-key
       DAI_CORS_ORIGINS: https://example.com
       DAI_JUDGE_HOST_WORK_DIR: ${{ github.workspace }}/judge-work
+      DAI_ENV_BASE_IMAGE: python:3.12-slim@sha256:0000000000000000000000000000000000000000000000000000000000000000
     steps:
       - uses: actions/checkout@v4
       - name: 验证 Compose 配置
         run: docker compose -f docker-compose.prod.yml config -q
+      - name: 启动数据库与缓存
+        run: docker compose -f docker-compose.prod.yml up -d --wait mysql redis
+      - name: 两步迁移（迁移 A → basic 种子 → head，TASK-016）
+        run: |
+          docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade b4c5d6e7f890
+          docker compose -f docker-compose.prod.yml exec -T mysql mysql -uroot -proot_secret dai_platform -e "INSERT INTO environment_profiles (slug, display_name, status, created_at, updated_at) VALUES ('basic', '基础档位', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP); INSERT INTO environment_versions (profile_id, version_number, base_image_ref, minimum_memory_mb, manifest_sha256, status, image_digest, created_at, updated_at) SELECT id, 1, 'python:3.12-slim', 128, REPEAT('a',64), 'available', CONCAT('sha256:',REPEAT('b',64)), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM environment_profiles WHERE slug='basic';"
+          docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade head
       - name: 启动服务
         run: |
           mkdir -p judge-work
@@ -219,6 +247,9 @@ jobs:
         run: |
           curl -sf http://localhost:8080/api/v1/health/live
           curl -sf http://localhost:8080/api/v1/health/ready
+      - name: 安全响应头检查（TASK-030：含 HSTS 内层禁止断言）
+        run: |
+          BASE_URL=http://localhost:8080 bash scripts/check_security_headers.sh
       - name: 停止服务
         if: always()
         run: docker compose -f docker-compose.prod.yml down -v
