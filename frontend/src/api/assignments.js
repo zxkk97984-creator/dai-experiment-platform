@@ -12,4 +12,6 @@ export const assignmentsAPI = {
   createQuestion(assignmentId, data) { return client.post(`/assignments/${assignmentId}/questions`, data) },
   // Phase 4：题目编辑（环境覆盖/import 策略在 QuestionEditView 使用）
   updateQuestion(assignmentId, questionId, data) { return client.patch(`/assignments/${assignmentId}/questions/${questionId}`, data) },
+  /** TASK-017：删除题目——仅无提交的 draft 作业允许（后端 409 保护） */
+  deleteQuestion(assignmentId, questionId) { return client.delete(`/assignments/${assignmentId}/questions/${questionId}`) },
 }
