@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from uuid import uuid4
 
 from conftest import auth_header, create_user, login
 from sqlalchemy import select
@@ -18,10 +19,47 @@ def _token(client, db_session_factory, username, role="teacher"):
     return token
 
 
-def _create_course(client, token, title="可见范围课程", status="published", visibility="private", **extra):
-    payload = {"title": title, "description": "desc", "status": status, "visibility": visibility, **extra}
+def _create_course(client, db_session_factory, token, title="可见范围课程", status="published", visibility="private", **extra):
+    """创建课程：draft 直接 POST；published/archived 走合法转换路径（POST 只允许 draft，
+    发布必须经 PATCH 并过 _ensure_course_publishable 门禁——TASK-006）。"""
+    if status == "draft":
+        payload = {"title": title, "status": "draft", "visibility": visibility, **extra}
+        resp = client.post(f"{API}/courses", headers=auth_header(token), json=payload)
+        assert resp.status_code == 201, resp.text
+        return resp.json()
+    with db_session_factory() as db:
+        suffix = uuid4().hex[:8]
+        term = AcademicTerm(
+            code=f"VIS-T-{suffix}", name="Visibility term",
+            start_date=date(2026, 9, 1), end_date=date(2027, 1, 20), status="active",
+        )
+        db.add(term)
+        db.flush()
+        teaching_class = TeachingClass(
+            academic_term_id=term.id, code=f"VIS-C-{suffix}",
+            name="Visibility class", status="active",
+        )
+        db.add(teaching_class)
+        db.commit()
+        term_id, class_id = term.id, teaching_class.id
+    payload = {
+        "title": title,
+        "description": "desc",
+        "visibility": visibility,
+        "academic_term_id": term_id,
+        "teaching_class_ids": [class_id],
+        "cover": "covers/visibility.png",
+        "start_time": "2026-09-01T08:00:00",
+        "default_score": 100,
+        **extra,
+    }
     resp = client.post(f"{API}/courses", headers=auth_header(token), json=payload)
     assert resp.status_code == 201, resp.text
+    course_id = resp.json()["id"]
+    resp = client.patch(
+        f"{API}/courses/{course_id}", headers=auth_header(token), json={"status": status}
+    )
+    assert resp.status_code == 200, resp.text
     return resp.json()
 
 
@@ -49,13 +87,13 @@ def _chapters(client, token, course_id):
 def test_create_accepts_all_visibilities(client, db_session_factory):
     token = _token(client, db_session_factory, "t-vis")
     for vis in ("private", "class", "public", "whitelist"):
-        course = _create_course(client, token, title=f"课程-{vis}", visibility=vis)
+        course = _create_course(client, db_session_factory, token, title=f"课程-{vis}", visibility=vis)
         assert course["visibility"] == vis
 
 
 def test_update_accepts_all_visibilities(client, db_session_factory):
     token = _token(client, db_session_factory, "t-upd")
-    course_id = _create_course(client, token)["id"]
+    course_id = _create_course(client, db_session_factory, token)["id"]
     for vis in ("private", "class", "public", "whitelist"):
         resp = client.patch(
             f"{API}/courses/{course_id}", headers=auth_header(token), json={"visibility": vis}
@@ -71,7 +109,7 @@ def test_invalid_visibility_rejected(client, db_session_factory):
         json={"title": "非法范围", "visibility": "everyone"},
     )
     assert resp.status_code == 422, resp.text
-    course_id = _create_course(client, token)["id"]
+    course_id = _create_course(client, db_session_factory, token)["id"]
     resp = client.patch(
         f"{API}/courses/{course_id}", headers=auth_header(token), json={"visibility": "friends"}
     )
@@ -80,7 +118,7 @@ def test_invalid_visibility_rejected(client, db_session_factory):
 
 def test_visibility_null_rejected(client, db_session_factory):
     token = _token(client, db_session_factory, "t-null")
-    course_id = _create_course(client, token)["id"]
+    course_id = _create_course(client, db_session_factory, token)["id"]
     resp = client.patch(
         f"{API}/courses/{course_id}", headers=auth_header(token), json={"visibility": None}
     )
@@ -128,6 +166,7 @@ def test_class_visibility_allows_class_members_and_teacher_added_students(client
 
     course = _create_course(
         client,
+        db_session_factory,
         teacher_token,
         title="教学班可见课程",
         visibility="class",
@@ -253,7 +292,7 @@ def test_students_endpoint_pagination(client, db_session_factory):
 def _setup_whitelist_course(client, db_session_factory):
     t_tok = _token(client, db_session_factory, "t_wl")
     s_tok = _token(client, db_session_factory, "s_wl", "student")
-    course = _create_course(client, t_tok, visibility="whitelist")
+    course = _create_course(client, db_session_factory, t_tok, visibility="whitelist")
     return t_tok, s_tok, course["id"]
 
 
@@ -450,7 +489,7 @@ def test_public_course_visible_enroll_then_content(client, db_session_factory):
     t_tok = _token(client, db_session_factory, "t_pub")
     s1 = _token(client, db_session_factory, "s_pub1", "student")
     s2 = _token(client, db_session_factory, "s_pub2", "student")
-    course = _create_course(client, t_tok, visibility="public")
+    course = _create_course(client, db_session_factory, t_tok, visibility="public")
     cid = course["id"]
     _add_chapter_lesson(client, t_tok, cid)
 
@@ -563,7 +602,7 @@ def test_private_enrolled_student_keeps_access(client, db_session_factory):
     """存量 private 课程的已选学生继续访问（选课后改为 private 模拟存量课程）"""
     t_tok = _token(client, db_session_factory, "t_priv")
     s_tok = _token(client, db_session_factory, "s_priv", "student")
-    course = _create_course(client, t_tok, visibility="public")
+    course = _create_course(client, db_session_factory, t_tok, visibility="public")
     _add_chapter_lesson(client, t_tok, course["id"])
     assert _enroll(client, s_tok, course["id"]).status_code == 201
     resp = client.patch(
@@ -583,7 +622,7 @@ def test_private_dropped_student_can_reenroll(client, db_session_factory):
     """存量 private 课程的 dropped enrollment 可通过直接地址恢复选课"""
     t_tok = _token(client, db_session_factory, "t_prd")
     s_tok = _token(client, db_session_factory, "s_prd", "student")
-    course = _create_course(client, t_tok, visibility="public")
+    course = _create_course(client, db_session_factory, t_tok, visibility="public")
     assert _enroll(client, s_tok, course["id"]).status_code == 201
     resp = client.patch(
         f"{API}/courses/{course['id']}", headers=auth_header(t_tok),
@@ -605,7 +644,7 @@ def test_private_dropped_student_can_reenroll(client, db_session_factory):
 def test_private_never_enrolled_student_denied(client, db_session_factory):
     t_tok = _token(client, db_session_factory, "t_pne")
     s_tok = _token(client, db_session_factory, "s_pne", "student")
-    course = _create_course(client, t_tok, visibility="private")
+    course = _create_course(client, db_session_factory, t_tok, visibility="private")
 
     resp = client.get(f"{API}/courses", headers=auth_header(s_tok))
     assert resp.json()["total"] == 0
@@ -619,7 +658,7 @@ def test_draft_archived_hidden_from_students(client, db_session_factory):
     t_tok = _token(client, db_session_factory, "t_dar")
     s_tok = _token(client, db_session_factory, "s_dar", "student")
     for status in ("draft", "archived"):
-        course = _create_course(client, t_tok, status=status, visibility="public")
+        course = _create_course(client, db_session_factory, t_tok, status=status, visibility="public")
         resp = client.get(f"{API}/courses", headers=auth_header(s_tok))
         assert resp.json()["total"] == 0
         assert client.get(f"{API}/courses/{course['id']}", headers=auth_header(s_tok)).status_code == 403
@@ -631,7 +670,7 @@ def test_owner_admin_access_draft_archived_any_visibility(client, db_session_fac
     admin_tok = _token(client, db_session_factory, "admin2", "admin")
     for status in ("draft", "archived", "published"):
         for vis in ("private", "public", "whitelist"):
-            course = _create_course(client, t_tok, status=status, visibility=vis)
+            course = _create_course(client, db_session_factory, t_tok, status=status, visibility=vis)
             for tok in (t_tok, admin_tok):
                 resp = client.get(f"{API}/courses/{course['id']}", headers=auth_header(tok))
                 assert resp.status_code == 200, f"{status}/{vis} for {tok[:8]}"
@@ -641,7 +680,7 @@ def test_owner_admin_access_draft_archived_any_visibility(client, db_session_fac
 def test_other_teacher_cannot_access_course(client, db_session_factory):
     t_tok = _token(client, db_session_factory, "t_ota")
     other_tok = _token(client, db_session_factory, "t_otb", "teacher")
-    course = _create_course(client, t_tok, visibility="public")
+    course = _create_course(client, db_session_factory, t_tok, visibility="public")
     resp = client.get(f"{API}/courses/{course['id']}", headers=auth_header(other_tok))
     assert resp.status_code == 403
     resp = client.get(f"{API}/courses", headers=auth_header(other_tok))
@@ -651,7 +690,7 @@ def test_other_teacher_cannot_access_course(client, db_session_factory):
 def test_developer_keeps_empty_course_list(client, db_session_factory):
     t_tok = _token(client, db_session_factory, "t_dev")
     dev_tok = _token(client, db_session_factory, "dev2", "developer")
-    _create_course(client, t_tok, visibility="public")
+    _create_course(client, db_session_factory, t_tok, visibility="public")
     resp = client.get(f"{API}/courses", headers=auth_header(dev_tok))
     assert resp.status_code == 200
     assert resp.json()["total"] == 0
@@ -662,9 +701,9 @@ def test_student_list_total_matches_filtered_no_duplicates(client, db_session_fa
     t_tok = _token(client, db_session_factory, "t_mix")
     s_tok = _token(client, db_session_factory, "s_mix", "student")
     s_id = _student_id(client, s_tok)
-    pub = _create_course(client, t_tok, title="公开课", visibility="public")
-    wl = _create_course(client, t_tok, title="白名单课", visibility="whitelist")
-    _create_course(client, t_tok, title="私密课", visibility="private")
+    pub = _create_course(client, db_session_factory, t_tok, title="公开课", visibility="public")
+    wl = _create_course(client, db_session_factory, t_tok, title="白名单课", visibility="whitelist")
+    _create_course(client, db_session_factory, t_tok, title="私密课", visibility="private")
     client.post(
         f"{API}/courses/{wl['id']}/whitelist", headers=auth_header(t_tok),
         json={"student_id": s_id},
@@ -696,12 +735,13 @@ def test_student_list_total_matches_filtered_no_duplicates(client, db_session_fa
 def _setup_activity_course(client, db_session_factory, visibility):
     """published 课程 + 章节 + published 作业（含题目）+ published 考试（含选择题）"""
     t_tok = _token(client, db_session_factory, "t_act")
-    course = _create_course(client, t_tok, visibility=visibility)
+    course = _create_course(client, db_session_factory, t_tok, visibility=visibility)
     _add_chapter_lesson(client, t_tok, course["id"])
 
+    # TASK-007：POST 只允许 draft，发布走专用 /publish 端点（至少一题）
     resp = client.post(
         f"{API}/assignments", headers=auth_header(t_tok),
-        json={"course_id": course["id"], "title": "作业", "status": "published"},
+        json={"course_id": course["id"], "title": "作业"},
     )
     aid = resp.json()["id"]
     resp = client.post(
@@ -709,6 +749,8 @@ def _setup_activity_course(client, db_session_factory, visibility):
         json={"title": "题", "function_name": "f", "hidden_tests": "SECRET", "grading_mode": "legacy"},
     )
     qid = resp.json()["id"]
+    resp = client.post(f"{API}/assignments/{aid}/publish", headers=auth_header(t_tok))
+    assert resp.status_code == 200, resp.text
 
     now = utc_now()
     resp = client.post(

@@ -57,6 +57,65 @@ def test_publish_rejects_incomplete_course(client, db_session_factory):
     assert "课程封面" in response.json()["detail"]["message"]
 
 
+def test_create_with_published_status_rejected(client, db_session_factory):
+    """TASK-006：POST 只接受 draft，直接创建 published 返回 422（关闭发布旁路）。"""
+    token = _teacher_token(client, db_session_factory)
+    response = client.post(
+        f"{API}/courses",
+        headers=auth_header(token),
+        json={"title": "Bypass course", "status": "published"},
+    )
+    assert response.status_code == 422, response.text
+    # 未落库
+    assert "bypass" not in response.text
+
+
+def test_create_with_unknown_status_rejected(client, db_session_factory):
+    token = _teacher_token(client, db_session_factory)
+    response = client.post(
+        f"{API}/courses",
+        headers=auth_header(token),
+        json={"title": "Weird course", "status": "live"},
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_regular_update_does_not_publish(client, db_session_factory):
+    """普通更新（不传 status）不触发发布：草稿仍为草稿。"""
+    token = _teacher_token(client, db_session_factory)
+    created = client.post(
+        f"{API}/courses",
+        headers=auth_header(token),
+        json={"title": "Stay draft", "status": "draft"},
+    )
+    assert created.status_code == 201, created.text
+    course_id = created.json()["id"]
+
+    response = client.patch(
+        f"{API}/courses/{course_id}",
+        headers=auth_header(token),
+        json={"title": "Stay draft v2"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "draft"
+
+
+def test_patch_with_unknown_status_rejected(client, db_session_factory):
+    token = _teacher_token(client, db_session_factory)
+    created = client.post(
+        f"{API}/courses",
+        headers=auth_header(token),
+        json={"title": "Typed status", "status": "draft"},
+    )
+    assert created.status_code == 201, created.text
+    response = client.patch(
+        f"{API}/courses/{created.json()['id']}",
+        headers=auth_header(token),
+        json={"status": "live"},
+    )
+    assert response.status_code == 422, response.text
+
+
 def test_publish_accepts_course_with_complete_basic_information(client, db_session_factory):
     token = _teacher_token(client, db_session_factory)
     term_id, class_id = _academic_data(db_session_factory)
