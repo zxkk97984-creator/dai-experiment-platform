@@ -15,7 +15,7 @@ from sqlalchemy import select
 from app.api import api_router
 from app.config import Settings, get_settings
 from app.database import SessionLocal
-from app.dependencies import require_roles
+from app.dependencies import get_db, get_redis_client, require_roles
 from app.services.exam_service import scan_expired_exams
 
 logger = logging.getLogger("dai.main")
@@ -118,11 +118,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(_: Request, exc: StarletteHTTPException):
-        return JSONResponse(status_code=exc.status_code, content={"detail": _normalize_detail(exc.detail)})
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": _normalize_detail(exc.detail)},
+            headers=getattr(exc, "headers", None),
+        )
 
     @app.exception_handler(HTTPException)
     async def fastapi_http_exception_handler(_: Request, exc: HTTPException):
-        return JSONResponse(status_code=exc.status_code, content={"detail": _normalize_detail(exc.detail)})
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": _normalize_detail(exc.detail)},
+            headers=getattr(exc, "headers", None),
+        )
 
     @app.exception_handler(Exception)
     async def general_exception_handler(_: Request, exc: Exception):
@@ -135,36 +143,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok", "app": settings.app_name}
 
     @app.get("/api/v1/health/ready", tags=["health"])
-    def health_ready():
-        """就绪检查——验证 MySQL + Redis 可达"""
-        import redis as _redis
+    def health_ready(db=Depends(get_db), redis_client=Depends(get_redis_client)):
+        """就绪检查——MySQL 与 Redis 均为关键依赖，任一不可用返回 503。
+
+        响应不回显底层异常详情（只返回 ok/unavailable），细节仅记录服务端日志；
+        liveness（/api/v1/health/live）只判断进程存活，不检查任何依赖。
+        """
         ready = True
         details = {}
 
         # MySQL
         try:
-            from app.database import SessionLocal
-            db = SessionLocal()
-            db.execute(select(1)) if True else None  # simplified check
-            db.close()
+            db.execute(select(1))
             details["mysql"] = "ok"
-        except Exception as e:
+        except Exception:
             ready = False
-            details["mysql"] = str(e)[:100]
+            details["mysql"] = "unavailable"
+            logger.warning("健康检查：MySQL 不可用", exc_info=True)
 
-        # Redis
+        # Redis（认证、限流与队列唤醒的关键依赖，故障时实例必须摘流）
         try:
-            r = _redis.Redis.from_url(settings.redis_url, socket_connect_timeout=2)
-            r.ping()
+            redis_client.ping()
             details["redis"] = "ok"
-        except Exception as e:
-            details["redis"] = str(e)[:100]
-            # Redis 不可用不影响 ready（判题暂时无法入队但不阻塞 API）
+        except Exception:
+            ready = False
+            details["redis"] = "unavailable"
+            logger.warning("健康检查：Redis 不可用", exc_info=True)
 
-        status_code = 200 if ready else 503
         from fastapi.responses import JSONResponse
         return JSONResponse(
-            status_code=status_code,
+            status_code=200 if ready else 503,
             content={"status": "ready" if ready else "degraded", "checks": details},
         )
 

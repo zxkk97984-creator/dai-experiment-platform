@@ -1,7 +1,7 @@
 from collections.abc import Callable
 
 import redis
-from fastapi import Depends
+from fastapi import Depends, Query
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
@@ -14,12 +14,33 @@ from .security import decode_token
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
+class PaginationParams:
+    """统一分页契约（TASK-021 / F-24）：page >= 1，1 <= page_size <= 100。
+
+    非法值由 FastAPI Query 校验统一返回 422；响应结构不变。
+    """
+
+    def __init__(self, page: int, page_size: int):
+        self.page = page
+        self.page_size = page_size
+
+
+def pagination(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> PaginationParams:
+    return PaginationParams(page=page, page_size=page_size)
+
+
 def get_db():
     yield from get_db_session()
 
 
 def get_redis_client(settings: Settings = Depends(get_settings)):
-    return redis.Redis.from_url(settings.redis_url, decode_responses=True)
+    # socket_connect_timeout 限定连接阶段——Redis 故障时快速失败（健康检查/登录/限流均依赖此语义）
+    return redis.Redis.from_url(
+        settings.redis_url, decode_responses=True, socket_connect_timeout=2
+    )
 
 
 def get_current_payload(
