@@ -109,6 +109,17 @@ const questionEnvId = ref(null)
 const questionPolicyMode = ref('inherit')  // inherit | unrestricted | restricted
 const questionAllowedImports = ref([])
 const assignmentDraft = computed(() => assignment.value?.status === 'draft')
+// TASK-009：已发布或已有学生提交（即使取消发布）→ 题目/AI 配置/环境锁定不可编辑
+const assignmentLocked = computed(() => !assignmentDraft.value || !!assignment.value?.has_submissions)
+const lockedNotice = computed(() => {
+  if (assignment.value?.status === 'published') {
+    return '作业已发布，题目与评分配置已锁定；修改需先取消发布（已有提交后不可修改，纠错请新建作业）。'
+  }
+  if (assignment.value?.has_submissions) {
+    return '该作业已有学生提交，题目与评分配置不可修改（纠错请新建作业）。'
+  }
+  return ''
+})
 
 const envById = (id) => envOptions.value.find((o) => o.environment_version_id === id) || null
 const envImportCandidates = (envId) => {
@@ -417,6 +428,37 @@ function openAiConfig(q) {
  sideTab.value = 'ai'
 }
 
+// ── 删除题目（TASK-017）：仅无提交的 draft 作业可删除，后端 409 兜底 ──
+const deleteTarget = ref(null)
+const deleteBusy = ref(false)
+
+function requestDeleteQuestion(q) {
+ if (assignmentLocked.value) return
+ deleteTarget.value = q
+}
+
+async function performDeleteQuestion() {
+ if (!deleteTarget.value || deleteBusy.value) return
+ deleteBusy.value = true
+ try {
+   await assignmentsAPI.deleteQuestion(route.params.id, deleteTarget.value.id)
+   app.showToast('题目已删除', 'success')
+   const targetId = deleteTarget.value.id
+   deleteTarget.value = null
+   if (editingId.value === targetId || activeId.value === targetId) {
+     activeId.value = null
+     editingId.value = null
+     resetQuestionForm()
+   }
+   fetch()
+ } catch (e) {
+   app.showToast(e.response?.data?.detail?.message || '删除失败', 'error')
+   deleteTarget.value = null
+ } finally {
+   deleteBusy.value = false
+ }
+}
+
 // 运行测试：调用后端 sample-run（该接口仅对学生开放，教师调用会返回 403，
 // 错误如实展示，不做假成功）
 async function runSample() {
@@ -515,7 +557,8 @@ onMounted(() => { fetch(); fetchEnv() })
             <AppIcon name="assignment" :size="18" />
             <p>暂无题目，点击「添加题目」创建第一道题目</p>
           </div>
-          <button class="btn-primary btn-sm" @click="startNew">
+          <p v-if="lockedNotice" class="qe-lock-notice">{{ lockedNotice }}</p>
+          <button class="btn-primary btn-sm" :disabled="assignmentLocked" @click="startNew">
             <AppIcon name="plus" :size="14" />
             添加题目
           </button>
@@ -530,7 +573,7 @@ onMounted(() => { fetch(); fetchEnv() })
             class="qe-list-row"
             :class="{ 'qe-list-row--active': activeId === q.id }"
           >
-            <div class="qe-list-main" :class="{ 'qe-list-main--readonly': !assignmentDraft }" @click="assignmentDraft && openEdit(q)">
+            <div class="qe-list-main" :class="{ 'qe-list-main--readonly': assignmentLocked }" @click="!assignmentLocked && openEdit(q)">
               <span class="qe-list-no">#{{ i + 1 }}</span>
               <div class="qe-list-text">
                 <div class="qe-list-title">{{ q.title }}</div>
@@ -541,11 +584,14 @@ onMounted(() => { fetch(); fetchEnv() })
               </div>
             </div>
             <div class="qe-list-actions">
-              <button v-if="assignmentDraft" class="btn-sm btn-outline" @click="openEdit(q)">编辑</button>
+              <button v-if="!assignmentLocked" class="btn-sm btn-outline" @click="openEdit(q)">编辑</button>
               <!-- 收敛：不再行内展开第二个 AIQuestionConfig 实例，统一打开右侧栏 AI tab -->
-              <button class="btn-sm btn-outline" @click="openAiConfig(q)">
+              <button class="btn-sm btn-outline" :disabled="assignmentLocked" @click="openAiConfig(q)">
                 <AppIcon name="settings" :size="14" />
                 <span class="qe-sr-only">🤖 </span>AI 配置
+              </button>
+              <button v-if="!assignmentLocked" class="btn-sm btn-outline qe-delete-action" data-action="delete-question" @click="requestDeleteQuestion(q)">
+                <AppIcon name="trash" :size="14" />删除
               </button>
             </div>
           </div>
@@ -822,6 +868,18 @@ onMounted(() => { fetch(); fetchEnv() })
         :busy="scheduleSaving"
         @confirm="saveSchedule()"
         @cancel="scheduleConfirmOpen = false"
+      />
+      <!-- 删除题目确认（TASK-017）：仅无提交的 draft 作业可删除；后端对已发布/有提交返回 409 -->
+      <ConfirmDialog
+        v-if="deleteTarget"
+        :title="`删除题目「${deleteTarget.title}」？`"
+        message="删除后该题目的 Rubric 等从属数据将一并清除，且不可恢复。已发布或已有学生提交的作业不可删除题目。"
+        confirm-text="确认删除"
+        cancel-text="取消"
+        :danger="true"
+        :busy="deleteBusy"
+        @confirm="performDeleteQuestion()"
+        @cancel="deleteTarget = null"
       />
     </div>
   </AppLayout>

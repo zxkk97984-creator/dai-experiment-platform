@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
 from app.config import Settings, get_settings
-from app.dependencies import get_db, get_redis_client
+from app.dependencies import PaginationParams, get_db, get_redis_client, pagination
 from app.errors import api_error
 from app.models import (
     Assignment, CodeGrade, Course, Exam, ExamAnswer, ExamQuestion,
@@ -37,6 +37,21 @@ from app.services.ai_grading_queue import enqueue_ai_grade
 from app.services.score_merger import merge_scores
 
 router = APIRouter(prefix="/ai-grading", tags=["AI 评分"])
+
+
+def _ensure_assignment_content_editable(db: Session, kind: str, question_id: int) -> None:
+    """TASK-009：作业题 AI 配置/Rubric 属于评分事实——发布或已有提交后禁止修改。"""
+    if kind != "assignment":
+        return
+    from app.api.assignments import ensure_assignment_content_editable
+
+    q = db.get(JudgeQuestion, question_id)
+    if q is None:
+        raise api_error(404, "NOT_FOUND", "题目不存在")
+    assignment = db.get(Assignment, q.assignment_id)
+    if assignment is None:
+        raise api_error(404, "NOT_FOUND", "作业不存在")
+    ensure_assignment_content_editable(db, assignment)
 
 
 def _teacher_or_admin(user: User):
@@ -153,6 +168,7 @@ def update_question_ai_config(
     _teacher_or_admin(current_user)
     course_id = _get_course_id_for_question(db, kind, question_id)
     _ensure_course_teacher(db, course_id, current_user)
+    _ensure_assignment_content_editable(db, kind, question_id)
 
     if kind == "assignment":
         q = db.get(JudgeQuestion, question_id)
@@ -211,6 +227,8 @@ def generate_rubric_endpoint(
     if not settings.ai_ready:
         raise api_error(503, "AI_NOT_READY", "AI 服务未配置 API Key")
 
+    _ensure_assignment_content_editable(db, kind, question_id)
+
     if kind == "assignment":
         q = db.get(JudgeQuestion, question_id)
     else:
@@ -261,6 +279,7 @@ def generate_test_groups_endpoint(
     _teacher_or_admin(current_user)
     course_id = _get_course_id_for_question(db, kind, question_id)
     _ensure_course_teacher(db, course_id, current_user)
+    _ensure_assignment_content_editable(db, kind, question_id)
 
     if not settings.ai_ready:
         raise api_error(503, "AI_NOT_READY", "AI 服务未配置 API Key")
@@ -363,6 +382,7 @@ def patch_rubric(
     k = "assignment" if rubric.judge_question_id else "exam"
     course_id = _get_course_id_for_question(db, k, qid)
     _ensure_course_teacher(db, course_id, current_user)
+    _ensure_assignment_content_editable(db, k, qid)
 
     try:
         updated = update_draft_rubric(db, rubric_id, document)
@@ -386,6 +406,7 @@ def lock_rubric_endpoint(
     k = "assignment" if rubric.judge_question_id else "exam"
     course_id = _get_course_id_for_question(db, k, qid)
     _ensure_course_teacher(db, course_id, current_user)
+    _ensure_assignment_content_editable(db, k, qid)
 
     try:
         locked = lock_rubric(db, rubric_id)
@@ -527,11 +548,11 @@ def list_grades(
     student_id: int | None = Query(None),
     student_name: str | None = Query(None),
     status: str | None = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    page, page_size = pagination.page, pagination.page_size
     _teacher_or_admin(current_user)
 
     query, count_q = _build_grade_base_query(
