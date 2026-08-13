@@ -84,6 +84,39 @@ def ensure_assignment_manager(assignment: Assignment, user: User, db: Session):
     raise api_error(403, "FORBIDDEN", "没有权限管理该作业")
 
 
+def _assignment_has_submissions(db: Session, assignment_id: int) -> bool:
+    return (
+        db.scalar(
+            select(Submission.id)
+            .join(JudgeQuestion, Submission.question_id == JudgeQuestion.id)
+            .where(JudgeQuestion.assignment_id == assignment_id)
+            .limit(1)
+        )
+        is not None
+    )
+
+
+def ensure_scoring_editable(db: Session, assignment: Assignment) -> None:
+    """评分输入与规则（题目结构/分值/测试/环境/Rubric/AI 配置）不可变守卫：
+
+    - published 状态禁止修改；
+    - 即使取消发布，只要存在任何学生提交，仍禁止修改；
+    - 标题、描述、截止时间等非评分元数据不受此守卫限制。
+    """
+    if assignment.status == "published":
+        raise api_error(
+            409,
+            "ASSIGNMENT_NOT_EDITABLE",
+            "已发布作业的评分配置不可修改，请先取消发布",
+        )
+    if _assignment_has_submissions(db, assignment.id):
+        raise api_error(
+            409,
+            "ASSIGNMENT_HAS_SUBMISSIONS",
+            "该作业已有学生提交，评分输入与规则不可修改",
+        )
+
+
 def _assignment_with_summary(db: Session, assignment: Assignment) -> AssignmentRead:
     """读响应附加学生可见环境摘要（Phase 5）——不含 digest/tag/构建日志。"""
     data = AssignmentRead.model_validate(assignment)
@@ -208,8 +241,9 @@ def update_assignment(
     from app.services.environment_service import ENV_FIELDS, validate_environment_selection
 
     env_changes = [k for k in ENV_FIELDS if k in updates]
-    if env_changes and assignment.status != "draft":
-        raise api_error(409, "ASSIGNMENT_NOT_EDITABLE", "已发布作业的环境设置不可修改，请先将作业切回 draft")
+    if env_changes:
+        # 环境设置属于评分输入：发布后或已有提交后不可修改
+        ensure_scoring_editable(db, assignment)
     if updates.get("environment_version_id") is not None:
         validate_environment_selection(db, updates["environment_version_id"])
     for key, value in updates.items():
@@ -362,6 +396,7 @@ def create_question(
 ):
     assignment = require_assignment(assignment_id, db)
     ensure_assignment_manager(assignment, current_user, db)
+    ensure_scoring_editable(db, assignment)
     data = payload.model_dump(exclude_unset=True)
     # JSON null 与未提供字段语义一致：新建编程题默认进入 active。
     if data.get("grading_mode") is None:
@@ -387,11 +422,10 @@ def update_question(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """更新作业编程题——要求教师所有权且作业处于 draft 状态"""
+    """更新作业编程题——要求教师所有权且评分配置处于可编辑状态"""
     assignment = require_assignment(assignment_id, db)
     ensure_assignment_manager(assignment, current_user, db)
-    if assignment.status != "draft":
-        raise api_error(409, "ASSIGNMENT_NOT_EDITABLE", "只有草稿状态的作业可以修改题目，请先将作业切回 draft")
+    ensure_scoring_editable(db, assignment)
     question = db.get(JudgeQuestion, question_id)
     if not question or question.assignment_id != assignment_id:
         raise api_error(404, "QUESTION_NOT_FOUND", "题目不存在或不属于该作业")

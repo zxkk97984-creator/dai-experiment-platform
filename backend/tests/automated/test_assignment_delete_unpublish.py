@@ -119,8 +119,13 @@ def test_delete_published_assignment_conflict(client, db_session_factory):
 def test_delete_draft_with_submissions_conflict(client, db_session_factory):
     """已发布→学生提交→取消发布回草稿→删除被拒（有提交记录防边界），且拒绝时数据零删除"""
     teacher_token, student_token, course_id, student_id = _setup(client, db_session_factory)
-    assignment_id = _create_assignment(client, teacher_token, course_id, status="published")
+    # 评分事实不可变：题必须在发布前建好（发布后不再能新增题）
+    assignment_id = _create_assignment(client, teacher_token, course_id, status="draft")
     question_id = _create_question(client, teacher_token, assignment_id)
+    publish = client.post(
+        f"/api/v1/assignments/{assignment_id}/publish", headers=auth_header(teacher_token)
+    )
+    assert publish.status_code == 200, publish.text
 
     submit = client.post(
         "/api/v1/judge/submissions",
@@ -275,7 +280,6 @@ def test_unpublish_then_republish_legacy(client, db_session_factory):
     """取消发布后可重新发布（legacy 无 rubric 题目走现有发布门禁直接通过）"""
     teacher_token, _, course_id, _ = _setup(client, db_session_factory)
     assignment_id = _create_assignment(client, teacher_token, course_id, status="published")
-    _create_question(client, teacher_token, assignment_id)
 
     client.post(f"/api/v1/assignments/{assignment_id}/unpublish", headers=auth_header(teacher_token))
     resp = client.post(

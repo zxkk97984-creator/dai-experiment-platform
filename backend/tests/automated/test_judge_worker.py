@@ -75,12 +75,14 @@ def test_sample_run_permission_denied_all_cases(client, db_session_factory):
     t_tok, _ = login(client, "t_perm2")
     s_tok, _ = login(client, "s_perm2")
     cid = create_course_db(db_session_factory, teacher_username='t_perm2', title='C', status='published', visibility='public')
-    # 不选课
-    aid = create_assignment_db(db_session_factory, course_id=cid, teacher_username='t_perm2', title='A', status='published')
+    # 不选课（评分事实不可变：题必须在发布前建好）
+    aid = create_assignment_db(db_session_factory, course_id=cid, teacher_username='t_perm2', title='A', status='draft')
     q = client.post(f'/api/v1/assignments/{aid}/questions', headers=auth_header(t_tok), json={
-        'title': 'Q', 'function_name': 'f', 'hidden_tests': 'def test(): pass',
+        'title': 'Q', 'function_name': 'f', 'hidden_tests': 'def test(): pass', 'grading_mode': 'legacy',
     })
     qid = q.json()['id']
+    pub = client.post(f'/api/v1/assignments/{aid}/publish', headers=auth_header(t_tok))
+    assert pub.status_code == 200, pub.text
 
     r = client.post(f'/api/v1/judge/questions/{qid}/sample-run',
                     headers=auth_header(s_tok), json={'question_id': qid, 'code': 'pass'})
@@ -113,10 +115,12 @@ def test_sample_run_permission_denied_all_cases(client, db_session_factory):
     s_dc, _ = login(client, "s_dc2")
     c3 = client.post('/api/v1/courses', headers=auth_header(t_dc), json={'title':'C3','status':'draft'})
     c3id = c3.json()['id']
-    a3id = create_assignment_db(db_session_factory, course_id=c3id, teacher_username='t_dc2', title='A3', status='published')
+    a3id = create_assignment_db(db_session_factory, course_id=c3id, teacher_username='t_dc2', title='A3', status='draft')
     q3 = client.post(f'/api/v1/assignments/{a3id}/questions', headers=auth_header(t_dc), json={
-        'title':'Q3','function_name':'f','hidden_tests':'def test(): pass',
+        'title':'Q3','function_name':'f','hidden_tests':'def test(): pass', 'grading_mode': 'legacy',
     })
+    pub3 = client.post(f'/api/v1/assignments/{a3id}/publish', headers=auth_header(t_dc))
+    assert pub3.status_code == 200, pub3.text
     r = client.post(f'/api/v1/judge/questions/{q3.json()["id"]}/sample-run',
                     headers=auth_header(s_dc), json={'question_id':q3.json()['id'],'code':'pass'})
     assert r.status_code in (403, 404), f"draft course: {r.status_code}"

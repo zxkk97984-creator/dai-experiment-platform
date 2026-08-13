@@ -38,6 +38,8 @@ def test_settings(tmp_path):
         jupyter_base_url="http://localhost:8888",
         judge_use_docker=False,
         judge_timeout_seconds=5,
+        # 隔离本地 backend/.env：测试永不携带真实 AI Key，杜绝外呼
+        ai_api_key="",
         studio_storage_dir=str(tmp_path / "studio"),
         # 测试视频目录指向临时目录，绝不写入真实 backend/storage/videos/
         video_storage_dir=str(tmp_path / "videos"),

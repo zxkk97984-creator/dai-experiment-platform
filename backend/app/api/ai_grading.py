@@ -44,6 +44,24 @@ def _teacher_or_admin(user: User):
         raise api_error(403, "FORBIDDEN", "仅教师和管理员可访问")
 
 
+def _ensure_assignment_scoring_editable(db: Session, kind: str, question_id: int) -> None:
+    """作业类题目的 AI 配置/Rubric 属于评分事实：发布后或存在提交后禁止修改。
+
+    考试题由考试自身生命周期管理，不受此守卫限制。
+    """
+    if kind != "assignment":
+        return
+    question = db.get(JudgeQuestion, question_id)
+    if question is None:
+        raise api_error(404, "NOT_FOUND", "题目不存在")
+    assignment = db.get(Assignment, question.assignment_id)
+    if assignment is None:
+        raise api_error(404, "NOT_FOUND", "作业不存在")
+    from app.api.assignments import ensure_scoring_editable
+
+    ensure_scoring_editable(db, assignment)
+
+
 def _ensure_course_teacher(db: Session, course_id: int, user: User):
     """验证用户是该课程的教师或 admin"""
     if user.role == "admin":
@@ -153,6 +171,7 @@ def update_question_ai_config(
     _teacher_or_admin(current_user)
     course_id = _get_course_id_for_question(db, kind, question_id)
     _ensure_course_teacher(db, course_id, current_user)
+    _ensure_assignment_scoring_editable(db, kind, question_id)
 
     if kind == "assignment":
         q = db.get(JudgeQuestion, question_id)
@@ -207,6 +226,7 @@ def generate_rubric_endpoint(
     _teacher_or_admin(current_user)
     course_id = _get_course_id_for_question(db, kind, question_id)
     _ensure_course_teacher(db, course_id, current_user)
+    _ensure_assignment_scoring_editable(db, kind, question_id)
 
     if not settings.ai_ready:
         raise api_error(503, "AI_NOT_READY", "AI 服务未配置 API Key")
@@ -363,6 +383,7 @@ def patch_rubric(
     k = "assignment" if rubric.judge_question_id else "exam"
     course_id = _get_course_id_for_question(db, k, qid)
     _ensure_course_teacher(db, course_id, current_user)
+    _ensure_assignment_scoring_editable(db, k, qid)
 
     try:
         updated = update_draft_rubric(db, rubric_id, document)
@@ -386,6 +407,7 @@ def lock_rubric_endpoint(
     k = "assignment" if rubric.judge_question_id else "exam"
     course_id = _get_course_id_for_question(db, k, qid)
     _ensure_course_teacher(db, course_id, current_user)
+    _ensure_assignment_scoring_editable(db, k, qid)
 
     try:
         locked = lock_rubric(db, rubric_id)

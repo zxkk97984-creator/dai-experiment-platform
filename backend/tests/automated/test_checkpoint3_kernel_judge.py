@@ -323,11 +323,13 @@ def test_teacher_a_cannot_see_teacher_b_submissions(client, db_session_factory):
 
     caid = create_course_db(db_session_factory, teacher_username='ta1', title='TA Course', status='published', visibility='public')
     client.post(f'/api/v1/courses/{caid}/enroll', headers=auth_header(s_tok))
-    aid = create_assignment_db(db_session_factory, course_id=caid, teacher_username='ta1', title='A1', status='published')
+    aid = create_assignment_db(db_session_factory, course_id=caid, teacher_username='ta1', title='A1', status='draft')
     q = client.post(f'/api/v1/assignments/{aid}/questions', headers=auth_header(ta_tok), json={
-        'title': 'Q1', 'function_name': 'f', 'hidden_tests': 'def test(): pass',
+        'title': 'Q1', 'function_name': 'f', 'hidden_tests': 'def test(): pass', 'grading_mode': 'legacy',
     })
     qid = q.json()['id']
+    pub = client.post(f'/api/v1/assignments/{aid}/publish', headers=auth_header(ta_tok))
+    assert pub.status_code == 200, pub.text
 
     # student submits
     sub = client.post('/api/v1/judge/submissions', headers=auth_header(s_tok), json={
