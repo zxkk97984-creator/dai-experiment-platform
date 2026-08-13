@@ -41,7 +41,7 @@ def test_chat_uses_configured_endpoint_and_model():
         make_test_settings(),
         transport=httpx.MockTransport(handler),
     )
-    result = client.chat_json([{"role": "user", "content": "hello"}])
+    result = client.chat_json([{"role": "user", "content": "hello"}], operation="ai_grading")
     assert result == {"ok": True}
     assert seen["url"] == "https://aihub.codingpython.cn/v1/chat/completions"
     assert seen["auth"].startswith("Bearer ")
@@ -70,7 +70,7 @@ def test_chat_passes_messages_correctly():
         {"role": "system", "content": "You are a code grader."},
         {"role": "user", "content": "Grade this code."},
     ]
-    client.chat_json(messages)
+    client.chat_json(messages, operation="ai_grading")
     assert seen["body"]["messages"] == messages
     assert seen["body"]["response_format"] == {"type": "json_object"}
 
@@ -94,7 +94,7 @@ def test_base_url_with_trailing_slash():
         make_test_settings(ai_base_url="https://aihub.codingpython.cn/"),
         transport=httpx.MockTransport(handler),
     )
-    client.chat_json([{"role": "user", "content": "x"}])
+    client.chat_json([{"role": "user", "content": "x"}], operation="ai_grading")
     assert seen["url"] == "https://aihub.codingpython.cn/v1/chat/completions"
 
 
@@ -114,7 +114,7 @@ def test_base_url_already_contains_v1():
         make_test_settings(ai_base_url="https://aihub.codingpython.cn/v1"),
         transport=httpx.MockTransport(handler),
     )
-    client.chat_json([{"role": "user", "content": "x"}])
+    client.chat_json([{"role": "user", "content": "x"}], operation="ai_grading")
     assert seen["url"] == "https://aihub.codingpython.cn/v1/chat/completions"
 
 
@@ -139,7 +139,7 @@ def test_retry_on_429():
         make_test_settings(ai_max_retries=2),
         transport=httpx.MockTransport(handler),
     )
-    result = client.chat_json([{"role": "user", "content": "x"}])
+    result = client.chat_json([{"role": "user", "content": "x"}], operation="ai_grading")
     assert result == {"ok": True}
     assert call_count[0] == 2
 
@@ -162,7 +162,7 @@ def test_retry_on_5xx():
         make_test_settings(ai_max_retries=3),
         transport=httpx.MockTransport(handler),
     )
-    result = client.chat_json([{"role": "user", "content": "x"}])
+    result = client.chat_json([{"role": "user", "content": "x"}], operation="ai_grading")
     assert result == {"ok": True}
     assert call_count[0] == 3
 
@@ -179,7 +179,7 @@ def test_exhausted_retries_raise():
         transport=httpx.MockTransport(handler),
     )
     with pytest.raises(AIServiceError) as exc_info:
-        client.chat_json([{"role": "user", "content": "x"}])
+        client.chat_json([{"role": "user", "content": "x"}], operation="ai_grading")
     assert exc_info.value.retryable is True
 
 
@@ -198,7 +198,7 @@ def test_401_fails_immediately():
         transport=httpx.MockTransport(handler),
     )
     with pytest.raises(AIServiceError) as exc_info:
-        client.chat_json([{"role": "user", "content": "x"}])
+        client.chat_json([{"role": "user", "content": "x"}], operation="ai_grading")
     assert exc_info.value.retryable is False
     assert call_count[0] == 1  # 一次都不重试
 
@@ -215,7 +215,7 @@ def test_timeout_raises_retryable():
         transport=httpx.MockTransport(handler),
     )
     with pytest.raises(AIServiceError) as exc_info:
-        client.chat_json([{"role": "user", "content": "x"}])
+        client.chat_json([{"role": "user", "content": "x"}], operation="ai_grading")
     assert exc_info.value.retryable is True
 
 
@@ -235,7 +235,7 @@ def test_markdown_json_fence_extraction():
         make_test_settings(),
         transport=httpx.MockTransport(handler),
     )
-    result = client.chat_json([{"role": "user", "content": "x"}])
+    result = client.chat_json([{"role": "user", "content": "x"}], operation="ai_grading")
     assert result == {"ok": True}
 
 
@@ -252,7 +252,7 @@ def test_pure_json_without_fence():
         make_test_settings(),
         transport=httpx.MockTransport(handler),
     )
-    result = client.chat_json([{"role": "user", "content": "x"}])
+    result = client.chat_json([{"role": "user", "content": "x"}], operation="ai_grading")
     assert result == {"ok": True}
 
 
@@ -270,7 +270,7 @@ def test_invalid_json_raises():
         transport=httpx.MockTransport(handler),
     )
     with pytest.raises(Exception):
-        client.chat_json([{"role": "user", "content": "x"}])
+        client.chat_json([{"role": "user", "content": "x"}], operation="ai_grading")
 
 
 def test_empty_choices_raises():
@@ -285,7 +285,7 @@ def test_empty_choices_raises():
         transport=httpx.MockTransport(handler),
     )
     with pytest.raises(Exception):
-        client.chat_json([{"role": "user", "content": "x"}])
+        client.chat_json([{"role": "user", "content": "x"}], operation="ai_grading")
 
 
 def test_sanitize_ai_error_removes_secrets():

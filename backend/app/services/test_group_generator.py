@@ -91,7 +91,8 @@ def generate_test_groups(
     for attempt in range(2):
         messages = build_test_group_messages(snapshot, fix_issues=(issues or None))
         try:
-            payload = client.chat_json(messages)
+            # TASK-028：test_group_generation 预算 3000 completion tokens
+            payload = client.chat_json(messages, operation="test_group_generation")
         except AIServiceError as exc:
             if exc.code == "bad_json":
                 # JSON 提取失败：携带提示进行一次修复生成

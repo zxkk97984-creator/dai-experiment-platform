@@ -575,7 +575,7 @@ def test_generate_fix_retry_succeeds(tmp_path, monkeypatch):
             self.responses = list(responses)
             self.calls = []
 
-        def chat_json(self, messages):
+        def chat_json(self, messages, *, operation=None):
             self.calls.append(messages)
             return self.responses.pop(0)
 
@@ -619,7 +619,7 @@ def test_generate_bad_json_fix_retry(tmp_path, monkeypatch):
         def __init__(self):
             self.calls = 0
 
-        def chat_json(self, messages):
+        def chat_json(self, messages, *, operation=None):
             self.calls += 1
             if self.calls == 1:
                 raise AIServiceError("bad_json", "AI 返回非 JSON 内容", retryable=True)
@@ -666,7 +666,7 @@ class FakeAIClient:
         self.responses = list(responses)
         self.calls = []
 
-    def chat_json(self, messages):
+    def chat_json(self, messages, *, operation=None):
         self.calls.append(messages)
         if not self.responses:
             raise AssertionError("模型调用次数超过预设")

@@ -59,6 +59,29 @@ def _teacher_or_admin(user: User):
         raise api_error(403, "FORBIDDEN", "仅教师和管理员可访问")
 
 
+def _check_generation_rate_limit(redis_client, user_id: int, scope: str) -> None:
+    """AI 高成本生成的用户级限流：同一 scope 每 60 秒最多 5 次。
+
+    TASK-028/F-23：Redis 故障时 fail-closed 返回 503——限流失效不得放行
+    高成本生成（生成路径每用户每次调用都有真实成本）。
+    """
+    limit_key = f"ai:gen:{scope}:{user_id}"
+    try:
+        count = redis_client.incr(limit_key)
+        if count == 1:
+            redis_client.expire(limit_key, 60)
+    except Exception as exc:
+        logger.error(
+            "ai_rate_limit_unavailable",
+            extra={"scope": scope, "user_id": user_id},
+        )
+        raise api_error(
+            503, "AI_RATE_LIMIT_UNAVAILABLE", "限流服务不可用，请稍后再试"
+        ) from exc
+    if count > 5:
+        raise api_error(429, "AI_RATE_LIMITED", "生成过于频繁，请稍后再试")
+
+
 @router.get("/status", response_model=AIServiceStatus)
 def ai_service_status(
     settings: Settings = Depends(get_settings),
@@ -228,6 +251,7 @@ def generate_rubric_endpoint(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
+    redis_client=Depends(get_redis_client),
 ):
     _teacher_or_admin(current_user)
     course_id = _get_course_id_for_question(db, kind, question_id)
@@ -235,6 +259,9 @@ def generate_rubric_endpoint(
 
     if not settings.ai_ready:
         raise api_error(503, "AI_NOT_READY", "AI 服务未配置 API Key")
+
+    # TASK-028：Rubric 生成同样纳入限流（每用户每题目 60 秒 5 次，Redis 故障 503）
+    _check_generation_rate_limit(redis_client, current_user.id, f"rubric:{kind}:{question_id}")
 
     _ensure_assignment_content_editable(db, kind, question_id)
 
@@ -293,16 +320,9 @@ def generate_test_groups_endpoint(
     if not settings.ai_ready:
         raise api_error(503, "AI_NOT_READY", "AI 服务未配置 API Key")
 
-    # 限流：每用户每题目 60 秒内最多 5 次（redis 故障不阻断生成）
-    limit_key = f"ai:testgroups:gen:{current_user.id}:{kind}:{question_id}"
-    try:
-        count = redis_client.incr(limit_key)
-        if count == 1:
-            redis_client.expire(limit_key, 60)
-    except Exception:
-        count = 0
-    if count > 5:
-        raise api_error(429, "AI_RATE_LIMITED", "生成过于频繁，请稍后再试")
+    # TASK-028/F-23：每用户每题目 60 秒内最多 5 次；Redis 故障时 fail-closed 返回
+    # 503（高成本生成不得在限流失效时放行）
+    _check_generation_rate_limit(redis_client, current_user.id, f"testgroups:{kind}:{question_id}")
 
     if kind == "assignment":
         q = db.get(JudgeQuestion, question_id)
