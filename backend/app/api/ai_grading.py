@@ -23,6 +23,7 @@ from app.schemas.ai_grading import (
     TestGroupsGenerateRequest, TestGroupsGenerateResponse,
 )
 from app.services.ai_client import AIServiceError, DeepSeekClient
+from app.services.op_metrics import ai_metrics_sink
 from app.services.ai_prompts import build_test_group_snapshot
 from app.services.rubric_service import (
     RubricGenerationError, build_question_snapshot, generate_rubric,
@@ -284,7 +285,7 @@ def generate_rubric_endpoint(
         is_exam=(kind == "exam"),
     )
 
-    client = DeepSeekClient(settings)
+    client = DeepSeekClient(settings, metrics_sink=ai_metrics_sink())
     try:
         rubric = generate_rubric(db, client, kind=kind, question_id=question_id, snapshot=snapshot)
     except RubricGenerationError as exc:
@@ -356,7 +357,7 @@ def generate_test_groups_endpoint(
         teacher_constraints=teacher_constraints,
     )
 
-    client = DeepSeekClient(settings)
+    client = DeepSeekClient(settings, metrics_sink=ai_metrics_sink())
     try:
         with tempfile.TemporaryDirectory(prefix="dai-testgen-") as tmp:
             result = generate_test_groups(

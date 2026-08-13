@@ -94,6 +94,9 @@ def fail_ai_grade(
             return  # 已被并发 Worker 处理，不覆盖
         db.commit()
         db.expire_all()
+        from app.services.op_metrics import record as record_metric
+
+        record_metric(redis_client, "judge_failures_total", label="retryable")
         msg = json.dumps({"type": "ai_grade", "id": code_grade_id, "attempt": current + 1})
         redis_client.rpush(_ai_queue_name(), msg)
     else:
@@ -112,6 +115,9 @@ def fail_ai_grade(
             return  # 已被并发 Worker 处理，不覆盖
         db.commit()
         db.expire_all()
+        from app.services.op_metrics import record as record_metric
+
+        record_metric(redis_client, "judge_failures_total", label="permanent")
         # 考试 active CodeGrade：父级当场转 review_required（finalize 自身幂等/CAS）
         if grade.exam_answer_id:
             from app.models import ExamAnswer

@@ -276,9 +276,10 @@ def publish_assignment(
         if not settings.ai_ready:
             raise api_error(503, "AI_NOT_READY", "发布含 AI 评分的题目需要配置 DAI_AI_API_KEY")
         from app.services.ai_client import DeepSeekClient, AIServiceError
+        from app.services.op_metrics import ai_metrics_sink
         from app.services.rubric_service import ensure_locked_rubrics_for_publish
         try:
-            client = DeepSeekClient(settings)
+            client = DeepSeekClient(settings, metrics_sink=ai_metrics_sink())
             ensure_locked_rubrics_for_publish(db, client, questions)
         except AIServiceError as exc:
             raise api_error(503, "AI_RUBRIC_UNAVAILABLE", f"Rubric 生成失败: {exc}")
