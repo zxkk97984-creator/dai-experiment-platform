@@ -6,6 +6,33 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.schemas.environments import EnvironmentSummaryRead, ImportDiagnosticRead
 
+# ── 输入硬上限（TASK-004） ────────────────────────────────────
+# 超限在 Schema 校验层拒绝（422），发生在写库、入队或启动 Docker 之前。
+MAX_CODE_CHARS = 50_000  # 代码/隐藏测试：字符数上限
+MAX_CODE_BYTES = 64 * 1024  # 代码/隐藏测试：UTF-8 字节上限
+MAX_TEXT_ANSWER_CHARS = 20_000  # 考试文本答案单项：字符数上限
+MAX_TEXT_ANSWER_BYTES = 64 * 1024  # 考试文本答案单项：UTF-8 字节上限
+
+
+def _utf8_bytes(v: str) -> int:
+    return len(v.encode("utf-8"))
+
+
+def _bounded(v: str, label: str, max_chars: int, max_bytes: int) -> str:
+    if len(v) > max_chars:
+        raise ValueError(f"{label} 超过字符上限 {max_chars}")
+    if _utf8_bytes(v) > max_bytes:
+        raise ValueError(f"{label} UTF-8 字节数超过上限 {max_bytes}")
+    return v
+
+
+def validate_code_size(v: str) -> str:
+    return _bounded(v, "代码", MAX_CODE_CHARS, MAX_CODE_BYTES)
+
+
+def validate_text_answer_size(v: str) -> str:
+    return _bounded(v, "文本答案", MAX_TEXT_ANSWER_CHARS, MAX_TEXT_ANSWER_BYTES)
+
 
 class PaginatedResponse(BaseModel):
     items: list[Any]
@@ -478,6 +505,13 @@ class JudgeQuestionCreate(BaseModel):
 
         return validate_import_names(v)
 
+    @field_validator("starter_code", "hidden_tests")
+    @classmethod
+    def _limit_code_fields(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return validate_code_size(v)
+
 
 class JudgeQuestionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -525,10 +559,22 @@ class JudgeQuestionUpdate(BaseModel):
 
         return validate_import_names(v)
 
+    @field_validator("starter_code", "hidden_tests")
+    @classmethod
+    def _limit_code_fields(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return validate_code_size(v)
+
 
 class SubmissionCreate(BaseModel):
     question_id: int
     code: str
+
+    @field_validator("code")
+    @classmethod
+    def _limit_code(cls, v: str) -> str:
+        return validate_code_size(v)
 
 
 class SubmissionRead(BaseModel):
@@ -615,6 +661,20 @@ class ExamAnswerSaveItem(BaseModel):
     code_answer: str | None = None
     text_answers: dict[str, str] | None = None
     expected_version: int = 0
+
+    @field_validator("code_answer")
+    @classmethod
+    def _limit_code_answer(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return validate_code_size(v)
+
+    @field_validator("text_answers")
+    @classmethod
+    def _limit_text_answers(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        if v is None:
+            return v
+        return {key: validate_text_answer_size(value) for key, value in v.items()}
 
 
 class ExamAnswerBatchRequest(BaseModel):
@@ -833,6 +893,11 @@ class ExperimentCellsSaveRequest(BaseModel):
 
 class ExperimentCellExecuteRequest(BaseModel):
     code: str
+
+    @field_validator("code")
+    @classmethod
+    def _limit_code(cls, v: str) -> str:
+        return validate_code_size(v)
 
 
 class ExperimentCellExecuteResponse(BaseModel):
