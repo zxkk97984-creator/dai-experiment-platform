@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.api.courses import can_access_course_content, require_course
 from app.config import Settings, get_settings
-from app.dependencies import get_current_user, get_db, require_roles
+from app.dependencies import PaginationParams, get_current_user, get_db, pagination, require_roles
 from app.errors import api_error
 from app.models import (
     Assignment,
@@ -41,7 +41,8 @@ def _submitted_map(db: Session, assignments: list[Assignment], student_id: int) 
     """批量计算学生对每个作业的已交状态，避免逐作业 N+1 查询。
 
     语义与 dashboard 待办判定互补：「至少一题无该学生提交记录」即待办，
-    因此「全部题目都有提交记录」才算已交；无题目作业不存在未交题目，视为已交。
+    因此「全部题目都有提交记录」才算已交；零题作业永远是未提交（TASK-007：
+    零题不得发布，更不得被视为已完成）。
     """
     if not assignments:
         return {}
@@ -65,8 +66,8 @@ def _submitted_map(db: Session, assignments: list[Assignment], student_id: int) 
             ).all()
         )
     return {
-        a.id: all(qid in submitted_qids for qid in qids_by_assignment.get(a.id, []))
-        for a in assignments
+        a.id: bool(qids) and all(qid in submitted_qids for qid in qids)
+        for a, qids in ((a, qids_by_assignment.get(a.id, [])) for a in assignments)
     }
 
 
@@ -79,9 +80,39 @@ def ensure_assignment_manager(assignment: Assignment, user: User, db: Session):
     raise api_error(403, "FORBIDDEN", "没有权限管理该作业")
 
 
+def assignment_has_submissions(db: Session, assignment_id: int) -> bool:
+    """是否存在任何学生提交（评分事实守卫的事实依据）。"""
+    return db.scalar(
+        select(Submission.id)
+        .join(JudgeQuestion, Submission.question_id == JudgeQuestion.id)
+        .where(JudgeQuestion.assignment_id == assignment_id)
+        .limit(1)
+    ) is not None
+
+
+def ensure_assignment_content_editable(db: Session, assignment: Assignment) -> None:
+    """评分事实守卫（TASK-009 / R-01）。
+
+    已发布，或存在任何学生提交（即使已取消发布）时，题目结构、分值、测试、
+    环境和 AI 评分配置不可原地修改；纠错通过新建作业完成。
+    标题、描述和截止时间等非评分元数据不受此守卫限制。
+    """
+    if assignment.status == "published":
+        raise api_error(
+            409, "ASSIGNMENT_CONTENT_LOCKED",
+            "已发布作业的题目与评分配置不可修改，请先取消发布（已有提交后不可修改，纠错请新建作业）",
+        )
+    if assignment_has_submissions(db, assignment.id):
+        raise api_error(
+            409, "ASSIGNMENT_CONTENT_LOCKED",
+            "该作业已有学生提交，题目与评分配置不可修改（纠错请新建作业）",
+        )
+
+
 def _assignment_with_summary(db: Session, assignment: Assignment) -> AssignmentRead:
-    """读响应附加学生可见环境摘要（Phase 5）——不含 digest/tag/构建日志。"""
+    """读响应附加学生可见环境摘要（Phase 5）与提交事实（TASK-009）——不含 digest/tag/构建日志。"""
     data = AssignmentRead.model_validate(assignment)
+    data.has_submissions = assignment_has_submissions(db, assignment.id)
     if assignment.environment_version_id is not None:
         from app.services.environment_service import (
             public_environment_summary,
@@ -97,11 +128,11 @@ def _assignment_with_summary(db: Session, assignment: Assignment) -> AssignmentR
 @router.get("", response_model=PaginatedResponse)
 def list_assignments(
     course_id: int | None = None,
-    page: int = 1,
-    page_size: int = 20,
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    page, page_size = pagination.page, pagination.page_size
     query = select(Assignment)
     count_query = select(func.count()).select_from(Assignment)
     if course_id:
@@ -140,7 +171,8 @@ def list_assignments(
     for item in assignments:
         data = AssignmentRead.model_validate(item).model_dump()
         if current_user.role == "student":
-            data["is_submitted"] = submitted_map.get(item.id, True)
+            # TASK-007：零题作业 is_submitted 恒为 False（兜底默认同样为 False）
+            data["is_submitted"] = submitted_map.get(item.id, False)
         items.append(data)
     return PaginatedResponse(items=items, page=page, page_size=page_size, total=total)
 
@@ -166,8 +198,7 @@ def create_assignment(
     if data["environment_version_id"] is None:
         basic = resolve_basic_available_version(db)
         data["environment_version_id"] = basic.id if basic else None
-    if data.get("status") == "published":
-        data["published_at"] = utc_now()
+    # TASK-007：POST 只允许 draft（Schema 已强制），发布必须走 /publish 门禁
     assignment = Assignment(**data, created_by_id=current_user.id)
     db.add(assignment)
     db.commit()
@@ -200,18 +231,18 @@ def update_assignment(
     assignment = require_assignment(assignment_id, db)
     ensure_assignment_manager(assignment, current_user, db)
     updates = payload.model_dump(exclude_unset=True)
-    # Phase 4 门禁：已发布作业的环境字段不可直接改，必须先回到 draft（发布后绑定不可变）
+    # Phase 4 门禁：环境字段是评分事实——已发布或已有提交时不可改（TASK-009）
     from app.services.environment_service import ENV_FIELDS, validate_environment_selection
 
     env_changes = [k for k in ENV_FIELDS if k in updates]
-    if env_changes and assignment.status != "draft":
-        raise api_error(409, "ASSIGNMENT_NOT_EDITABLE", "已发布作业的环境设置不可修改，请先将作业切回 draft")
+    if env_changes and (
+        assignment.status != "draft" or assignment_has_submissions(db, assignment.id)
+    ):
+        raise api_error(409, "ASSIGNMENT_CONTENT_LOCKED", "该作业的环境设置已锁定，不可修改（纠错请新建作业）")
     if updates.get("environment_version_id") is not None:
         validate_environment_selection(db, updates["environment_version_id"])
     for key, value in updates.items():
         setattr(assignment, key, value)
-    if assignment.status == "published" and assignment.published_at is None:
-        assignment.published_at = utc_now()
     db.commit()
     db.refresh(assignment)
     return assignment
@@ -233,6 +264,9 @@ def publish_assignment(
     all_questions = db.scalars(
         select(JudgeQuestion).where(JudgeQuestion.assignment_id == assignment_id)
     ).all()
+    # TASK-007：已发布作业必须至少包含一道题——零题作业不得发布
+    if not all_questions:
+        raise api_error(409, "ASSIGNMENT_HAS_NO_QUESTIONS", "作业必须至少包含一道题目才能发布")
     validate_publish_gate(db, assignment, all_questions)
 
     # AI 评分门禁：非 legacy 题目需要锁定 Rubric
@@ -352,6 +386,7 @@ def create_question(
 ):
     assignment = require_assignment(assignment_id, db)
     ensure_assignment_manager(assignment, current_user, db)
+    ensure_assignment_content_editable(db, assignment)  # TASK-009：发布后/有提交后禁止新增题
     data = payload.model_dump(exclude_unset=True)
     # JSON null 与未提供字段语义一致：新建编程题默认进入 active。
     if data.get("grading_mode") is None:
@@ -369,6 +404,30 @@ def create_question(
     return question
 
 
+@router.delete("/{assignment_id}/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_question(
+    assignment_id: int,
+    question_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """删除作业题目（TASK-017 / F-07）。
+
+    仅无任何提交的 draft 作业允许删除；已发布或已有提交 → 409。
+    同一事务清理题目从属数据（Rubric），不级联删除提交/成绩。
+    """
+    assignment = require_assignment(assignment_id, db)
+    ensure_assignment_manager(assignment, current_user, db)
+    ensure_assignment_content_editable(db, assignment)
+    question = db.get(JudgeQuestion, question_id)
+    if not question or question.assignment_id != assignment_id:
+        raise api_error(404, "QUESTION_NOT_FOUND", "题目不存在或不属于该作业")
+    db.execute(delete(QuestionRubric).where(QuestionRubric.judge_question_id == question_id))
+    db.delete(question)
+    db.commit()
+    return None
+
+
 @router.patch("/{assignment_id}/questions/{question_id}", response_model=JudgeQuestionRead)
 def update_question(
     assignment_id: int,
@@ -377,11 +436,10 @@ def update_question(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """更新作业编程题——要求教师所有权且作业处于 draft 状态"""
+    """更新作业编程题——要求教师所有权且作业内容可编辑（TASK-009：发布或已有提交即锁定）"""
     assignment = require_assignment(assignment_id, db)
     ensure_assignment_manager(assignment, current_user, db)
-    if assignment.status != "draft":
-        raise api_error(409, "ASSIGNMENT_NOT_EDITABLE", "只有草稿状态的作业可以修改题目，请先将作业切回 draft")
+    ensure_assignment_content_editable(db, assignment)
     question = db.get(JudgeQuestion, question_id)
     if not question or question.assignment_id != assignment_id:
         raise api_error(404, "QUESTION_NOT_FOUND", "题目不存在或不属于该作业")
