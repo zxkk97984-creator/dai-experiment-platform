@@ -730,7 +730,7 @@ def _create_question(client, db_session_factory, teacher_username="gen_teacher",
 def _patch_ai(client, monkeypatch, responses):
     """替换端点的 DeepSeekClient 为 FakeAIClient，并跳过 Docker 预检"""
     fake = FakeAIClient(responses)
-    monkeypatch.setattr("app.api.ai_grading.DeepSeekClient", lambda settings: fake)
+    monkeypatch.setattr("app.api.ai_grading.DeepSeekClient", lambda settings, **kw: fake)
     monkeypatch.setattr(
         "app.services.test_group_generator.preflight_groups", lambda *a, **k: []
     )
