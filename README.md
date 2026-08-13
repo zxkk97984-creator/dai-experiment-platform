@@ -297,6 +297,13 @@ curl http://localhost:8080/api/v1/health/ready
 # → {"status":"ready","checks":{"mysql":"ok","redis":"ok"}}
 ```
 
+### 备份与恢复
+
+生产数据（MySQL/Redis/studio/视频/封面卷/环境镜像）的每日备份与恢复流程见
+[`docs/backup-restore.md`](docs/backup-restore.md)：`scripts/backup.sh` 保留
+7 个日备 + 4 个周备（RPO 24h / RTO 4h），生产升级前必须先完成备份
+（发布顺序见「数据库迁移与回滚」与部署文档）。
+
 ### DoD 判题配置
 
 Worker 容器通过宿主机 docker.sock 启动 judge 容器。需配置宿主机工作目录：
