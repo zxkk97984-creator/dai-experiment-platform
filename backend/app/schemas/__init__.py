@@ -14,6 +14,22 @@ class PaginatedResponse(BaseModel):
     total: int = 0
 
 
+# ── 分层输入上限（TASK-004 / F-10） ─────────────────────────────
+# 判题/提交代码：≤50,000 字符且 UTF-8 ≤64 KiB；考试文本答案单项：≤20,000 字符且 ≤64 KiB。
+# 超限在 Schema 层拒绝（422），保证不写库、不入队、不启动 Docker。
+JUDGE_CODE_MAX_CHARS = 50_000
+EXAM_TEXT_MAX_CHARS = 20_000
+TEXT_MAX_UTF8_BYTES = 64 * 1024
+
+
+def _validate_text_bounds(value: str, max_chars: int, label: str) -> str:
+    if len(value) > max_chars:
+        raise ValueError(f"{label}不能超过 {max_chars} 个字符")
+    if len(value.encode("utf-8")) > TEXT_MAX_UTF8_BYTES:
+        raise ValueError(f"{label}的 UTF-8 编码不能超过 {TEXT_MAX_UTF8_BYTES} 字节")
+    return value
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -52,22 +68,40 @@ class UserCreate(BaseModel):
     real_name: str
     student_no: str | None = None
     role: str
-    status: str = "active"
+    status: Literal["active", "disabled"] = "active"
+
+    @field_validator("password")
+    @classmethod
+    def _check_password_rules(cls, v: str) -> str:
+        from app.security import validate_password_rules
+
+        validate_password_rules(v)
+        return v
 
 
 class UserUpdate(BaseModel):
     real_name: str | None = None
     student_no: str | None = None
     role: str | None = None
-    status: str | None = None
+    status: Literal["active", "disabled"] | None = None
 
 
 class PasswordUpdate(BaseModel):
+    # TASK-011：本人改密必须提交 current_password（管理员重置无需旧密码）
     password: str
+    current_password: str | None = None
+
+    @field_validator("password")
+    @classmethod
+    def _check_password_rules(cls, v: str) -> str:
+        from app.security import validate_password_rules
+
+        validate_password_rules(v)
+        return v
 
 
 class StatusUpdate(BaseModel):
-    status: str
+    status: Literal["active", "disabled"]
 
 
 # class 为新的“教学班可见”；public 仅作为旧数据/旧客户端兼容值保留。
@@ -136,7 +170,8 @@ class TeachingClassStudentBatch(BaseModel):
 class CourseCreate(BaseModel):
     title: str
     description: str | None = None
-    status: str = "draft"
+    # TASK-006：创建只允许 draft——发布必须走 PATCH 转换并经 _ensure_course_publishable 门禁
+    status: Literal["draft"] = "draft"
     cover: str | None = None
     start_time: datetime | None = None
     visibility: CourseVisibility = "class"  # 可见范围：仅自己 / 教学班 / 指定学生
@@ -149,7 +184,7 @@ class CourseUpdate(BaseModel):
     """更新课程：全部字段可选，仅更新传入字段"""
     title: str | None = None
     description: str | None = None
-    status: str | None = None
+    status: Literal["draft", "published", "archived"] | None = None
     cover: str | None = None
     start_time: datetime | None = None
     visibility: CourseVisibility | None = None
@@ -274,7 +309,7 @@ class LessonCreate(BaseModel):
     notebook_path: str | None = None
     video_url: str | None = None
     order_index: int = 0
-    status: str = "draft"
+    status: Literal["draft", "published", "pending"] = "draft"
 
     @field_validator("video_url")
     @classmethod
@@ -292,7 +327,7 @@ class LessonUpdate(BaseModel):
     video_url: str | None = None
     order_index: int | None = None
     chapter_id: int | None = None
-    status: str | None = None
+    status: Literal["draft", "published", "pending"] | None = None
 
     @field_validator("video_url")
     @classmethod
@@ -356,7 +391,8 @@ class AssignmentCreate(BaseModel):
     course_id: int
     title: str
     description: str | None = None
-    status: str = "draft"
+    # TASK-007：创建只允许 draft——发布必须走专用 /publish 门禁
+    status: Literal["draft"] = "draft"
     due_at: datetime | None = None
     # ── 环境档位绑定（Phase 4：教师选择） ─────────────────────
     # 教师显式选择 available 环境版本；省略时服务层解析 basic 当前可用版本。
@@ -373,9 +409,12 @@ class AssignmentCreate(BaseModel):
 
 
 class AssignmentUpdate(BaseModel):
+    # TASK-007：通用 PATCH 不再接受 status——发布/取消发布只能走 /publish 与 /unpublish；
+    # 未知字段（含 status）显式 422，避免客户端误以为状态已更新
+    model_config = ConfigDict(extra="forbid")
+
     title: str | None = None
     description: str | None = None
-    status: str | None = None
     due_at: datetime | None = None
     # 环境字段仅在作业 draft 状态可修改（API 层门禁）；exclude_unset 区分未传与显式 null
     environment_version_id: int | None = None
@@ -413,6 +452,8 @@ class AssignmentRead(BaseModel):
     # 当前学生对作业的提交状态：全部题目都有提交记录才算已交（与 dashboard 待办语义互补）。
     # 仅学生作业列表接口计算该值；教师/管理员视图与详情接口保持默认 False。
     is_submitted: bool = False
+    # 是否存在任何学生提交（TASK-009）：教师详情接口计算，前端据此锁定题目/AI 配置编辑
+    has_submissions: bool = False
 
 
 class PublicCase(BaseModel):
@@ -460,7 +501,7 @@ class JudgeQuestionCreate(BaseModel):
     signature: str | None = None
     starter_code: str | None = None
     public_cases: list[PublicCase] = Field(default_factory=list)
-    hidden_tests: str
+    hidden_tests: str = Field(max_length=JUDGE_CODE_MAX_CHARS)
     time_limit_ms: int = 10000
     memory_limit_mb: int = 256
     grading_mode: Literal["legacy", "shadow", "active"] | None = None
@@ -477,6 +518,18 @@ class JudgeQuestionCreate(BaseModel):
         from app.services.import_policy import validate_import_names
 
         return validate_import_names(v)
+
+    @field_validator("hidden_tests")
+    @classmethod
+    def _check_hidden_tests_bounds(cls, v: str) -> str:
+        return _validate_text_bounds(v, JUDGE_CODE_MAX_CHARS, "隐藏测试")
+
+    @field_validator("starter_code")
+    @classmethod
+    def _check_starter_code_bounds(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return _validate_text_bounds(v, JUDGE_CODE_MAX_CHARS, "代码模板")
 
 
 class JudgeQuestionRead(BaseModel):
@@ -508,7 +561,7 @@ class JudgeQuestionUpdate(BaseModel):
     signature: str | None = None
     starter_code: str | None = None
     public_cases: list[PublicCase] | None = None
-    hidden_tests: str | None = None
+    hidden_tests: str | None = Field(default=None, max_length=JUDGE_CODE_MAX_CHARS)
     time_limit_ms: int | None = None
     memory_limit_mb: int | None = None
     grading_mode: Literal["legacy", "shadow", "active"] | None = None
@@ -525,10 +578,29 @@ class JudgeQuestionUpdate(BaseModel):
 
         return validate_import_names(v)
 
+    @field_validator("hidden_tests")
+    @classmethod
+    def _check_hidden_tests_bounds(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return _validate_text_bounds(v, JUDGE_CODE_MAX_CHARS, "隐藏测试")
+
+    @field_validator("starter_code")
+    @classmethod
+    def _check_starter_code_bounds(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return _validate_text_bounds(v, JUDGE_CODE_MAX_CHARS, "代码模板")
+
 
 class SubmissionCreate(BaseModel):
     question_id: int
-    code: str
+    code: str = Field(max_length=JUDGE_CODE_MAX_CHARS)
+
+    @field_validator("code")
+    @classmethod
+    def _check_code_bounds(cls, v: str) -> str:
+        return _validate_text_bounds(v, JUDGE_CODE_MAX_CHARS, "代码")
 
 
 class SubmissionRead(BaseModel):
@@ -561,7 +633,7 @@ class SampleRunResponse(BaseModel):
 class ExamCreate(BaseModel):
     course_id: int
     title: str
-    status: str = "draft"
+    status: Literal["draft"] = "draft"
     duration_minutes: int = 60
     start_at: datetime | None = None
     end_at: datetime | None = None
@@ -572,7 +644,7 @@ class ExamCreate(BaseModel):
 
 class ExamUpdate(BaseModel):
     title: str | None = None
-    status: str | None = None
+    status: Literal["draft", "published"] | None = None
     duration_minutes: int | None = None
     start_at: datetime | None = None
     end_at: datetime | None = None
@@ -615,6 +687,47 @@ class ExamAnswerSaveItem(BaseModel):
     code_answer: str | None = None
     text_answers: dict[str, str] | None = None
     expected_version: int = 0
+
+    @field_validator("code_answer")
+    @classmethod
+    def _check_code_answer_bounds(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return _validate_text_bounds(v, JUDGE_CODE_MAX_CHARS, "编程题答案")
+
+    @field_validator("text_answers")
+    @classmethod
+    def _check_text_answers_bounds(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        if v is None:
+            return v
+        for key, value in v.items():
+            _validate_text_bounds(value, EXAM_TEXT_MAX_CHARS, f"填空题答案「{key}」")
+        return v
+
+
+class ExamAnswerSaveRequest(BaseModel):
+    """单题保存（PUT /exams/{exam_id}/answers/{question_id}）——question_id 由路径提供。"""
+
+    selected_options: list[str] | None = None
+    code_answer: str | None = None
+    text_answers: dict[str, str] | None = None
+    expected_version: int = 0
+
+    @field_validator("code_answer")
+    @classmethod
+    def _check_code_answer_bounds(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return _validate_text_bounds(v, JUDGE_CODE_MAX_CHARS, "编程题答案")
+
+    @field_validator("text_answers")
+    @classmethod
+    def _check_text_answers_bounds(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        if v is None:
+            return v
+        for key, value in v.items():
+            _validate_text_bounds(value, EXAM_TEXT_MAX_CHARS, f"填空题答案「{key}」")
+        return v
 
 
 class ExamAnswerBatchRequest(BaseModel):
@@ -779,10 +892,23 @@ class NotebookTemplateVersionRead(BaseModel):
 
 
 class ExperimentModuleCreate(BaseModel):
+    # TASK-008：创建只允许 draft（发布必须走 /publish 门禁）；未知字段（如 entry_url）显式 422
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     description: str | None = None
     template_id: int | None = None
-    status: str = "draft"
+    status: Literal["draft"] = "draft"
+
+
+class ExperimentModuleUpdate(BaseModel):
+    """实验模块更新——只允许元数据字段；status 只能走 /publish 与 /unpublish 端点。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    description: str | None = None
+    template_id: int | None = None
 
 
 class ExperimentModuleRead(BaseModel):
@@ -790,7 +916,6 @@ class ExperimentModuleRead(BaseModel):
     id: int
     name: str
     description: str | None = None
-    entry_url: str | None = None
     template_id: int | None = None
     owner_id: int | None = None
     status: str

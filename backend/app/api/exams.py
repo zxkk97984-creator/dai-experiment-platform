@@ -2,14 +2,14 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.api.courses import can_access_course_content, ensure_course_manager, require_course
 from app.config import Settings, get_settings
-from app.dependencies import get_current_user, get_db, require_roles
+from app.dependencies import PaginationParams, get_current_user, get_db, pagination, require_roles
 from app.errors import api_error
 from app.models import Course, CourseEnrollment, Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission, QuestionRubric, User
-from app.schemas import ExamAnswerBatchRequest, ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionTeacherRead, ExamQuestionUpdate, ExamRead, ExamRetryRequest, ExamSessionRead, ExamSubmitRequest, ExamSubmissionRead, ExamTimeExtensionRequest, ExamUpdate, PaginatedResponse
+from app.schemas import ExamAnswerBatchRequest, ExamAnswerSaveRequest, ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionTeacherRead, ExamQuestionUpdate, ExamRead, ExamRetryRequest, ExamSessionRead, ExamSubmitRequest, ExamSubmissionRead, ExamTimeExtensionRequest, ExamUpdate, PaginatedResponse
 from app.services.exam_service import build_student_exam_session, build_student_exam_summary, create_question, delete_question, exam_max_score, extend_exam_submission, force_submit_exam_submission, get_my_grade, get_question, list_questions, release_exam_review, require_exam_editable, retry_exam_submission as retry_exam_submission_service, save_answer, start_exam as svc_start_exam, student_exam_status, submit_exam as svc_submit_exam, update_question, validate_publish
 
 router = APIRouter(prefix="/exams", tags=["exams"])
@@ -44,13 +44,12 @@ def _submitted_ids(db: Session, exams: list[Exam], student_id: int) -> set[int]:
 
 @router.get("", response_model=PaginatedResponse)
 def list_exams(
-    page: int = 1,
-    page_size: int = 20,
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    page, page_size = pagination.page, pagination.page_size
     query = select(Exam)
-    count_query = select(func.count()).select_from(Exam)
     if current_user.role == "student":
         query = (
             query.join(Course, Exam.course_id == Course.id)
@@ -60,23 +59,22 @@ def list_exams(
             .where(CourseEnrollment.student_id == current_user.id)
             .where(CourseEnrollment.status == "enrolled")
         )
-        count_query = (
-            count_query.join(Course, Exam.course_id == Course.id)
-            .join(CourseEnrollment, Course.id == CourseEnrollment.course_id)
-            .where(Exam.status == "published")
-            .where(Course.status == "published")
-            .where(CourseEnrollment.student_id == current_user.id)
-            .where(CourseEnrollment.status == "enrolled")
-        )
     elif current_user.role == "teacher":
         query = query.join(Course, Exam.course_id == Course.id).where(Course.teacher_id == current_user.id)
-        count_query = count_query.join(Course, Exam.course_id == Course.id).where(Course.teacher_id == current_user.id)
     elif current_user.role != "admin":
         # developer or any unsupported role: empty
         query = query.where(Exam.id == -1)
-        count_query = count_query.where(Exam.id == -1)
-    total = db.scalar(count_query) or 0
-    exams = db.scalars(query.order_by(Exam.id).offset((page - 1) * page_size).limit(page_size)).all()
+    # TASK-022：窗口函数一次取回总数，避免额外的 count 查询；
+    # joinedload 预取 course，避免逐项惰性加载
+    rows = db.execute(
+        query.options(joinedload(Exam.course))
+        .add_columns(func.count().over().label("_total"))
+        .order_by(Exam.id)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+    total = rows[0]._total if rows else 0
+    exams = [row.Exam for row in rows]
     student_submissions = {}
     from app.services.time_utils import utc_now
     server_now = utc_now()
@@ -86,32 +84,61 @@ def list_exams(
             ExamSubmission.exam_id.in_([exam.id for exam in exams]),
         )).all()
         student_submissions = {submission.exam_id: submission for submission in rows}
+    # TASK-022：一次批量聚合题数/参与人数/应参加人数/最高分，避免逐考试 N+1。
+    # 目标：列表 SQL 数不随 N 线性增长（每页 ≤5 次）。
+    # 学生视图只需最高分（其余统计仅教师/管理员列表展示），按角色裁剪聚合。
+    exam_ids = [exam.id for exam in exams]
+    agg_maps = {}
+    if exam_ids:
+        question_rows = db.execute(
+            select(
+                ExamQuestion.exam_id,
+                func.count(),
+                func.coalesce(func.sum(ExamQuestion.points), 0.0),
+            )
+            .where(ExamQuestion.exam_id.in_(exam_ids))
+            .group_by(ExamQuestion.exam_id)
+        ).all()
+        agg_maps["question"] = {row[0]: row[1] for row in question_rows}
+        agg_maps["max_score"] = {row[0]: float(row[2]) for row in question_rows}
+    if exam_ids and current_user.role != "student":
+        participant_rows = db.execute(
+            select(ExamSubmission.exam_id, func.count())
+            .where(
+                ExamSubmission.exam_id.in_(exam_ids),
+                ExamSubmission.status.in_(("submitted", "grading", "graded", "review_required")),
+            )
+            .group_by(ExamSubmission.exam_id)
+        ).all()
+        agg_maps["participant"] = dict(participant_rows)
+        course_ids = [exam.course_id for exam in exams]
+        expected_rows = db.execute(
+            select(CourseEnrollment.course_id, func.count())
+            .where(
+                CourseEnrollment.course_id.in_(course_ids),
+                CourseEnrollment.status == "enrolled",
+            )
+            .group_by(CourseEnrollment.course_id)
+        ).all()
+        agg_maps["expected"] = dict(expected_rows)
+
     items = []
     for exam in exams:
         if current_user.role == "student":
-            data = build_student_exam_summary(exam, student_submissions.get(exam.id), db, server_now)
+            data = build_student_exam_summary(
+                exam, student_submissions.get(exam.id), db, server_now,
+                max_scores=agg_maps.get("max_score", {}),
+            )
         else:
             data = ExamRead.model_validate(exam).model_dump()
             data.update({
                 "course_title": exam.course.title if exam.course else "",
-                "question_count": db.scalar(
-                    select(func.count()).select_from(ExamQuestion).where(ExamQuestion.exam_id == exam.id)
-                ) or 0,
-                "participant_count": db.scalar(
-                    select(func.count()).select_from(ExamSubmission).where(
-                        ExamSubmission.exam_id == exam.id,
-                        ExamSubmission.status.in_(("submitted", "grading", "graded", "review_required")),
-                    )
-                ) or 0,
-                "expected_count": db.scalar(
-                    select(func.count()).select_from(CourseEnrollment).where(
-                        CourseEnrollment.course_id == exam.course_id,
-                        CourseEnrollment.status == "enrolled",
-                    )
-                ) or 0,
+                "question_count": agg_maps.get("question", {}).get(exam.id, 0),
+                "participant_count": agg_maps.get("participant", {}).get(exam.id, 0),
+                "expected_count": agg_maps.get("expected", {}).get(exam.course_id, 0),
                 "created_at": exam.created_at,
                 "updated_at": exam.updated_at,
-                "max_score": exam_max_score(exam.id, db),
+                "max_score": float(agg_maps.get("max_score", {}).get(exam.id, 0.0)),
                 "server_now": server_now,
             })
         items.append(data)
@@ -605,11 +632,12 @@ def del_question(exam_id: int, question_id: int, db: Session = Depends(get_db), 
 # ── 学生答题 ──
 
 @router.put("/{exam_id}/answers/{question_id}", status_code=status.HTTP_201_CREATED)
-def put_answer(exam_id: int, question_id: int, payload: dict, db: Session = Depends(get_db), current_user: User = Depends(require_roles("student"))):
+def put_answer(exam_id: int, question_id: int, payload: ExamAnswerSaveRequest, db: Session = Depends(get_db), current_user: User = Depends(require_roles("student"))):
+    """单题保存——强类型 Schema（TASK-004）：长度/字节超限在写库前由 422 拒绝。"""
     exam = require_exam(exam_id, db)
     if exam.status != "published" or not can_access_course_content(exam.course, current_user, db):
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布或无权参加")
-    return save_answer(db, exam_id, question_id, current_user, payload)
+    return save_answer(db, exam_id, question_id, current_user, payload.model_dump(exclude_none=True))
 
 
 @router.put("/{exam_id}/answers", status_code=status.HTTP_200_OK)
