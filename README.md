@@ -388,7 +388,8 @@ set PYTEST_DEBUG_TEMPROOT=%LOCALAPPDATA%\Temp\dai-pytest-tmp
 .venv\Scripts\python.exe -m pytest tests\automated -q -p no:cacheprovider
 ```
 
-当前基线：**815 项通过、3 项跳过、0 项失败**。
+当前基线：**1037 项通过、3 项跳过、0 项失败**（2026-08-14，提交 `4dc11e9`，
+conda 环境 `dai`，Python 3.12）。精确数字以 CI `backend-test-sqlite` 门禁为准。
 
 ### 前端测试与构建
 
@@ -398,7 +399,8 @@ npm test
 npm run build
 ```
 
-当前基线：**63 个测试文件、675 项测试全部通过**，生产构建成功。
+当前基线：**825 项测试全部通过**（2026-08-14，提交 `4dc11e9`），生产构建成功。
+精确数字以 CI `frontend-test` 门禁为准。
 
 ### 仓库清理边界
 
