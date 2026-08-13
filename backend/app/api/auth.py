@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Cookie, Depends, Request, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
@@ -7,7 +7,15 @@ from app.errors import api_error
 from app.models import User
 from app.schemas import LoginRequest, LogoutRequest, RefreshRequest, TokenResponse, UserRead
 from app.security import decode_token
-from app.services.auth_service import authenticate_user, issue_token_pair, refresh_token_pair, revoke_tokens
+from app.services.auth_service import (
+    authenticate_user,
+    check_login_rate_limits,
+    issue_token_pair,
+    record_login_failure,
+    refresh_token_pair,
+    reset_login_failures,
+    revoke_tokens,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -66,15 +74,37 @@ def _logout_access_payload(request: Request, settings: Settings) -> dict | None:
     return payload if payload.get("type") == "access" else None
 
 
+def _client_ip(request: Request, settings: Settings) -> str:
+    """客户端 IP：仅当配置为可信代理时才信任 X-Forwarded-For 最右一跳。"""
+    if settings.trusted_proxy:
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            last_hop = forwarded.split(",")[-1].strip()
+            if last_hop:
+                return last_hop
+    return request.client.host if request.client else "unknown"
+
+
 @router.post("/login")
 def login(
     payload: LoginRequest,
+    request: Request,
     response: Response,
     db: Session = Depends(get_db),
     redis_client=Depends(get_redis_client),
     settings: Settings = Depends(get_settings),
 ):
-    user = authenticate_user(db, payload.username, payload.password)
+    username = payload.username or ""
+    rate_username = username.strip().lower()
+    client_ip = _client_ip(request, settings)
+    check_login_rate_limits(redis_client, settings, rate_username, client_ip)
+    try:
+        user = authenticate_user(db, username, payload.password)
+    except HTTPException as exc:
+        if exc.status_code == 401:
+            record_login_failure(redis_client, settings, rate_username, client_ip)
+        raise
+    reset_login_failures(redis_client, rate_username)
     tokens = issue_token_pair(user, redis_client, settings)
     # Refresh token 仅存入 HttpOnly Cookie，不在 JSON body 返回
     _set_refresh_cookie(response, tokens.refresh_token, settings)

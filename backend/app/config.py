@@ -133,6 +133,14 @@ class Settings(BaseSettings):
     def cover_storage_path(self) -> Path:
         return Path(self.cover_storage_dir).resolve()
 
+    # ── 登录限流 ──
+    login_rate_limit_window_seconds: int = Field(default=900, ge=60)
+    login_rate_limit_user_max_failures: int = Field(default=10, ge=1)
+    login_rate_limit_ip_max_attempts: int = Field(default=30, ge=1)
+    # 仅当部署在可信反向代理之后（生产 Nginx）才置 True；
+    # 此时客户端 IP 取 X-Forwarded-For 最右一跳，否则使用直连地址。
+    trusted_proxy: bool = False
+
     # ── 环境档位控制面（Phase 1） ──────────────────────────────
     env_build_queue_name: str = "environment:build:queue"
     env_build_timeout_seconds: int = Field(default=3600, ge=60, le=86400)

@@ -118,11 +118,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(_: Request, exc: StarletteHTTPException):
-        return JSONResponse(status_code=exc.status_code, content={"detail": _normalize_detail(exc.detail)})
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": _normalize_detail(exc.detail)},
+            headers=exc.headers,
+        )
 
     @app.exception_handler(HTTPException)
     async def fastapi_http_exception_handler(_: Request, exc: HTTPException):
-        return JSONResponse(status_code=exc.status_code, content={"detail": _normalize_detail(exc.detail)})
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": _normalize_detail(exc.detail)},
+            headers=exc.headers,
+        )
 
     @app.exception_handler(Exception)
     async def general_exception_handler(_: Request, exc: Exception):

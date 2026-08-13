@@ -36,6 +36,9 @@ services:
       DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
       DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
       DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
+      # 登录限流：生产 API 位于前端 Nginx 反向代理之后，必须信任 X-Forwarded-For
+      # 最右一跳作为客户端 IP；否则所有用户共享 Nginx 容器 IP 的限流桶
+      DAI_TRUSTED_PROXY: ${DAI_TRUSTED_PROXY:-true}
       # 环境档位基础镜像——生产校验强制带 @sha256: digest（config.py 拒绝可变标签）
       DAI_ENV_BASE_IMAGE: "${DAI_ENV_BASE_IMAGE:?DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的 python:3.12-slim 引用}"
       DAI_STUDIO_STORAGE_DIR: /app/storage/studio

@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+import redis as redis_lib
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -8,6 +9,65 @@ from app.errors import api_error
 from app.models import User
 from app.schemas import TokenResponse
 from app.security import create_token, decode_token, token_ttl_seconds, verify_password
+
+
+def _user_rate_key(username: str) -> str:
+    return f"rl:user:{username}"
+
+
+def _ip_rate_key(ip: str) -> str:
+    return f"rl:ip:{ip}"
+
+
+def _redis_call(redis_client, method: str, *args):
+    """Redis 访问统一错误语义：故障时登录返回 503，绝不造成永久锁定。"""
+    try:
+        return getattr(redis_client, method)(*args)
+    except redis_lib.exceptions.RedisError:
+        raise api_error(503, "SERVICE_UNAVAILABLE", "认证服务暂不可用，请稍后重试")
+
+
+def check_login_rate_limits(redis_client, settings: Settings, username: str, ip: str) -> None:
+    """登录前检查账户与 IP 双维限流；超限抛 429 并带 Retry-After。"""
+    user_key = _user_rate_key(username)
+    ip_key = _ip_rate_key(ip)
+    user_failures = int(_redis_call(redis_client, "get", user_key) or 0)
+    ip_attempts = int(_redis_call(redis_client, "get", ip_key) or 0)
+    if user_failures >= settings.login_rate_limit_user_max_failures:
+        raise api_error(
+            429,
+            "RATE_LIMITED",
+            "失败次数过多，请稍后再试",
+            headers={"Retry-After": str(_rate_retry_after(redis_client, user_key))},
+        )
+    if ip_attempts >= settings.login_rate_limit_ip_max_attempts:
+        raise api_error(
+            429,
+            "RATE_LIMITED",
+            "尝试次数过多，请稍后再试",
+            headers={"Retry-After": str(_rate_retry_after(redis_client, ip_key))},
+        )
+
+
+def _rate_retry_after(redis_client, key: str) -> int:
+    ttl = _redis_call(redis_client, "ttl", key)
+    try:
+        return int(ttl) if ttl and int(ttl) > 0 else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def record_login_failure(redis_client, settings: Settings, username: str, ip: str) -> None:
+    """记录一次失败：账户与 IP 计数器各 +1，首个计数开启窗口。"""
+    for key in (_user_rate_key(username), _ip_rate_key(ip)):
+        count = _redis_call(redis_client, "incr", key)
+        if count == 1:
+            _redis_call(redis_client, "expire", key, settings.login_rate_limit_window_seconds)
+
+
+def reset_login_failures(redis_client, username: str) -> None:
+    """成功登录后清除该账户的失败计数（IP 计数按窗口自然衰减）。"""
+    _redis_call(redis_client, "delete", _user_rate_key(username))
 
 
 def authenticate_user(db: Session, username: str, password: str) -> User:
