@@ -18,6 +18,11 @@ services:
 
   redis:
     image: redis:7-alpine
+    # TASK-013：AOF everysec + 持久卷——正常重建保留 Refresh Token/黑名单/限流计数
+    # 详细故障语义见 docs/redis-persistence.md
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis_data:/data
     networks:
       - internal
     healthcheck:
@@ -147,6 +152,8 @@ services:
 
 volumes:
   mysql_data:
+  # Redis AOF 持久卷——备份任务必须包含此卷（TASK-013/TASK-014）
+  redis_data:
   studio_data:
   # 教师上传视频持久卷——容器重建后视频仍存在，备份任务必须包含此卷
   video_data:
