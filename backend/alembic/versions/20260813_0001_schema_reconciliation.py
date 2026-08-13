@@ -48,6 +48,8 @@ _SUBMITTED_AT_TABLES = ["experiment_submissions"]
 
 
 def upgrade() -> None:
+    # SQLite 不支持 ALTER COLUMN 的 server_default 语法，统一走 batch 模式
+    # （recreate="auto"：SQLite 重建表，MySQL 仍为原生 ALTER——与实库演练一致）
     for table in _TIMESTAMP_TABLES:
         for column in ("created_at", "updated_at"):
             op.execute(
@@ -55,44 +57,44 @@ def upgrade() -> None:
                     f"UPDATE {table} SET {column} = CURRENT_TIMESTAMP WHERE {column} IS NULL"
                 )
             )
-            op.alter_column(
-                table,
-                column,
-                existing_type=sa.DateTime(),
-                nullable=False,
-                server_default=sa.text("CURRENT_TIMESTAMP"),
-            )
+            with op.batch_alter_table(table) as batch_op:
+                batch_op.alter_column(
+                    column,
+                    existing_type=sa.DateTime(),
+                    nullable=False,
+                    server_default=sa.text("CURRENT_TIMESTAMP"),
+                )
     for table in _SUBMITTED_AT_TABLES:
         op.execute(
             sa.text(
                 f"UPDATE {table} SET submitted_at = CURRENT_TIMESTAMP WHERE submitted_at IS NULL"
             )
         )
-        op.alter_column(
-            table,
-            "submitted_at",
-            existing_type=sa.DateTime(),
-            nullable=False,
-            server_default=sa.text("CURRENT_TIMESTAMP"),
-        )
+        with op.batch_alter_table(table) as batch_op:
+            batch_op.alter_column(
+                "submitted_at",
+                existing_type=sa.DateTime(),
+                nullable=False,
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+            )
 
 
 def downgrade() -> None:
     """恢复 nullable（保留 server default，与升级前状态一致）。"""
     for table in _TIMESTAMP_TABLES:
         for column in ("created_at", "updated_at"):
-            op.alter_column(
-                table,
-                column,
+            with op.batch_alter_table(table) as batch_op:
+                batch_op.alter_column(
+                    column,
+                    existing_type=sa.DateTime(),
+                    nullable=True,
+                    server_default=sa.text("CURRENT_TIMESTAMP"),
+                )
+    for table in _SUBMITTED_AT_TABLES:
+        with op.batch_alter_table(table) as batch_op:
+            batch_op.alter_column(
+                "submitted_at",
                 existing_type=sa.DateTime(),
                 nullable=True,
                 server_default=sa.text("CURRENT_TIMESTAMP"),
             )
-    for table in _SUBMITTED_AT_TABLES:
-        op.alter_column(
-            table,
-            "submitted_at",
-            existing_type=sa.DateTime(),
-            nullable=True,
-            server_default=sa.text("CURRENT_TIMESTAMP"),
-        )

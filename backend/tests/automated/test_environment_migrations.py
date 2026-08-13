@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
+from alembic.config import Config as AlembicConfig
+from alembic.script import ScriptDirectory
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 MIGRATION_PATH = (
@@ -34,7 +36,16 @@ NEW_REVISION = "b4c5d6e7f890"
 REVISION_A = "b4c5d6e7f890"
 REVISION_B = "c5d6e7f8a901"
 REVISION_FIX = "d6e7f8a9b012"
-CURRENT_HEAD = "20260812_0002"
+def _derive_current_head() -> str:
+    """从 alembic 脚本目录推导当前 head（随新增迁移自动前移，避免硬编码漂移）。"""
+    cfg = AlembicConfig(str(BACKEND_DIR / "alembic.ini"))
+    script = ScriptDirectory.from_config(cfg)
+    heads = script.get_heads()
+    assert len(heads) == 1, f"迁移链出现多个 head: {heads}"
+    return heads[0]
+
+
+CURRENT_HEAD = _derive_current_head()
 
 CONTROL_TABLES = [
     "package_catalog",
