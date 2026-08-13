@@ -684,9 +684,10 @@ def _create_question(client, db_session_factory, teacher_username="gen_teacher",
     create_user(db_session_factory, teacher_username, "teacher")
     token, _ = login(client, teacher_username)
     headers = auth_header(token)
+    # TASK-006：POST /courses 只接受 draft；生成链路仅需教师拥有课程
     course_id = client.post(
         "/api/v1/courses", headers=headers,
-        json={"title": f"{teacher_username}-course", "status": "published"},
+        json={"title": f"{teacher_username}-course"},
     ).json()["id"]
 
     now = datetime.now(timezone.utc)
@@ -773,9 +774,10 @@ def test_endpoint_ai_not_ready(client, db_session_factory, test_settings):
     create_user(db_session_factory, "gen_teacher_nokey", "teacher")
     token, _ = login(client, "gen_teacher_nokey")
     headers = auth_header(token)
+    # TASK-006：POST /courses 只接受 draft
     course_id = client.post(
         "/api/v1/courses", headers=headers,
-        json={"title": "nokey-course", "status": "published"},
+        json={"title": "nokey-course"},
     ).json()["id"]
     assignment_id = client.post(
         "/api/v1/assignments", headers=headers,

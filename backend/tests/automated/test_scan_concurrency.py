@@ -175,7 +175,9 @@ class TestAIFinalizeOnReviewRequired:
         settings = MagicMock()
         with db_session_factory() as db:
             # grade_code_submission 在 process_ai_grade 内 import，patch 其来源模块
-            with patch("app.services.ai_grading_service.grade_code_submission",
+            # DeepSeekClient 构造会创建 httpx.Client（受环境 proxy 变量影响），一并 mock 掉
+            with patch("app.services.ai_client.DeepSeekClient", return_value=MagicMock()), \
+                 patch("app.services.ai_grading_service.grade_code_submission",
                        side_effect=AIServiceError("AI_UNAVAILABLE", "AI 服务不可用", retryable=False)):
                 result = process_ai_grade(db, MagicMock(), settings, ctx["cg_id"])
                 assert result is None  # 失败路径返回 None

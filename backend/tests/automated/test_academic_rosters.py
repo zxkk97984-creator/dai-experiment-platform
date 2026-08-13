@@ -36,11 +36,16 @@ def test_class_roster_syncs_course_counts_and_student_metadata(client, db_sessio
     assert add.status_code == 200, add.text
 
     course = client.post(f"{API}/courses", headers=auth_header(teacher_token), json={
-        "title": "数据结构", "status": "published", "visibility": "private",
+        "title": "数据结构", "visibility": "private",
+        "description": "desc", "cover": "covers/x.png",
+        "start_time": "2026-09-01T08:00:00", "default_score": 100,
         "academic_term_id": term.json()["id"], "teaching_class_ids": [class_id],
     })
     assert course.status_code == 201, course.text
-    body = course.json()
+    # TASK-006：发布必须走 PATCH 转换（课程信息已完整）
+    publish = client.patch(f"{API}/courses/{course.json()['id']}", headers=auth_header(teacher_token), json={"status": "published"})
+    assert publish.status_code == 200, publish.text
+    body = publish.json()
     assert body["academic_term"]["name"] == "2026 秋季学期"
     assert body["teaching_classes"][0]["name"] == "计算机一班"
     assert body["student_count"] == 1
@@ -67,10 +72,17 @@ def test_manual_drop_is_not_reactivated_by_class_sync(client, db_session_factory
         "academic_term_id": term["id"], "code": "AI-01", "name": "人工智能一班",
     }).json()["id"]
     client.post(f"{API}/teaching-classes/{class_id}/students", headers=auth_header(admin_token), json={"student_ids": [student.id]})
-    course_id = client.post(f"{API}/courses", headers=auth_header(teacher_token), json={
-        "title": "机器学习", "status": "published", "visibility": "private",
+    course = client.post(f"{API}/courses", headers=auth_header(teacher_token), json={
+        "title": "机器学习", "visibility": "private",
+        "description": "desc", "cover": "covers/x.png",
+        "start_time": "2027-02-20T08:00:00", "default_score": 100,
         "academic_term_id": term["id"], "teaching_class_ids": [class_id],
-    }).json()["id"]
+    })
+    assert course.status_code == 201, course.text
+    course_id = course.json()["id"]
+    # TASK-006：发布必须走 PATCH 转换
+    publish = client.patch(f"{API}/courses/{course_id}", headers=auth_header(teacher_token), json={"status": "published"})
+    assert publish.status_code == 200, publish.text
     removed = client.delete(f"{API}/courses/{course_id}/students/{student.id}", headers=auth_header(teacher_token))
     assert removed.status_code == 204
     client.post(f"{API}/teaching-classes/{class_id}/students", headers=auth_header(admin_token), json={"student_ids": [student.id]})

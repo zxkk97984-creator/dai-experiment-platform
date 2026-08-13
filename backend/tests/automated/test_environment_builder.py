@@ -58,7 +58,18 @@ def _make_package(db, id_, name="numpy", version="2.1.3", source="pypi", imports
     return pkg
 
 
+def _clear_conftest_seed(db):
+    """conftest（TASK-010）预置 basic available 版本以满足 NOT NULL 默认；
+    本文件 fixtures 使用固定 id/slug 独立建数据，先移除预置行避免唯一约束冲突。"""
+    for version in db.query(EnvironmentVersion).all():
+        db.delete(version)
+    for profile in db.query(EnvironmentProfile).all():
+        db.delete(profile)
+    db.commit()
+
+
 def _make_profile(db, id_=1, slug="basic", display_name="Python 基础"):
+    _clear_conftest_seed(db)
     prof = EnvironmentProfile(id=id_, slug=slug, display_name=display_name, status="active")
     db.add(prof)
     db.commit()
@@ -196,7 +207,12 @@ def test_smoke_script_renders_executable_python():
     compile(rendered, "<smoke-script>", "exec")
 
     namespace: dict = {}
-    exec(rendered, namespace)
+    try:
+        exec(rendered, namespace)
+    except SystemExit:
+        # 容器语义：存在缺失 import 时脚本以非零码退出（测试环境无 ipykernel），
+        # 不影响对渲染结果结构（dict/failed 列表）的断言
+        pass
     # 执行后 results 是合法 dict（容器内以此生成 DAI_SMOKE_IMPORTS JSON 报告）
     results = namespace["results"]
     assert isinstance(results, dict)
@@ -430,6 +446,7 @@ def test_retry_job_runs_after_failure(db_session_factory, test_settings):
 
 def test_seed_creates_profiles_packages_versions(db_session_factory, test_settings):
     with db_session_factory() as db:
+        _clear_conftest_seed(db)
         result = seed_environment_catalog(db, test_settings)
         assert len(result.profiles_created) == 3
         assert len(result.packages_created) == 7
@@ -445,6 +462,7 @@ def test_seed_creates_profiles_packages_versions(db_session_factory, test_settin
 
 def test_seed_idempotent(db_session_factory, test_settings):
     with db_session_factory() as db:
+        _clear_conftest_seed(db)
         seed_environment_catalog(db, test_settings)
         second = seed_environment_catalog(db, test_settings)
         assert second.profiles_created == []
@@ -458,6 +476,7 @@ def test_seed_idempotent(db_session_factory, test_settings):
 
 def test_seed_enqueue_is_idempotent(db_session_factory, test_settings, redis_client):
     with db_session_factory() as db:
+        _clear_conftest_seed(db)
         first = seed_environment_catalog(db, test_settings, enqueue=True, redis_client=redis_client)
         assert len(first.enqueued) == 3
         assert redis_client.llen(test_settings.env_build_queue_name) == 3

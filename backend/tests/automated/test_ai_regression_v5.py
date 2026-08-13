@@ -11,10 +11,11 @@ def _create_course_and_exam(client, db_session_factory, username: str):
     create_user(db_session_factory, username, "teacher")
     token, _ = login(client, username)
     headers = auth_header(token)
+    # TASK-006：POST /courses 只接受 draft
     course_id = client.post(
         "/api/v1/courses",
         headers=headers,
-        json={"title": f"{username}-course", "status": "published"},
+        json={"title": f"{username}-course"},
     ).json()["id"]
     now = datetime.now(timezone.utc)
     exam_id = client.post(
@@ -37,10 +38,11 @@ def test_assignment_explicit_null_mode_still_defaults_to_active(client, db_sessi
     create_user(db_session_factory, "null_assignment_teacher", "teacher")
     token, _ = login(client, "null_assignment_teacher")
     headers = auth_header(token)
+    # TASK-006：POST /courses 只接受 draft
     course_id = client.post(
         "/api/v1/courses",
         headers=headers,
-        json={"title": "Null assignment course", "status": "published"},
+        json={"title": "Null assignment course"},
     ).json()["id"]
     assignment_id = client.post(
         "/api/v1/assignments",

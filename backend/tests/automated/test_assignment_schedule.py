@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from conftest import auth_header, create_user, login
 from app.api import judge as judge_api
@@ -17,11 +18,17 @@ def _setup(client, db_session_factory):
     teacher_token, _ = login(client, "schedule_teacher")
     other_token, _ = login(client, "schedule_other")
     student_token, _ = login(client, "schedule_student")
-    course_id = client.post(
-        "/api/v1/courses",
-        headers=auth_header(teacher_token),
-        json={"title": "作业时间测试课", "status": "published", "visibility": "public"},
-    ).json()["id"]
+    # TASK-006：POST /courses 只接受 draft；用 ORM 创建已发布课程（时间链路仅依赖发布态 + 选课）
+    with db_session_factory() as db:
+        from app.models import Course, User
+        teacher = db.scalar(
+            select(User).where(User.username == "schedule_teacher")
+        )
+        course = Course(title="作业时间测试课", description="d", status="published",
+                        visibility="public", default_score=100, teacher_id=teacher.id)
+        db.add(course)
+        db.commit()
+        course_id = course.id
     client.post(f"/api/v1/courses/{course_id}/enroll", headers=auth_header(student_token))
     return teacher_token, other_token, student_token, course_id
 
@@ -98,10 +105,17 @@ def test_first_published_at_survives_unpublish_and_republish(client, db_session_
     assert second.json()["published_at"] == first_published_at
 
 
-def test_direct_published_create_gets_first_published_at(client, db_session_factory):
+def test_first_publish_sets_published_at(client, db_session_factory):
+    """TASK-007 后不再支持创建即发布：首次 /publish 落盘 first_published_at"""
     teacher, _, _, course_id = _setup(client, db_session_factory)
-    assignment = _assignment(client, teacher, course_id, status="published")
-    assert assignment["published_at"]
+    assignment = _assignment(client, teacher, course_id)
+    _question(client, teacher, assignment["id"])
+    published = client.post(
+        f"/api/v1/assignments/{assignment['id']}/publish",
+        headers=auth_header(teacher),
+    )
+    assert published.status_code == 200, published.text
+    assert published.json()["published_at"]
 
 
 def test_deadline_blocks_sample_run_and_submission(client, db_session_factory):

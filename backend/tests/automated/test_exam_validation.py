@@ -9,6 +9,17 @@ from app.services.exam_service import score_choice_answer, validate_publish, val
 from conftest import auth_header, create_user, login
 
 
+def _create_published_course(db_sf, teacher_user, title):
+    """POST /courses 只接受 draft，已发布课程直接走 ORM 构造"""
+    from app.models import Course
+    with db_sf() as db:
+        course = Course(title=title, description="d", status="published",
+                        visibility="public", default_score=100, teacher_id=teacher_user.id)
+        db.add(course)
+        db.commit()
+        return course.id
+
+
 # ═══════════════════════════════════════════════════════════════
 # 1. PublicCase 历史格式迁移
 # ═══════════════════════════════════════════════════════════════
@@ -166,11 +177,9 @@ def test_points_must_be_positive(db_session_factory):
 
 def test_publish_fails_with_invalid_questions(client, db_session_factory):
     """发布时若题目有校验错误，应拒绝发布"""
-    create_user(db_session_factory, "pv_t", "teacher")
+    teacher_user = create_user(db_session_factory, "pv_t", "teacher")
     t_tok, _ = login(client, "pv_t")
-    c = client.post("/api/v1/courses", headers=auth_header(t_tok),
-                    json={"title": "VC", "status": "published"})
-    cid = c.json()["id"]
+    cid = _create_published_course(db_session_factory, teacher_user, "VC")
     import datetime
     from datetime import timezone, timedelta
     now = datetime.datetime.now(timezone.utc)
@@ -202,11 +211,9 @@ def test_publish_fails_with_invalid_questions(client, db_session_factory):
 
 def test_active_code_draft_can_save_but_publish_requires_test_groups(client, db_session_factory):
     """active 编程题可先保存草稿，但配置不完整时不能发布。"""
-    create_user(db_session_factory, "pv2_t", "teacher")
+    teacher_user = create_user(db_session_factory, "pv2_t", "teacher")
     t_tok, _ = login(client, "pv2_t")
-    c = client.post("/api/v1/courses", headers=auth_header(t_tok),
-                    json={"title": "VC2", "status": "published"})
-    cid = c.json()["id"]
+    cid = _create_published_course(db_session_factory, teacher_user, "VC2")
     import datetime
     from datetime import timezone, timedelta
     now = datetime.datetime.now(timezone.utc)
@@ -245,11 +252,9 @@ def test_exam_question_update_schema():
 
 def test_exam_question_patch_uses_schema(client, db_session_factory):
     """PATCH 端点使用 ExamQuestionUpdate 而非裸 dict"""
-    create_user(db_session_factory, "pu_t", "teacher")
+    teacher_user = create_user(db_session_factory, "pu_t", "teacher")
     t_tok, _ = login(client, "pu_t")
-    c = client.post("/api/v1/courses", headers=auth_header(t_tok),
-                    json={"title": "VU", "status": "published"})
-    cid = c.json()["id"]
+    cid = _create_published_course(db_session_factory, teacher_user, "VU")
     import datetime
     from datetime import timezone, timedelta
     now = datetime.datetime.now(timezone.utc)

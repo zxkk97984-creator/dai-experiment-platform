@@ -23,22 +23,31 @@ def _setup_course(client, db_session_factory, course_status="published", assignm
     create_user(db_session_factory, "s_j", "student")
     t_tok, _ = login(client, "t_j")
     s_tok, _ = login(client, "s_j")
-    c = client.post('/api/v1/courses', headers=auth_header(t_tok), json={
-        'title': 'Judge Course', 'status': course_status, 'visibility': 'public',
-    })
-    cid = c.json()['id']
+    # TASK-006：POST /courses 只接受 draft；用 ORM 创建指定状态的课程
+    with db_session_factory() as db:
+        teacher = db.query(models.User).filter(models.User.username == 't_j').first()
+        course = models.Course(title='Judge Course', description='d', status=course_status,
+                               visibility='public', default_score=100, teacher_id=teacher.id)
+        db.add(course)
+        db.commit()
+        cid = course.id
     if course_status == 'published':
         client.post(f'/api/v1/courses/{cid}/enroll', headers=auth_header(s_tok))
+    # TASK-007：POST /assignments 只接受 draft；发布走 /publish 门禁（需至少一题）
     a = client.post('/api/v1/assignments', headers=auth_header(t_tok), json={
-        'course_id': cid, 'title': 'A1', 'status': assignment_status,
+        'course_id': cid, 'title': 'A1',
     })
     aid = a.json()['id']
     q = client.post(f'/api/v1/assignments/{aid}/questions', headers=auth_header(t_tok), json={
         'title': 'Q1', 'function_name': 'add',
         'public_cases': [{'args': [1, 2], 'expected': 3}],
         'hidden_tests': 'HIDDEN_SENTINEL_XYZ\ndef test_hidden(): assert add(1,2)==3',
+        'grading_mode': 'legacy',
     })
     qid = q.json()['id']
+    if assignment_status == 'published':
+        p = client.post(f'/api/v1/assignments/{aid}/publish', headers=auth_header(t_tok))
+        assert p.status_code == 200, p.text
     return t_tok, s_tok, cid, aid, qid
 
 
@@ -68,24 +77,34 @@ def test_sample_run_no_submission_no_queue(client, db_session_factory):
 # 2. 权限拒绝：未选课、draft assignment、draft course、teacher
 # ═══════════════════════════════════════════════════════════════
 
+def _orm_course(db_session_factory, teacher_username, title, status):
+    """TASK-006：POST /courses 只接受 draft；直接按状态 ORM 建课。"""
+    with db_session_factory() as db:
+        teacher = db.query(models.User).filter(models.User.username == teacher_username).first()
+        course = models.Course(title=title, description='d', status=status,
+                               visibility='public', default_score=100, teacher_id=teacher.id)
+        db.add(course)
+        db.commit()
+        return course.id
+
+
 def test_sample_run_permission_denied_all_cases(client, db_session_factory):
-    # 未选课
+    # 未选课（published course + published assignment，学生未选课）
     create_user(db_session_factory, "t_perm2", "teacher")
     create_user(db_session_factory, "s_perm2", "student")
     t_tok, _ = login(client, "t_perm2")
     s_tok, _ = login(client, "s_perm2")
-    c = client.post('/api/v1/courses', headers=auth_header(t_tok), json={
-        'title': 'C', 'status': 'published', 'visibility': 'public',
-    })
-    cid = c.json()['id']
-    # 不选课
+    cid = _orm_course(db_session_factory, "t_perm2", 'C', 'published')
     a = client.post('/api/v1/assignments', headers=auth_header(t_tok), json={
-        'course_id': cid, 'title': 'A', 'status': 'published',
+        'course_id': cid, 'title': 'A',
     })
     q = client.post(f'/api/v1/assignments/{a.json()["id"]}/questions', headers=auth_header(t_tok), json={
         'title': 'Q', 'function_name': 'f', 'hidden_tests': 'def test(): pass',
+        'grading_mode': 'legacy',
     })
     qid = q.json()['id']
+    p = client.post(f'/api/v1/assignments/{a.json()["id"]}/publish', headers=auth_header(t_tok))
+    assert p.status_code == 200, p.text
 
     r = client.post(f'/api/v1/judge/questions/{qid}/sample-run',
                     headers=auth_header(s_tok), json={'question_id': qid, 'code': 'pass'})
@@ -101,9 +120,9 @@ def test_sample_run_permission_denied_all_cases(client, db_session_factory):
     create_user(db_session_factory, "s_da2", "student")
     t_da, _ = login(client, "t_da2")
     s_da, _ = login(client, "s_da2")
-    c2 = client.post('/api/v1/courses', headers=auth_header(t_da), json={'title':'C2','status':'published','visibility':'public'})
-    client.post(f'/api/v1/courses/{c2.json()["id"]}/enroll', headers=auth_header(s_da))
-    a2 = client.post('/api/v1/assignments', headers=auth_header(t_da), json={'course_id':c2.json()['id'],'title':'A2','status':'draft'})
+    c2 = _orm_course(db_session_factory, "t_da2", 'C2', 'published')
+    client.post(f'/api/v1/courses/{c2}/enroll', headers=auth_header(s_da))
+    a2 = client.post('/api/v1/assignments', headers=auth_header(t_da), json={'course_id': c2, 'title': 'A2'})
     q2 = client.post(f'/api/v1/assignments/{a2.json()["id"]}/questions', headers=auth_header(t_da), json={
         'title':'Q2','function_name':'f','hidden_tests':'def test(): pass',
     })
@@ -111,13 +130,13 @@ def test_sample_run_permission_denied_all_cases(client, db_session_factory):
                     headers=auth_header(s_da), json={'question_id':q2.json()['id'],'code':'pass'})
     assert r.status_code == 403, f"draft assignment: {r.status_code}"
 
-    # draft course
+    # draft course（课程未发布即不可运行，作业保持 draft）
     create_user(db_session_factory, "t_dc2", "teacher")
     create_user(db_session_factory, "s_dc2", "student")
     t_dc, _ = login(client, "t_dc2")
     s_dc, _ = login(client, "s_dc2")
-    c3 = client.post('/api/v1/courses', headers=auth_header(t_dc), json={'title':'C3','status':'draft'})
-    a3 = client.post('/api/v1/assignments', headers=auth_header(t_dc), json={'course_id':c3.json()['id'],'title':'A3','status':'published'})
+    c3 = _orm_course(db_session_factory, "t_dc2", 'C3', 'draft')
+    a3 = client.post('/api/v1/assignments', headers=auth_header(t_dc), json={'course_id': c3, 'title': 'A3'})
     q3 = client.post(f'/api/v1/assignments/{a3.json()["id"]}/questions', headers=auth_header(t_dc), json={
         'title':'Q3','function_name':'f','hidden_tests':'def test(): pass',
     })

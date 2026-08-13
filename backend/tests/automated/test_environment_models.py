@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import pytest
 import sqlalchemy as sa
 from sqlalchemy import select
 
@@ -23,6 +24,20 @@ CONTROL_TABLES = [
     "profile_version_packages",
     "environment_build_jobs",
 ]
+
+
+@pytest.fixture(autouse=True)
+def _clear_conftest_seed(db_session_factory):
+    """conftest（TASK-010）预置 basic 可用版本；本文件 fixtures 使用固定
+    id/slug 自建环境数据，测试开始前移除预置行，避免
+    UNIQUE(environment_profiles.id / slug) 冲突。"""
+    with db_session_factory() as db:
+        for version in db.query(EnvironmentVersion).all():
+            db.delete(version)
+        for profile in db.query(EnvironmentProfile).all():
+            db.delete(profile)
+        db.commit()
+    yield
 
 
 def _make_package(db, **overrides):

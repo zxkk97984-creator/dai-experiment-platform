@@ -34,10 +34,16 @@ def test_queue_sanitize_consistent_with_client():
     assert "sk-secret-key-value" not in queue_safe
 
 
-def test_client_repr_no_leak():
+def test_client_repr_no_leak(monkeypatch):
     """DeepSeekClient repr 不泄露 API Key"""
     from app.config import Settings
     from app.services.ai_client import DeepSeekClient
+
+    # httpx 默认 trust_env：shell 中的代理变量（如 ALL_PROXY=socks://…）
+    # 会让 httpx.Client 构造抛 ValueError，与测试目的无关——隔离环境变量
+    for var in ("ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy",
+                "HTTPS_PROXY", "https_proxy"):
+        monkeypatch.delenv(var, raising=False)
 
     settings = Settings(
         _env_file=None,

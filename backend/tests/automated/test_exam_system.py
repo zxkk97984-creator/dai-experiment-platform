@@ -7,12 +7,17 @@ API = "/api/v1"
 def _h(token): return auth_header(token)
 
 def _setup(client, db_session_factory):
-    create_user(db_session_factory, "e_t", "teacher")
+    from app.models import Course
+    teacher = create_user(db_session_factory, "e_t", "teacher")
     create_user(db_session_factory, "e_s", "student")
     t_tok, _ = login(client, "e_t")
     s_tok, _ = login(client, "e_s")
-    c = client.post(f"{API}/courses", headers=_h(t_tok), json={"title":"C","status":"published","visibility":"public"})
-    cid = c.json()["id"]
+    with db_session_factory() as db:
+        course = Course(title="C", description="d", status="published", visibility="public",
+                        default_score=100, teacher_id=teacher.id)
+        db.add(course)
+        db.commit()
+        cid = course.id
     client.post(f"{API}/courses/{cid}/enroll", headers=_h(s_tok))
     now = datetime.datetime.now(timezone.utc)
     e = client.post(f"{API}/exams", headers=_h(t_tok), json={"course_id":cid,"title":"E","duration_minutes":60,"start_at":(now-timedelta(hours=1)).isoformat(),"end_at":(now+timedelta(hours=1)).isoformat()})

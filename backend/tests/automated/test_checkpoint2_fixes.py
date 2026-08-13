@@ -53,17 +53,28 @@ def _create_template_with_version(db_session_factory, owner_id=1) -> tuple[int, 
 
 def _setup_lesson_with_template(client, db_session_factory, course_status="published"):
     """创建教师+课程+选课+章节+课时（绑定模板）+返回关键 ID"""
-    create_user(db_session_factory, "t1", "teacher")
+    t_user = create_user(db_session_factory, "t1", "teacher")
     create_user(db_session_factory, "s1", "student")
     t_tok, _ = login(client, "t1")
     s_tok, _ = login(client, "s1")
 
     tid, vid = _create_template_with_version(db_session_factory)
 
-    c = client.post("/api/v1/courses", headers=auth_header(t_tok), json={
-        "title": "测试课程", "status": course_status, "visibility": "public",
-    })
-    cid = c.json()["id"]
+    if course_status == "draft":
+        c = client.post("/api/v1/courses", headers=auth_header(t_tok), json={
+            "title": "测试课程", "status": "draft", "visibility": "public",
+        })
+        cid = c.json()["id"]
+    else:
+        # TASK-006：POST 只允许 draft，published 课程走 ORM 领域 fixture
+        with db_session_factory() as db:
+            course = models.Course(
+                title="测试课程", description="d", status="published",
+                visibility="public", default_score=100, teacher_id=t_user.id,
+            )
+            db.add(course)
+            db.commit()
+            cid = course.id
 
     ch = client.post(f"/api/v1/courses/{cid}/chapters", headers=auth_header(t_tok), json={"title": "章"})
     chid = ch.json()["id"]
@@ -201,7 +212,7 @@ class FakeKernelManager:
         self.sessions = {}       # {record_id: FakeSession}
         self.initialized_versions = set()
 
-    def get_or_create_session(self, record_id, lesson_storage_dir=""):
+    def get_or_create_session(self, record_id, lesson_storage_dir="", *, image_ref=None, environment_version_id=None):
         if record_id not in self.sessions:
             self.sessions[record_id] = FakeSession()
         return self.sessions[record_id]
@@ -402,15 +413,20 @@ def test_execution_count_increments_per_visible_cell(client, db_session_factory,
 
 def test_notebooks_get_returns_template_not_found_with_deprecation(client, db_session_factory):
     """已发布已选课但无模板的 lesson → TEMPLATE_NOT_FOUND + Deprecation"""
-    create_user(db_session_factory, "tnb", "teacher")
+    t_user = create_user(db_session_factory, "tnb", "teacher")
     create_user(db_session_factory, "snb", "student")
     t_tok, _ = login(client, "tnb")
     s_tok, _ = login(client, "snb")
 
-    c = client.post("/api/v1/courses", headers=auth_header(t_tok), json={
-        "title": "NB Course", "status": "published", "visibility": "public",
-    })
-    cid = c.json()["id"]
+    # TASK-006：published 课程走 ORM 领域 fixture
+    with db_session_factory() as db:
+        course = models.Course(
+            title="NB Course", description="d", status="published",
+            visibility="public", default_score=100, teacher_id=t_user.id,
+        )
+        db.add(course)
+        db.commit()
+        cid = course.id
     ch = client.post(f"/api/v1/courses/{cid}/chapters", headers=auth_header(t_tok), json={"title": "Ch"})
     le = client.post(f"/api/v1/chapters/{ch.json()['id']}/lessons", headers=auth_header(t_tok), json={
         "title": "No Template", "content_type": "markdown",

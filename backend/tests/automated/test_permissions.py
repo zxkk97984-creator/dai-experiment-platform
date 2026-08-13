@@ -8,17 +8,29 @@ API = "/api/v1"
 
 def _setup_full(client, db_session_factory, course_status="published"):
     """创建教师+两个学生（一个 enrolled）+ 课程+章节+assignment+exam"""
-    create_user(db_session_factory, "t_own", "teacher")
+    t_own = create_user(db_session_factory, "t_own", "teacher")
     create_user(db_session_factory, "s_yes", "student")
     create_user(db_session_factory, "s_no", "student")
     t_tok, _ = login(client, "t_own")
     s_yes_tok, _ = login(client, "s_yes")
     s_no_tok, _ = login(client, "s_no")
 
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok), json={
-        "title": "PermTest", "status": course_status, "visibility": "public",
-    })
-    cid = c.json()["id"]
+    if course_status == "draft":
+        c = client.post(f"{API}/courses", headers=auth_header(t_tok), json={
+            "title": "PermTest", "status": "draft", "visibility": "public",
+        })
+        assert c.status_code == 201, c.text
+        cid = c.json()["id"]
+    else:
+        # TASK-006：POST 只允许 draft，published 课程走 ORM 领域 fixture
+        with db_session_factory() as db:
+            course = models.Course(
+                title="PermTest", description="d", status="published",
+                visibility="public", default_score=100, teacher_id=t_own.id,
+            )
+            db.add(course)
+            db.commit()
+            cid = course.id
     if course_status == "published":
         client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_yes_tok))
     ch = client.post(f"{API}/courses/{cid}/chapters", headers=auth_header(t_tok), json={"title": "Ch"})
@@ -26,14 +38,17 @@ def _setup_full(client, db_session_factory, course_status="published"):
     le = client.post(f"{API}/chapters/{chid}/lessons", headers=auth_header(t_tok), json={
         "title": "Lesson", "content_type": "markdown", "content": "test",
     })
+    # TASK-007：POST 只允许 draft，发布走专用 /publish 端点（至少一题，legacy 模式避免 AI 门禁）
     a = client.post(f"{API}/assignments", headers=auth_header(t_tok), json={
-        "course_id": cid, "title": "A", "status": "published",
+        "course_id": cid, "title": "A",
     })
     aid = a.json()["id"]
     q = client.post(f"{API}/assignments/{aid}/questions", headers=auth_header(t_tok), json={
-        "title": "Q", "function_name": "f", "hidden_tests": "SECRET",
+        "title": "Q", "function_name": "f", "hidden_tests": "SECRET", "grading_mode": "legacy",
     })
     qid = q.json()["id"]
+    pub = client.post(f"{API}/assignments/{aid}/publish", headers=auth_header(t_tok))
+    assert pub.status_code == 200, pub.text
     now = datetime.now(UTC)
     e = client.post(f"{API}/exams", headers=auth_header(t_tok), json={
         "course_id": cid,
@@ -140,9 +155,9 @@ def test_draft_course_rejected(client, db_session_factory):
 def test_draft_assignment_rejected(client, db_session_factory):
     d = _setup_full(client, db_session_factory)
     tok = d["s_yes_tok"]
-    # 把 assignment 改为 draft
+    # 把 assignment 改为 draft（TASK-007：取消发布走专用端点）
     t_tok = d["t_tok"]
-    client.patch(f"{API}/assignments/{d['aid']}", headers=auth_header(t_tok), json={"status": "draft"})
+    client.post(f"{API}/assignments/{d['aid']}/unpublish", headers=auth_header(t_tok))
     r = client.get(f"{API}/assignments/{d['aid']}", headers=auth_header(tok))
     assert r.status_code == 403
 
@@ -161,28 +176,34 @@ def test_draft_exam_rejected(client, db_session_factory):
 # ═══════════════════════════════════════════════════════════════
 
 def test_teacher_b_cannot_manage_teacher_a_resources(client, db_session_factory):
-    create_user(db_session_factory, "ta_r", "teacher")
+    ta_user = create_user(db_session_factory, "ta_r", "teacher")
     create_user(db_session_factory, "tb_r", "teacher")
     create_user(db_session_factory, "stu_r", "student")
     ta_tok, _ = login(client, "ta_r")
     tb_tok, _ = login(client, "tb_r")
 
-    c = client.post(f"{API}/courses", headers=auth_header(ta_tok), json={
-        "title": "TA Only", "status": "published",
-    })
-    cid = c.json()["id"]
+    # TASK-006：published 课程走 ORM 领域 fixture
+    with db_session_factory() as db:
+        course = models.Course(
+            title="TA Only", description="d", status="published",
+            visibility="public", default_score=100, teacher_id=ta_user.id,
+        )
+        db.add(course)
+        db.commit()
+        cid = course.id
     ch = client.post(f"{API}/courses/{cid}/chapters", headers=auth_header(ta_tok), json={"title": "Ch"})
     chid = ch.json()["id"]
     le = client.post(f"{API}/chapters/{chid}/lessons", headers=auth_header(ta_tok), json={
         "title": "L", "content_type": "markdown",
     })
     a = client.post(f"{API}/assignments", headers=auth_header(ta_tok), json={
-        "course_id": cid, "title": "A", "status": "published",
+        "course_id": cid, "title": "A",
     })
     aid = a.json()["id"]
     q = client.post(f"{API}/assignments/{aid}/questions", headers=auth_header(ta_tok), json={
-        "title": "Q", "function_name": "f", "hidden_tests": "def test(): pass",
+        "title": "Q", "function_name": "f", "hidden_tests": "def test(): pass", "grading_mode": "legacy",
     })
+    client.post(f"{API}/assignments/{aid}/publish", headers=auth_header(ta_tok))
     e = client.post(f"{API}/exams", headers=auth_header(ta_tok), json={
         "course_id": cid, "title": "E", "duration_minutes": 30,
     })
@@ -266,7 +287,7 @@ def test_error_business_detail_not_double_nested(client, db_session_factory):
 def test_error_developer_has_no_course_access(client, db_session_factory):
     """developer 对课程内容/列表无访问权——有真实 assignment/exam 数据"""
     create_user(db_session_factory, "dev_x2", "developer")
-    create_user(db_session_factory, "t_x2", "teacher")
+    t_x2 = create_user(db_session_factory, "t_x2", "teacher")
     create_user(db_session_factory, "s_x2", "student")
     create_user(db_session_factory, "admin_x2", "admin")
     d_tok, _ = login(client, "dev_x2")
@@ -274,16 +295,25 @@ def test_error_developer_has_no_course_access(client, db_session_factory):
     s_tok, _ = login(client, "s_x2")
     admin_tok, _ = login(client, "admin_x2")
 
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok), json={
-        "title": "DevBlocked2", "status": "published", "visibility": "public",
-    })
-    cid = c.json()["id"]
+    # TASK-006：published 课程走 ORM 领域 fixture
+    with db_session_factory() as db:
+        course = models.Course(
+            title="DevBlocked2", description="d", status="published",
+            visibility="public", default_score=100, teacher_id=t_x2.id,
+        )
+        db.add(course)
+        db.commit()
+        cid = course.id
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
-    # 创建真实 assignment 和 exam
+    # 创建真实 assignment 和 exam（TASK-007：发布走专用端点）
     a = client.post(f"{API}/assignments", headers=auth_header(t_tok), json={
-        "course_id": cid, "title": "A1", "status": "published",
+        "course_id": cid, "title": "A1",
     })
     aid = a.json()["id"]
+    client.post(f"{API}/assignments/{aid}/questions", headers=auth_header(t_tok), json={
+        "title": "Q", "function_name": "f", "hidden_tests": "def test(): pass", "grading_mode": "legacy",
+    })
+    client.post(f"{API}/assignments/{aid}/publish", headers=auth_header(t_tok))
     now = datetime.now(UTC)
     e = client.post(f"{API}/exams", headers=auth_header(t_tok), json={
         "course_id": cid,
@@ -369,7 +399,7 @@ def test_draft_assignment_questions_rejected(client, db_session_factory):
     d = _setup_full(client, db_session_factory)
     t_tok = d["t_tok"]
     tok = d["s_yes_tok"]
-    client.patch(f"{API}/assignments/{d['aid']}", headers=auth_header(t_tok), json={"status": "draft"})
+    client.post(f"{API}/assignments/{d['aid']}/unpublish", headers=auth_header(t_tok))
     r = client.get(f"{API}/assignments/{d['aid']}/questions", headers=auth_header(tok))
     assert r.status_code == 403
 
@@ -377,14 +407,21 @@ def test_draft_assignment_questions_rejected(client, db_session_factory):
 def test_teacher_b_full_mutation_rejection(client, db_session_factory):
     """teacher B 不能 create question、patch/publish assignment、patch exam、view grades、read questions"""
     from app import models as m
-    create_user(db_session_factory, "ta_m", "teacher")
+    ta_user = create_user(db_session_factory, "ta_m", "teacher")
     create_user(db_session_factory, "tb_m", "teacher")
     ta_tok, _ = login(client, "ta_m")
     tb_tok, _ = login(client, "tb_m")
 
-    c = client.post(f"{API}/courses", headers=auth_header(ta_tok), json={"title": "TA Mut", "status": "published"})
-    cid = c.json()["id"]
-    a = client.post(f"{API}/assignments", headers=auth_header(ta_tok), json={"course_id": cid, "title": "A", "status": "published"})
+    # TASK-006：published 课程走 ORM 领域 fixture
+    with db_session_factory() as db:
+        course = m.Course(
+            title="TA Mut", description="d", status="published",
+            visibility="public", default_score=100, teacher_id=ta_user.id,
+        )
+        db.add(course)
+        db.commit()
+        cid = course.id
+    a = client.post(f"{API}/assignments", headers=auth_header(ta_tok), json={"course_id": cid, "title": "A"})
     aid = a.json()["id"]
     e = client.post(f"{API}/exams", headers=auth_header(ta_tok), json={"course_id": cid, "title": "E", "duration_minutes": 30})
     eid = e.json()["id"]

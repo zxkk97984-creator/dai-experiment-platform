@@ -314,26 +314,33 @@ def test_judge_docker_failure_sets_system_error():
 
 def test_teacher_a_cannot_see_teacher_b_submissions(client, db_session_factory):
     """真实: ta 创建课程+作业+题目, tb 尝试查看→403"""
-    create_user(db_session_factory, 'ta1', 'teacher')
+    ta_user = create_user(db_session_factory, 'ta1', 'teacher')
     create_user(db_session_factory, 'tb1', 'teacher')
     create_user(db_session_factory, 'stu1', 'student')
     ta_tok, _ = login(client, 'ta1')
     tb_tok, _ = login(client, 'tb1')
     s_tok, _ = login(client, 'stu1')
 
-    ca = client.post('/api/v1/courses', headers=auth_header(ta_tok), json={
-        'title': 'TA Course', 'status': 'published', 'visibility': 'public',
-    })
-    caid = ca.json()['id']
+    # TASK-006：published 课程走 ORM 领域 fixture
+    with db_session_factory() as db:
+        course = models.Course(
+            title='TA Course', description='d', status='published',
+            visibility='public', default_score=100, teacher_id=ta_user.id,
+        )
+        db.add(course)
+        db.commit()
+        caid = course.id
     client.post(f'/api/v1/courses/{caid}/enroll', headers=auth_header(s_tok))
     a = client.post('/api/v1/assignments', headers=auth_header(ta_tok), json={
-        'course_id': caid, 'title': 'A1', 'status': 'published',
+        'course_id': caid, 'title': 'A1',
     })
     aid = a.json()['id']
     q = client.post(f'/api/v1/assignments/{aid}/questions', headers=auth_header(ta_tok), json={
         'title': 'Q1', 'function_name': 'f', 'hidden_tests': 'def test(): pass',
+        'grading_mode': 'legacy',
     })
     qid = q.json()['id']
+    client.post(f'/api/v1/assignments/{aid}/publish', headers=auth_header(ta_tok))
 
     # student submits
     sub = client.post('/api/v1/judge/submissions', headers=auth_header(s_tok), json={
@@ -358,7 +365,7 @@ def test_teacher_a_cannot_see_teacher_b_submissions(client, db_session_factory):
 
 def test_student_b_cannot_access_student_a_record(client, db_session_factory):
     """真实: sa 创建 record, sb 尝试所有操作→403"""
-    create_user(db_session_factory, 't_rec', 'teacher')
+    t_user = create_user(db_session_factory, 't_rec', 'teacher')
     create_user(db_session_factory, 'sa1', 'student')
     create_user(db_session_factory, 'sb1', 'student')
     t_tok, _ = login(client, 't_rec')
@@ -379,10 +386,15 @@ def test_student_b_cannot_access_student_a_record(client, db_session_factory):
         db.commit()
         tid, vid = tmpl.id, ver.id
 
-    c = client.post('/api/v1/courses', headers=auth_header(t_tok), json={
-        'title': 'Rec Course', 'status': 'published', 'visibility': 'public',
-    })
-    cid = c.json()['id']
+    # TASK-006：published 课程走 ORM 领域 fixture
+    with db_session_factory() as db:
+        course = models.Course(
+            title='Rec Course', description='d', status='published',
+            visibility='public', default_score=100, teacher_id=t_user.id,
+        )
+        db.add(course)
+        db.commit()
+        cid = course.id
     ch = client.post(f'/api/v1/courses/{cid}/chapters', headers=auth_header(t_tok), json={'title':'Ch'})
     chid = ch.json()['id']
 

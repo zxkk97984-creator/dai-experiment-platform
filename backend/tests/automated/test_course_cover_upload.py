@@ -231,15 +231,22 @@ def _setup(client, db_session_factory, visibility="public", archived=False, tag=
     tag 用于同一测试内多次调用时避免用户名冲突。
     """
     prefix = f"{tag}_" if tag else ""
-    create_user(db_session_factory, f"{prefix}t_own", "teacher")
+    teacher = create_user(db_session_factory, f"{prefix}t_own", "teacher")
     create_user(db_session_factory, f"{prefix}t_other", "teacher")
     create_user(db_session_factory, f"{prefix}s_yes", "student")
     create_user(db_session_factory, f"{prefix}admin", "admin")
     tok = {u: login(client, f"{prefix}{u}")[0] for u in ["t_own", "t_other", "s_yes", "admin"]}
-    c = client.post(f"{API}/courses", headers=auth_header(tok["t_own"]), json={
-        "title": "封面课程", "status": "published", "visibility": visibility,
-    })
-    cid = c.json()["id"]
+    # TASK-006：POST /courses 只接受 draft，发布须走 PATCH 转换（要求学期/教学班/封面等完整）。
+    # 封面读写断言需要 published 课程，此处用领域 ORM 直接落库。
+    with db_session_factory() as db:
+        course = models.Course(
+            title="封面课程", description="d", status="published",
+            visibility=visibility, default_score=100, teacher_id=teacher.id,
+        )
+        db.add(course)
+        db.commit()
+        db.refresh(course)
+        cid = course.id
     if archived:
         r = client.delete(f"{API}/courses/{cid}", headers=auth_header(tok["t_own"]))
         assert r.status_code == 204

@@ -17,9 +17,16 @@ def _setup_experiment(client, db_sf):
     t_tok, _ = login(client, "esub_t")
     s_tok, _ = login(client, "esub_s")
 
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "ESubC", "status": "published", "visibility": "public"})
-    cid = c.json()["id"]
+    # TASK-006：POST /courses 只接受 draft；发布需经 PATCH + 完整信息门禁，
+    # 这里用 ORM 直接创建已发布课程（实验链路仅依赖课程已发布 + 学生选课）
+    with db_sf() as db:
+        from app.models import Course, User
+        teacher = db.scalar(select(User).where(User.username == "esub_t"))
+        course = Course(title="ESubC", description="d", status="published",
+                        visibility="public", default_score=100, teacher_id=teacher.id)
+        db.add(course)
+        db.commit()
+        cid = course.id
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
 
     ch = client.post(f"{API}/courses/{cid}/chapters", headers=auth_header(t_tok),

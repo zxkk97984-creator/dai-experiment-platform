@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import select
 
 from app.models import (
@@ -22,6 +23,20 @@ from app.models import (
 from conftest import auth_header, create_user, login
 
 API = "/api/v1/environments"
+
+
+@pytest.fixture(autouse=True)
+def _clear_conftest_seed(db_session_factory):
+    """conftest（TASK-010）预置 basic 可用版本（slug=basic、digest "b"*64）；
+    本文件测试通过 API 自建同 slug 档位与同 digest 的 available 版本，
+    测试开始前移除预置行，避免 UNIQUE(slug / image_digest) 冲突。"""
+    with db_session_factory() as db:
+        for version in db.query(EnvironmentVersion).all():
+            db.delete(version)
+        for profile in db.query(EnvironmentProfile).all():
+            db.delete(profile)
+        db.commit()
+    yield
 
 
 # ═══════════════════════════════════════════════════════════════

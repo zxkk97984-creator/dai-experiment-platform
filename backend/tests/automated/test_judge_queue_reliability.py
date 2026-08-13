@@ -471,8 +471,10 @@ def test_p0_2_queued_repush_updates_queued_at(db_session_factory):
         old_queued_at = sub.queued_at
         db.commit()
 
-        # 第一次扫描：因为 queued 超时，应重新推送
-        stats1 = requeue_stale_jobs(db, job_type="assignment", stale_queued_seconds=120)
+        # 第一次扫描：因为 queued 超时，应重新推送（mock Redis 使 rpush 成功，
+        # queued_repushed 仅在消息真正推入队列时计数）
+        with patch("app.services.judge_queue._get_redis") as mock_redis:
+            stats1 = requeue_stale_jobs(db, job_type="assignment", stale_queued_seconds=120)
         assert stats1["queued_repushed"] >= 1
 
         # 重新加载——SQLite 可能返回 naive，用 replace 规范化

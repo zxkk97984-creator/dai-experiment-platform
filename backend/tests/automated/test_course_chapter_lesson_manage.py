@@ -5,10 +5,11 @@ from conftest import auth_header, create_user, login
 
 
 def _create_course(client, teacher_token):
+    # TASK-006：POST /courses 只接受 status="draft"（不传默认 draft）；章节/课时管理不依赖发布状态
     resp = client.post(
         "/api/v1/courses",
         headers=auth_header(teacher_token),
-        json={"title": "章节管理测试课程", "description": "desc", "status": "published"},
+        json={"title": "章节管理测试课程", "description": "desc"},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]

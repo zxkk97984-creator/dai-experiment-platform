@@ -9,15 +9,24 @@ from conftest import auth_header, create_user, login
 API = "/api/v1"
 
 
+def _create_published_course(db_sf, teacher_user, title):
+    """POST /courses 只接受 draft，已发布课程直接走 ORM 构造"""
+    from app.models import Course
+    with db_sf() as db:
+        course = Course(title=title, description="d", status="published",
+                        visibility="public", default_score=100, teacher_id=teacher_user.id)
+        db.add(course)
+        db.commit()
+        return course.id
+
+
 def _setup_exam(client, db_sf):
     """创建一个已发布的考试（时间窗口为当前前后各1小时）"""
-    create_user(db_sf, "tzt", "teacher")
+    teacher_user = create_user(db_sf, "tzt", "teacher")
     create_user(db_sf, "szt", "student")
     t_tok, _ = login(client, "tzt")
     s_tok, _ = login(client, "szt")
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "TZC", "status": "published", "visibility": "public"})
-    cid = c.json()["id"]
+    cid = _create_published_course(db_sf, teacher_user, "TZC")
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
 
     now = utc_now()
@@ -82,13 +91,11 @@ def test_utc_now_has_tz():
 
 def test_exam_not_started_yet(client, db_session_factory):
     """start_at 在未来时不能开始考试"""
-    create_user(db_session_factory, "fut_t", "teacher")
+    teacher_user = create_user(db_session_factory, "fut_t", "teacher")
     create_user(db_session_factory, "fut_s", "student")
     t_tok, _ = login(client, "fut_t")
     s_tok, _ = login(client, "fut_s")
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "FC", "status": "published", "visibility": "public"})
-    cid = c.json()["id"]
+    cid = _create_published_course(db_session_factory, teacher_user, "FC")
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
 
     # 考试在未来 1 小时后开始
@@ -113,13 +120,11 @@ def test_exam_not_started_yet(client, db_session_factory):
 
 def test_exam_ended_no_submit(client, db_session_factory):
     """end_at 已过时不能再交卷"""
-    create_user(db_session_factory, "end_t", "teacher")
+    teacher_user = create_user(db_session_factory, "end_t", "teacher")
     create_user(db_session_factory, "end_s", "student")
     t_tok, _ = login(client, "end_t")
     s_tok, _ = login(client, "end_s")
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "EC", "status": "published", "visibility": "public"})
-    cid = c.json()["id"]
+    cid = _create_published_course(db_session_factory, teacher_user, "EC")
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
 
     # 考试在 2 小时前结束
@@ -152,13 +157,11 @@ def test_exam_starts_exactly_at_start_at(client, db_session_factory):
 
 def test_exam_without_time_window_cannot_publish(client, db_session_factory):
     """正式考试必须设置开始时间与最晚进入时间。"""
-    create_user(db_session_factory, "ntw_t", "teacher")
+    teacher_user = create_user(db_session_factory, "ntw_t", "teacher")
     create_user(db_session_factory, "ntw_s", "student")
     t_tok, _ = login(client, "ntw_t")
     s_tok, _ = login(client, "ntw_s")
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "NW", "status": "published", "visibility": "public"})
-    cid = c.json()["id"]
+    cid = _create_published_course(db_session_factory, teacher_user, "NW")
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
     e = client.post(f"{API}/exams", headers=auth_header(t_tok), json={
         "course_id": cid, "title": "NoWin", "duration_minutes": 60,

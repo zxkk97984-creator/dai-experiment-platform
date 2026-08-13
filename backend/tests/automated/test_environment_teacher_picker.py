@@ -47,7 +47,11 @@ def _login_teacher(client, db_session_factory, username="teach4"):
 
 
 def _seed(db_session_factory, test_settings, *, basic_available=True):
-    """seed 三个档位；basic v1 默认标记 available（带 digest），返回 basic 版本 id。"""
+    """seed 三个档位；basic v1 默认标记 available（带 digest），返回 basic 版本 id。
+
+    conftest（TASK-010）会预置一个 available 的 basic v1；需要 draft 场景时
+    （basic_available=False）显式将其退回 draft，恢复本文件既有的草稿语义。
+    """
     with db_session_factory() as db:
         seed_environment_catalog(db, test_settings)
         basic = db.scalar(
@@ -60,6 +64,11 @@ def _seed(db_session_factory, test_settings, *, basic_available=True):
             basic.status = "available"
             basic.image_digest = "sha256:" + "a" * 64
             basic.python_version = "3.12"
+            db.commit()
+        elif not basic_available and basic.status != "draft":
+            basic.status = "draft"
+            basic.image_digest = None
+            basic.python_version = None
             db.commit()
         return basic.id
 
@@ -74,7 +83,8 @@ def _make_data_available(db_session_factory):
         )
         assert data is not None
         data.status = "available"
-        data.image_digest = "sha256:" + "b" * 64
+        # conftest 预置的 basic 版本占用 "b"*64 摘要；image_digest 有 UNIQUE 约束，换用独立摘要
+        data.image_digest = "sha256:" + "c" * 64
         data.python_version = "3.12"
         db.commit()
         return data.id
@@ -207,6 +217,14 @@ def test_publish_gate_blocks_unavailable_environment(client, db_session_factory,
         db.add(assignment)
         db.commit()
         assignment_id = assignment.id
+        # TASK-007：发布门禁要求至少一题（零题 409 ASSIGNMENT_HAS_NO_QUESTIONS），
+        # 补一道 legacy 题让门禁推进到环境可用性检查
+        question = JudgeQuestion(
+            assignment_id=assignment_id, title="Q", function_name="f",
+            hidden_tests="assert True", grading_mode="legacy",
+        )
+        db.add(question)
+        db.commit()
 
     r = client.post(f"{ASSIGN_API}/{assignment_id}/publish", headers=auth_header(tok))
     assert r.status_code == 409, r.text
@@ -215,7 +233,7 @@ def test_publish_gate_blocks_unavailable_environment(client, db_session_factory,
 
 def test_publish_gate_blocks_insufficient_memory(client, db_session_factory, test_settings):
     """题目内存低于环境最低内存 → 409 MEMORY_BELOW_ENV_MIN（plan 3 内存门禁）"""
-    basic_id = _seed(db_session_factory, test_settings)  # basic minimum_memory_mb=256
+    basic_id = _seed(db_session_factory, test_settings)  # 预置 basic 最低内存 128 MB
     tok = _login_teacher(client, db_session_factory)
     course_id, _ = _make_course_with_lesson(db_session_factory, teacher_id=1)
     with db_session_factory() as db:
@@ -228,7 +246,7 @@ def test_publish_gate_blocks_insufficient_memory(client, db_session_factory, tes
         assignment_id = assignment.id
         question = JudgeQuestion(
             assignment_id=assignment_id, title="Q", function_name="f",
-            hidden_tests="assert True", memory_limit_mb=128, grading_mode="legacy",
+            hidden_tests="assert True", memory_limit_mb=64, grading_mode="legacy",
         )
         db.add(question)
         db.commit()
@@ -279,7 +297,8 @@ def test_published_assignment_environment_immutable(client, db_session_factory, 
         json={"environment_version_id": data_id},
     )
     assert r.status_code == 409, r.text
-    assert r.json()["detail"]["code"] == "ASSIGNMENT_NOT_EDITABLE"
+    # TASK-009：已发布/已有提交的作业内容锁定，错误码统一为 ASSIGNMENT_CONTENT_LOCKED
+    assert r.json()["detail"]["code"] == "ASSIGNMENT_CONTENT_LOCKED"
 
     # 非环境字段仍可改（标题）
     r = client.patch(

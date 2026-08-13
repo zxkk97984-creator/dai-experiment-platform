@@ -2,20 +2,25 @@
 from datetime import timedelta
 
 from conftest import auth_header, create_user, login
+from app import models
 from app.services.time_utils import utc_now
 
 
 def test_exam_submission_and_grade_visibility(client, db_session_factory):
-    create_user(db_session_factory, "teacher", "teacher")
+    teacher_user = create_user(db_session_factory, "teacher", "teacher")
     create_user(db_session_factory, "student", "student")
     teacher_token, _ = login(client, "teacher")
     student_token, _ = login(client, "student")
 
-    course_id = client.post(
-        "/api/v1/courses",
-        headers=auth_header(teacher_token),
-        json={"title": "深度学习", "status": "published", "visibility": "public"},
-    ).json()["id"]
+    # TASK-006：published 课程走 ORM 领域 fixture
+    with db_session_factory() as db:
+        course = models.Course(
+            title="深度学习", description="d", status="published",
+            visibility="public", default_score=100, teacher_id=teacher_user.id,
+        )
+        db.add(course)
+        db.commit()
+        course_id = course.id
     client.post(f"/api/v1/courses/{course_id}/enroll", headers=auth_header(student_token))
 
     now = utc_now()
@@ -88,13 +93,13 @@ def test_jupyter_entry_and_experiment_records(client, db_session_factory):
     assert templates_response.status_code == 200
     assert templates_response.json()["items"][0]["name"].endswith(".ipynb")
 
+    # TASK-008：模块 POST 只允许 draft（status 字段不再接受）
     module_response = client.post(
         "/api/v1/experiments/modules",
         headers=auth_header(developer_token),
         json={
             "name": "Swin Transformer 可视化",
             "description": "可视化实验",
-            "status": "published",
         },
     )
     assert module_response.status_code == 201

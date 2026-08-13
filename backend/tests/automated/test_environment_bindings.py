@@ -6,13 +6,15 @@
 - 策略字段默认值：作业/提交/Notebook unrestricted，题目 inherit，白名单为空
 - Submission 环境与策略快照字段
 - ExperimentRecord 创建时绑定环境
-- 无种子环境时模型层可空（测试库宽容，兼容 Phase 4 前的创建路径）
+- 无 basic 可用版本时模型层拒绝 NULL（TASK-010：NOT NULL + 惰性默认绑定）
 
 说明：开发库（MySQL）尚未跑迁移 A/B，本测试全部使用隔离 SQLite 测试库。
 """
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.models import (
     Assignment,
@@ -97,7 +99,9 @@ def test_assignment_explicit_environment_overrides_default(db_session_factory, t
             version_number=2,
             status="available",
             base_image_ref="python:3.12-slim",
-            image_digest="sha256:" + "b" * 64,
+            # conftest 预置的 basic 版本占用 "b"*64 摘要；image_digest 有
+            # UNIQUE 约束，换用独立摘要避免冲突
+            image_digest="sha256:" + "c" * 64,
             minimum_memory_mb=768,
             manifest_sha256="m" * 64,
         )
@@ -245,8 +249,13 @@ def test_experiment_record_binds_environment(db_session_factory, test_settings):
         assert record.environment_version_id == basic_id
 
 
-def test_no_seed_environment_allows_null_model(db_session_factory):
-    """无种子环境时模型层可空（测试库宽容），Phase 4 前创建路径不因新字段中断"""
+def test_no_available_basic_blocks_null_binding(db_session_factory):
+    """TASK-010：environment_version_id 为 NOT NULL + 惰性默认绑定 basic 可用版本。
+
+    原「无种子环境时模型层可空」语义已废弃（模型列收紧 NOT NULL），改为断言新契约：
+    - 有 basic 可用版本（conftest 预置）：未显式指定环境的作业被默认绑定；
+    - 无任何 basic 可用版本：插入 NULL 违反 NOT NULL → IntegrityError。
+    """
     with db_session_factory() as db:
         course = Course(title="C1", status="published")
         db.add(course)
@@ -255,6 +264,29 @@ def test_no_seed_environment_allows_null_model(db_session_factory):
         assignment = Assignment(course_id=course.id, title="A1", status="draft")
         db.add(assignment)
         db.commit()
-        assert assignment.environment_version_id is None
+        db.refresh(assignment)
+        basic_id = db.scalar(
+            select(EnvironmentVersion.id)
+            .join(EnvironmentProfile, EnvironmentProfile.id == EnvironmentVersion.profile_id)
+            .where(EnvironmentProfile.slug == "basic", EnvironmentVersion.status == "available")
+        )
+        assert basic_id is not None, "conftest 应预置 basic 可用版本"
+        assert assignment.environment_version_id == basic_id  # NOT NULL + 默认绑定
         assert assignment.import_policy_mode == "unrestricted"
         assert assignment.allowed_imports == []
+
+    with db_session_factory() as db:
+        # 移除全部环境行，模拟迁移 B 前无 basic 可用版本的库
+        for version in db.query(EnvironmentVersion).all():
+            db.delete(version)
+        for profile in db.query(EnvironmentProfile).all():
+            db.delete(profile)
+        db.commit()
+        course = Course(title="C2", status="published")
+        db.add(course)
+        db.commit()
+        db.refresh(course)
+        assignment = Assignment(course_id=course.id, title="A2", status="draft")
+        db.add(assignment)
+        with pytest.raises(IntegrityError):  # NOT NULL：无可用版本不得落 NULL
+            db.commit()

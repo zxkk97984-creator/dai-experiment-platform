@@ -34,7 +34,7 @@ def mov_bytes(size: int = 200) -> bytes:
 
 def _setup(client, db_session_factory, visibility="public", enroll="s_yes"):
     """教师 owner + 其他教师 + 已选课学生 + 未选课学生 + 开发者 + 管理员"""
-    create_user(db_session_factory, "t_own", "teacher")
+    teacher = create_user(db_session_factory, "t_own", "teacher")
     create_user(db_session_factory, "t_other", "teacher")
     create_user(db_session_factory, "s_yes", "student")
     create_user(db_session_factory, "s_no", "student")
@@ -43,10 +43,17 @@ def _setup(client, db_session_factory, visibility="public", enroll="s_yes"):
     tok = {u: login(client, u)[0] for u in
            ["t_own", "t_other", "s_yes", "s_no", "dev", "admin"]}
 
-    c = client.post(f"{API}/courses", headers=auth_header(tok["t_own"]), json={
-        "title": "视频课程", "status": "published", "visibility": visibility,
-    })
-    cid = c.json()["id"]
+    # TASK-006：POST /courses 只接受 draft，发布须走 PATCH 转换（要求学期/教学班/封面等完整）。
+    # 选课与播放签名端点要求已发布课程，此处用领域 ORM 直接落库 published 课程。
+    with db_session_factory() as db:
+        course = models.Course(
+            title="视频课程", description="d", status="published",
+            visibility=visibility, default_score=100, teacher_id=teacher.id,
+        )
+        db.add(course)
+        db.commit()
+        db.refresh(course)
+        cid = course.id
     if enroll == "s_yes":
         client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(tok["s_yes"]))
     ch = client.post(f"{API}/courses/{cid}/chapters", headers=auth_header(tok["t_own"]), json={"title": "Ch"})

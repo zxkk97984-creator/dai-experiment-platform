@@ -26,7 +26,11 @@ def _user(client, db_session_factory, username, role):
 
 
 def _env_version(db_session_factory, owner_id):
-    """available 环境版本（带 digest，可绑定到模板版本）。"""
+    """available 环境版本（带 digest，可绑定到模板版本）。
+
+    digest 使用 'c'*64——conftest 预置的 basic 版本占用 'b'*64
+    （image_digest 有唯一约束，TASK-010）。
+    """
     with db_session_factory() as db:
         profile = EnvironmentProfile(slug=f"mp-{owner_id}", display_name="发布测试档位", status="active")
         db.add(profile)
@@ -38,7 +42,7 @@ def _env_version(db_session_factory, owner_id):
             minimum_memory_mb=128,
             manifest_sha256="a" * 64,
             status="available",
-            image_digest="sha256:" + "b" * 64,
+            image_digest="sha256:" + "c" * 64,
             created_by_id=owner_id,
         )
         db.add(version)
@@ -154,15 +158,17 @@ def test_publish_with_unpublished_template_rejected(client, db_session_factory):
     assert response.json()["detail"]["code"] == "MODULE_VERSION_MISSING"
 
 
-def test_publish_without_environment_rejected(client, db_session_factory):
+def test_publish_without_explicit_env_binds_basic_available(client, db_session_factory):
+    """TASK-010 后模板版本环境列 NOT NULL + 默认绑定 basic 可用版本——
+    未显式指定环境的模板发布时自动绑定 basic（MODULE_ENV_MISSING 门禁保留为纵深防御）。"""
     token = _user(client, db_session_factory, "mp-no-env", "developer")
     template_id = _template(db_session_factory, 1, env_version_id=None)
     module = _create(client, token, name="环境缺失", template_id=template_id)
     response = client.post(
         f"{API}/experiments/modules/{module['id']}/publish", headers=auth_header(token),
     )
-    assert response.status_code == 409, response.text
-    assert response.json()["detail"]["code"] == "MODULE_ENV_MISSING"
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "published"
 
 
 def test_publish_and_unpublish_roundtrip(client, db_session_factory):

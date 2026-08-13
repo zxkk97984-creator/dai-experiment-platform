@@ -15,9 +15,15 @@ def _setup_submission(client, db_sf):
     t_tok, _ = login(client, "erv_t")
     s_tok, _ = login(client, "erv_s")
 
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "RVC", "status": "published", "visibility": "public"})
-    cid = c.json()["id"]
+    # TASK-006：POST /courses 只接受 draft；用 ORM 创建已发布课程（评分链路仅依赖发布态 + 选课）
+    with db_sf() as db:
+        from app.models import Course, User
+        teacher = db.scalar(select(User).where(User.username == "erv_t"))
+        course = Course(title="RVC", description="d", status="published",
+                        visibility="public", default_score=100, teacher_id=teacher.id)
+        db.add(course)
+        db.commit()
+        cid = course.id
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
     ch = client.post(f"{API}/courses/{cid}/chapters", headers=auth_header(t_tok),
                      json={"title": "Ch1", "order_index": 1})

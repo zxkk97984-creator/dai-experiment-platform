@@ -8,10 +8,16 @@ API = "/api/v1"
 def _h(tok): return auth_header(tok)
 
 def _setup(client, db_sf):
-    create_user(db_sf, "ejt", "teacher"); create_user(db_sf, "ejs", "student")
+    from app.models import Course
+    teacher_user = create_user(db_sf, "ejt", "teacher")
+    create_user(db_sf, "ejs", "student")
     t_tok, _ = login(client, "ejt"); s_tok, _ = login(client, "ejs")
-    c = client.post(f"{API}/courses", headers=_h(t_tok), json={"title":"EC","status":"published","visibility":"public"})
-    cid = c.json()["id"]
+    with db_sf() as db:
+        course = Course(title="EC", description="d", status="published",
+                        visibility="public", default_score=100, teacher_id=teacher_user.id)
+        db.add(course)
+        db.commit()
+        cid = course.id
     client.post(f"{API}/courses/{cid}/enroll", headers=_h(s_tok))
     now = datetime.datetime.now(timezone.utc)
     e = client.post(f"{API}/exams", headers=_h(t_tok), json={"course_id":cid,"title":"CE","duration_minutes":60,"start_at":(now-timedelta(hours=1)).isoformat(),"end_at":(now+timedelta(hours=1)).isoformat()})

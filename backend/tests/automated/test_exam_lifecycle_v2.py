@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from app.models import Exam, ExamSubmission
+from app.models import Course, Exam, ExamSubmission
 from app.services.time_utils import as_utc, utc_now
 from conftest import auth_header, create_user, login
 
@@ -12,14 +12,16 @@ API = "/api/v1"
 
 
 def _seed(client, db_sf, *, question=None, duration=60, start_delta=-10, end_delta=30):
-    create_user(db_sf, "life_teacher", "teacher")
+    teacher_user = create_user(db_sf, "life_teacher", "teacher")
     create_user(db_sf, "life_student", "student")
     teacher, _ = login(client, "life_teacher")
     student, _ = login(client, "life_student")
-    course = client.post(f"{API}/courses", headers=auth_header(teacher), json={
-        "title": "Lifecycle", "status": "published", "visibility": "public",
-    })
-    course_id = course.json()["id"]
+    with db_sf() as db:
+        course = Course(title="Lifecycle", description="d", status="published",
+                        visibility="public", default_score=100, teacher_id=teacher_user.id)
+        db.add(course)
+        db.commit()
+        course_id = course.id
     client.post(f"{API}/courses/{course_id}/enroll", headers=auth_header(student))
     now = utc_now()
     exam = client.post(f"{API}/exams", headers=auth_header(teacher), json={

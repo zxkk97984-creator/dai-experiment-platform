@@ -39,6 +39,9 @@ REVISION_FIX = "d6e7f8a9b012"
 def _derive_current_head() -> str:
     """从 alembic 脚本目录推导当前 head（随新增迁移自动前移，避免硬编码漂移）。"""
     cfg = AlembicConfig(str(BACKEND_DIR / "alembic.ini"))
+    # script_location 在 ini 中是相对路径，会按 CWD 解析——
+    # 从仓库根收集测试时会失败，这里显式给绝对路径
+    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
     assert len(heads) == 1, f"迁移链出现多个 head: {heads}"
