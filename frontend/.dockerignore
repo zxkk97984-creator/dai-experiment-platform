@@ -1,0 +1,30 @@
+# 本地环境与凭据（示例配置保留，实际 .env 严禁进入构建上下文）
+.env
+.env.*
+!.env.example
+
+# 本地依赖与构建产物（容器内由 npm ci 与 npm run build 重新生成）
+node_modules/
+dist/
+
+# Vite 缓存
+.vite/
+
+# 测试与覆盖率产物
+coverage/
+playwright-report/
+test-results/
+.playwright-mcp/
+
+# IDE
+.vscode/
+.idea/
+
+# Git
+.git
+.gitignore
+
+# 日志与缓存
+*.log
+*.pid
+.npm/
