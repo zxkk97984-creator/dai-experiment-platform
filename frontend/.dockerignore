@@ -1,0 +1,29 @@
+# 本地依赖与构建产物
+node_modules
+dist
+dist-ssr
+
+# 本地环境（示例配置保留）
+.env
+.env.*
+!.env.example
+
+# 测试凭据与产物
+e2e/credentials.js
+test-results
+playwright-report
+coverage
+
+# IDE / 系统
+.vscode
+.idea
+.DS_Store
+*.local
+
+# Git
+.git
+.gitignore
+
+# 日志与缓存
+*.log
+npm-debug.log*
