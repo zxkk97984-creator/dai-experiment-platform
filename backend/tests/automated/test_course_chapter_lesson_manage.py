@@ -8,7 +8,7 @@ def _create_course(client, teacher_token):
     resp = client.post(
         "/api/v1/courses",
         headers=auth_header(teacher_token),
-        json={"title": "章节管理测试课程", "description": "desc", "status": "published"},
+        json={"title": "章节管理测试课程", "description": "desc"},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]

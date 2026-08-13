@@ -18,9 +18,9 @@ class TestGradingModeDefault:
         tok, _ = login(client, "gmd_t")
 
         cid = client.post("/api/v1/courses", headers=auth_header(tok),
-                          json={"title": "GD", "status": "published"}).json()["id"]
+                          json={"title": "GD"}).json()["id"]
         aid = client.post("/api/v1/assignments", headers=auth_header(tok),
-                          json={"title": "GA", "course_id": cid, "status": "published"}).json()["id"]
+                          json={"title": "GA", "course_id": cid}).json()["id"]
 
         resp = client.post(f"/api/v1/assignments/{aid}/questions", headers=auth_header(tok), json={
             "title": "Q", "function_name": "f", "hidden_tests": "def test(): assert True",
@@ -43,9 +43,9 @@ class TestGradingModeDefault:
         tok, _ = login(client, "gel_t")
 
         cid = client.post("/api/v1/courses", headers=auth_header(tok),
-                          json={"title": "GL", "status": "published"}).json()["id"]
+                          json={"title": "GL"}).json()["id"]
         aid = client.post("/api/v1/assignments", headers=auth_header(tok),
-                          json={"title": "GA", "course_id": cid, "status": "published"}).json()["id"]
+                          json={"title": "GA", "course_id": cid}).json()["id"]
 
         resp = client.post(f"/api/v1/assignments/{aid}/questions", headers=auth_header(tok), json={
             "title": "Q", "function_name": "f", "hidden_tests": "def test(): pass",
@@ -66,7 +66,7 @@ class TestGradingModeDefault:
         tok, _ = login(client, "ecd_t")
 
         cid = client.post("/api/v1/courses", headers=auth_header(tok),
-                          json={"title": "EC", "status": "published"}).json()["id"]
+                          json={"title": "EC"}).json()["id"]
         now = datetime.now(timezone.utc)
         eid = client.post("/api/v1/exams", headers=auth_header(tok), json={
             "course_id": cid, "title": "EE", "duration_minutes": 60,
@@ -93,7 +93,7 @@ class TestGradingModeDefault:
         tok, _ = login(client, "ech_t")
 
         cid = client.post("/api/v1/courses", headers=auth_header(tok),
-                          json={"title": "ECH", "status": "published"}).json()["id"]
+                          json={"title": "ECH"}).json()["id"]
         now = datetime.now(timezone.utc)
         eid = client.post("/api/v1/exams", headers=auth_header(tok), json={
             "course_id": cid, "title": "ECH", "duration_minutes": 60,
@@ -119,9 +119,9 @@ class TestGradingModeDefault:
         tok, _ = login(client, "igr_t")
 
         cid = client.post("/api/v1/courses", headers=auth_header(tok),
-                          json={"title": "IG", "status": "published"}).json()["id"]
+                          json={"title": "IG"}).json()["id"]
         aid = client.post("/api/v1/assignments", headers=auth_header(tok),
-                          json={"title": "GA", "course_id": cid, "status": "published"}).json()["id"]
+                          json={"title": "GA", "course_id": cid}).json()["id"]
 
         resp = client.post(f"/api/v1/assignments/{aid}/questions", headers=auth_header(tok), json={
             "title": "Q", "function_name": "f", "hidden_tests": "def test(): pass",

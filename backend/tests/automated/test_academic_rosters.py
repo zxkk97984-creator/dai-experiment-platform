@@ -7,6 +7,27 @@ from tests.automated.conftest import auth_header, create_user, login
 API = "/api/v1"
 
 
+def _publish_course(client, teacher_token, **payload):
+    """draft 创建 + PATCH 发布的合法链路；返回 PATCH 响应（序列化与旧 POST 一致）"""
+    data = {
+        "description": "课程简介",
+        "cover": "covers/test.png",
+        "start_time": "2026-09-01T08:00:00",
+        "visibility": "class",
+        "default_score": 100,
+    }
+    data.update(payload)
+    created = client.post(f"{API}/courses", headers=auth_header(teacher_token), json=data)
+    assert created.status_code == 201, created.text
+    published = client.patch(
+        f"{API}/courses/{created.json()['id']}",
+        headers=auth_header(teacher_token),
+        json={"status": "published"},
+    )
+    assert published.status_code == 200, published.text
+    return published
+
+
 def _setup(client, db_session_factory):
     admin = create_user(db_session_factory, "academic_admin", "admin")
     teacher = create_user(db_session_factory, "academic_teacher", "teacher")
@@ -35,11 +56,11 @@ def test_class_roster_syncs_course_counts_and_student_metadata(client, db_sessio
     add = client.post(f"{API}/teaching-classes/{class_id}/students", headers=auth_header(admin_token), json={"student_ids": [student.id]})
     assert add.status_code == 200, add.text
 
-    course = client.post(f"{API}/courses", headers=auth_header(teacher_token), json={
-        "title": "数据结构", "status": "published", "visibility": "private",
+    course = _publish_course(client, teacher_token, **{
+        "title": "数据结构", "visibility": "private",
         "academic_term_id": term.json()["id"], "teaching_class_ids": [class_id],
     })
-    assert course.status_code == 201, course.text
+    assert course.status_code == 200, course.text
     body = course.json()
     assert body["academic_term"]["name"] == "2026 秋季学期"
     assert body["teaching_classes"][0]["name"] == "计算机一班"
@@ -67,8 +88,8 @@ def test_manual_drop_is_not_reactivated_by_class_sync(client, db_session_factory
         "academic_term_id": term["id"], "code": "AI-01", "name": "人工智能一班",
     }).json()["id"]
     client.post(f"{API}/teaching-classes/{class_id}/students", headers=auth_header(admin_token), json={"student_ids": [student.id]})
-    course_id = client.post(f"{API}/courses", headers=auth_header(teacher_token), json={
-        "title": "机器学习", "status": "published", "visibility": "private",
+    course_id = _publish_course(client, teacher_token, **{
+        "title": "机器学习", "visibility": "private",
         "academic_term_id": term["id"], "teaching_class_ids": [class_id],
     }).json()["id"]
     removed = client.delete(f"{API}/courses/{course_id}/students/{student.id}", headers=auth_header(teacher_token))

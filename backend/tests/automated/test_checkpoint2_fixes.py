@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from app import models
 from app.database import Base
 from app.services.kernel_manager import KernelManager
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_course_db, create_user, login
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -60,10 +60,10 @@ def _setup_lesson_with_template(client, db_session_factory, course_status="publi
 
     tid, vid = _create_template_with_version(db_session_factory)
 
-    c = client.post("/api/v1/courses", headers=auth_header(t_tok), json={
-        "title": "测试课程", "status": course_status, "visibility": "public",
-    })
-    cid = c.json()["id"]
+    cid = create_course_db(
+        db_session_factory, teacher_username="t1", title="测试课程",
+        status=course_status, visibility="public",
+    )
 
     ch = client.post(f"/api/v1/courses/{cid}/chapters", headers=auth_header(t_tok), json={"title": "章"})
     chid = ch.json()["id"]
@@ -407,10 +407,10 @@ def test_notebooks_get_returns_template_not_found_with_deprecation(client, db_se
     t_tok, _ = login(client, "tnb")
     s_tok, _ = login(client, "snb")
 
-    c = client.post("/api/v1/courses", headers=auth_header(t_tok), json={
-        "title": "NB Course", "status": "published", "visibility": "public",
-    })
-    cid = c.json()["id"]
+    cid = create_course_db(
+        db_session_factory, teacher_username="tnb", title="NB Course",
+        status="published", visibility="public",
+    )
     ch = client.post(f"/api/v1/courses/{cid}/chapters", headers=auth_header(t_tok), json={"title": "Ch"})
     le = client.post(f"/api/v1/chapters/{ch.json()['id']}/lessons", headers=auth_header(t_tok), json={
         "title": "No Template", "content_type": "markdown",

@@ -1,7 +1,7 @@
 """后端权限与错误协议 RED 测试"""
 from datetime import UTC, datetime, timedelta
 from app import models
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_assignment_db, create_course_db, create_user, login
 
 API = "/api/v1"
 
@@ -15,10 +15,13 @@ def _setup_full(client, db_session_factory, course_status="published"):
     s_yes_tok, _ = login(client, "s_yes")
     s_no_tok, _ = login(client, "s_no")
 
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok), json={
-        "title": "PermTest", "status": course_status, "visibility": "public",
-    })
-    cid = c.json()["id"]
+    cid = create_course_db(
+        db_session_factory,
+        teacher_username="t_own",
+        title="PermTest",
+        status=course_status,
+        visibility="public",
+    )
     if course_status == "published":
         client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_yes_tok))
     ch = client.post(f"{API}/courses/{cid}/chapters", headers=auth_header(t_tok), json={"title": "Ch"})
@@ -27,13 +30,15 @@ def _setup_full(client, db_session_factory, course_status="published"):
         "title": "Lesson", "content_type": "markdown", "content": "test",
     })
     a = client.post(f"{API}/assignments", headers=auth_header(t_tok), json={
-        "course_id": cid, "title": "A", "status": "published",
+        "course_id": cid, "title": "A", "status": "draft",
     })
     aid = a.json()["id"]
     q = client.post(f"{API}/assignments/{aid}/questions", headers=auth_header(t_tok), json={
-        "title": "Q", "function_name": "f", "hidden_tests": "SECRET",
+        "title": "Q", "function_name": "f", "hidden_tests": "SECRET", "grading_mode": "legacy",
     })
     qid = q.json()["id"]
+    pub = client.post(f"{API}/assignments/{aid}/publish", headers=auth_header(t_tok))
+    assert pub.status_code == 200, pub.text
     now = datetime.now(UTC)
     e = client.post(f"{API}/exams", headers=auth_header(t_tok), json={
         "course_id": cid,
@@ -140,9 +145,10 @@ def test_draft_course_rejected(client, db_session_factory):
 def test_draft_assignment_rejected(client, db_session_factory):
     d = _setup_full(client, db_session_factory)
     tok = d["s_yes_tok"]
-    # 把 assignment 改为 draft
+    # 把 assignment 改为 draft（取消发布）
     t_tok = d["t_tok"]
-    client.patch(f"{API}/assignments/{d['aid']}", headers=auth_header(t_tok), json={"status": "draft"})
+    unpub = client.post(f"{API}/assignments/{d['aid']}/unpublish", headers=auth_header(t_tok))
+    assert unpub.status_code == 200, unpub.text
     r = client.get(f"{API}/assignments/{d['aid']}", headers=auth_header(tok))
     assert r.status_code == 403
 
@@ -167,22 +173,21 @@ def test_teacher_b_cannot_manage_teacher_a_resources(client, db_session_factory)
     ta_tok, _ = login(client, "ta_r")
     tb_tok, _ = login(client, "tb_r")
 
-    c = client.post(f"{API}/courses", headers=auth_header(ta_tok), json={
-        "title": "TA Only", "status": "published",
-    })
-    cid = c.json()["id"]
+    cid = create_course_db(db_session_factory, teacher_username="ta_r", title="TA Only", status="published")
     ch = client.post(f"{API}/courses/{cid}/chapters", headers=auth_header(ta_tok), json={"title": "Ch"})
     chid = ch.json()["id"]
     le = client.post(f"{API}/chapters/{chid}/lessons", headers=auth_header(ta_tok), json={
         "title": "L", "content_type": "markdown",
     })
     a = client.post(f"{API}/assignments", headers=auth_header(ta_tok), json={
-        "course_id": cid, "title": "A", "status": "published",
+        "course_id": cid, "title": "A", "status": "draft",
     })
     aid = a.json()["id"]
     q = client.post(f"{API}/assignments/{aid}/questions", headers=auth_header(ta_tok), json={
-        "title": "Q", "function_name": "f", "hidden_tests": "def test(): pass",
+        "title": "Q", "function_name": "f", "hidden_tests": "def test(): pass", "grading_mode": "legacy",
     })
+    pub = client.post(f"{API}/assignments/{aid}/publish", headers=auth_header(ta_tok))
+    assert pub.status_code == 200, pub.text
     e = client.post(f"{API}/exams", headers=auth_header(ta_tok), json={
         "course_id": cid, "title": "E", "duration_minutes": 30,
     })
@@ -274,16 +279,21 @@ def test_error_developer_has_no_course_access(client, db_session_factory):
     s_tok, _ = login(client, "s_x2")
     admin_tok, _ = login(client, "admin_x2")
 
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok), json={
-        "title": "DevBlocked2", "status": "published", "visibility": "public",
-    })
-    cid = c.json()["id"]
+    cid = create_course_db(
+        db_session_factory, teacher_username="t_x2", title="DevBlocked2",
+        status="published", visibility="public",
+    )
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
     # 创建真实 assignment 和 exam
     a = client.post(f"{API}/assignments", headers=auth_header(t_tok), json={
-        "course_id": cid, "title": "A1", "status": "published",
+        "course_id": cid, "title": "A1", "status": "draft",
     })
     aid = a.json()["id"]
+    q = client.post(f"{API}/assignments/{aid}/questions", headers=auth_header(t_tok), json={
+        "title": "Q1", "function_name": "f", "hidden_tests": "def test(): pass", "grading_mode": "legacy",
+    })
+    pub = client.post(f"{API}/assignments/{aid}/publish", headers=auth_header(t_tok))
+    assert pub.status_code == 200, pub.text
     now = datetime.now(UTC)
     e = client.post(f"{API}/exams", headers=auth_header(t_tok), json={
         "course_id": cid,
@@ -369,7 +379,8 @@ def test_draft_assignment_questions_rejected(client, db_session_factory):
     d = _setup_full(client, db_session_factory)
     t_tok = d["t_tok"]
     tok = d["s_yes_tok"]
-    client.patch(f"{API}/assignments/{d['aid']}", headers=auth_header(t_tok), json={"status": "draft"})
+    unpub = client.post(f"{API}/assignments/{d['aid']}/unpublish", headers=auth_header(t_tok))
+    assert unpub.status_code == 200, unpub.text
     r = client.get(f"{API}/assignments/{d['aid']}/questions", headers=auth_header(tok))
     assert r.status_code == 403
 
@@ -382,10 +393,11 @@ def test_teacher_b_full_mutation_rejection(client, db_session_factory):
     ta_tok, _ = login(client, "ta_m")
     tb_tok, _ = login(client, "tb_m")
 
-    c = client.post(f"{API}/courses", headers=auth_header(ta_tok), json={"title": "TA Mut", "status": "published"})
-    cid = c.json()["id"]
-    a = client.post(f"{API}/assignments", headers=auth_header(ta_tok), json={"course_id": cid, "title": "A", "status": "published"})
-    aid = a.json()["id"]
+    cid = create_course_db(db_session_factory, teacher_username="ta_m", title="TA Mut", status="published")
+    aid = create_assignment_db(
+        db_session_factory, course_id=cid, teacher_username="ta_m",
+        title="A", status="published",
+    )
     e = client.post(f"{API}/exams", headers=auth_header(ta_tok), json={"course_id": cid, "title": "E", "duration_minutes": 30})
     eid = e.json()["id"]
 

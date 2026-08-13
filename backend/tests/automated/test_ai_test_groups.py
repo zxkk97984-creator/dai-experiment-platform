@@ -686,7 +686,7 @@ def _create_question(client, db_session_factory, teacher_username="gen_teacher",
     headers = auth_header(token)
     course_id = client.post(
         "/api/v1/courses", headers=headers,
-        json={"title": f"{teacher_username}-course", "status": "published"},
+        json={"title": f"{teacher_username}-course"},
     ).json()["id"]
 
     now = datetime.now(timezone.utc)
@@ -775,7 +775,7 @@ def test_endpoint_ai_not_ready(client, db_session_factory, test_settings):
     headers = auth_header(token)
     course_id = client.post(
         "/api/v1/courses", headers=headers,
-        json={"title": "nokey-course", "status": "published"},
+        json={"title": "nokey-course"},
     ).json()["id"]
     assignment_id = client.post(
         "/api/v1/assignments", headers=headers,

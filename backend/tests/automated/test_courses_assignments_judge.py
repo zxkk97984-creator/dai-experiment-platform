@@ -1,7 +1,7 @@
 from __future__ import annotations
 from unittest.mock import patch
 
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_assignment_db, create_course_db, create_user, login
 from app.worker.judge_worker import process_submission
 
 
@@ -16,18 +16,14 @@ def test_course_assignment_submission_and_worker_result(
     teacher_token, _ = login(client, "teacher")
     student_token, _ = login(client, "student")
 
-    course_response = client.post(
-        "/api/v1/courses",
-        headers=auth_header(teacher_token),
-        json={
-            "title": "机器学习基础",
-            "description": "AI course",
-            "status": "published",
-            "visibility": "public",
-        },
+    course_id = create_course_db(
+        db_session_factory,
+        teacher_username="teacher",
+        title="机器学习基础",
+        description="AI course",
+        status="published",
+        visibility="public",
     )
-    assert course_response.status_code == 201, course_response.text
-    course_id = course_response.json()["id"]
 
     chapter_response = client.post(
         f"/api/v1/courses/{course_id}/chapters",
@@ -62,18 +58,13 @@ def test_course_assignment_submission_and_worker_result(
     assert chapters_response.status_code == 200
     assert chapters_response.json()["items"][0]["lessons"][0]["title"] == "线性回归"
 
-    assignment_response = client.post(
-        "/api/v1/assignments",
-        headers=auth_header(teacher_token),
-        json={
-            "course_id": course_id,
-            "title": "函数作业",
-            "description": "实现 add",
-            "status": "published",
-        },
+    assignment_id = create_assignment_db(
+        db_session_factory,
+        course_id=course_id,
+        teacher_username="teacher",
+        title="函数作业",
+        status="draft",
     )
-    assert assignment_response.status_code == 201
-    assignment_id = assignment_response.json()["id"]
 
     question_response = client.post(
         f"/api/v1/assignments/{assignment_id}/questions",
@@ -93,6 +84,12 @@ def test_course_assignment_submission_and_worker_result(
     )
     assert question_response.status_code == 201
     question_id = question_response.json()["id"]
+
+    publish_response = client.post(
+        f"/api/v1/assignments/{assignment_id}/publish",
+        headers=auth_header(teacher_token),
+    )
+    assert publish_response.status_code == 200, publish_response.text
 
     submit_response = client.post(
         "/api/v1/judge/submissions",
@@ -136,17 +133,18 @@ def test_worker_marks_wrong_answer(client, db_session_factory, redis_client, tes
     teacher_token, _ = login(client, "teacher")
     student_token, _ = login(client, "student")
 
-    course_id = client.post(
-        "/api/v1/courses",
-        headers=auth_header(teacher_token),
-        json={"title": "Python", "status": "published", "visibility": "public"},
-    ).json()["id"]
+    course_id = create_course_db(
+        db_session_factory,
+        teacher_username="teacher",
+        title="Python",
+        status="published",
+        visibility="public",
+    )
     client.post(f"/api/v1/courses/{course_id}/enroll", headers=auth_header(student_token))
-    assignment_id = client.post(
-        "/api/v1/assignments",
-        headers=auth_header(teacher_token),
-        json={"course_id": course_id, "title": "A1", "status": "published"},
-    ).json()["id"]
+    assignment_id = create_assignment_db(
+        db_session_factory, course_id=course_id, teacher_username="teacher",
+        title="A1", status="draft",
+    )
     question_id = client.post(
         f"/api/v1/assignments/{assignment_id}/questions",
         headers=auth_header(teacher_token),
@@ -160,6 +158,10 @@ def test_worker_marks_wrong_answer(client, db_session_factory, redis_client, tes
             "grading_mode": "legacy",
         },
     ).json()["id"]
+    publish_resp = client.post(
+        f"/api/v1/assignments/{assignment_id}/publish", headers=auth_header(teacher_token)
+    )
+    assert publish_resp.status_code == 200, publish_resp.text
     submission_id = client.post(
         "/api/v1/judge/submissions",
         headers=auth_header(student_token),
@@ -189,18 +191,19 @@ def test_assignment_list_returns_is_submitted_for_student(client, db_session_fac
     teacher_token, _ = login(client, "teacher")
     student_token, _ = login(client, "student")
 
-    course_id = client.post(
-        "/api/v1/courses",
-        headers=auth_header(teacher_token),
-        json={"title": "机器学习基础", "status": "published", "visibility": "public"},
-    ).json()["id"]
+    course_id = create_course_db(
+        db_session_factory,
+        teacher_username="teacher",
+        title="机器学习基础",
+        status="published",
+        visibility="public",
+    )
     client.post(f"/api/v1/courses/{course_id}/enroll", headers=auth_header(student_token))
 
-    assignment_id = client.post(
-        "/api/v1/assignments",
-        headers=auth_header(teacher_token),
-        json={"course_id": course_id, "title": "函数作业", "status": "published"},
-    ).json()["id"]
+    assignment_id = create_assignment_db(
+        db_session_factory, course_id=course_id, teacher_username="teacher",
+        title="函数作业", status="draft",
+    )
     question_ids = []
     for i in range(2):
         resp = client.post(
@@ -215,6 +218,10 @@ def test_assignment_list_returns_is_submitted_for_student(client, db_session_fac
         )
         assert resp.status_code == 201, resp.text
         question_ids.append(resp.json()["id"])
+    publish_resp = client.post(
+        f"/api/v1/assignments/{assignment_id}/publish", headers=auth_header(teacher_token)
+    )
+    assert publish_resp.status_code == 200, publish_resp.text
 
     def student_items():
         resp = client.get("/api/v1/assignments", headers=auth_header(student_token))
@@ -242,14 +249,16 @@ def test_assignment_list_returns_is_submitted_for_student(client, db_session_fac
     assert resp.status_code == 201, resp.text
     assert student_items()[0]["is_submitted"] is True
 
-    # 无题目作业：不存在未交题目 → 已交（与 dashboard 的「至少一题无提交才待办」语义互补）
-    noq_id = client.post(
-        "/api/v1/assignments",
-        headers=auth_header(teacher_token),
-        json={"course_id": course_id, "title": "无题作业", "status": "published"},
-    ).json()["id"]
+    # 零题作业永远未提交（API 已禁止零题发布；此处以领域 fixture 覆盖存量数据语义）
+    noq_id = create_assignment_db(
+        db_session_factory,
+        course_id=course_id,
+        teacher_username="teacher",
+        title="无题作业",
+        status="published",
+    )
     by_id = {it["id"]: it["is_submitted"] for it in student_items()}
-    assert by_id[noq_id] is True
+    assert by_id[noq_id] is False
 
     # 教师视角不计算学生提交状态：默认 False
     teacher_items = client.get("/api/v1/assignments", headers=auth_header(teacher_token)).json()["items"]

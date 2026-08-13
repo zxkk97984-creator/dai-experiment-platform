@@ -4,7 +4,7 @@
 - 删除：教师权限 204；非教师 403；published 409；有提交草稿 409；级联清理；删除后列表不含
 - unpublish：published → draft 状态流转；draft 409；学生端列表不可见；再 publish 正常（legacy 无 rubric）
 """
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_course_db, create_user, login
 from app.models import Assignment, CodeGrade, JudgeQuestion, QuestionRubric, Submission
 
 
@@ -14,23 +14,34 @@ def _setup(client, db_session_factory):
     student = create_user(db_session_factory, "student", "student")
     teacher_token, _ = login(client, "teacher")
     student_token, _ = login(client, "student")
-    course_id = client.post(
-        "/api/v1/courses",
-        headers=auth_header(teacher_token),
-        json={"title": "作业管理测试课", "status": "published", "visibility": "public"},
-    ).json()["id"]
+    course_id = create_course_db(
+        db_session_factory,
+        teacher_username="teacher",
+        title="作业管理测试课",
+        status="published",
+        visibility="public",
+    )
     client.post(f"/api/v1/courses/{course_id}/enroll", headers=auth_header(student_token))
     return teacher_token, student_token, course_id, student.id
 
 
 def _create_assignment(client, teacher_token, course_id, title="草稿作业", status="draft"):
+    """创建作业；status="published" 时走 draft → 加题 → /publish 合法链路"""
     resp = client.post(
         "/api/v1/assignments",
         headers=auth_header(teacher_token),
-        json={"course_id": course_id, "title": title, "status": status},
+        json={"course_id": course_id, "title": title, "status": "draft"},
     )
     assert resp.status_code == 201, resp.text
-    return resp.json()["id"]
+    assignment_id = resp.json()["id"]
+    if status == "published":
+        _create_question(client, teacher_token, assignment_id)
+        pub = client.post(
+            f"/api/v1/assignments/{assignment_id}/publish",
+            headers=auth_header(teacher_token),
+        )
+        assert pub.status_code == 200, pub.text
+    return assignment_id
 
 
 def _create_question(client, teacher_token, assignment_id, title="两数相加"):

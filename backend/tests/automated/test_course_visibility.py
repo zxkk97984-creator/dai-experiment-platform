@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_course_db, create_user, login
 from sqlalchemy import select
 
-from app.models import AcademicTerm, TeachingClass, TeachingClassStudent, User
+from app.models import AcademicTerm, Course, CourseTeachingClass, TeachingClass, TeachingClassStudent, User
+from app.services.roster_service import sync_course_class_enrollments
 from app.services.time_utils import utc_now
 
 API = "/api/v1"
@@ -18,7 +19,7 @@ def _token(client, db_session_factory, username, role="teacher"):
     return token
 
 
-def _create_course(client, token, title="可见范围课程", status="published", visibility="private", **extra):
+def _create_course(client, token, title="可见范围课程", status="draft", visibility="private", **extra):
     payload = {"title": title, "description": "desc", "status": status, "visibility": visibility, **extra}
     resp = client.post(f"{API}/courses", headers=auth_header(token), json=payload)
     assert resp.status_code == 201, resp.text
@@ -126,15 +127,20 @@ def test_class_visibility_allows_class_members_and_teacher_added_students(client
         term_id = term.id
         class_id = teaching_class.id
 
-    course = _create_course(
-        client,
-        teacher_token,
+    course_id = create_course_db(
+        db_session_factory,
+        teacher_username="t-class-scope",
         title="教学班可见课程",
+        status="published",
         visibility="class",
         academic_term_id=term_id,
-        teaching_class_ids=[class_id],
     )
-    course_id = course["id"]
+    with db_session_factory() as db:
+        db.add(CourseTeachingClass(course_id=course_id, teaching_class_id=class_id))
+        db.commit()
+        course = db.get(Course, course_id)
+        sync_course_class_enrollments(db, course)
+        db.commit()
 
     member_list = client.get(f"{API}/courses", headers=auth_header(member_token))
     assert member_list.status_code == 200, member_list.text
@@ -253,8 +259,14 @@ def test_students_endpoint_pagination(client, db_session_factory):
 def _setup_whitelist_course(client, db_session_factory):
     t_tok = _token(client, db_session_factory, "t_wl")
     s_tok = _token(client, db_session_factory, "s_wl", "student")
-    course = _create_course(client, t_tok, visibility="whitelist")
-    return t_tok, s_tok, course["id"]
+    cid = create_course_db(
+        db_session_factory,
+        teacher_username="t_wl",
+        title="可见范围课程",
+        status="published",
+        visibility="whitelist",
+    )
+    return t_tok, s_tok, cid
 
 
 def test_owner_crud_whitelist(client, db_session_factory):
@@ -450,8 +462,7 @@ def test_public_course_visible_enroll_then_content(client, db_session_factory):
     t_tok = _token(client, db_session_factory, "t_pub")
     s1 = _token(client, db_session_factory, "s_pub1", "student")
     s2 = _token(client, db_session_factory, "s_pub2", "student")
-    course = _create_course(client, t_tok, visibility="public")
-    cid = course["id"]
+    cid = create_course_db(db_session_factory, teacher_username="t_pub", title="可见范围课程", status="published", visibility="public")
     _add_chapter_lesson(client, t_tok, cid)
 
     # 未选学生：list/get 可见、can_enroll=true、chapters 拒绝
@@ -563,55 +574,55 @@ def test_private_enrolled_student_keeps_access(client, db_session_factory):
     """存量 private 课程的已选学生继续访问（选课后改为 private 模拟存量课程）"""
     t_tok = _token(client, db_session_factory, "t_priv")
     s_tok = _token(client, db_session_factory, "s_priv", "student")
-    course = _create_course(client, t_tok, visibility="public")
-    _add_chapter_lesson(client, t_tok, course["id"])
-    assert _enroll(client, s_tok, course["id"]).status_code == 201
+    cid = create_course_db(db_session_factory, teacher_username="t_priv", title="可见范围课程", status="published", visibility="public")
+    _add_chapter_lesson(client, t_tok, cid)
+    assert _enroll(client, s_tok, cid).status_code == 201
     resp = client.patch(
-        f"{API}/courses/{course['id']}", headers=auth_header(t_tok),
+        f"{API}/courses/{cid}", headers=auth_header(t_tok),
         json={"visibility": "private"},
     )
     assert resp.status_code == 200, resp.text
 
     resp = client.get(f"{API}/courses", headers=auth_header(s_tok))
     assert len(resp.json()["items"]) == 1
-    resp = client.get(f"{API}/courses/{course['id']}", headers=auth_header(s_tok))
+    resp = client.get(f"{API}/courses/{cid}", headers=auth_header(s_tok))
     assert resp.status_code == 200
-    assert _chapters(client, s_tok, course["id"]).status_code == 200
+    assert _chapters(client, s_tok, cid).status_code == 200
 
 
 def test_private_dropped_student_can_reenroll(client, db_session_factory):
     """存量 private 课程的 dropped enrollment 可通过直接地址恢复选课"""
     t_tok = _token(client, db_session_factory, "t_prd")
     s_tok = _token(client, db_session_factory, "s_prd", "student")
-    course = _create_course(client, t_tok, visibility="public")
-    assert _enroll(client, s_tok, course["id"]).status_code == 201
+    cid = create_course_db(db_session_factory, teacher_username="t_prd", title="可见范围课程", status="published", visibility="public")
+    assert _enroll(client, s_tok, cid).status_code == 201
     resp = client.patch(
-        f"{API}/courses/{course['id']}", headers=auth_header(t_tok),
+        f"{API}/courses/{cid}", headers=auth_header(t_tok),
         json={"visibility": "private"},
     )
     assert resp.status_code == 200, resp.text
     assert client.delete(
-        f"{API}/courses/{course['id']}/enroll", headers=auth_header(s_tok)
+        f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok)
     ).status_code == 204
     # 退课后 private 课程从列表消失
     resp = client.get(f"{API}/courses", headers=auth_header(s_tok))
     assert resp.json()["total"] == 0
     # 但可通过直接地址恢复
-    resp = _enroll(client, s_tok, course["id"])
+    resp = _enroll(client, s_tok, cid)
     assert resp.status_code == 201
-    assert _chapters(client, s_tok, course["id"]).status_code == 200
+    assert _chapters(client, s_tok, cid).status_code == 200
 
 
 def test_private_never_enrolled_student_denied(client, db_session_factory):
     t_tok = _token(client, db_session_factory, "t_pne")
     s_tok = _token(client, db_session_factory, "s_pne", "student")
-    course = _create_course(client, t_tok, visibility="private")
+    cid = create_course_db(db_session_factory, teacher_username="t_pne", title="可见范围课程", status="published", visibility="private")
 
     resp = client.get(f"{API}/courses", headers=auth_header(s_tok))
     assert resp.json()["total"] == 0
-    resp = client.get(f"{API}/courses/{course['id']}", headers=auth_header(s_tok))
+    resp = client.get(f"{API}/courses/{cid}", headers=auth_header(s_tok))
     assert resp.status_code == 403
-    resp = _enroll(client, s_tok, course["id"])
+    resp = _enroll(client, s_tok, cid)
     assert resp.status_code == 403
 
 
@@ -619,11 +630,11 @@ def test_draft_archived_hidden_from_students(client, db_session_factory):
     t_tok = _token(client, db_session_factory, "t_dar")
     s_tok = _token(client, db_session_factory, "s_dar", "student")
     for status in ("draft", "archived"):
-        course = _create_course(client, t_tok, status=status, visibility="public")
+        cid = create_course_db(db_session_factory, teacher_username="t_dar", title="可见范围课程", status=status, visibility="public")
         resp = client.get(f"{API}/courses", headers=auth_header(s_tok))
         assert resp.json()["total"] == 0
-        assert client.get(f"{API}/courses/{course['id']}", headers=auth_header(s_tok)).status_code == 403
-        assert _enroll(client, s_tok, course["id"]).status_code == 400
+        assert client.get(f"{API}/courses/{cid}", headers=auth_header(s_tok)).status_code == 403
+        assert _enroll(client, s_tok, cid).status_code == 400
 
 
 def test_owner_admin_access_draft_archived_any_visibility(client, db_session_factory):
@@ -631,18 +642,18 @@ def test_owner_admin_access_draft_archived_any_visibility(client, db_session_fac
     admin_tok = _token(client, db_session_factory, "admin2", "admin")
     for status in ("draft", "archived", "published"):
         for vis in ("private", "public", "whitelist"):
-            course = _create_course(client, t_tok, status=status, visibility=vis)
+            cid = create_course_db(db_session_factory, teacher_username="t_own2", title="可见范围课程", status=status, visibility=vis)
             for tok in (t_tok, admin_tok):
-                resp = client.get(f"{API}/courses/{course['id']}", headers=auth_header(tok))
+                resp = client.get(f"{API}/courses/{cid}", headers=auth_header(tok))
                 assert resp.status_code == 200, f"{status}/{vis} for {tok[:8]}"
-                assert _chapters(client, tok, course["id"]).status_code == 200
+                assert _chapters(client, tok, cid).status_code == 200
 
 
 def test_other_teacher_cannot_access_course(client, db_session_factory):
     t_tok = _token(client, db_session_factory, "t_ota")
     other_tok = _token(client, db_session_factory, "t_otb", "teacher")
-    course = _create_course(client, t_tok, visibility="public")
-    resp = client.get(f"{API}/courses/{course['id']}", headers=auth_header(other_tok))
+    cid = create_course_db(db_session_factory, teacher_username="t_ota", title="可见范围课程", status="published", visibility="public")
+    resp = client.get(f"{API}/courses/{cid}", headers=auth_header(other_tok))
     assert resp.status_code == 403
     resp = client.get(f"{API}/courses", headers=auth_header(other_tok))
     assert resp.json()["total"] == 0
@@ -651,7 +662,7 @@ def test_other_teacher_cannot_access_course(client, db_session_factory):
 def test_developer_keeps_empty_course_list(client, db_session_factory):
     t_tok = _token(client, db_session_factory, "t_dev")
     dev_tok = _token(client, db_session_factory, "dev2", "developer")
-    _create_course(client, t_tok, visibility="public")
+    create_course_db(db_session_factory, teacher_username="t_dev", title="可见范围课程", status="published", visibility="public")
     resp = client.get(f"{API}/courses", headers=auth_header(dev_tok))
     assert resp.status_code == 200
     assert resp.json()["total"] == 0
@@ -662,14 +673,14 @@ def test_student_list_total_matches_filtered_no_duplicates(client, db_session_fa
     t_tok = _token(client, db_session_factory, "t_mix")
     s_tok = _token(client, db_session_factory, "s_mix", "student")
     s_id = _student_id(client, s_tok)
-    pub = _create_course(client, t_tok, title="公开课", visibility="public")
-    wl = _create_course(client, t_tok, title="白名单课", visibility="whitelist")
-    _create_course(client, t_tok, title="私密课", visibility="private")
+    pub = create_course_db(db_session_factory, teacher_username="t_mix", title="公开课", status="published", visibility="public")
+    wl = create_course_db(db_session_factory, teacher_username="t_mix", title="白名单课", status="published", visibility="whitelist")
+    create_course_db(db_session_factory, teacher_username="t_mix", title="私密课", status="published", visibility="private")
     client.post(
-        f"{API}/courses/{wl['id']}/whitelist", headers=auth_header(t_tok),
+        f"{API}/courses/{wl}/whitelist", headers=auth_header(t_tok),
         json={"student_id": s_id},
     )
-    _enroll(client, s_tok, pub["id"])
+    _enroll(client, s_tok, pub)
 
     resp = client.get(f"{API}/courses", headers=auth_header(s_tok))
     data = resp.json()
@@ -677,10 +688,10 @@ def test_student_list_total_matches_filtered_no_duplicates(client, db_session_fa
     ids = [item["id"] for item in data["items"]]
     assert len(ids) == len(set(ids)) == 2
     by_id = {item["id"]: item for item in data["items"]}
-    assert by_id[pub["id"]]["is_enrolled"] is True
-    assert by_id[pub["id"]]["can_enroll"] is False
-    assert by_id[wl["id"]]["is_enrolled"] is False
-    assert by_id[wl["id"]]["can_enroll"] is True
+    assert by_id[pub]["is_enrolled"] is True
+    assert by_id[pub]["can_enroll"] is False
+    assert by_id[wl]["is_enrolled"] is False
+    assert by_id[wl]["can_enroll"] is True
 
     # 分页一页一条，total 不变
     resp = client.get(f"{API}/courses", headers=auth_header(s_tok), params={"page": 1, "page_size": 1})
@@ -696,12 +707,12 @@ def test_student_list_total_matches_filtered_no_duplicates(client, db_session_fa
 def _setup_activity_course(client, db_session_factory, visibility):
     """published 课程 + 章节 + published 作业（含题目）+ published 考试（含选择题）"""
     t_tok = _token(client, db_session_factory, "t_act")
-    course = _create_course(client, t_tok, visibility=visibility)
-    _add_chapter_lesson(client, t_tok, course["id"])
+    cid = create_course_db(db_session_factory, teacher_username="t_act", title="可见范围课程", status="published", visibility=visibility)
+    _add_chapter_lesson(client, t_tok, cid)
 
     resp = client.post(
         f"{API}/assignments", headers=auth_header(t_tok),
-        json={"course_id": course["id"], "title": "作业", "status": "published"},
+        json={"course_id": cid, "title": "作业", "status": "draft"},
     )
     aid = resp.json()["id"]
     resp = client.post(
@@ -709,12 +720,14 @@ def _setup_activity_course(client, db_session_factory, visibility):
         json={"title": "题", "function_name": "f", "hidden_tests": "SECRET", "grading_mode": "legacy"},
     )
     qid = resp.json()["id"]
+    pub = client.post(f"{API}/assignments/{aid}/publish", headers=auth_header(t_tok))
+    assert pub.status_code == 200, pub.text
 
     now = utc_now()
     resp = client.post(
         f"{API}/exams", headers=auth_header(t_tok),
         json={
-            "course_id": course["id"], "title": "考试", "duration_minutes": 30,
+            "course_id": cid, "title": "考试", "duration_minutes": 30,
             "start_at": (now - timedelta(minutes=5)).isoformat(),
             "end_at": (now + timedelta(minutes=30)).isoformat(),
         },
@@ -726,7 +739,7 @@ def _setup_activity_course(client, db_session_factory, visibility):
     })
     resp = client.patch(f"{API}/exams/{eid}", headers=auth_header(t_tok), json={"status": "published"})
     assert resp.status_code == 200, resp.text
-    return t_tok, course["id"], aid, qid, eid
+    return t_tok, cid, aid, qid, eid
 
 
 def test_public_not_enrolled_cannot_participate(client, db_session_factory):

@@ -11,11 +11,8 @@ def _create_course_and_exam(client, db_session_factory, username: str):
     create_user(db_session_factory, username, "teacher")
     token, _ = login(client, username)
     headers = auth_header(token)
-    course_id = client.post(
-        "/api/v1/courses",
-        headers=headers,
-        json={"title": f"{username}-course", "status": "published"},
-    ).json()["id"]
+    from conftest import create_course_db
+    course_id = create_course_db(db_session_factory, teacher_username=username, title=f"{username}-course", status="published")
     now = datetime.now(timezone.utc)
     exam_id = client.post(
         "/api/v1/exams",
@@ -37,11 +34,8 @@ def test_assignment_explicit_null_mode_still_defaults_to_active(client, db_sessi
     create_user(db_session_factory, "null_assignment_teacher", "teacher")
     token, _ = login(client, "null_assignment_teacher")
     headers = auth_header(token)
-    course_id = client.post(
-        "/api/v1/courses",
-        headers=headers,
-        json={"title": "Null assignment course", "status": "published"},
-    ).json()["id"]
+    from conftest import create_course_db
+    course_id = create_course_db(db_session_factory, teacher_username="null_assignment_teacher", title="Null assignment course", status="published")
     assignment_id = client.post(
         "/api/v1/assignments",
         headers=headers,

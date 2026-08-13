@@ -1,7 +1,7 @@
 """考试 + Jupyter 旧集成测试（适配 v5 模型）"""
 from datetime import timedelta
 
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_course_db, create_user, login
 from app.services.time_utils import utc_now
 
 
@@ -11,11 +11,10 @@ def test_exam_submission_and_grade_visibility(client, db_session_factory):
     teacher_token, _ = login(client, "teacher")
     student_token, _ = login(client, "student")
 
-    course_id = client.post(
-        "/api/v1/courses",
-        headers=auth_header(teacher_token),
-        json={"title": "深度学习", "status": "published", "visibility": "public"},
-    ).json()["id"]
+    course_id = create_course_db(
+        db_session_factory, teacher_username="teacher", title="深度学习",
+        status="published", visibility="public",
+    )
     client.post(f"/api/v1/courses/{course_id}/enroll", headers=auth_header(student_token))
 
     now = utc_now()

@@ -13,7 +13,7 @@ def _teacher_token(client, db_session_factory, username="teacher"):
 
 
 def _create_course(client, token, **extra):
-    payload = {"title": "课程设置测试课程", "description": "desc", "status": "published", **extra}
+    payload = {"title": "课程设置测试课程", "description": "desc", **extra}
     resp = client.post("/api/v1/courses", headers=auth_header(token), json=payload)
     assert resp.status_code == 201, resp.text
     return resp.json()

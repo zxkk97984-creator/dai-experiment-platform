@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.services.time_utils import as_utc, utc_now
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_course_db, create_user, login
 
 API = "/api/v1"
 
@@ -15,9 +15,7 @@ def _setup_exam(client, db_sf):
     create_user(db_sf, "szt", "student")
     t_tok, _ = login(client, "tzt")
     s_tok, _ = login(client, "szt")
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "TZC", "status": "published", "visibility": "public"})
-    cid = c.json()["id"]
+    cid = create_course_db(db_sf, teacher_username="tzt", title="TZC", status="published", visibility="public")
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
 
     now = utc_now()
@@ -86,9 +84,7 @@ def test_exam_not_started_yet(client, db_session_factory):
     create_user(db_session_factory, "fut_s", "student")
     t_tok, _ = login(client, "fut_t")
     s_tok, _ = login(client, "fut_s")
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "FC", "status": "published", "visibility": "public"})
-    cid = c.json()["id"]
+    cid = create_course_db(db_session_factory, teacher_username="fut_t", title="FC", status="published", visibility="public")
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
 
     # 考试在未来 1 小时后开始
@@ -117,9 +113,7 @@ def test_exam_ended_no_submit(client, db_session_factory):
     create_user(db_session_factory, "end_s", "student")
     t_tok, _ = login(client, "end_t")
     s_tok, _ = login(client, "end_s")
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "EC", "status": "published", "visibility": "public"})
-    cid = c.json()["id"]
+    cid = create_course_db(db_session_factory, teacher_username="end_t", title="EC", status="published", visibility="public")
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
 
     # 考试在 2 小时前结束
@@ -156,9 +150,7 @@ def test_exam_without_time_window_cannot_publish(client, db_session_factory):
     create_user(db_session_factory, "ntw_s", "student")
     t_tok, _ = login(client, "ntw_t")
     s_tok, _ = login(client, "ntw_s")
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "NW", "status": "published", "visibility": "public"})
-    cid = c.json()["id"]
+    cid = create_course_db(db_session_factory, teacher_username="ntw_t", title="NW", status="published", visibility="public")
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
     e = client.post(f"{API}/exams", headers=auth_header(t_tok), json={
         "course_id": cid, "title": "NoWin", "duration_minutes": 60,
