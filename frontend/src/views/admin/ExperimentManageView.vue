@@ -9,7 +9,7 @@ const app = useAppStore()
 const modules = ref([])
 const loading = ref(true)
 const showCreate = ref(false)
-const form = ref({ name: '', description: '', entry_url: '' })
+const form = ref({ name: '', description: '' })
 
 async function fetch() {
   loading.value = true
@@ -20,14 +20,23 @@ async function fetch() {
 
 async function handleCreate() {
   if (!form.value.name) return
-  try { await experimentsAPI.createModule(form.value); app.showToast('创建成功', 'success'); showCreate.value = false; form.value = { name: '', description: '', entry_url: '' }; fetch() }
+  try { await experimentsAPI.createModule(form.value); app.showToast('创建成功', 'success'); showCreate.value = false; form.value = { name: '', description: '' }; fetch() }
   catch (e) { app.showToast(e.response?.data?.detail?.message || '创建失败', 'error') }
 }
 
 async function handleUpdate(m) {
-  const newStatus = m.status === 'published' ? 'draft' : 'published'
-  try { await experimentsAPI.updateModule(m.id, { status: newStatus }); app.showToast('状态已更新', 'success'); fetch() }
-  catch { app.showToast('操作失败', 'error') }
+  try {
+    if (m.status === 'published') {
+      await experimentsAPI.unpublishModule(m.id)
+      app.showToast('已下架', 'success')
+    } else {
+      await experimentsAPI.publishModule(m.id)
+      app.showToast('已发布', 'success')
+    }
+    fetch()
+  } catch (e) {
+    app.showToast(e.response?.data?.detail?.message || '操作失败', 'error')
+  }
 }
 
 onMounted(fetch)
@@ -54,7 +63,6 @@ onMounted(fetch)
       <div v-if="showCreate" class="card create-form">
         <div class="form-group"><label>模块名称</label><input v-model="form.name" placeholder="输入模块名称" /></div>
         <div class="form-group"><label>描述</label><textarea v-model="form.description" rows="2" placeholder="模块描述"></textarea></div>
-        <div class="form-group"><label>入口 URL（可选）</label><input v-model="form.entry_url" placeholder="外部链接，留空使用默认环境" /></div>
         <button class="btn-primary" @click="handleCreate">确认创建</button>
       </div>
 

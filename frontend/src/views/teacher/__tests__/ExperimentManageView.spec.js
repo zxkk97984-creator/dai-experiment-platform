@@ -14,6 +14,8 @@ vi.mock('../../../api/experiments', () => ({
     listModules: vi.fn(),
     createModule: vi.fn(),
     updateModule: vi.fn(),
+    publishModule: vi.fn(),
+    unpublishModule: vi.fn(),
   },
 }))
 
@@ -88,14 +90,12 @@ describe('实验模块管理页 ExperimentManageView', () => {
 
     await wrapper.find('input[placeholder="例如：Python 数据分析实验"]').setValue('Python 数据分析实验')
     await wrapper.find('textarea[placeholder="实验目标和步骤说明"]').setValue('完成数据清洗与可视化')
-    await wrapper.find('input[placeholder="外部实验链接，留空则使用 JupyterLab"]').setValue('https://example.com/lab')
     await wrapper.find('.create-form button.btn-primary').trigger('click')
     await flushPromises()
 
     expect(experimentsAPI.createModule).toHaveBeenCalledWith({
       name: 'Python 数据分析实验',
       description: '完成数据清洗与可视化',
-      entry_url: 'https://example.com/lab',
     })
     expect(wrapper.find('[role="dialog"][aria-label="创建实验"]').exists()).toBe(false)
     expect(experimentsAPI.listModules).toHaveBeenCalledTimes(2)
@@ -130,5 +130,43 @@ describe('实验模块管理页 ExperimentManageView', () => {
     expect(experimentsAPI.updateModule).toHaveBeenCalledWith(1, expect.objectContaining({ name: '新名称' }))
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
     expect(experimentsAPI.listModules).toHaveBeenCalledTimes(2)
+  })
+
+  it('草稿模块点击「发布」调用 publishModule 并刷新', async () => {
+    experimentsAPI.listModules.mockResolvedValue({ data: { items: makeModules(1) } })
+    experimentsAPI.publishModule.mockResolvedValue({ data: { id: 1, status: 'published' } })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    await wrapper.find('.publish-action').trigger('click')
+    await flushPromises()
+
+    expect(experimentsAPI.publishModule).toHaveBeenCalledWith(1)
+    expect(experimentsAPI.updateModule).not.toHaveBeenCalled()
+    expect(showToastMock).toHaveBeenCalledWith('已发布', 'success')
+  })
+
+  it('已发布模块点击「下架」调用 unpublishModule 并刷新', async () => {
+    const publishedModules = makeModules(1)
+    publishedModules[0].status = 'published'
+    experimentsAPI.listModules.mockResolvedValue({ data: { items: publishedModules } })
+    experimentsAPI.unpublishModule.mockResolvedValue({ data: { id: 1, status: 'draft' } })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    await wrapper.find('.publish-action').trigger('click')
+    await flushPromises()
+
+    expect(experimentsAPI.unpublishModule).toHaveBeenCalledWith(1)
+    expect(showToastMock).toHaveBeenCalledWith('已下架', 'success')
+  })
+
+  it('创建表单不再包含入口 URL 字段', async () => {
+    const wrapper = await mountPage()
+    await flushPromises()
+    await openCreateModal(wrapper)
+
+    expect(wrapper.find('[name="module-entry-url"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('入口 URL')
   })
 })

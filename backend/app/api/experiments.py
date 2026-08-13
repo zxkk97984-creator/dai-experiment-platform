@@ -28,6 +28,7 @@ from app.schemas import (
     ExperimentCellsSaveRequest,
     ExperimentModuleCreate,
     ExperimentModuleRead,
+    ExperimentModuleUpdate,
     ExperimentRecordDetailResponse,
     ExperimentRecordRead,
     ExperimentReviewUpdate,
@@ -280,24 +281,79 @@ def get_module(
         raise api_error(404, "EXPERIMENT_MODULE_NOT_FOUND", "实验模块不存在")
     if current_user.role == "student" and module.status != "published":
         raise api_error(403, "FORBIDDEN", "无权查看未发布的实验模块")
+    # Developer 只能查看自己的草稿/下架模块；他人已发布模块作为共享元数据可见
+    if (
+        current_user.role == "developer"
+        and module.owner_id != current_user.id
+        and module.status != "published"
+    ):
+        raise api_error(403, "FORBIDDEN", "无权查看其他开发者的未发布实验模块")
     return module
 
 
 @router.patch("/modules/{module_id}", response_model=ExperimentModuleRead)
 def patch_module(
     module_id: int,
-    payload: dict,
+    payload: ExperimentModuleUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("admin", "teacher", "developer")),
 ):
+    """更新模块元数据：强类型 Schema，status 不可修改，未知字段拒绝。"""
     module = db.get(ExperimentModule, module_id)
     if not module:
         raise api_error(404, "EXPERIMENT_MODULE_NOT_FOUND", "实验模块不存在")
     if current_user.role in ("teacher", "developer") and module.owner_id != current_user.id:
         raise api_error(403, "FORBIDDEN", "无权管理其他用户创建的实验模块")
-    for key in ("name", "description", "template_id", "status"):
-        if key in payload:
-            setattr(module, key, payload[key])
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(module, key, value)
+    db.commit()
+    db.refresh(module)
+    return module
+
+
+def _ensure_module_publishable(module: ExperimentModule, db: Session) -> None:
+    """发布前校验：绑定可用模板且模板存在已发布版本。"""
+    if module.template_id is None:
+        raise api_error(422, "MODULE_TEMPLATE_REQUIRED", "发布前必须绑定 Notebook 模板")
+    template = db.get(NotebookTemplate, module.template_id)
+    if not template or not template.current_version_id:
+        raise api_error(422, "MODULE_TEMPLATE_NOT_READY", "模板不存在或尚未发布版本")
+
+
+@router.post("/modules/{module_id}/publish", response_model=ExperimentModuleRead)
+def publish_module(
+    module_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("admin", "teacher", "developer")),
+):
+    """发布模块：要求模板就绪；状态变更只能通过本端点。"""
+    module = db.get(ExperimentModule, module_id)
+    if not module:
+        raise api_error(404, "EXPERIMENT_MODULE_NOT_FOUND", "实验模块不存在")
+    if current_user.role in ("teacher", "developer") and module.owner_id != current_user.id:
+        raise api_error(403, "FORBIDDEN", "无权管理其他用户创建的实验模块")
+    _ensure_module_publishable(module, db)
+    module.status = "published"
+    db.commit()
+    db.refresh(module)
+    return module
+
+
+@router.post("/modules/{module_id}/unpublish", response_model=ExperimentModuleRead)
+def unpublish_module(
+    module_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("admin", "teacher", "developer")),
+):
+    """取消发布：published → draft，学生端立即不可见。"""
+    module = db.get(ExperimentModule, module_id)
+    if not module:
+        raise api_error(404, "EXPERIMENT_MODULE_NOT_FOUND", "实验模块不存在")
+    if current_user.role in ("teacher", "developer") and module.owner_id != current_user.id:
+        raise api_error(403, "FORBIDDEN", "无权管理其他用户创建的实验模块")
+    if module.status != "published":
+        raise api_error(409, "MODULE_NOT_PUBLISHED", "仅已发布的模块可取消发布")
+    module.status = "draft"
     db.commit()
     db.refresh(module)
     return module

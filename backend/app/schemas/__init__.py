@@ -841,10 +841,20 @@ class NotebookTemplateVersionRead(BaseModel):
 
 
 class ExperimentModuleCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str
     description: str | None = None
     template_id: int | None = None
-    status: str = "draft"
+    # 创建只允许草稿；发布必须走 POST /experiments/modules/{id}/publish
+    status: Literal["draft"] = "draft"
+
+
+class ExperimentModuleUpdate(BaseModel):
+    """更新模块：status 不可修改，发布/取消发布只能走 publish/unpublish 端点"""
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = None
+    description: str | None = None
+    template_id: int | None = None
 
 
 class ExperimentModuleRead(BaseModel):

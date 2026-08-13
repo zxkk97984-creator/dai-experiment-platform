@@ -52,6 +52,9 @@ export const experimentsAPI = {
   getModule(id) { return client.get(`/experiments/modules/${id}`) },
   createModule(payload) { return client.post('/experiments/modules', payload) },
   updateModule(id, payload) { return client.patch(`/experiments/modules/${id}`, payload) },
+  /** 发布模块（后端校验模板就绪）；状态变更只能走 publish/unpublish */
+  publishModule(id) { return client.post(`/experiments/modules/${id}/publish`) },
+  unpublishModule(id) { return client.post(`/experiments/modules/${id}/unpublish`) },
 
   // 实验提交
   /** 学生提交实验快照——client_request_id 保证幂等 */
