@@ -384,7 +384,8 @@ class AssignmentCreate(BaseModel):
     course_id: int
     title: str
     description: str | None = None
-    status: str = "draft"
+    # 创建只允许草稿；发布必须走 POST /assignments/{id}/publish
+    status: Literal["draft"] = "draft"
     due_at: datetime | None = None
     # ── 环境档位绑定（Phase 4：教师选择） ─────────────────────
     # 教师显式选择 available 环境版本；省略时服务层解析 basic 当前可用版本。
@@ -401,9 +402,9 @@ class AssignmentCreate(BaseModel):
 
 
 class AssignmentUpdate(BaseModel):
+    """更新作业：status 不可修改，发布/取消发布只能走 /publish 与 /unpublish"""
     title: str | None = None
     description: str | None = None
-    status: str | None = None
     due_at: datetime | None = None
     # 环境字段仅在作业 draft 状态可修改（API 层门禁）；exclude_unset 区分未传与显式 null
     environment_version_id: int | None = None

@@ -145,6 +145,39 @@ def create_course_db(
         return course.id
 
 
+def create_assignment_db(
+    db_session_factory,
+    *,
+    course_id,
+    teacher_username="teacher",
+    title="测试作业",
+    status="draft",
+    due_at=None,
+    environment_version_id=None,
+):
+    """领域 fixture：直接创建作业行（绕过 API 发布门禁）。
+
+    用于与「作业发布」无关的测试；发布门禁本身由
+    test_assignment_publish_gate.py 走 API 覆盖。
+    """
+    from app.models import Assignment
+
+    with db_session_factory() as db:
+        teacher = db.query(User).filter(User.username == teacher_username).first()
+        assignment = Assignment(
+            course_id=course_id,
+            title=title,
+            status=status,
+            due_at=due_at,
+            environment_version_id=environment_version_id,
+            created_by_id=teacher.id if teacher else None,
+        )
+        db.add(assignment)
+        db.commit()
+        db.refresh(assignment)
+        return assignment.id
+
+
 def login(client, username, password="Passw0rd!"):
     response = client.post(
         "/api/v1/auth/login",

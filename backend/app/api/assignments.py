@@ -41,7 +41,8 @@ def _submitted_map(db: Session, assignments: list[Assignment], student_id: int) 
     """批量计算学生对每个作业的已交状态，避免逐作业 N+1 查询。
 
     语义与 dashboard 待办判定互补：「至少一题无该学生提交记录」即待办，
-    因此「全部题目都有提交记录」才算已交；无题目作业不存在未交题目，视为已交。
+    因此「全部题目都有提交记录」才算已交；
+    零题作业没有任何可提交的题目，永远视为未提交（未完成）。
     """
     if not assignments:
         return {}
@@ -65,7 +66,11 @@ def _submitted_map(db: Session, assignments: list[Assignment], student_id: int) 
             ).all()
         )
     return {
-        a.id: all(qid in submitted_qids for qid in qids_by_assignment.get(a.id, []))
+        a.id: (
+            False
+            if not qids_by_assignment.get(a.id)
+            else all(qid in submitted_qids for qid in qids_by_assignment[a.id])
+        )
         for a in assignments
     }
 
@@ -140,7 +145,8 @@ def list_assignments(
     for item in assignments:
         data = AssignmentRead.model_validate(item).model_dump()
         if current_user.role == "student":
-            data["is_submitted"] = submitted_map.get(item.id, True)
+            # 零题作业永远未提交（无题可答），进入任务中心「未完成」逻辑
+            data["is_submitted"] = submitted_map.get(item.id, False)
         items.append(data)
     return PaginatedResponse(items=items, page=page, page_size=page_size, total=total)
 
@@ -166,8 +172,6 @@ def create_assignment(
     if data["environment_version_id"] is None:
         basic = resolve_basic_available_version(db)
         data["environment_version_id"] = basic.id if basic else None
-    if data.get("status") == "published":
-        data["published_at"] = utc_now()
     assignment = Assignment(**data, created_by_id=current_user.id)
     db.add(assignment)
     db.commit()
@@ -210,8 +214,6 @@ def update_assignment(
         validate_environment_selection(db, updates["environment_version_id"])
     for key, value in updates.items():
         setattr(assignment, key, value)
-    if assignment.status == "published" and assignment.published_at is None:
-        assignment.published_at = utc_now()
     db.commit()
     db.refresh(assignment)
     return assignment
@@ -234,6 +236,14 @@ def publish_assignment(
         select(JudgeQuestion).where(JudgeQuestion.assignment_id == assignment_id)
     ).all()
     validate_publish_gate(db, assignment, all_questions)
+
+    # 发布要求至少包含一道题（零题作业不得进入 published，也不会被视作已提交）
+    if not all_questions:
+        raise api_error(
+            422,
+            "ASSIGNMENT_HAS_NO_QUESTIONS",
+            "作业必须至少包含一道题才能发布",
+        )
 
     # AI 评分门禁：非 legacy 题目需要锁定 Rubric
     questions = [q for q in all_questions if q.grading_mode != "legacy"]
