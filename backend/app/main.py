@@ -136,7 +136,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/health/ready", tags=["health"])
     def health_ready():
-        """就绪检查——验证 MySQL + Redis 可达"""
+        """就绪检查——验证 MySQL + Redis 可达。
+
+        Redis 承载 Refresh Token、黑名单与队列唤醒，是认证关键依赖；
+        任一依赖故障即返回 503，且不回显底层异常详情。
+        """
         import redis as _redis
         ready = True
         details = {}
@@ -148,18 +152,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             db.execute(select(1)) if True else None  # simplified check
             db.close()
             details["mysql"] = "ok"
-        except Exception as e:
+        except Exception:
             ready = False
-            details["mysql"] = str(e)[:100]
+            details["mysql"] = "unavailable"
 
         # Redis
         try:
             r = _redis.Redis.from_url(settings.redis_url, socket_connect_timeout=2)
             r.ping()
             details["redis"] = "ok"
-        except Exception as e:
-            details["redis"] = str(e)[:100]
-            # Redis 不可用不影响 ready（判题暂时无法入队但不阻塞 API）
+        except Exception:
+            ready = False
+            details["redis"] = "unavailable"
 
         status_code = 200 if ready else 503
         from fastapi.responses import JSONResponse
