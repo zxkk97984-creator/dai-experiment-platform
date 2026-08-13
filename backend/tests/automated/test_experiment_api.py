@@ -1,6 +1,8 @@
 """实验 API 测试 — v5 统一模型后的验收测试"""
 from conftest import auth_header, create_user, login
 
+from app.models import Course
+
 
 def _seed_student_catalog(db_session_factory):
     """创建四态目录数据，并放入一条其他学生记录验证隔离。"""
@@ -157,13 +159,14 @@ def test_teacher_can_create_and_update_own_module_only(client, db_session_factor
     )
     assert own.status_code == 201, own.text
 
+    # TASK-008：status 不能经 PATCH 写入——元数据更新仍可用
     own_update = client.patch(
         f"/api/v1/experiments/modules/{own.json()['id']}",
         headers=auth_header(teacher_tok),
-        json={"status": "published"},
+        json={"description": "教师更新描述"},
     )
     assert own_update.status_code == 200, own_update.text
-    assert own_update.json()["status"] == "published"
+    assert own_update.json()["description"] == "教师更新描述"
 
     other = client.post(
         "/api/v1/experiments/modules",
@@ -175,7 +178,7 @@ def test_teacher_can_create_and_update_own_module_only(client, db_session_factor
     other_update = client.patch(
         f"/api/v1/experiments/modules/{other.json()['id']}",
         headers=auth_header(teacher_tok),
-        json={"status": "draft"},
+        json={"name": "越权改名"},
     )
     assert other_update.status_code == 403
 
@@ -199,8 +202,8 @@ def test_student_cannot_read_draft_module(client, db_session_factory):
     assert mid not in ids
 
 
-def test_module_publish_is_patch(client, db_session_factory):
-    """模块发布通过 PATCH 更新 status"""
+def test_module_publish_uses_dedicated_endpoint(client, db_session_factory):
+    """TASK-008：发布只能走 /publish 门禁端点（不再经 PATCH 写 status）。"""
     create_user(db_session_factory, "developer2", "developer")
     d_tok, _ = login(client, "developer2")
 
@@ -209,11 +212,16 @@ def test_module_publish_is_patch(client, db_session_factory):
     })
     mid = m.json()["id"]
 
+    # PATCH 写 status 已被禁止
     r = client.patch(f"/api/v1/experiments/modules/{mid}", headers=auth_header(d_tok), json={
         "status": "published",
     })
-    assert r.status_code == 200, r.text
-    assert r.json()["status"] == "published"
+    assert r.status_code == 422, r.text
+
+    # 专用发布端点：未绑定模板 → 409 门禁
+    p = client.post(f"/api/v1/experiments/modules/{mid}/publish", headers=auth_header(d_tok))
+    assert p.status_code == 409, p.text
+    assert p.json()["detail"]["code"] == "MODULE_TEMPLATE_MISSING"
 
 
 def test_notebooks_deprecation_header(client, db_session_factory):
@@ -226,21 +234,28 @@ def test_notebooks_deprecation_header(client, db_session_factory):
 
 def test_ensure_record_validation(client, db_session_factory):
     """ensure-for-lesson 不存在模板时返回 TEMPLATE_NOT_FOUND"""
-    create_user(db_session_factory, "teacher_t", "teacher")
+    teacher = create_user(db_session_factory, "teacher_t", "teacher")
     create_user(db_session_factory, "student_s", "student")
     t_tok, _ = login(client, "teacher_t")
     s_tok, _ = login(client, "student_s")
 
-    c = client.post("/api/v1/courses", headers=auth_header(t_tok), json={
-        "title": "Test", "status": "published", "visibility": "public",
-    })
-    ch = client.post(f"/api/v1/courses/{c.json()['id']}/chapters", headers=auth_header(t_tok), json={
+    # TASK-006：POST 只允许 draft——已发布课程用领域 fixture 直接构造
+    with db_session_factory() as db:
+        course = Course(
+            title="Test", description="d", status="published",
+            visibility="public", default_score=100, teacher_id=teacher.id,
+        )
+        db.add(course)
+        db.commit()
+        course_id = course.id
+
+    ch = client.post(f"/api/v1/courses/{course_id}/chapters", headers=auth_header(t_tok), json={
         "title": "Ch1",
     })
     le = client.post(f"/api/v1/chapters/{ch.json()['id']}/lessons", headers=auth_header(t_tok), json={
         "title": "Lesson", "content_type": "markdown",
     })
-    client.post(f"/api/v1/courses/{c.json()['id']}/enroll", headers=auth_header(s_tok))
+    client.post(f"/api/v1/courses/{course_id}/enroll", headers=auth_header(s_tok))
 
     r = client.post(
         f"/api/v1/experiments/records/ensure-for-lesson/{le.json()['id']}",
@@ -264,11 +279,14 @@ def test_p0_4_teacher_submission_isolation(client, db_session_factory):
     t_b_tok, _ = login(client, "t_iso_b")
     s_b_tok, _ = login(client, "s_iso_b")
 
-    # 教师 A 创建课程、章节、课时
+    # 教师 A 创建课程、章节、课时（TASK-006：POST 只允许 draft，发布态经领域 fixture 构造）
     c_a = client.post("/api/v1/courses", headers=auth_header(t_a_tok), json={
-        "title": "教师A的课程", "status": "published", "visibility": "public",
+        "title": "教师A的课程", "visibility": "public",
     })
     cid_a = c_a.json()["id"]
+    with db_session_factory() as db:
+        db.get(Course, cid_a).status = "published"
+        db.commit()
     client.post(f"/api/v1/courses/{cid_a}/enroll", headers=auth_header(s_a_tok))
 
     ch_a = client.post(f"/api/v1/courses/{cid_a}/chapters", headers=auth_header(t_a_tok), json={

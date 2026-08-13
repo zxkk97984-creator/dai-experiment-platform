@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.dependencies import get_current_user, get_db, require_roles
+from app.dependencies import PaginationParams, get_current_user, get_db, pagination, require_roles
 from app.errors import api_error
 from app.models import (
     Chapter,
@@ -28,6 +28,7 @@ from app.schemas import (
     ExperimentCellsSaveRequest,
     ExperimentModuleCreate,
     ExperimentModuleRead,
+    ExperimentModuleUpdate,
     ExperimentRecordDetailResponse,
     ExperimentRecordRead,
     ExperimentReviewUpdate,
@@ -168,11 +169,11 @@ def list_student_module_catalog(
         default=None, alias="status"
     ),
     sort: Literal["default", "recent_desc", "name_asc"] = "default",
-    page: int = 1,
-    page_size: int = 10,
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("student")),
 ):
+    page, page_size = pagination.page, pagination.page_size
     """学生实验目录：合并已发布模块与当前学生自己的实验状态。"""
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
@@ -262,10 +263,20 @@ def create_module(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("admin", "teacher", "developer")),
 ):
+    # TASK-008：Schema 强制 draft + extra=forbid；发布必须走 /publish 门禁
     module = ExperimentModule(**payload.model_dump(), owner_id=current_user.id)
     db.add(module)
     db.commit()
     db.refresh(module)
+    return module
+
+
+def _require_module_manager(module_id: int, db: Session, current_user: User) -> ExperimentModule:
+    module = db.get(ExperimentModule, module_id)
+    if not module:
+        raise api_error(404, "EXPERIMENT_MODULE_NOT_FOUND", "实验模块不存在")
+    if current_user.role in ("teacher", "developer") and module.owner_id != current_user.id:
+        raise api_error(403, "FORBIDDEN", "无权管理其他用户创建的实验模块")
     return module
 
 
@@ -280,24 +291,65 @@ def get_module(
         raise api_error(404, "EXPERIMENT_MODULE_NOT_FOUND", "实验模块不存在")
     if current_user.role == "student" and module.status != "published":
         raise api_error(403, "FORBIDDEN", "无权查看未发布的实验模块")
+    # TASK-008：Developer 只能查看自己创建的模块（列表/详情权限一致）
+    if current_user.role == "developer" and module.owner_id != current_user.id:
+        raise api_error(403, "FORBIDDEN", "无权查看其他开发者创建的实验模块")
     return module
 
 
 @router.patch("/modules/{module_id}", response_model=ExperimentModuleRead)
 def patch_module(
     module_id: int,
-    payload: dict,
+    payload: ExperimentModuleUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("admin", "teacher", "developer")),
 ):
-    module = db.get(ExperimentModule, module_id)
-    if not module:
-        raise api_error(404, "EXPERIMENT_MODULE_NOT_FOUND", "实验模块不存在")
-    if current_user.role in ("teacher", "developer") and module.owner_id != current_user.id:
-        raise api_error(403, "FORBIDDEN", "无权管理其他用户创建的实验模块")
-    for key in ("name", "description", "template_id", "status"):
-        if key in payload:
-            setattr(module, key, payload[key])
+    """TASK-008：强类型更新——拒绝裸 dict/status/未知字段；发布走专用端点。"""
+    module = _require_module_manager(module_id, db, current_user)
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(module, key, value)
+    db.commit()
+    db.refresh(module)
+    return module
+
+
+@router.post("/modules/{module_id}/publish", response_model=ExperimentModuleRead)
+def publish_module(
+    module_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("admin", "teacher", "developer")),
+):
+    """TASK-008：发布门禁——绑定可用模板、模板已发布当前版本、版本绑定运行环境。"""
+    module = _require_module_manager(module_id, db, current_user)
+    if module.status == "published":
+        return module  # 重复发布幂等
+    if not module.template_id:
+        raise api_error(409, "MODULE_TEMPLATE_MISSING", "发布前请先绑定 Notebook 模板")
+    template = db.get(NotebookTemplate, module.template_id)
+    if not template or not template.current_version_id:
+        raise api_error(409, "MODULE_VERSION_MISSING", "模板尚未发布版本，请先在模板工作台发布")
+    version = db.get(NotebookTemplateVersion, template.current_version_id)
+    if not version or version.template_id != template.id:
+        raise api_error(404, "VERSION_NOT_FOUND", "模板版本不存在")
+    if version.environment_version_id is None:
+        raise api_error(409, "MODULE_ENV_MISSING", "模板当前版本未绑定运行环境，无法发布")
+    module.status = "published"
+    db.commit()
+    db.refresh(module)
+    return module
+
+
+@router.post("/modules/{module_id}/unpublish", response_model=ExperimentModuleRead)
+def unpublish_module(
+    module_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("admin", "teacher", "developer")),
+):
+    """TASK-008：下架 published → draft，学生端立即不可见。"""
+    module = _require_module_manager(module_id, db, current_user)
+    if module.status != "published":
+        raise api_error(409, "MODULE_NOT_PUBLISHED", "仅已发布的模块可以下架")
+    module.status = "draft"
     db.commit()
     db.refresh(module)
     return module
@@ -925,11 +977,11 @@ def list_submissions(
     entry_id: int | None = None,
     review_status: Literal["pending", "graded"] | None = None,
     sort: Literal["submitted_desc", "submitted_asc"] = "submitted_desc",
-    page: int = 1,
-    page_size: int = 10,
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    page, page_size = pagination.page, pagination.page_size
     """查看实验提交列表。
 
     权限：

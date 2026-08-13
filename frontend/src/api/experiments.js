@@ -52,6 +52,9 @@ export const experimentsAPI = {
   getModule(id) { return client.get(`/experiments/modules/${id}`) },
   createModule(payload) { return client.post('/experiments/modules', payload) },
   updateModule(id, payload) { return client.patch(`/experiments/modules/${id}`, payload) },
+  /** 发布/下架：专用门禁端点（TASK-008）——不允许经 updateModule 写 status */
+  publishModule(id) { return client.post(`/experiments/modules/${id}/publish`) },
+  unpublishModule(id) { return client.post(`/experiments/modules/${id}/unpublish`) },
 
   // 实验提交
   /** 学生提交实验快照——client_request_id 保证幂等 */

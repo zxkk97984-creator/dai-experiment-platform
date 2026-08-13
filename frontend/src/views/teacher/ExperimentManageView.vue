@@ -7,6 +7,7 @@ import TeacherMetricGrid from '../../components/teacher/TeacherMetricGrid.vue'
 import TeacherPageHeader from '../../components/teacher/TeacherPageHeader.vue'
 import TeacherPagination from '../../components/teacher/TeacherPagination.vue'
 import { experimentsAPI } from '../../api/experiments.js'
+import { studioAPI } from '../../api/studio.js'
 import { useAppStore } from '../../stores/app.js'
 import { useAuthStore } from '../../stores/auth.js'
 import { formatDateTime } from '../../utils/format.js'
@@ -16,20 +17,21 @@ const router = useRouter()
 const app = useAppStore()
 const auth = useAuthStore()
 const modules = ref([])
+const templates = ref([])
 const loading = ref(true)
 const createOpen = ref(false)
 const editingId = ref(null)
-const form = ref({ name: '', description: '', entry_url: '' })
+// TASK-008：只保留内部模板模式——移除无效 entry_url 字段
+const form = ref({ name: '', description: '', template_id: null })
 const query = ref('')
 const statusFilter = ref('all')
-const entryFilter = ref('all')
 const sortOrder = ref('updated')
 const moduleStatus = (module) => module.status || 'draft'
 const moduleUpdated = (module) => module.updated_at || module.created_at || ''
 const summary = computed(() => ({ total: modules.value.length, published: modules.value.filter((item) => moduleStatus(item) === 'published').length, draft: modules.value.filter((item) => moduleStatus(item) === 'draft').length, offline: modules.value.filter((item) => moduleStatus(item) === 'offline' || moduleStatus(item) === 'archived').length }))
 const filteredModules = computed(() => {
   const keyword = query.value.trim().toLowerCase()
-  const result = modules.value.filter((item) => (!keyword || `${item.name || ''} ${item.description || ''}`.toLowerCase().includes(keyword)) && (statusFilter.value === 'all' || moduleStatus(item) === statusFilter.value) && (entryFilter.value === 'all' || (entryFilter.value === 'external' ? item.entry_url : !item.entry_url)))
+  const result = modules.value.filter((item) => (!keyword || `${item.name || ''} ${item.description || ''}`.toLowerCase().includes(keyword)) && (statusFilter.value === 'all' || moduleStatus(item) === statusFilter.value))
   return [...result].sort((a, b) => sortOrder.value === 'name' ? String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN') : new Date(moduleUpdated(b) || 0) - new Date(moduleUpdated(a) || 0))
 })
 const { page, pageSize, pageCount, pagedItems, goToPage, resetPage } = useClientPagination(filteredModules)
@@ -37,8 +39,12 @@ const { page, pageSize, pageCount, pagedItems, goToPage, resetPage } = useClient
 async function fetch() {
   loading.value = true
   try {
-    const res = await experimentsAPI.listModules()
-    modules.value = res.data.items || res.data
+    const [moduleRes, templateRes] = await Promise.all([
+      experimentsAPI.listModules(),
+      studioAPI.listTemplates(),
+    ])
+    modules.value = moduleRes.data.items || moduleRes.data
+    templates.value = templateRes.data.items || templateRes.data
   } catch {
     app.showToast('加载实验模块失败', 'error')
   } finally {
@@ -48,13 +54,13 @@ async function fetch() {
 
 function openCreateModal() {
   editingId.value = null
-  form.value = { name: '', description: '', entry_url: '' }
+  form.value = { name: '', description: '', template_id: null }
   createOpen.value = true
 }
 
 function openEditModal(module) {
   editingId.value = module.id
-  form.value = { name: module.name || '', description: module.description || '', entry_url: module.entry_url || '' }
+  form.value = { name: module.name || '', description: module.description || '', template_id: module.template_id ?? null }
   createOpen.value = true
 }
 
@@ -68,7 +74,11 @@ async function saveModule() {
     app.showToast('请输入实验名称', 'error')
     return
   }
-  const payload = { ...form.value, name }
+  const payload = {
+    name,
+    description: form.value.description,
+    template_id: form.value.template_id || null,
+  }
   try {
     if (editingId.value) {
       await experimentsAPI.updateModule(editingId.value, payload)
@@ -78,7 +88,7 @@ async function saveModule() {
       app.showToast('创建成功', 'success')
     }
     createOpen.value = false
-    form.value = { name: '', description: '', entry_url: '' }
+    form.value = { name: '', description: '', template_id: null }
     editingId.value = null
     fetch()
   } catch (e) {
@@ -87,13 +97,19 @@ async function saveModule() {
 }
 
 async function toggleStatus(m) {
-  const newStatus = m.status === 'published' ? 'draft' : 'published'
+  // TASK-008：发布/下架只走专用门禁端点（发布要求模板已发布版本并绑定运行环境）
+  const publishing = m.status !== 'published'
   try {
-    await experimentsAPI.updateModule(m.id, { status: newStatus })
-    app.showToast(newStatus === 'published' ? '已发布' : '已下架', 'success')
+    if (publishing) {
+      await experimentsAPI.publishModule(m.id)
+      app.showToast('已发布', 'success')
+    } else {
+      await experimentsAPI.unpublishModule(m.id)
+      app.showToast('已下架', 'success')
+    }
     fetch()
-  } catch {
-    app.showToast('操作失败', 'error')
+  } catch (e) {
+    app.showToast(e.response?.data?.detail?.message || '操作失败', 'error')
   }
 }
 
@@ -135,10 +151,13 @@ onMounted(fetch)
               <textarea v-model="form.description" name="module-description" rows="3" placeholder="实验目标和步骤说明"></textarea>
             </div>
             <div class="form-group">
-              <label>入口 URL（可选）</label>
-              <input v-model="form.entry_url" name="module-entry-url" placeholder="外部实验链接，留空则使用 JupyterLab" />
+              <label>Notebook 模板</label>
+              <select v-model="form.template_id" name="module-template">
+                <option :value="null">暂不绑定（发布前必须绑定）</option>
+                <option v-for="tpl in templates" :key="tpl.id" :value="tpl.id">{{ tpl.name }}</option>
+              </select>
             </div>
-            <p class="form-hint modal-hint">创建后可在列表中发布或下架实验模块。</p>
+            <p class="form-hint modal-hint">发布要求绑定已发布版本并绑定运行环境的模板；创建后可在列表中发布或下架实验模块。</p>
             <div class="create-actions">
               <button class="btn-ghost btn-sm" type="button" @click="closeCreateModal">取消</button>
               <button class="btn-primary btn-sm" type="button" data-action="save-module" @click="saveModule">{{ editingId ? '保存' : '确定' }}</button>
@@ -148,7 +167,7 @@ onMounted(fetch)
       </div>
 
       <TeacherMetricGrid aria-label="实验统计" :items="[{ key: 'total', label: '全部实验', icon: 'experiment', tone: 'blue', value: summary.total, unit: '个' }, { key: 'published', label: '已发布', icon: 'send', tone: 'green', value: summary.published, unit: '个' }, { key: 'draft', label: '草稿', icon: 'draft', tone: 'orange', value: summary.draft, unit: '个' }, { key: 'offline', label: '已下架', icon: 'clock', tone: 'purple', value: summary.offline, unit: '个' }]" />
-      <section class="data-panel"><div class="filter-bar"><label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索实验名称" @input="resetPage" /></label><select v-model="statusFilter" @change="resetPage"><option value="all">状态：全部</option><option value="published">已发布</option><option value="draft">草稿</option><option value="offline">已下架</option></select><select v-model="entryFilter" @change="resetPage"><option value="all">入口：全部入口</option><option value="jupyter">JupyterLab</option><option value="external">外部入口</option></select><select v-model="sortOrder" @change="resetPage"><option value="updated">排序：最近更新</option><option value="name">排序：实验名称</option></select></div><div v-if="loading" class="loading-list"><span v-for="i in 6" :key="i" class="skeleton"></span></div><div v-else-if="filteredModules.length === 0" class="empty-state"><AppIcon name="experiment" :size="32" /><strong>暂无符合条件的实验</strong><p>调整筛选条件，或创建一个新实验。</p></div><div v-else class="table-scroll"><table><thead><tr><th>实验名称</th><th>描述</th><th>入口</th><th>状态</th><th>最近更新</th><th>操作</th></tr></thead><tbody><tr v-for="module in pagedItems" :key="module.id"><td class="title-cell">{{ module.name }}</td><td>{{ module.description || '暂无实验描述' }}</td><td><code v-if="module.entry_url" class="entry-code">{{ module.entry_url }}</code><span v-else>JupyterLab</span></td><td><span class="status-pill" :class="moduleStatus(module)">{{ moduleStatus(module) === 'published' ? '已发布' : moduleStatus(module) === 'draft' ? '草稿' : '已下架' }}</span></td><td class="muted-cell">{{ formatDateTime(moduleUpdated(module)) }}</td><td class="actions-cell"><button class="text-action" data-action="edit-module" @click="openEditModal(module)">编辑模块</button><button class="text-action" @click="goToSubmissions">查看提交</button><button class="publish-action" @click="toggleStatus(module)">{{ module.status === 'published' ? '下架' : '发布' }}</button></td></tr></tbody></table></div><TeacherPagination v-if="!loading" :current-page="page" :page-count="pageCount" :total="filteredModules.length" :page-size="pageSize" aria-label="实验列表分页" @change="goToPage" /></section>
+      <section class="data-panel"><div class="filter-bar"><label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索实验名称" @input="resetPage" /></label><select v-model="statusFilter" @change="resetPage"><option value="all">状态：全部</option><option value="published">已发布</option><option value="draft">草稿</option><option value="offline">已下架</option></select><select v-model="sortOrder" @change="resetPage"><option value="updated">排序：最近更新</option><option value="name">排序：实验名称</option></select></div><div v-if="loading" class="loading-list"><span v-for="i in 6" :key="i" class="skeleton"></span></div><div v-else-if="filteredModules.length === 0" class="empty-state"><AppIcon name="experiment" :size="32" /><strong>暂无符合条件的实验</strong><p>调整筛选条件，或创建一个新实验。</p></div><div v-else class="table-scroll"><table><thead><tr><th>实验名称</th><th>描述</th><th>状态</th><th>最近更新</th><th>操作</th></tr></thead><tbody><tr v-for="module in pagedItems" :key="module.id"><td class="title-cell">{{ module.name }}</td><td>{{ module.description || '暂无实验描述' }}</td><td><span class="status-pill" :class="moduleStatus(module)">{{ moduleStatus(module) === 'published' ? '已发布' : moduleStatus(module) === 'draft' ? '草稿' : '已下架' }}</span></td><td class="muted-cell">{{ formatDateTime(moduleUpdated(module)) }}</td><td class="actions-cell"><button class="text-action" data-action="edit-module" @click="openEditModal(module)">编辑模块</button><button class="text-action" @click="goToSubmissions">查看提交</button><button class="publish-action" @click="toggleStatus(module)">{{ module.status === 'published' ? '下架' : '发布' }}</button></td></tr></tbody></table></div><TeacherPagination v-if="!loading" :current-page="page" :page-count="pageCount" :total="filteredModules.length" :page-size="pageSize" aria-label="实验列表分页" @change="goToPage" /></section>
     </div>
   </AppLayout>
 </template>
@@ -289,14 +308,13 @@ onMounted(fetch)
   text-overflow: ellipsis;
   vertical-align: middle;
 }
-.table-scroll th:nth-child(1) { width: 21%; }
-.table-scroll th:nth-child(2) { width: 25%; }
+.table-scroll th:nth-child(1) { width: 22%; }
+.table-scroll th:nth-child(2) { width: 30%; }
 .table-scroll th:nth-child(3) { width: 12%; }
-.table-scroll th:nth-child(4) { width: 10%; }
-.table-scroll th:nth-child(5) { width: 10%; }
-.table-scroll th:nth-child(6) { width: 22%; }
-.table-scroll td:nth-child(4),
-.table-scroll td:nth-child(5) { white-space: nowrap; }
+.table-scroll th:nth-child(4) { width: 12%; }
+.table-scroll th:nth-child(5) { width: 24%; }
+.table-scroll td:nth-child(3),
+.table-scroll td:nth-child(4) { white-space: nowrap; }
 .table-scroll .status-pill {
   display: inline-flex;
   min-width: max-content;
