@@ -4,10 +4,15 @@ from sqlalchemy import select
 
 from app.database import Base, SessionLocal, engine
 from app.models import User
-from app.security import hash_password
+from app.security import hash_password, validate_password_rules
 
 
 def create_admin(username: str, password: str, real_name: str):
+    # TASK-011：CLI 也是密码入口——共享同一校验，避免弱口令管理员
+    try:
+        validate_password_rules(password, username)
+    except ValueError as exc:
+        raise SystemExit(f"密码不符合要求：{exc}")
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         existing = db.scalar(select(User).where(User.username == username))

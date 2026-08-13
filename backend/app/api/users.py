@@ -2,11 +2,11 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.dependencies import get_current_user, get_db, require_roles
+from app.dependencies import PaginationParams, get_current_user, get_db, pagination, require_roles
 from app.errors import api_error
 from app.models import User
 from app.schemas import PaginatedResponse, PasswordUpdate, StatusUpdate, UserCreate, UserRead, UserUpdate
-from app.security import hash_password
+from app.security import hash_password, validate_password_rules, verify_password
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -16,13 +16,13 @@ VALID_STATUSES = {"active", "disabled"}
 
 @router.get("", response_model=PaginatedResponse)
 def list_users(
-    page: int = 1,
-    page_size: int = 20,
     role: str | None = None,
     status_filter: str | None = None,
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin")),
 ):
+    page, page_size = pagination.page, pagination.page_size
     query = select(User)
     count_query = select(func.count()).select_from(User)
     if role:
@@ -46,6 +46,10 @@ def create_user(
         raise api_error(400, "INVALID_ROLE", "角色无效")
     if payload.status not in VALID_STATUSES:
         raise api_error(400, "INVALID_STATUS", "用户状态无效")
+    try:
+        validate_password_rules(payload.password, payload.username)
+    except ValueError as exc:
+        raise api_error(422, "INVALID_PASSWORD", str(exc))
     if db.scalar(select(User).where(User.username == payload.username)):
         raise api_error(409, "USERNAME_EXISTS", "用户名已存在")
     student_no = payload.student_no.strip() if payload.student_no else None
@@ -70,13 +74,12 @@ def create_user(
 @router.get("/students", response_model=PaginatedResponse)
 def list_students(
     q: str | None = None,
-    page: int = 1,
-    page_size: int = 20,
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("teacher", "admin")),
 ):
     """学生候选列表——教师选择白名单学生用，只暴露 active student"""
-    page_size = max(1, min(page_size, 100))
+    page, page_size = pagination.page, pagination.page_size
     filters = (User.role == "student", User.status == "active")
     query = select(User).where(*filters)
     count_query = select(func.count()).select_from(User).where(*filters)
@@ -147,11 +150,24 @@ def update_password(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """TASK-011：本人改密必须提交并验证 current_password；管理员重置无需旧密码。
+
+    所有入口共享同一密码规则（含与用户名等同检查）。
+    """
     if current_user.role != "admin" and current_user.id != user_id:
         raise api_error(403, "FORBIDDEN", "没有权限修改该用户密码")
     user = db.get(User, user_id)
     if not user:
         raise api_error(404, "USER_NOT_FOUND", "用户不存在")
+    if current_user.role != "admin":
+        if not payload.current_password:
+            raise api_error(422, "CURRENT_PASSWORD_REQUIRED", "修改密码必须提供当前密码")
+        if not verify_password(payload.current_password, user.password_hash):
+            raise api_error(400, "CURRENT_PASSWORD_INCORRECT", "当前密码不正确")
+    try:
+        validate_password_rules(payload.password, user.username)
+    except ValueError as exc:
+        raise api_error(422, "INVALID_PASSWORD", str(exc))
     user.password_hash = hash_password(payload.password)
     db.commit()
     db.refresh(user)
