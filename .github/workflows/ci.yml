@@ -25,6 +25,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest fakeredis
+      - name: Secret 扫描（高信号模式：密钥/私钥形态，误报需显式说明）
+        run: |
+          if grep -rnE "(sk-[A-Za-z0-9]{20,}|-----BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY-----)" \
+              --include="*.py" --include="*.yml" --include="*.yaml" --include="*.js" --include="*.vue" \
+              backend frontend scripts docs .github 2>/dev/null; then
+            echo "::error::检测到疑似密钥泄漏"; exit 1
+          fi
+          echo "secret scan clean"
+      - name: Python SCA（接受记录门禁，见 docs/security/sca-acceptances.md）
+        run: |
+          pip install pip-audit
+          python ../scripts/check_sca.py
       - name: 运行测试（跳过 kernel + docker）
         run: python -m pytest -q --ignore=tests/kernel_connect_test.py --ignore=tests/kernel_ipykernel_test.py --ignore=tests/kernel_test.py --ignore=tests/debug_kernel.py --ignore=tests/diag_execute.py --ignore=tests/test_kernel_prototype.py
 
@@ -83,10 +95,34 @@ jobs:
           mysql -h 127.0.0.1 -u root -ptest_root -e "CREATE DATABASE IF NOT EXISTS dai_platform"
       - name: 等 Redis 就绪
         run: redis-cli -h 127.0.0.1 ping
-      - name: 运行迁移
+      - name: 迁移第一步（环境控制面迁移 A）
+        run: alembic upgrade b4c5d6e7f890
+      - name: 种入 basic 可用版本（迁移 B 前置，等价生产 seed-environments 后构建完成）
+        run: |
+          mysql -h 127.0.0.1 -u root -ptest_root dai_platform -e "
+          INSERT INTO environment_profiles (slug, display_name, status, created_at, updated_at) VALUES ('basic', '基础档位', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+          INSERT INTO environment_versions (profile_id, version_number, base_image_ref, minimum_memory_mb, manifest_sha256, status, image_digest, created_at, updated_at)
+          SELECT id, 1, 'python:3.12-slim', 128, REPEAT('a',64), 'available', CONCAT('sha256:',REPEAT('b',64)), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM environment_profiles WHERE slug='basic';"
+      - name: 迁移到 head
         run: alembic upgrade head
+      - name: 模型/迁移收敛检查（TASK-010：ORM 与实库零漂移）
+        run: alembic check
       - name: 运行测试（跳过 kernel + docker）
         run: python -m pytest -q --ignore=tests/kernel_connect_test.py --ignore=tests/kernel_ipykernel_test.py --ignore=tests/kernel_test.py --ignore=tests/debug_kernel.py --ignore=tests/diag_execute.py --ignore=tests/test_kernel_prototype.py
+
+  backend-lint:
+    name: 后端高信号 lint（Ruff）
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Ruff
+        run: pip install ruff
+      - name: 高信号规则阻断（TASK-026：仅 E9/F63/F7/F82/F811，禁止新增）
+        run: ruff check app/ --select E9,F63,F7,F82,F811
 
   frontend-test:
     name: 前端 test + build
@@ -105,10 +141,14 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: 安装依赖
         run: npm ci
+      - name: Lint（TASK-026 门禁）
+        run: npm run lint
       - name: 运行测试
         run: npm test
       - name: 构建
         run: npm run build
+      - name: 生产依赖审计（TASK-002 修复后 0 漏洞；高危阻断）
+        run: npm audit --omit=dev --audit-level=high
 
   e2e-test:
     name: E2E Playwright（需 Docker）

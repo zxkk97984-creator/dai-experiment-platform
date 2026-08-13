@@ -21,6 +21,7 @@ from app.models import (
     ProfileVersionPackage,
 )
 from app.schemas.environments import EnvironmentOptionRead, EnvironmentSummaryRead, PackageSummary
+from app.services.import_policy import ImportPolicy
 
 
 def get_packages_for_version(db: Session, version_id: int) -> list[PackageCatalog]:
@@ -551,8 +552,6 @@ def installed_imports_for_version(db: Session, version_id: int) -> set[str]:
 
 def resolve_effective_policy(assignment, question) -> "ImportPolicy":
     """解析题目的最终 import 策略：inherit → 作业策略；否则题目自己的（计划 2.4）。"""
-    from app.services.import_policy import ImportPolicy
-
     if getattr(question, "import_policy_mode", "inherit") in ("inherit", None):
         mode = assignment.import_policy_mode
         allowed = list(assignment.allowed_imports or [])
@@ -582,8 +581,6 @@ def public_environment_summary(
     if profile is None or profile.status != "active":
         return None
     if policy is None:
-        from app.services.import_policy import ImportPolicy
-
         policy = ImportPolicy(mode="unrestricted")
     return EnvironmentSummaryRead(
         display_name=profile.display_name,
