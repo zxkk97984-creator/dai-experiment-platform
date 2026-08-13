@@ -110,7 +110,20 @@ const questionPolicyMode = ref('inherit')  // inherit | unrestricted | restricte
 const questionAllowedImports = ref([])
 const assignmentDraft = computed(() => assignment.value?.status === 'draft')
 // TASK-009：已发布或已有学生提交（即使取消发布）→ 题目/AI 配置/环境锁定不可编辑
+// TASK-020：AI 服务状态（enabled/ready）——禁用时显示治理门提示，AI 动作被服务端拒绝前先行禁用
+const aiEnabled = ref(false)
+const aiReady = ref(false)
+
 const assignmentLocked = computed(() => !assignmentDraft.value || !!assignment.value?.has_submissions)
+const aiDisabledNotice = computed(() => {
+  if (aiEnabled.value) return ''
+  return 'AI 智能评分当前未启用（未完成数据治理审批）——题目仍可使用人工评分流程，AI 相关功能暂时不可用。'
+})
+const aiKeyMissingNotice = computed(() => {
+  if (!aiEnabled.value || aiReady.value) return ''
+  return 'AI 智能评分已启用但未配置 API Key——AI 相关功能暂时不可用，请联系管理员配置 DAI_AI_API_KEY。'
+})
+
 const lockedNotice = computed(() => {
   if (assignment.value?.status === 'published') {
     return '作业已发布，题目与评分配置已锁定；修改需先取消发布（已有提交后不可修改，纠错请新建作业）。'
@@ -495,7 +508,15 @@ function formatSavedAt(d) {
  return `${d.getMonth() + 1}月${d.getDate()}日 ${hh}:${mm}`
 }
 
-onMounted(() => { fetch(); fetchEnv() })
+async function fetchAiStatus() {
+  try {
+    const res = await aiGradingAPI.getStatus()
+    aiEnabled.value = res.data.enabled === true
+    aiReady.value = res.data.ready === true
+  } catch { /* 忽略——AI 调用由服务端兜底门禁 */ }
+}
+
+onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 </script>
 
 <template>
@@ -557,6 +578,9 @@ onMounted(() => { fetch(); fetchEnv() })
             <AppIcon name="assignment" :size="18" />
             <p>暂无题目，点击「添加题目」创建第一道题目</p>
           </div>
+          <p v-if="aiDisabledNotice || aiKeyMissingNotice" class="qe-lock-notice qe-ai-notice">
+            {{ aiDisabledNotice || aiKeyMissingNotice }}
+          </p>
           <p v-if="lockedNotice" class="qe-lock-notice">{{ lockedNotice }}</p>
           <button class="btn-primary btn-sm" :disabled="assignmentLocked" @click="startNew">
             <AppIcon name="plus" :size="14" />

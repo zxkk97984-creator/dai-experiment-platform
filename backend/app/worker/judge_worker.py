@@ -877,6 +877,17 @@ def process_ai_grade(db: Session, redis_client, settings: Settings, code_grade_i
     if not claim_ai_grade(db, code_grade_id):
         return None
 
+    if not settings.ai_ready:
+        # TASK-020：AI 关闭（未审批/未配置）时零外呼——
+        # 不构造客户端、不发任何请求；任务以不可重试终态转人工评分
+        db.rollback()
+        fail_ai_grade(
+            db, redis_client, code_grade_id,
+            "AI 服务未启用（DAI_AI_ENABLED=false 或未配置 API Key）",
+            retryable=False,
+        )
+        return None
+
     try:
         client = DeepSeekClient(settings)
         cg = grade_code_submission(db, client, code_grade_id)

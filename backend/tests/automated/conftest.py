@@ -46,6 +46,10 @@ def test_settings(tmp_path):
         # 测试封面目录指向临时目录，绝不写入真实 backend/storage/covers/
         cover_storage_dir=str(tmp_path / "covers"),
         cover_max_upload_bytes=5 * 1024 * 1024,
+        # TASK-020：默认关闭后，测试环境显式选择启用（等价生产 DAI_AI_ENABLED=true 的显式审批后配置）；
+        # 需要验证禁用语义的测试自行构造 Settings
+        ai_enabled=True,
+        ai_api_key="test-ai-key-not-real",
     )
 
 
