@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Cookie, Depends, Request, Response, status
+from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
@@ -7,7 +8,17 @@ from app.errors import api_error
 from app.models import User
 from app.schemas import LoginRequest, LogoutRequest, RefreshRequest, TokenResponse, UserRead
 from app.security import decode_token
-from app.services.auth_service import authenticate_user, issue_token_pair, refresh_token_pair, revoke_tokens
+from app.services.auth_service import (
+    LoginRateLimited,
+    authenticate_user,
+    check_login_rate_limit,
+    clear_login_failures,
+    issue_token_pair,
+    record_login_failure,
+    refresh_token_pair,
+    resolve_client_ip,
+    revoke_tokens,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -69,13 +80,47 @@ def _logout_access_payload(request: Request, settings: Settings) -> dict | None:
 @router.post("/login")
 def login(
     payload: LoginRequest,
+    request: Request,
     response: Response,
     db: Session = Depends(get_db),
     redis_client=Depends(get_redis_client),
     settings: Settings = Depends(get_settings),
 ):
-    user = authenticate_user(db, payload.username, payload.password)
-    tokens = issue_token_pair(user, redis_client, settings)
+    # ── 双维限流（TASK-005） ──
+    # 用户名 15 分钟 10 次失败 / IP 15 分钟 30 次尝试，超限 429 + Retry-After。
+    # Redis 不可用 → 503 失败关闭（认证事实依赖 Redis，绝不绕过限流放行）。
+    client_ip = resolve_client_ip(request, settings)
+    try:
+        check_login_rate_limit(redis_client, settings, payload.username, client_ip)
+    except RedisConnectionError:
+        raise api_error(503, "AUTH_SERVICE_UNAVAILABLE", "认证服务暂不可用，请稍后重试")
+    except LoginRateLimited as exc:
+        raise api_error(
+            429,
+            "LOGIN_RATE_LIMITED",
+            "尝试次数过多，请稍后再试",
+            fields={"retry_after_seconds": exc.retry_after_seconds},
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
+
+    try:
+        user = authenticate_user(db, payload.username, payload.password)
+    except Exception:
+        # 登录失败统一文案；失败计数（Redis 故障时静默跳过——失败原因优先于计数）
+        try:
+            record_login_failure(redis_client, settings, payload.username, client_ip)
+        except RedisConnectionError:
+            pass
+        raise
+
+    try:
+        clear_login_failures(redis_client, payload.username)
+    except RedisConnectionError:
+        pass  # 计数清理失败不影响本次登录
+    try:
+        tokens = issue_token_pair(user, redis_client, settings)
+    except RedisConnectionError:
+        raise api_error(503, "AUTH_SERVICE_UNAVAILABLE", "认证服务暂不可用，请稍后重试")
     # Refresh token 仅存入 HttpOnly Cookie，不在 JSON body 返回
     _set_refresh_cookie(response, tokens.refresh_token, settings)
     return {

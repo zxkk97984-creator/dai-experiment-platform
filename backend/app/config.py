@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
+    # ── 登录限流（TASK-005 / F-14） ────────────────────────────
+    # 账户维度：15 分钟窗口内最多 10 次失败；IP 维度：同窗口最多 30 次尝试。
+    # 超限冷却 15 分钟（窗口随失败滚动，成功登录清除账户计数）。
+    login_rate_limit_window_seconds: int = 900
+    login_max_failures_per_username: int = 10
+    login_max_attempts_per_ip: int = 30
+    # 可信反向代理 IP/CIDR（逗号分隔）——仅当直连 peer 在此列表中时才采用
+    # X-Forwarded-For 的首个地址作为客户端 IP；未配置时一律使用直连 peer。
+    trusted_proxies: str = ""
     jupyter_base_url: str = "http://localhost:8888"
     judge_queue_name: str = "judge:queue"
     judge_image: str = "dai-judge-python:latest"
@@ -120,6 +130,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def trusted_proxy_list(self) -> list[str]:
+        return [item.strip() for item in self.trusted_proxies.split(",") if item.strip()]
 
     @property
     def studio_storage_path(self) -> Path:

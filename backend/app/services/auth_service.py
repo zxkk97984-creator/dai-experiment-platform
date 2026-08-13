@@ -17,6 +17,79 @@ def authenticate_user(db: Session, username: str, password: str) -> User:
     return user
 
 
+# ── 登录限流（TASK-005 / F-14） ────────────────────────────────
+# 双维限流：用户名维度防单账户爆破（含 bcrypt CPU 放大），IP 维度防横向轮换用户名。
+# 计数器存 Redis；窗口随失败滚动（仅在首次失败时设置 TTL）。
+# Redis 不可用时登录必须失败关闭（503），绝不跳过限流放行。
+
+
+class LoginRateLimited(Exception):
+    """触发限流——携带剩余冷却秒数（Retry-After）。"""
+
+    def __init__(self, retry_after_seconds: int):
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(f"login rate limited, retry after {retry_after_seconds}s")
+
+
+def _login_user_key(username: str) -> str:
+    return f"login:fail:user:{username.strip().casefold()}"
+
+
+def _login_ip_key(ip: str) -> str:
+    return f"login:fail:ip:{ip}"
+
+
+def resolve_client_ip(request, settings: Settings) -> str:
+    """确定客户端 IP：仅当直连 peer 在可信代理列表内时才采用 X-Forwarded-For。
+
+    伪造的 X-Forwarded-For 在直连客户端不可信时被忽略，防止攻击者通过
+    自定义头绕过 IP 维度限流。
+    """
+    peer = (request.client.host if request.client else "") or ""
+    if settings.trusted_proxy_list and peer in settings.trusted_proxy_list:
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            first = forwarded.split(",")[0].strip()
+            # 兼容 [IPv6]:port 与 ip:port 形态
+            if first.startswith("["):
+                first = first.split("]")[0].lstrip("[")
+            elif first.count(":") == 1:
+                first = first.rsplit(":", 1)[0]
+            if first:
+                return first
+    return peer or "unknown"
+
+
+def check_login_rate_limit(redis_client, settings: Settings, username: str, ip: str) -> None:
+    """任一维度超限即抛 LoginRateLimited（含 Retry-After 秒数）。
+
+    Redis 不可用抛 ConnectionError，由调用方转为 503 失败关闭。
+    """
+    user_key = _login_user_key(username)
+    ip_key = _login_ip_key(ip)
+    user_count = int(redis_client.get(user_key) or 0)
+    ip_count = int(redis_client.get(ip_key) or 0)
+    if user_count < settings.login_max_failures_per_username and ip_count < settings.login_max_attempts_per_ip:
+        return
+    ttls = [redis_client.ttl(key) for key in (user_key, ip_key) if redis_client.exists(key)]
+    retry_after = max((t for t in ttls if t is not None and t > 0), default=settings.login_rate_limit_window_seconds)
+    raise LoginRateLimited(int(retry_after))
+
+
+def record_login_failure(redis_client, settings: Settings, username: str, ip: str) -> None:
+    """登录失败后计数（窗口随首次失败起算；再次失败不刷新窗口）。"""
+    window = settings.login_rate_limit_window_seconds
+    for key in (_login_user_key(username), _login_ip_key(ip)):
+        count = redis_client.incr(key)
+        if count == 1:
+            redis_client.expire(key, window)
+
+
+def clear_login_failures(redis_client, username: str) -> None:
+    """登录成功后清除账户维度的失败计数（IP 维度保留，防换用户名绕过）。"""
+    redis_client.delete(_login_user_key(username))
+
+
 def issue_token_pair(user: User, redis_client, settings: Settings) -> TokenResponse:
     access_token = create_token(
         subject=user.id,
