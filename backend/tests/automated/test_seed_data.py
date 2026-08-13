@@ -25,6 +25,13 @@ from app.seed_data import (
 
 
 def _seed_environment_catalog(db):
+    # 移除 conftest（TASK-010）预置的 basic available 版本——本测试自建
+    # basic/data/torch-cpu 档位与可控 digest，预置行会触发 slug/image_digest 唯一冲突
+    for version in db.query(EnvironmentVersion).all():
+        db.delete(version)
+    for profile in db.query(EnvironmentProfile).all():
+        db.delete(profile)
+    db.commit()
     for index, slug in enumerate(("basic", "data", "torch-cpu"), start=1):
         profile = EnvironmentProfile(
             slug=slug,

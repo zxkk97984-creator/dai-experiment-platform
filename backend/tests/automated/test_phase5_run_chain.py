@@ -45,8 +45,19 @@ from conftest import auth_header, create_user, login
 # 工具
 # ═══════════════════════════════════════════════════════════════
 
+def _clear_conftest_seed(db):
+    """移除 conftest（TASK-010）预置的 basic available 版本——
+    本文件测试自控 digest 字母与版本状态，预置行的 digest/status 会干扰断言。"""
+    for version in db.query(EnvironmentVersion).all():
+        db.delete(version)
+    for profile in db.query(EnvironmentProfile).all():
+        db.delete(profile)
+    db.commit()
+
+
 def _seed_version_available(db, settings, slug="basic", digest_letter="a") -> int:
-    """幂等 seed 后把指定档位 v1 标记为 available（mock digest），返回版本 id。"""
+    """清掉 conftest 预置后幂等 seed，把指定档位 v1 标记为 available（mock digest），返回版本 id。"""
+    _clear_conftest_seed(db)
     seed_environment_catalog(db, settings)
     version = db.scalar(
         select(EnvironmentVersion)
@@ -350,7 +361,6 @@ def test_missing_digest_fails_closed_system_error(db_session_factory, test_setti
     """ENVIRONMENT_IMAGE_MISSING：提交快照指向未构建版本（无 digest）→ fail closed 不扣分"""
     with db_session_factory() as db:
         seed_environment_catalog(db, test_settings)
-        # basic v1 保持 draft（无 digest）
         teacher = _make_teacher(db)
         student = _make_student(db)
         course = Course(title="C1", status="published", teacher_id=teacher.id)
@@ -373,6 +383,12 @@ def test_missing_digest_fails_closed_system_error(db_session_factory, test_setti
             .join(EnvironmentProfile, EnvironmentProfile.id == EnvironmentVersion.profile_id)
             .where(EnvironmentProfile.slug == "basic", EnvironmentVersion.version_number == 1)
         )
+        # 作业创建依赖 available 默认绑定（TASK-010 NOT NULL），之后把 basic v1
+        # 还原为“未构建”：draft、无 digest（conftest 预置了 available + digest）
+        draft_version.status = "draft"
+        draft_version.image_digest = None
+        draft_version.available_at = None
+        db.commit()
         submission = Submission(
             question_id=question.id, student_id=student.id, code="def add(a,b): return a+b",
             environment_version_id=draft_version.id,  # draft 状态、无 digest
