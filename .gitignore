@@ -48,6 +48,8 @@ design-qa.md
 teacher-grading-detail-*.png
 /*-current.jpg
 *.png
+# TASK-030 演练证据截图（docs/security/evidence/ 例外）
+!docs/security/evidence/*.png
 
 # 临时计划文件
 .pt-tmp/
