@@ -21,13 +21,14 @@ describe('AppHeader 用户菜单', () => {
     setActivePinia(pinia)
     const auth = useAuthStore()
     auth.setUser({ id: 1, username: 'student_alice', real_name: realName, role })
-    return { wrapper: mount(AppHeader, { global: { plugins: [pinia] } }), auth }
+    return { wrapper: mount(AppHeader, { global: { plugins: [pinia] }, attachTo: document.body }), auth }
   }
 
   beforeEach(() => {
     localStorage.clear()
     vi.resetAllMocks()
     setActivePinia(createPinia())
+    document.body.innerHTML = ''
   })
 
   it('显示真实姓名、头像图标与下拉箭头', () => {
@@ -66,6 +67,52 @@ describe('AppHeader 用户菜单', () => {
     document.dispatchEvent(new Event('pointerdown'))
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.user-menu').exists()).toBe(false)
+  })
+
+  it('打开菜单后焦点移入首个菜单项（TASK-024）', async () => {
+    const { wrapper } = mountAs()
+    const trigger = wrapper.get('.user-trigger')
+    trigger.element.focus()
+    await trigger.trigger('click')
+    await wrapper.vm.$nextTick()
+    const logoutBtn = wrapper.findAll('.user-menu button').find((b) => b.text().includes('退出'))
+    expect(document.activeElement).toBe(logoutBtn.element)
+  })
+
+  it('Escape 关闭菜单后焦点恢复到触发器（TASK-024）', async () => {
+    const { wrapper } = mountAs()
+    const trigger = wrapper.get('.user-trigger')
+    trigger.element.focus()
+    await trigger.trigger('click')
+    await wrapper.vm.$nextTick()
+    await trigger.trigger('keydown', { key: 'Escape' })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.user-menu').exists()).toBe(false)
+    expect(document.activeElement).toBe(trigger.element)
+  })
+
+  it('外部点击关闭菜单后焦点恢复到触发器（TASK-024）', async () => {
+    const { wrapper } = mountAs()
+    const trigger = wrapper.get('.user-trigger')
+    trigger.element.focus()
+    await trigger.trigger('click')
+    await wrapper.vm.$nextTick()
+    document.dispatchEvent(new Event('pointerdown'))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.user-menu').exists()).toBe(false)
+    expect(document.activeElement).toBe(trigger.element)
+  })
+
+  it('保留原生 Tab/Enter/Space 按钮语义（TASK-024）', async () => {
+    const { wrapper } = mountAs()
+    const trigger = wrapper.get('.user-trigger')
+    // 触发器为真实按钮，Enter/Space 的点击合成由浏览器原生处理，组件不拦截
+    expect(trigger.element.tagName).toBe('BUTTON')
+    expect(trigger.attributes('type')).toBe('button')
+    await trigger.trigger('keydown', { key: 'Enter' })
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    await trigger.trigger('click')
+    expect(trigger.attributes('aria-expanded')).toBe('true')
   })
 
   it('退出是唯一状态改变动作并路由到 /login', async () => {

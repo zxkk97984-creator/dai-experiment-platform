@@ -1,8 +1,9 @@
 <script setup>
 // AppHeader：右侧单一用户菜单触发器（姓名 + 圆形头像 + chevron）。
-// 菜单键盘可访问：Escape / 外部点击关闭；退出为唯一状态改变动作。
+// 菜单键盘可访问（TASK-024）：打开后焦点移入首个菜单项；
+// Escape / 外部点击关闭后焦点恢复到触发器；Tab/Enter/Space 保持原生行为。
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppIcon from '../ui/AppIcon.vue'
 import { useAuthStore } from '../../stores/auth.js'
@@ -13,12 +14,29 @@ const auth = useAuthStore()
 
 const open = ref(false)
 const wrapEl = ref(null)
+const triggerEl = ref(null)
+const menuEl = ref(null)
 
 const displayName = computed(() => auth.user?.real_name || auth.user?.username || '同学')
 const roleBadge = computed(() => statusBadge(ROLE_MAP, auth.role))
 
-function toggle() { open.value = !open.value }
-function close() { open.value = false }
+function openMenu() {
+  open.value = true
+  // 焦点移入菜单首个可操作项，读屏/键盘用户立即进入菜单上下文
+  nextTick(() => {
+    const first = menuEl.value?.querySelector('button, [role="menuitem"]')
+    first?.focus()
+  })
+}
+
+function close() {
+  if (!open.value) return
+  open.value = false
+  // Escape / 外部点击 / 退出动作后焦点恢复到触发器
+  nextTick(() => triggerEl.value?.focus())
+}
+
+function toggle() { open.value ? close() : openMenu() }
 
 // Escape 关闭（菜单内任意焦点位置均冒泡到 header 根）
 function onKeydown(e) {
@@ -52,6 +70,7 @@ onBeforeUnmount(() => {
     <div class="header-right">
       <div ref="wrapEl" class="user-menu-wrap">
         <button
+          ref="triggerEl"
           type="button"
           class="user-trigger"
           :aria-expanded="open"
@@ -67,7 +86,7 @@ onBeforeUnmount(() => {
           </span>
         </button>
 
-        <div v-if="open" class="user-menu" role="menu" aria-label="用户菜单">
+        <div v-if="open" ref="menuEl" class="user-menu" role="menu" aria-label="用户菜单">
           <div class="user-menu-head">
             <span class="user-menu-name">{{ displayName }}</span>
             <span class="user-menu-role">{{ roleBadge.label }}</span>

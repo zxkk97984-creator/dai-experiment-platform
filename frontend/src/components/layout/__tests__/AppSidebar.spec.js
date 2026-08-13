@@ -43,6 +43,24 @@ describe('AppSidebar 角色首页导航', () => {
     expect(routerState.push).toHaveBeenCalledWith('/student')
   })
 
+  it('活动路由项声明 aria-current="page"，其余项不声明（TASK-024）', () => {
+    const { wrapper } = mountAs('student', '/student/courses')
+    const courses = wrapper.findAll('.nav-item').find((n) => n.text().includes('课程'))
+    expect(courses.attributes('aria-current')).toBe('page')
+    for (const item of wrapper.findAll('.nav-item')) {
+      if (item.element === courses.element) continue
+      expect(item.attributes('aria-current')).toBeUndefined()
+    }
+  })
+
+  it('折叠按钮 aria-label 中文化并随状态切换（TASK-024）', async () => {
+    const { wrapper } = mountAs('student', '/student')
+    const collapse = wrapper.get('.collapse-btn')
+    expect(collapse.attributes('aria-label')).toBe('收起侧栏')
+    await collapse.trigger('click')
+    expect(wrapper.get('.collapse-btn').attributes('aria-label')).toBe('展开侧栏')
+  })
+
   it('学生首页项在子路由不高亮', () => {
     const { wrapper } = mountAs('student', '/student/courses')
     expect(wrapper.findAll('.nav-item')[0].classes()).not.toContain('active')
