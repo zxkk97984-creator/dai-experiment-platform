@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.courses import can_access_course_content
 from app.config import Settings, get_settings
-from app.dependencies import get_current_user, get_db, get_redis_client
+from app.dependencies import PaginationParams, get_current_user, get_db, get_redis_client, pagination
 from app.errors import api_error
 from app.models import Assignment, CodeGrade, Course, CourseEnrollment, JudgeQuestion, Submission, User
 from app.schemas import ImportDiagnosticRead, PaginatedResponse, SampleRunResponse, SubmissionCreate, SubmissionRead
@@ -120,11 +120,11 @@ def create_submission(
 
 @router.get("/submissions", response_model=PaginatedResponse)
 def list_submissions(
-    page: int = 1,
-    page_size: int = 20,
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    page, page_size = pagination.page, pagination.page_size
     query = select(Submission)
     count_query = select(func.count()).select_from(Submission)
     if current_user.role == "student":

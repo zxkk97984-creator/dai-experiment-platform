@@ -3,7 +3,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.dependencies import get_current_user, get_db, require_roles
+from app.dependencies import PaginationParams, get_current_user, get_db, pagination, require_roles
 from app.errors import api_error
 from app.models import AcademicTerm, TeachingClass, TeachingClassStudent, User
 from app.schemas import (
@@ -32,7 +32,8 @@ def _class_summary(db: Session, teaching_class: TeachingClass) -> TeachingClassS
 
 
 @router.get("/academic-terms", response_model=PaginatedResponse)
-def list_terms(page: int = 1, page_size: int = 100, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+def list_terms(pagination: PaginationParams = Depends(pagination), db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    page, page_size = pagination.page, pagination.page_size
     query = select(AcademicTerm).order_by(AcademicTerm.start_date.desc(), AcademicTerm.id.desc())
     total = db.scalar(select(func.count()).select_from(AcademicTerm)) or 0
     rows = db.scalars(query.offset((page - 1) * page_size).limit(page_size)).all()
@@ -86,8 +87,10 @@ def close_term(term_id: int, db: Session = Depends(get_db), _: User = Depends(re
 
 
 @router.get("/teaching-classes", response_model=PaginatedResponse)
-def list_classes(academic_term_id: int | None = None, q: str | None = None, page: int = 1, page_size: int = 100,
+def list_classes(academic_term_id: int | None = None, q: str | None = None,
+                 pagination: PaginationParams = Depends(pagination),
                  db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    page, page_size = pagination.page, pagination.page_size
     filters = []
     if academic_term_id is not None:
         filters.append(TeachingClass.academic_term_id == academic_term_id)
@@ -146,7 +149,8 @@ def archive_class(class_id: int, db: Session = Depends(get_db), _: User = Depend
 
 
 @router.get("/teaching-classes/{class_id}/students", response_model=PaginatedResponse)
-def list_class_students(class_id: int, page: int = 1, page_size: int = 100, db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+def list_class_students(class_id: int, pagination: PaginationParams = Depends(pagination), db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    page, page_size = pagination.page, pagination.page_size
     row = db.get(TeachingClass, class_id)
     if not row:
         raise api_error(404, "TEACHING_CLASS_NOT_FOUND", "教学班不存在")
