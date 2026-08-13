@@ -85,3 +85,72 @@ def test_publish_accepts_course_with_complete_basic_information(client, db_sessi
 
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "published"
+
+
+# ── TASK-006：创建旁路关闭 ────────────────────────────────────
+
+
+def test_create_course_rejects_published_status(client, db_session_factory):
+    token = _teacher_token(client, db_session_factory)
+    response = client.post(
+        f"{API}/courses",
+        headers=auth_header(token),
+        json={"title": "Bypass attempt", "status": "published"},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["code"] == "VALIDATION_ERROR"
+
+
+def test_create_course_rejects_archived_status(client, db_session_factory):
+    token = _teacher_token(client, db_session_factory)
+    response = client.post(
+        f"{API}/courses",
+        headers=auth_header(token),
+        json={"title": "Bypass attempt", "status": "archived"},
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_create_course_accepts_draft_status(client, db_session_factory):
+    token = _teacher_token(client, db_session_factory)
+    response = client.post(
+        f"{API}/courses",
+        headers=auth_header(token),
+        json={"title": "Plain draft", "status": "draft"},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["status"] == "draft"
+
+
+def test_update_course_rejects_unknown_status(client, db_session_factory):
+    token = _teacher_token(client, db_session_factory)
+    created = client.post(
+        f"{API}/courses",
+        headers=auth_header(token),
+        json={"title": "Draft course", "status": "draft"},
+    )
+    response = client.patch(
+        f"{API}/courses/{created.json()['id']}",
+        headers=auth_header(token),
+        json={"status": "published_now"},
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_plain_update_does_not_trigger_publish(client, db_session_factory):
+    token = _teacher_token(client, db_session_factory)
+    created = client.post(
+        f"{API}/courses",
+        headers=auth_header(token),
+        json={"title": "Draft course", "status": "draft"},
+    )
+    # 不完整课程做普通字段更新（不带 status）不应触发发布门禁，也应保持 draft
+    response = client.patch(
+        f"{API}/courses/{created.json()['id']}",
+        headers=auth_header(token),
+        json={"title": "Renamed draft"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["title"] == "Renamed draft"
+    assert body["status"] == "draft"

@@ -106,6 +106,45 @@ def create_user(db_session_factory, username, role, password="Passw0rd!", real_n
         return user
 
 
+def create_course_db(
+    db_session_factory,
+    *,
+    teacher_username="teacher",
+    title="测试课程",
+    description="测试课程描述",
+    status="draft",
+    visibility="class",
+    default_score=100.0,
+    cover=None,
+    start_time=None,
+    academic_term_id=None,
+):
+    """领域 fixture：直接创建课程行（绕过 API 发布门禁）。
+
+    用于与「课程发布」无关的测试；发布门禁本身由
+    test_course_publish_requirements.py 走 API 覆盖。
+    """
+    from app.models import Course
+
+    with db_session_factory() as db:
+        teacher = db.query(User).filter(User.username == teacher_username).first()
+        course = Course(
+            title=title,
+            description=description,
+            status=status,
+            visibility=visibility,
+            default_score=default_score,
+            teacher_id=teacher.id if teacher else None,
+            cover=cover,
+            start_time=start_time,
+            academic_term_id=academic_term_id,
+        )
+        db.add(course)
+        db.commit()
+        db.refresh(course)
+        return course.id
+
+
 def login(client, username, password="Passw0rd!"):
     response = client.post(
         "/api/v1/auth/login",

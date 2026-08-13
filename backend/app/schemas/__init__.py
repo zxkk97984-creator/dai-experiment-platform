@@ -163,7 +163,8 @@ class TeachingClassStudentBatch(BaseModel):
 class CourseCreate(BaseModel):
     title: str
     description: str | None = None
-    status: str = "draft"
+    # 创建只允许草稿；发布必须走 PATCH 且经过完整性门禁（COURSE_INCOMPLETE）
+    status: Literal["draft"] = "draft"
     cover: str | None = None
     start_time: datetime | None = None
     visibility: CourseVisibility = "class"  # 可见范围：仅自己 / 教学班 / 指定学生
@@ -176,7 +177,7 @@ class CourseUpdate(BaseModel):
     """更新课程：全部字段可选，仅更新传入字段"""
     title: str | None = None
     description: str | None = None
-    status: str | None = None
+    status: Literal["draft", "published", "archived"] | None = None
     cover: str | None = None
     start_time: datetime | None = None
     visibility: CourseVisibility | None = None

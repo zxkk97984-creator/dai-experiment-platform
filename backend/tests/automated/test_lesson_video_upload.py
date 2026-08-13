@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app import models
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_course_db, create_user, login
 
 API = "/api/v1"
 
@@ -43,10 +43,14 @@ def _setup(client, db_session_factory, visibility="public", enroll="s_yes"):
     tok = {u: login(client, u)[0] for u in
            ["t_own", "t_other", "s_yes", "s_no", "dev", "admin"]}
 
-    c = client.post(f"{API}/courses", headers=auth_header(tok["t_own"]), json={
-        "title": "视频课程", "status": "published", "visibility": visibility,
-    })
-    cid = c.json()["id"]
+    # 领域 fixture 直接创建 published 课程（发布门禁由 course_publish 测试覆盖）
+    cid = create_course_db(
+        db_session_factory,
+        teacher_username="t_own",
+        title="视频课程",
+        status="published",
+        visibility=visibility,
+    )
     if enroll == "s_yes":
         client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(tok["s_yes"]))
     ch = client.post(f"{API}/courses/{cid}/chapters", headers=auth_header(tok["t_own"]), json={"title": "Ch"})
