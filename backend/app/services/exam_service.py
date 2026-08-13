@@ -533,10 +533,21 @@ def student_exam_status(exam: Exam, submission: ExamSubmission | None, now=None)
     return "ready", False, exam.status == "published"
 
 
-def build_student_exam_summary(exam: Exam, submission: ExamSubmission | None, db: Session, now=None) -> dict:
+def build_student_exam_summary(
+    exam: Exam,
+    submission: ExamSubmission | None,
+    db: Session,
+    now=None,
+    max_scores: dict[int, float] | None = None,
+) -> dict:
+    """max_scores 提供批量预聚合的最高分（TASK-022），避免逐考试查询；未提供时回退单查。"""
     from app.services.time_utils import utc_now
     now = now or utc_now()
     status, is_completed, can_start = student_exam_status(exam, submission, now)
+    if max_scores is not None:
+        max_score = float(max_scores.get(exam.id, 0.0))
+    else:
+        max_score = exam_max_score(exam.id, db)
     return {
         "id": exam.id,
         "course_id": exam.course_id,
@@ -549,7 +560,7 @@ def build_student_exam_summary(exam: Exam, submission: ExamSubmission | None, db
         "is_completed": is_completed,
         "is_submitted": is_completed,
         "can_start": can_start,
-        "max_score": exam_max_score(exam.id, db),
+        "max_score": max_score,
         "server_now": now,
         "attempt_expires_at": submission.expires_at if submission and submission.status == "started" else None,
         "review_released_at": exam.review_released_at,
