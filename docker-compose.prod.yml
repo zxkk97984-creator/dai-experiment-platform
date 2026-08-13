@@ -10,6 +10,8 @@ services:
       - mysql_data:/var/lib/mysql
     networks:
       - internal
+    # TASK-015：进程退出（含异常/OOM）自动恢复；数据完整性由卷+备份保证
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -25,6 +27,7 @@ services:
       - redis_data:/data
     networks:
       - internal
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -70,6 +73,15 @@ services:
         condition: service_healthy
     networks:
       - internal
+    restart: unless-stopped
+    # TASK-015：healthcheck 调 readiness（DB+Redis 双依赖）——Redis 故障时 unhealthy，
+    # 恢复后自动 healthy；异常退出由 restart policy 拉起
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=5).status==200 else 1)"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - "${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须设置}:/judge-work"
@@ -107,6 +119,9 @@ services:
         condition: service_healthy
     networks:
       - internal
+    # TASK-015：Worker 只做进程级重启（restart policy），不伪造业务健康检查——
+    # 队列事实源在 DB，stale recovery 兜底
+    restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - "${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须设置}:/judge-work"
@@ -137,6 +152,7 @@ services:
         condition: service_healthy
     networks:
       - internal
+    restart: unless-stopped
     volumes:
       # 只挂载 Docker socket——构建镜像由宿主机 daemon 执行；不挂载学生工作目录
       - /var/run/docker.sock:/var/run/docker.sock
@@ -145,10 +161,21 @@ services:
     build: ./frontend
     ports:
       - "${FRONTEND_PORT:-8080}:80"
+    # TASK-015：等待 API healthy 再启动；自身 healthcheck 走 /health
+    # （nginx 反代 /api/v1/health/live，见 frontend/nginx.conf）
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     networks:
       - internal
+    restart: unless-stopped
+    healthcheck:
+      # -Y off：显式禁用代理——健康检查只测本机 nginx，不依赖宿主机代理环境
+      test: ["CMD-SHELL", "wget -Y off -qO- http://127.0.0.1/health >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
 
 volumes:
   mysql_data:
