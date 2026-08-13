@@ -3,7 +3,7 @@ import uuid
 
 from sqlalchemy import select
 from app.models import ExperimentRecord, ExperimentSubmission, Lesson
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_course_db, create_user, login
 
 API = "/api/v1"
 
@@ -15,9 +15,7 @@ def _setup_submission(client, db_sf):
     t_tok, _ = login(client, "erv_t")
     s_tok, _ = login(client, "erv_s")
 
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "RVC", "status": "published", "visibility": "public"})
-    cid = c.json()["id"]
+    cid = create_course_db(db_sf, teacher_username="erv_t", title="RVC", status="published", visibility="public")
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
     ch = client.post(f"{API}/courses/{cid}/chapters", headers=auth_header(t_tok),
                      json={"title": "Ch1", "order_index": 1})

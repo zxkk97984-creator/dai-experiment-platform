@@ -1,7 +1,7 @@
 """考试系统测试"""
 import datetime, pytest
 from datetime import timezone, timedelta
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_course_db, create_user, login
 API = "/api/v1"
 
 def _h(token): return auth_header(token)
@@ -11,8 +11,7 @@ def _setup(client, db_session_factory):
     create_user(db_session_factory, "e_s", "student")
     t_tok, _ = login(client, "e_t")
     s_tok, _ = login(client, "e_s")
-    c = client.post(f"{API}/courses", headers=_h(t_tok), json={"title":"C","status":"published","visibility":"public"})
-    cid = c.json()["id"]
+    cid = create_course_db(db_session_factory, teacher_username="e_t", title="C", status="published", visibility="public")
     client.post(f"{API}/courses/{cid}/enroll", headers=_h(s_tok))
     now = datetime.datetime.now(timezone.utc)
     e = client.post(f"{API}/exams", headers=_h(t_tok), json={"course_id":cid,"title":"E","duration_minutes":60,"start_at":(now-timedelta(hours=1)).isoformat(),"end_at":(now+timedelta(hours=1)).isoformat()})

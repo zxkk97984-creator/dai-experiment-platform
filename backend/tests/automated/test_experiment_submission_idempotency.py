@@ -5,7 +5,7 @@ import pytest
 
 from sqlalchemy import select
 from app.models import ExperimentRecord, ExperimentSubmission
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_course_db, create_user, login
 
 API = "/api/v1"
 
@@ -17,9 +17,7 @@ def _setup_experiment(client, db_sf):
     t_tok, _ = login(client, "esub_t")
     s_tok, _ = login(client, "esub_s")
 
-    c = client.post(f"{API}/courses", headers=auth_header(t_tok),
-                    json={"title": "ESubC", "status": "published", "visibility": "public"})
-    cid = c.json()["id"]
+    cid = create_course_db(db_sf, teacher_username="esub_t", title="ESubC", status="published", visibility="public")
     client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_tok))
 
     ch = client.post(f"{API}/courses/{cid}/chapters", headers=auth_header(t_tok),

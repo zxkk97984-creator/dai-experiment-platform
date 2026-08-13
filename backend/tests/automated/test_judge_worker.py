@@ -15,7 +15,7 @@ from app.worker.judge_worker import (
     _status_from_pytest,
     process_submission,
 )
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_assignment_db, create_course_db, create_user, login
 
 
 def _setup_course(client, db_session_factory, course_status="published", assignment_status="published"):
@@ -23,21 +23,21 @@ def _setup_course(client, db_session_factory, course_status="published", assignm
     create_user(db_session_factory, "s_j", "student")
     t_tok, _ = login(client, "t_j")
     s_tok, _ = login(client, "s_j")
-    c = client.post('/api/v1/courses', headers=auth_header(t_tok), json={
-        'title': 'Judge Course', 'status': course_status, 'visibility': 'public',
-    })
-    cid = c.json()['id']
+    cid = create_course_db(db_session_factory, teacher_username='t_j', title='Judge Course', status=course_status, visibility='public')
     if course_status == 'published':
         client.post(f'/api/v1/courses/{cid}/enroll', headers=auth_header(s_tok))
     a = client.post('/api/v1/assignments', headers=auth_header(t_tok), json={
-        'course_id': cid, 'title': 'A1', 'status': assignment_status,
+        'course_id': cid, 'title': 'A1', 'status': 'draft',
     })
     aid = a.json()['id']
     q = client.post(f'/api/v1/assignments/{aid}/questions', headers=auth_header(t_tok), json={
-        'title': 'Q1', 'function_name': 'add',
+        'title': 'Q1', 'function_name': 'add', 'grading_mode': 'legacy',
         'public_cases': [{'args': [1, 2], 'expected': 3}],
         'hidden_tests': 'HIDDEN_SENTINEL_XYZ\ndef test_hidden(): assert add(1,2)==3',
     })
+    if assignment_status == 'published':
+        pub = client.post(f'/api/v1/assignments/{aid}/publish', headers=auth_header(t_tok))
+        assert pub.status_code == 200, pub.text
     qid = q.json()['id']
     return t_tok, s_tok, cid, aid, qid
 
@@ -74,15 +74,10 @@ def test_sample_run_permission_denied_all_cases(client, db_session_factory):
     create_user(db_session_factory, "s_perm2", "student")
     t_tok, _ = login(client, "t_perm2")
     s_tok, _ = login(client, "s_perm2")
-    c = client.post('/api/v1/courses', headers=auth_header(t_tok), json={
-        'title': 'C', 'status': 'published', 'visibility': 'public',
-    })
-    cid = c.json()['id']
+    cid = create_course_db(db_session_factory, teacher_username='t_perm2', title='C', status='published', visibility='public')
     # 不选课
-    a = client.post('/api/v1/assignments', headers=auth_header(t_tok), json={
-        'course_id': cid, 'title': 'A', 'status': 'published',
-    })
-    q = client.post(f'/api/v1/assignments/{a.json()["id"]}/questions', headers=auth_header(t_tok), json={
+    aid = create_assignment_db(db_session_factory, course_id=cid, teacher_username='t_perm2', title='A', status='published')
+    q = client.post(f'/api/v1/assignments/{aid}/questions', headers=auth_header(t_tok), json={
         'title': 'Q', 'function_name': 'f', 'hidden_tests': 'def test(): pass',
     })
     qid = q.json()['id']
@@ -101,9 +96,9 @@ def test_sample_run_permission_denied_all_cases(client, db_session_factory):
     create_user(db_session_factory, "s_da2", "student")
     t_da, _ = login(client, "t_da2")
     s_da, _ = login(client, "s_da2")
-    c2 = client.post('/api/v1/courses', headers=auth_header(t_da), json={'title':'C2','status':'published','visibility':'public'})
-    client.post(f'/api/v1/courses/{c2.json()["id"]}/enroll', headers=auth_header(s_da))
-    a2 = client.post('/api/v1/assignments', headers=auth_header(t_da), json={'course_id':c2.json()['id'],'title':'A2','status':'draft'})
+    c2id = create_course_db(db_session_factory, teacher_username='t_da2', title='C2', status='published', visibility='public')
+    client.post(f'/api/v1/courses/{c2id}/enroll', headers=auth_header(s_da))
+    a2 = client.post('/api/v1/assignments', headers=auth_header(t_da), json={'course_id':c2id,'title':'A2','status':'draft'})
     q2 = client.post(f'/api/v1/assignments/{a2.json()["id"]}/questions', headers=auth_header(t_da), json={
         'title':'Q2','function_name':'f','hidden_tests':'def test(): pass',
     })
@@ -117,8 +112,9 @@ def test_sample_run_permission_denied_all_cases(client, db_session_factory):
     t_dc, _ = login(client, "t_dc2")
     s_dc, _ = login(client, "s_dc2")
     c3 = client.post('/api/v1/courses', headers=auth_header(t_dc), json={'title':'C3','status':'draft'})
-    a3 = client.post('/api/v1/assignments', headers=auth_header(t_dc), json={'course_id':c3.json()['id'],'title':'A3','status':'published'})
-    q3 = client.post(f'/api/v1/assignments/{a3.json()["id"]}/questions', headers=auth_header(t_dc), json={
+    c3id = c3.json()['id']
+    a3id = create_assignment_db(db_session_factory, course_id=c3id, teacher_username='t_dc2', title='A3', status='published')
+    q3 = client.post(f'/api/v1/assignments/{a3id}/questions', headers=auth_header(t_dc), json={
         'title':'Q3','function_name':'f','hidden_tests':'def test(): pass',
     })
     r = client.post(f'/api/v1/judge/questions/{q3.json()["id"]}/sample-run',

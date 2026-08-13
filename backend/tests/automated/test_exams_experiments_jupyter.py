@@ -93,7 +93,6 @@ def test_jupyter_entry_and_experiment_records(client, db_session_factory):
         json={
             "name": "Swin Transformer 可视化",
             "description": "可视化实验",
-            "status": "published",
         },
     )
     assert module_response.status_code == 201

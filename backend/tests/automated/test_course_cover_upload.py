@@ -15,7 +15,7 @@ from fastapi import HTTPException, UploadFile
 
 from app import models
 from app.services import course_cover_service as svc
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_course_db, create_user, login
 
 API = "/api/v1"
 
@@ -236,10 +236,10 @@ def _setup(client, db_session_factory, visibility="public", archived=False, tag=
     create_user(db_session_factory, f"{prefix}s_yes", "student")
     create_user(db_session_factory, f"{prefix}admin", "admin")
     tok = {u: login(client, f"{prefix}{u}")[0] for u in ["t_own", "t_other", "s_yes", "admin"]}
-    c = client.post(f"{API}/courses", headers=auth_header(tok["t_own"]), json={
-        "title": "封面课程", "status": "published", "visibility": visibility,
-    })
-    cid = c.json()["id"]
+    cid = create_course_db(
+        db_session_factory, teacher_username=f"{prefix}t_own", title="封面课程",
+        status="published", visibility=visibility,
+    )
     if archived:
         r = client.delete(f"{API}/courses/{cid}", headers=auth_header(tok["t_own"]))
         assert r.status_code == 204

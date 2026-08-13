@@ -15,7 +15,7 @@ from sqlalchemy import select
 from app import models
 from app.database import Base
 from app.services.kernel_manager import KernelManager, KernelSession, get_kernel_manager
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_assignment_db, create_course_db, create_user, login
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -321,15 +321,9 @@ def test_teacher_a_cannot_see_teacher_b_submissions(client, db_session_factory):
     tb_tok, _ = login(client, 'tb1')
     s_tok, _ = login(client, 'stu1')
 
-    ca = client.post('/api/v1/courses', headers=auth_header(ta_tok), json={
-        'title': 'TA Course', 'status': 'published', 'visibility': 'public',
-    })
-    caid = ca.json()['id']
+    caid = create_course_db(db_session_factory, teacher_username='ta1', title='TA Course', status='published', visibility='public')
     client.post(f'/api/v1/courses/{caid}/enroll', headers=auth_header(s_tok))
-    a = client.post('/api/v1/assignments', headers=auth_header(ta_tok), json={
-        'course_id': caid, 'title': 'A1', 'status': 'published',
-    })
-    aid = a.json()['id']
+    aid = create_assignment_db(db_session_factory, course_id=caid, teacher_username='ta1', title='A1', status='published')
     q = client.post(f'/api/v1/assignments/{aid}/questions', headers=auth_header(ta_tok), json={
         'title': 'Q1', 'function_name': 'f', 'hidden_tests': 'def test(): pass',
     })
@@ -379,10 +373,7 @@ def test_student_b_cannot_access_student_a_record(client, db_session_factory):
         db.commit()
         tid, vid = tmpl.id, ver.id
 
-    c = client.post('/api/v1/courses', headers=auth_header(t_tok), json={
-        'title': 'Rec Course', 'status': 'published', 'visibility': 'public',
-    })
-    cid = c.json()['id']
+    cid = create_course_db(db_session_factory, teacher_username='t_rec', title='Rec Course', status='published', visibility='public')
     ch = client.post(f'/api/v1/courses/{cid}/chapters', headers=auth_header(t_tok), json={'title':'Ch'})
     chid = ch.json()['id']
 
