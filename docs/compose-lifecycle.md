@@ -38,3 +38,20 @@ nginx，不应受宿主机/环境代理变量影响（演练中实测发现：�
   优雅退出）均正确触发重启，语义与生产一致——生产主机为官方 dockerd 时，
   外部 kill 同样会触发 restart。
 - 依赖顺序验证：全栈 up 时 api 先 healthy，frontend 才启动（`condition: service_healthy`）。
+
+## 一次性迁移（TASK-016）演练记录
+
+配置：`migrate` 服务（同镜像 `alembic upgrade head`，restart: "no"），
+api/worker/environment-builder `depends_on: migrate: condition: service_completed_successfully`；
+backend Dockerfile CMD 已移除 alembic（API 只跑 uvicorn）。
+
+| 演练 | 结果 |
+| --- | --- |
+| 已 head 库上重复执行 `up migrate` ×2 | 两次 rc=0（幂等，no-op） |
+| 失败修订号 `alembic upgrade 2026-does-not-exist` | rc=255（非零） |
+| 空库直接 `up migrate` | exit 1（迁移 B 前置：basic 无 available 版本——新库两步部署的既定语义） |
+| 失败后 `up -d api` | compose 拒绝启动：`service "migrate" didn't complete successfully: exit 1`（新 API 被阻断） |
+| 两步空库部署（迁移 A → 种入 basic → head → up api） | api healthy；日志 0 次 alembic，首行为 `Started server process`（API 不再执行迁移） |
+
+发布顺序运维注意：api 容器重建后 IP 变化，nginx 静态解析旧上游 IP 会 502，
+需 `docker compose restart frontend`（已写入 README 发布顺序第 4 步）。

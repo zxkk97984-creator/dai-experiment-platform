@@ -10,5 +10,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# 默认命令：API 服务（Worker 用 command override）
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000"]
+# 默认命令：API 服务（Worker/migrate 用 command override）。
+# TASK-016：API 不再内嵌 alembic——迁移由 compose 的一次性 migrate 服务执行
+CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

@@ -34,9 +34,29 @@ services:
       timeout: 5s
       retries: 5
 
+  # TASK-016：一次性迁移执行者——一次部署只有一个迁移执行者；
+  # 成功（exit 0）后 api/worker 才启动；失败阻断新 API 启动（旧 API 不受影响）
+  migrate:
+    build: ./backend
+    command: alembic upgrade head
+    restart: "no"
+    environment:
+      DAI_ENVIRONMENT: ${DAI_ENVIRONMENT:-production}
+      DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
+      DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
+      DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
+      DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须是宿主机判题目录的绝对路径}
+      DAI_ENV_BASE_IMAGE: "${DAI_ENV_BASE_IMAGE:?DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的 python:3.12-slim 引用}"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - internal
+    volumes:
+      - ./backend/alembic/versions:/app/alembic/versions:ro
+
   api:
     build: ./backend
-    command: sh -c "alembic upgrade head && uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000"
     environment:
       DAI_ENVIRONMENT: ${DAI_ENVIRONMENT:-production}
       DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
@@ -71,6 +91,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # TASK-016：迁移成功后才启动 API；migrate 失败则新 API 不会启动
+      migrate:
+        condition: service_completed_successfully
     networks:
       - internal
     restart: unless-stopped
@@ -117,6 +140,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - internal
     # TASK-015：Worker 只做进程级重启（restart policy），不伪造业务健康检查——
@@ -150,6 +175,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - internal
     restart: unless-stopped

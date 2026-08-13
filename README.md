@@ -321,7 +321,26 @@ volumes:
 
 ### 升级
 
-运行 `alembic upgrade head` 即可，升级前无需备份或手工操作。
+生产发布顺序（TASK-014/TASK-016）：**先备份，再迁移，最后起新 API**——
+迁移由 compose 的一次性 `migrate` 服务执行，API 容器自身不再运行 Alembic。
+
+```bash
+# 1. 备份（7 日备 + 4 周备，见「备份与恢复」与 docs/backup-restore.md）
+DAI_BACKUP_DIR=/data/dai-backups ./scripts/backup.sh
+
+# 2. 执行迁移（一次性服务；失败则新 API 不会启动，旧 API 不受影响）
+docker compose -f docker-compose.prod.yml up migrate
+
+# 3. 部署其余服务（api/worker/frontend 等待 migrate 成功后才启动）
+docker compose -f docker-compose.prod.yml up -d
+
+# 4. api 容器重建后 nginx 仍缓存旧上游 IP，重启 frontend 重新解析
+docker compose -f docker-compose.prod.yml restart frontend
+```
+
+> 全新空库首次部署需两步迁移（迁移 B 前置要求 basic 环境档位已有 available 版本）：
+> 先 `docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade b4c5d6e7f890`，
+> 执行 seed-environments 并等待 basic v1 构建完成，再 `up migrate` 到 head。
 
 ### 回滚（生产环境）
 
