@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.dependencies import PaginationParams, get_current_user, get_db, pagination, require_roles
@@ -12,6 +12,15 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 VALID_ROLES = {"student", "teacher", "admin", "developer"}
 VALID_STATUSES = {"active", "disabled"}
+
+
+def _bump_session_version(db: Session, user_id: int) -> None:
+    """TASK-012：原子递增会话版本（SQL 自增，无读-改-写竞争）——
+    改密/管理员重置/禁用后调用，该用户全部旧 token 立即失效。"""
+    db.execute(
+        text("UPDATE users SET session_version = session_version + 1 WHERE id = :id"),
+        {"id": user_id},
+    )
 
 
 @router.get("", response_model=PaginatedResponse)
@@ -169,6 +178,8 @@ def update_password(
     except ValueError as exc:
         raise api_error(422, "INVALID_PASSWORD", str(exc))
     user.password_hash = hash_password(payload.password)
+    # TASK-012：改密/管理员重置后撤销该用户全部会话（本人与管理员路径一致）
+    _bump_session_version(db, user.id)
     db.commit()
     db.refresh(user)
     return user
@@ -186,6 +197,9 @@ def update_status(
     user = db.get(User, user_id)
     if not user:
         raise api_error(404, "USER_NOT_FOUND", "用户不存在")
+    # TASK-012：禁用时撤销全部会话；重新启用后旧 token 仍然失效（sv 不回退）
+    if payload.status != "active":
+        _bump_session_version(db, user.id)
     user.status = payload.status
     db.commit()
     db.refresh(user)

@@ -43,6 +43,7 @@ def create_token(
     secret_key: str,
     algorithm: str,
     expires_delta: timedelta,
+    session_version: int,
 ) -> str:
     expires_at = datetime.now(UTC) + expires_delta
     payload = {
@@ -50,6 +51,8 @@ def create_token(
         "role": role,
         "type": token_type,
         "jti": str(uuid4()),
+        # TASK-012：会话撤销版本——认证/刷新时与 users.session_version 比对
+        "sv": session_version,
         "exp": expires_at,
     }
     return jwt.encode(payload, secret_key, algorithm=algorithm)

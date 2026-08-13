@@ -144,6 +144,7 @@ def test_logout_with_expired_access_revokes_valid_refresh_cookie(
         secret_key=test_settings.secret_key,
         algorithm=test_settings.algorithm,
         expires_delta=timedelta(seconds=-1),
+        session_version=user.session_version,
     )
 
     logout_r = client.post(

@@ -98,6 +98,7 @@ def issue_token_pair(user: User, redis_client, settings: Settings) -> TokenRespo
         secret_key=settings.secret_key,
         algorithm=settings.algorithm,
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
+        session_version=user.session_version,
     )
     refresh_token = create_token(
         subject=user.id,
@@ -106,6 +107,7 @@ def issue_token_pair(user: User, redis_client, settings: Settings) -> TokenRespo
         secret_key=settings.secret_key,
         algorithm=settings.algorithm,
         expires_delta=timedelta(days=settings.refresh_token_expire_days),
+        session_version=user.session_version,
     )
     refresh_payload = decode_token(refresh_token, settings.secret_key, settings.algorithm)
     redis_client.setex(
@@ -139,6 +141,10 @@ def refresh_token_pair(db: Session, refresh_token: str, redis_client, settings: 
     user = db.get(User, int(user_id))
     if not user or user.status != "active":
         raise api_error(401, "USER_NOT_ACTIVE", "用户不存在或已禁用")
+    # TASK-012：改密/重置/禁用后 session_version 已递增——
+    # 旧 Refresh Token（含升级前无 sv 的 token）一律 401 重新登录
+    if payload.get("sv") != user.session_version:
+        raise api_error(401, "SESSION_REVOKED", "会话已失效，请重新登录")
     return issue_token_pair(user, redis_client, settings)
 
 

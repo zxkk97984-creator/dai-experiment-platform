@@ -53,6 +53,11 @@ class User(TimestampMixin, Base):
     real_name: Mapped[str] = mapped_column(String(120))
     role: Mapped[str] = mapped_column(String(30), index=True)
     status: Mapped[str] = mapped_column(String(30), default="active", index=True)
+    # TASK-012：全会话撤销版本——改密/管理员重置/禁用时原子 +1；
+    # 所有 token 携带 sv，认证/刷新时与库值比对，不一致（含旧 token 无 sv）即 401
+    session_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
 
     teaching_class_memberships: Mapped[list["TeachingClassStudent"]] = relationship(
         back_populates="student", cascade="all, delete-orphan"
