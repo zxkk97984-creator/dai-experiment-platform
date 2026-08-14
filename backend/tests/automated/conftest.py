@@ -267,6 +267,17 @@ def login(client, username, password="Passw0rd!"):
     return data["access_token"], refresh_token
 
 
+def constraint_violation():
+    """跨方言捕获 CHECK 约束违反。
+
+    SQLite 抛 sqlalchemy.exc.IntegrityError；MySQL 8 对 CHECK 违反抛
+    OperationalError(3819)。约束语义测试统一用本 helper 断言。
+    """
+    from sqlalchemy.exc import IntegrityError, OperationalError
+
+    return pytest.raises((IntegrityError, OperationalError))
+
+
 def auth_header(token):
     return {"Authorization": f"Bearer {token}"}
 

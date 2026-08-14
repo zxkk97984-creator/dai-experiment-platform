@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from app import models
 from app.database import Base
 from conftest import (
+    constraint_violation,
     make_exam,
     make_exam_question,
     make_experiment_module,
@@ -130,7 +131,7 @@ def test_experiment_record_requires_exactly_one_parent(
                 template_version_id=version_id,
             )
         )
-        with pytest.raises(IntegrityError):
+        with constraint_violation():
             db.commit()
 
 

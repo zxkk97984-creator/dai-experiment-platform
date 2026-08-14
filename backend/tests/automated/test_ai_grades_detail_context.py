@@ -64,6 +64,9 @@ def _seed_assignment_grade(db, teacher, student, *, status="completed", finished
     )
     db.add(cg)
     db.commit()
+    # 以库内实际值为准：MySQL DATETIME(0) 截断微秒，API 读到的正是截断值
+    db.refresh(cg)
+    db.refresh(sub)
     return cg.id, {
         "student_name": student.real_name,
         "student_username": student.username,
@@ -111,6 +114,9 @@ def _seed_exam_grade(db, teacher, student, *, status="completed", finished=True)
     )
     db.add(cg)
     db.commit()
+    # 以库内实际值为准：MySQL DATETIME(0) 截断微秒，API 读到的正是截断值
+    db.refresh(cg)
+    db.refresh(ea)
     return cg.id, {
         "student_name": student.real_name,
         "student_username": student.username,

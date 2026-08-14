@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from conftest import (
+    constraint_violation,
     make_assignment,
     make_exam,
     make_judge_question,
@@ -87,7 +88,7 @@ def test_rubric_xor_target_required(db_session_factory):
             model_name="deepseek-v4-flash",
         )
         db.add(rubric)
-        with pytest.raises(IntegrityError):
+        with constraint_violation():
             db.flush()
 
 
@@ -135,7 +136,7 @@ def test_code_grade_xor_target(db_session_factory):
             status="pending",
         )
         db.add(grade)
-        with pytest.raises(IntegrityError):
+        with constraint_violation():
             db.flush()
 
 

@@ -189,6 +189,9 @@ def test_fail_ai_grade_records_permanent_counter(db_session_factory, redis_clien
         grade_id = grade.id
 
     settings = Settings(_env_file=None, ai_enabled=False, ai_api_key="")
-    fail_ai_grade(db_session_factory(), redis_client, grade_id,
-                  "AI 服务未启用", retryable=False, max_attempts=3)
+    # 必须显式关闭 session：泄漏的连接会持有 MySQL 元数据锁，
+    # 导致 teardown 的 DROP TABLE 永久等待（2026-08 MySQL 回归卡死根因）。
+    with db_session_factory() as db:
+        fail_ai_grade(db, redis_client, grade_id,
+                      "AI 服务未启用", retryable=False, max_attempts=3)
     assert op_metrics.read(redis_client, "judge_failures_total", label="permanent") == 1

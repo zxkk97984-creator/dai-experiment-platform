@@ -75,9 +75,12 @@ def test_worker_zero_outbound_when_ai_disabled(db_session_factory, test_settings
     # 若构造客户端说明外呼路径被触碰——直接失败（客户端在函数内局部导入）
     with patch("app.services.ai_client.DeepSeekClient",
                side_effect=AssertionError("AI 关闭时不得构造 HTTP 客户端")):
-        result = process_ai_grade(
-            db_session_factory(), MagicMock(), disabled, grade_id,
-        )
+        # 必须显式关闭 session：泄漏连接会持有 MySQL 元数据锁，
+        # 导致 teardown 的 DROP TABLE 永久等待（2026-08 MySQL 回归卡死根因）。
+        with db_session_factory() as db:
+            result = process_ai_grade(
+                db, MagicMock(), disabled, grade_id,
+            )
 
     assert result is None  # 未产出评分
     with db_session_factory() as db:
