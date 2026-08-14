@@ -12,7 +12,6 @@ lesson_content/
 .pt-tmp
 .pt*
 .pytest_cache
-.pytest-temp-root
 
 # Python
 __pycache__
