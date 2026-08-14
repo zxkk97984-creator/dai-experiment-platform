@@ -18,6 +18,12 @@ services:
 
   redis:
     image: redis:7-alpine
+    # AOF everysec + 命名卷：容器重建后 Refresh Token、黑名单与短期唤醒状态不丢失。
+    # 故障语义：Redis 丢失时全部 Refresh 失效（需重新登录）、黑名单最多影响
+    # Access Token 剩余有效期（≤30 分钟）、判题任务事实源在 MySQL 可恢复。
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis_data:/data
     networks:
       - internal
     healthcheck:
@@ -151,6 +157,8 @@ services:
 volumes:
   mysql_data:
   studio_data:
+  # Redis AOF 持久卷——重启/重建后认证状态不丢失，备份任务必须包含此卷
+  redis_data:
   # 教师上传视频持久卷——容器重建后视频仍存在，备份任务必须包含此卷
   video_data:
   # 课程封面持久卷——必须纳入生产备份
