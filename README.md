@@ -314,7 +314,18 @@ volumes:
 
 ### 升级
 
-运行 `alembic upgrade head` 即可，升级前无需备份或手工操作。
+生产发布顺序（TASK-014/TASK-016）：**先备份，再迁移，最后起新 API**——
+迁移由 compose 的一次性 `migrate` 服务执行，API 容器自身不再运行 Alembic。
+
+```bash
+# 1. 备份（TASK-014：自动化备份依赖真实部署主机信息，落地前须按部署环境
+#    先完成数据库与持久卷的备份并验证可恢复）
+# 2. 执行迁移（一次性服务；失败则新 API 不会启动，旧 API 不受影响）
+docker compose -f docker-compose.prod.yml up migrate
+
+# 3. 部署其余服务（api/worker/frontend 等待 migrate 成功后才启动）
+docker compose -f docker-compose.prod.yml up -d
+```
 
 ### 回滚（生产环境）
 
@@ -362,7 +373,8 @@ set PYTEST_DEBUG_TEMPROOT=%LOCALAPPDATA%\Temp\dai-pytest-tmp
 .venv\Scripts\python.exe -m pytest tests\automated -q -p no:cacheprovider
 ```
 
-当前基线：**815 项通过、3 项跳过、0 项失败**。
+当前基线：**1023 项通过、3 项跳过、0 项失败**（2026-08-14，提交 `10f3a58`，
+Python 3.12）。精确数字以 CI `backend-test-sqlite` 门禁为准。
 
 ### 前端测试与构建
 
@@ -372,7 +384,8 @@ npm test
 npm run build
 ```
 
-当前基线：**63 个测试文件、675 项测试全部通过**，生产构建成功。
+当前基线：**817 项测试全部通过**（2026-08-14，提交 `10f3a58`），生产构建成功。
+精确数字以 CI `frontend-test` 门禁为准。
 
 ### 仓库清理边界
 
