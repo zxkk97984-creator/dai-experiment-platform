@@ -56,7 +56,7 @@ services:
       - internal
     volumes:
       - ./backend/alembic/versions:/app/alembic/versions:ro
-      - ./scripts:/scripts:ro
+      - ./scripts/seed-basic-environment-mysql.py:/scripts/seed-basic-environment-mysql.py:ro
 
   api:
     build: ./backend
