@@ -1,4 +1,9 @@
 from datetime import datetime
+import ast
+import keyword
+import math
+from pathlib import Path
+import tempfile
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
@@ -9,8 +14,10 @@ from app.config import Settings, get_settings
 from app.dependencies import get_current_user, get_db, require_roles, PaginationParams, pagination
 from app.errors import api_error
 from app.models import Course, CourseEnrollment, Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission, QuestionRubric, User
-from app.schemas import ExamAnswerBatchRequest, ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionTeacherRead, ExamQuestionUpdate, ExamRead, ExamRetryRequest, ExamSessionRead, ExamSubmitRequest, ExamSubmissionRead, ExamTimeExtensionRequest, ExamUpdate, PaginatedResponse
+from app.schemas import ExamAnswerBatchRequest, ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionTeacherRead, ExamQuestionUpdate, ExamRead, ExamRetryRequest, ExamSampleRunRequest, ExamSessionRead, ExamSubmitRequest, ExamSubmissionRead, ExamTimeExtensionRequest, ExamUpdate, PaginatedResponse, SampleRunResponse
 from app.services.exam_service import build_student_exam_session, build_student_exam_summary, create_question, delete_question, exam_max_score, extend_exam_submission, force_submit_exam_submission, get_my_grade, get_question, list_questions, release_exam_review, require_exam_editable, retry_exam_submission as retry_exam_submission_service, save_answer, start_exam as svc_start_exam, student_exam_status, submit_exam as svc_submit_exam, update_question, validate_publish
+from app.services.time_utils import as_utc, utc_now
+from app.worker.judge_worker import _run_docker_pytest, _status_from_pytest
 
 router = APIRouter(prefix="/exams", tags=["exams"])
 
@@ -261,6 +268,86 @@ def get_exam_session(
         "score": submission.get("score"),
     })
     return session
+
+
+@router.post(
+    "/{exam_id}/questions/{question_id}/sample-run",
+    response_model=SampleRunResponse,
+)
+def run_exam_public_cases(
+    exam_id: int,
+    question_id: int,
+    payload: ExamSampleRunRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    current_user: User = Depends(require_roles("student")),
+):
+    """运行考试编程题的公开样例，不读取隐藏测试、不产生正式评分。"""
+    exam = require_exam(exam_id, db)
+    if exam.status != "published" or not can_access_course_content(exam.course, current_user, db):
+        raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布或无权参加")
+
+    submission = db.scalar(select(ExamSubmission).where(
+        ExamSubmission.exam_id == exam_id,
+        ExamSubmission.student_id == current_user.id,
+    ))
+    now = utc_now()
+    if not submission or submission.status != "started":
+        raise api_error(403, "EXAM_NOT_STARTED", "考试未开始或已结束")
+    if submission.expires_at and as_utc(submission.expires_at) <= now:
+        raise api_error(403, "EXAM_EXPIRED", "考试已过期")
+
+    question = db.get(ExamQuestion, question_id)
+    if not question or question.exam_id != exam_id:
+        raise api_error(404, "QUESTION_NOT_FOUND", "题目不存在")
+    if question.question_type != "code":
+        raise api_error(422, "QUESTION_TYPE_INVALID", "仅编程题支持运行自测")
+
+    public_cases = question.public_cases or []
+    if not public_cases:
+        return SampleRunResponse(output="", status="no_public_cases", execution_time_ms=0)
+    function_name = str((question.teacher_constraints or {}).get("require_function") or "")
+    if not function_name:
+        try:
+            tree = ast.parse(question.starter_code or "")
+            function_name = next(
+                node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            )
+        except (SyntaxError, StopIteration):
+            function_name = ""
+    if not function_name.isidentifier() or keyword.iskeyword(function_name):
+        raise api_error(422, "PUBLIC_CASES_INVALID", "题目未配置有效的公开样例入口函数")
+
+    test_lines = [f"from user_code import {function_name}", "", "def test_public_cases():"]
+    for case in public_cases:
+        args = case.get("args", [])
+        expected = case.get("expected")
+        args_text = ", ".join(repr(arg) for arg in args)
+        test_lines.append(f"    assert {function_name}({args_text}) == {expected!r}")
+
+    with tempfile.TemporaryDirectory(prefix="dai-exam-sample-") as temp_dir:
+        workdir = Path(temp_dir)
+        (workdir / "user_code.py").write_text(payload.code, encoding="utf-8")
+        (workdir / "test_public_cases.py").write_text("\n".join(test_lines) + "\n", encoding="utf-8")
+        timeout_seconds = max(
+            min(math.ceil((question.time_limit_ms or 10_000) / 1000), settings.judge_timeout_seconds),
+            1,
+        )
+        memory_mb = question.memory_limit_mb or settings.judge_memory_limit_mb
+        try:
+            stdout, stderr, returncode, elapsed_ms = _run_docker_pytest(
+                workdir,
+                settings,
+                timeout_seconds,
+                memory_mb,
+                test_filename="test_public_cases.py",
+            )
+        except FileNotFoundError:
+            raise api_error(503, "JUDGE_UNAVAILABLE", "判题服务不可用（Docker 未就绪）")
+
+    run_status, _score = _status_from_pytest(returncode, stdout, stderr)
+    output = f"{stdout}\n{stderr}"[:20_000]
+    return SampleRunResponse(output=output, status=run_status, execution_time_ms=elapsed_ms)
 
 
 @router.post("/{exam_id}/start", response_model=ExamSessionRead, status_code=status.HTTP_201_CREATED)

@@ -208,3 +208,67 @@ def test_teacher_force_submit_records_reason(client, db_session_factory):
     with db_session_factory() as db:
         submission = db.scalar(select(ExamSubmission).where(ExamSubmission.id == started["id"]))
         assert submission.status == "graded"
+
+
+def test_active_student_sample_run_executes_only_public_cases(
+    client, db_session_factory, monkeypatch,
+):
+    code_question = {
+        "question_type": "code",
+        "prompt": "实现 add(a, b)",
+        "correct_answer": {"test_file": "def add(a, b):\n    return a + b"},
+        "points": 10,
+        "starter_code": "def add(a, b):\n    pass",
+        "public_cases": [{"args": [1, 2], "expected": 3}],
+        "hidden_tests": "from user_code import add\n\ndef test_hidden():\n    assert add(2, 3) == 5",
+        "grading_mode": "legacy",
+    }
+    ctx = _seed(client, db_session_factory, question=code_question)
+    teacher_headers = auth_header(ctx["teacher"])
+    student_headers = auth_header(ctx["student"])
+    assert client.patch(
+        f"{API}/exams/{ctx['exam_id']}", headers=teacher_headers, json={"status": "published"},
+    ).status_code == 200
+    assert client.post(f"{API}/exams/{ctx['exam_id']}/start", headers=student_headers).status_code == 201
+
+    def fake_runner(workdir, *_args, **_kwargs):
+        rendered_tests = (workdir / "test_public_cases.py").read_text(encoding="utf-8")
+        assert "assert add(1, 2) == 3" in rendered_tests
+        assert "test_hidden" not in rendered_tests
+        return "1 passed", "", 0, 12
+
+    monkeypatch.setattr("app.api.exams._run_docker_pytest", fake_runner)
+    response = client.post(
+        f"{API}/exams/{ctx['exam_id']}/questions/{ctx['question_id']}/sample-run",
+        headers=student_headers,
+        json={"code": "def add(a, b):\n    return a + b"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "output": "1 passed\n", "status": "accepted", "execution_time_ms": 12,
+        "diagnostic": None,
+    }
+
+
+def test_exam_sample_run_requires_an_active_owned_attempt(client, db_session_factory):
+    code_question = {
+        "question_type": "code", "prompt": "实现 add(a, b)", "correct_answer": {},
+        "points": 10, "public_cases": [], "hidden_tests": "assert True", "grading_mode": "legacy",
+    }
+    ctx = _seed(client, db_session_factory, question=code_question)
+    teacher_headers = auth_header(ctx["teacher"])
+    student_headers = auth_header(ctx["student"])
+    assert client.patch(
+        f"{API}/exams/{ctx['exam_id']}", headers=teacher_headers, json={"status": "published"},
+    ).status_code == 200
+
+    not_started = client.post(
+        f"{API}/exams/{ctx['exam_id']}/questions/{ctx['question_id']}/sample-run",
+        headers=student_headers, json={"code": "pass"},
+    )
+    forbidden_teacher = client.post(
+        f"{API}/exams/{ctx['exam_id']}/questions/{ctx['question_id']}/sample-run",
+        headers=teacher_headers, json={"code": "pass"},
+    )
+    assert not_started.status_code == 403
+    assert forbidden_teacher.status_code == 403

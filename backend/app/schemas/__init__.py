@@ -651,6 +651,16 @@ class SampleRunResponse(BaseModel):
     diagnostic: ImportDiagnosticRead | None = None
 
 
+class ExamSampleRunRequest(BaseModel):
+    """考试编程题公开样例自测；题目身份仅取自 URL，避免请求体歧义。"""
+    code: str
+
+    @field_validator("code")
+    @classmethod
+    def _limit_code(cls, value: str) -> str:
+        return validate_code_size(value)
+
+
 class ExamCreate(BaseModel):
     course_id: int
     title: str
