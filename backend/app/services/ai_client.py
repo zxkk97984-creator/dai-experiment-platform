@@ -77,9 +77,13 @@ class DeepSeekClient:
         settings: Settings,
         *,
         transport: httpx.BaseTransport | None = None,
+        metrics_sink=None,
     ):
         self._settings = settings
         self._endpoint = normalize_chat_endpoint(settings.ai_base_url)
+        # metrics_sink：TASK-029 用量指标回调（op_metrics.ai_metrics_sink），
+        # 只接收 {operation, prompt_tokens, completion_tokens}，不含任何原文。
+        self._metrics_sink = metrics_sink
         # trust_env=False：出站 AI 调用不读环境代理变量（socks/http 代理注入会
         # 导致请求失败甚至构造期崩溃）；如需代理应作为显式配置项提供。
         self._client = httpx.Client(
@@ -172,6 +176,16 @@ class DeepSeekClient:
                         "max_tokens": max_tokens,
                     },
                 )
+
+                if self._metrics_sink is not None:
+                    try:
+                        self._metrics_sink({
+                            "operation": operation,
+                            "prompt_tokens": usage.get("prompt_tokens"),
+                            "completion_tokens": usage.get("completion_tokens"),
+                        })
+                    except Exception:  # 指标路径绝不阻断业务
+                        logger.debug("AI 指标回调失败（忽略）", exc_info=True)
 
                 choices = data.get("choices", [])
                 if not choices:

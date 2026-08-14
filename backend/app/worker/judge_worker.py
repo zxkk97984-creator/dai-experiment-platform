@@ -873,6 +873,7 @@ def process_ai_grade(db: Session, redis_client, settings: Settings, code_grade_i
     from app.services.ai_grading_queue import claim_ai_grade, complete_ai_grade, fail_ai_grade
     from app.services.ai_grading_service import grade_code_submission
     from app.services.ai_client import AIServiceError, DeepSeekClient
+    from app.services.op_metrics import ai_metrics_sink
 
     if not claim_ai_grade(db, code_grade_id):
         return None
@@ -889,7 +890,7 @@ def process_ai_grade(db: Session, redis_client, settings: Settings, code_grade_i
         return None
 
     try:
-        client = DeepSeekClient(settings)
+        client = DeepSeekClient(settings, metrics_sink=ai_metrics_sink())
         cg = grade_code_submission(db, client, code_grade_id)
         db.commit()
         db.refresh(cg)
