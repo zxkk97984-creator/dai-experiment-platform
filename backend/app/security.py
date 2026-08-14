@@ -24,6 +24,7 @@ def create_token(
     secret_key: str,
     algorithm: str,
     expires_delta: timedelta,
+    session_version: int,
 ) -> str:
     expires_at = datetime.now(UTC) + expires_delta
     payload = {
@@ -32,6 +33,7 @@ def create_token(
         "type": token_type,
         "jti": str(uuid4()),
         "exp": expires_at,
+        "sv": session_version,
     }
     return jwt.encode(payload, secret_key, algorithm=algorithm)
 

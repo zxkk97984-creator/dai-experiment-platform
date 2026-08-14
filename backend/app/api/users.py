@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import update, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db, require_roles
@@ -164,6 +164,10 @@ def update_password(
     if payload.password.strip().lower() == (user.username or "").strip().lower():
         raise api_error(422, "PASSWORD_EQUALS_USERNAME", "密码不能与用户名相同")
     user.password_hash = hash_password(payload.password)
+    # 改密/重置立即撤销该用户全部会话（原子递增）
+    db.execute(
+        update(User).where(User.id == user.id).values(session_version=User.session_version + 1)
+    )
     db.commit()
     db.refresh(user)
     return user
@@ -182,6 +186,11 @@ def update_status(
     if not user:
         raise api_error(404, "USER_NOT_FOUND", "用户不存在")
     user.status = payload.status
+    if payload.status == "disabled":
+        # 禁用立即撤销该用户全部会话（原子递增）
+        db.execute(
+            update(User).where(User.id == user.id).values(session_version=User.session_version + 1)
+        )
     db.commit()
     db.refresh(user)
     return user

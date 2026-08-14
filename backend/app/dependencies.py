@@ -48,6 +48,9 @@ def get_current_user(
     user = db.get(User, int(user_id)) if user_id else None
     if not user or user.status != "active":
         raise api_error(401, "USER_NOT_ACTIVE", "用户不存在或已禁用")
+    token_sv = payload.get("sv")
+    if token_sv is None or int(token_sv) != user.session_version:
+        raise api_error(401, "SESSION_REVOKED", "会话已失效，请重新登录")
     return user
 
 
