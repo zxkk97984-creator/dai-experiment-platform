@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.courses import can_access_course_content, ensure_course_manager, require_course
 from app.config import Settings, get_settings
-from app.dependencies import get_current_user, get_db, require_roles
+from app.dependencies import get_current_user, get_db, require_roles, PaginationParams, pagination
 from app.errors import api_error
 from app.models import Course, CourseEnrollment, Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission, QuestionRubric, User
 from app.schemas import ExamAnswerBatchRequest, ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionTeacherRead, ExamQuestionUpdate, ExamRead, ExamRetryRequest, ExamSessionRead, ExamSubmitRequest, ExamSubmissionRead, ExamTimeExtensionRequest, ExamUpdate, PaginatedResponse
@@ -44,11 +44,11 @@ def _submitted_ids(db: Session, exams: list[Exam], student_id: int) -> set[int]:
 
 @router.get("", response_model=PaginatedResponse)
 def list_exams(
-    page: int = 1,
-    page_size: int = 20,
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    page, page_size = pagination.page, pagination.page_size
     query = select(Exam)
     count_query = select(func.count()).select_from(Exam)
     if current_user.role == "student":

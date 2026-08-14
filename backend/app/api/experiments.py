@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.dependencies import get_current_user, get_db, require_roles
+from app.dependencies import get_current_user, get_db, require_roles, PaginationParams, pagination
 from app.errors import api_error
 from app.models import (
     Chapter,
@@ -169,12 +169,12 @@ def list_student_module_catalog(
         default=None, alias="status"
     ),
     sort: Literal["default", "recent_desc", "name_asc"] = "default",
-    page: int = 1,
-    page_size: int = 10,
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("student")),
 ):
     """学生实验目录：合并已发布模块与当前学生自己的实验状态。"""
+    page, page_size = pagination.page, pagination.page_size
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
 
@@ -981,8 +981,7 @@ def list_submissions(
     entry_id: int | None = None,
     review_status: Literal["pending", "graded"] | None = None,
     sort: Literal["submitted_desc", "submitted_asc"] = "submitted_desc",
-    page: int = 1,
-    page_size: int = 10,
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -994,6 +993,7 @@ def list_submissions(
     - 开发者：仅自己模块的提交
     - 管理员：全部
     """
+    page, page_size = pagination.page, pagination.page_size
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
 

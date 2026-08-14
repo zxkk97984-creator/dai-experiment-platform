@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
 from app.config import Settings, get_settings
-from app.dependencies import get_db, get_redis_client, require_roles
+from app.dependencies import PaginationParams, get_db, get_redis_client, pagination, require_roles
 from app.errors import api_error
 from app.models import (
     Assignment, CodeGrade, Course, Exam, ExamAnswer, ExamQuestion,
@@ -558,11 +558,11 @@ def list_grades(
     student_id: int | None = Query(None),
     student_name: str | None = Query(None),
     status: str | None = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    page, page_size = pagination.page, pagination.page_size
     _teacher_or_admin(current_user)
 
     query, count_q = _build_grade_base_query(

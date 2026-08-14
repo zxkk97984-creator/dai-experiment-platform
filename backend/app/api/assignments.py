@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.api.courses import can_access_course_content, require_course
 from app.config import Settings, get_settings
-from app.dependencies import get_current_user, get_db, require_roles
+from app.dependencies import get_current_user, get_db, require_roles, PaginationParams, pagination
 from app.errors import api_error
 from app.models import (
     Assignment,
@@ -135,11 +135,11 @@ def _assignment_with_summary(db: Session, assignment: Assignment) -> AssignmentR
 @router.get("", response_model=PaginatedResponse)
 def list_assignments(
     course_id: int | None = None,
-    page: int = 1,
-    page_size: int = 20,
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    page, page_size = pagination.page, pagination.page_size
     query = select(Assignment)
     count_query = select(func.count()).select_from(Assignment)
     if course_id:

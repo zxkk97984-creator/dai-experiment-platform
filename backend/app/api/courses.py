@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import Settings, get_settings
-from app.dependencies import get_current_user, get_db, require_roles
+from app.dependencies import PaginationParams, get_current_user, get_db, pagination, require_roles
 from app.errors import api_error
 from app.services.lesson_video_service import remove_storage_key
 from app.models import (
@@ -204,8 +204,7 @@ def serialize_course(course: Course, is_enrolled: bool = False, can_enroll: bool
 
 @router.get("/courses", response_model=CourseListRead)
 def list_courses(
-    page: int = 1,
-    page_size: int = 20,
+    pagination: PaginationParams = Depends(pagination),
     q: str | None = None,
     status_filter: str | None = None,
     academic_term_id: int | None = None,
@@ -213,6 +212,7 @@ def list_courses(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    page, page_size = pagination.page, pagination.page_size
     page_size = max(1, min(page_size, 100))
     query = select(Course).options(
         selectinload(Course.academic_term),
@@ -559,8 +559,10 @@ def drop_course(
 
 
 @router.get("/courses/{course_id}/students", response_model=PaginatedResponse)
-def list_course_students(course_id: int, page: int = 1, page_size: int = 100,
+def list_course_students(course_id: int,
+                         pagination: PaginationParams = Depends(pagination),
                          db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    page, page_size = pagination.page, pagination.page_size
     course = require_course(course_id, db); ensure_course_manager(course, current_user)
     filters = (CourseEnrollment.course_id == course_id, CourseEnrollment.status == "enrolled")
     total = db.scalar(select(func.count()).select_from(CourseEnrollment).where(*filters)) or 0
@@ -608,11 +610,11 @@ def remove_course_student(course_id: int, student_id: int, db: Session = Depends
 @router.get("/courses/{course_id}/chapters", response_model=PaginatedResponse)
 def list_chapters(
     course_id: int,
-    page: int = 1,
-    page_size: int = 20,
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    page, page_size = pagination.page, pagination.page_size
     course = require_course(course_id, db)
     if not can_access_course_content(course, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限查看该课程章节")
@@ -788,12 +790,12 @@ def delete_chapter(
 @router.get("/courses/{course_id}/whitelist", response_model=CourseWhitelistListRead)
 def list_whitelist(
     course_id: int,
-    page: int = 1,
-    page_size: int = 20,
+    pagination: PaginationParams = Depends(pagination),
     q: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    page, page_size = pagination.page, pagination.page_size
     course = require_course(course_id, db)
     ensure_course_manager(course, current_user)
     filters = [CourseWhitelistStudent.course_id == course_id]

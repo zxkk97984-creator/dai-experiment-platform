@@ -2,6 +2,7 @@
 import pytest
 from datetime import datetime, timezone
 from conftest import create_user, login, auth_header
+from app.dependencies import PaginationParams
 from app.models import Assignment, Course, Exam, ExamQuestion, ExamSubmission, ExamAnswer, JudgeQuestion, Submission, CodeGrade, QuestionRubric, User
 
 
@@ -51,7 +52,8 @@ class TestGradesQueryDedup:
 
             response = list_grades(
                 kind="assignment", question_id=None, student_id=None,
-                student_name="张", status=None, page=1, page_size=20,
+                student_name="张", status=None,
+                pagination=PaginationParams(page=1, page_size=20),
                 db=db, current_user=teacher,
             )
 

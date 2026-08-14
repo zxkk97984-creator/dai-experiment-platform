@@ -3,7 +3,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.dependencies import get_current_user, get_db, require_roles
+from app.dependencies import PaginationParams, get_current_user, get_db, pagination, require_roles
 from app.errors import api_error
 from app.models import AcademicTerm, TeachingClass, TeachingClassStudent, User
 from app.schemas import (
@@ -32,7 +32,8 @@ def _class_summary(db: Session, teaching_class: TeachingClass) -> TeachingClassS
 
 
 @router.get("/academic-terms", response_model=PaginatedResponse)
-def list_terms(page: int = 1, page_size: int = 100, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+def list_terms(pagination: PaginationParams = Depends(pagination), db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    page, page_size = pagination.page, pagination.page_size
     query = select(AcademicTerm).order_by(AcademicTerm.start_date.desc(), AcademicTerm.id.desc())
     total = db.scalar(select(func.count()).select_from(AcademicTerm)) or 0
     rows = db.scalars(query.offset((page - 1) * page_size).limit(page_size)).all()
@@ -86,8 +87,10 @@ def close_term(term_id: int, db: Session = Depends(get_db), _: User = Depends(re
 
 
 @router.get("/teaching-classes", response_model=PaginatedResponse)
-def list_classes(academic_term_id: int | None = None, q: str | None = None, page: int = 1, page_size: int = 100,
+def list_classes(academic_term_id: int | None = None, q: str | None = None,
+                 pagination: PaginationParams = Depends(pagination),
                  db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    page, page_size = pagination.page, pagination.page_size
     filters = []
     if academic_term_id is not None:
         filters.append(TeachingClass.academic_term_id == academic_term_id)
@@ -145,8 +148,8 @@ def archive_class(class_id: int, db: Session = Depends(get_db), _: User = Depend
     return _class_summary(db, row)
 
 
-@router.get("/teaching-classes/{class_id}/students", response_model=PaginatedResponse)
-def list_class_students(class_id: int, page: int = 1, page_size: int = 100, db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+def _query_class_students(class_id: int, db: Session, page: int, page_size: int) -> PaginatedResponse:
+    """教学班学生名单分页查询（纯函数——供路由与内部调用复用，不依赖 FastAPI DI）。"""
     row = db.get(TeachingClass, class_id)
     if not row:
         raise api_error(404, "TEACHING_CLASS_NOT_FOUND", "教学班不存在")
@@ -155,6 +158,12 @@ def list_class_students(class_id: int, page: int = 1, page_size: int = 100, db: 
     students = db.scalars(select(User).join(TeachingClassStudent, TeachingClassStudent.student_id == User.id)
         .where(*filters).order_by(User.student_no, User.id).offset((page - 1) * page_size).limit(page_size)).all()
     return PaginatedResponse(items=[UserRead.model_validate(x) for x in students], page=page, page_size=page_size, total=total)
+
+
+@router.get("/teaching-classes/{class_id}/students", response_model=PaginatedResponse)
+def list_class_students(class_id: int, pagination: PaginationParams = Depends(pagination), db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+    page, page_size = pagination.page, pagination.page_size
+    return _query_class_students(class_id, db, page, page_size)
 
 
 @router.post("/teaching-classes/{class_id}/students", response_model=PaginatedResponse)
@@ -176,7 +185,7 @@ def add_class_students(class_id: int, payload: TeachingClassStudentBatch, db: Se
         else:
             db.add(TeachingClassStudent(teaching_class_id=class_id, student_id=student_id, status="active"))
     db.flush(); sync_courses_for_class(db, class_id); db.commit()
-    return list_class_students(class_id, db=db, _=_)
+    return _query_class_students(class_id, db, page=1, page_size=100)
 
 
 @router.delete("/teaching-classes/{class_id}/students/{student_id}", status_code=status.HTTP_204_NO_CONTENT)

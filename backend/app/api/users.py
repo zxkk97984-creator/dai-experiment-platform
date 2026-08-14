@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy import update, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.dependencies import get_current_user, get_db, require_roles
+from app.dependencies import get_current_user, get_db, require_roles, PaginationParams, pagination
 from app.errors import api_error
 from app.models import User
 from app.schemas import PaginatedResponse, PasswordUpdate, StatusUpdate, UserCreate, UserRead, UserUpdate
@@ -16,13 +16,13 @@ VALID_STATUSES = {"active", "disabled"}
 
 @router.get("", response_model=PaginatedResponse)
 def list_users(
-    page: int = 1,
-    page_size: int = 20,
     role: str | None = None,
     status_filter: str | None = None,
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin")),
 ):
+    page, page_size = pagination.page, pagination.page_size
     query = select(User)
     count_query = select(func.count()).select_from(User)
     if role:
@@ -72,13 +72,12 @@ def create_user(
 @router.get("/students", response_model=PaginatedResponse)
 def list_students(
     q: str | None = None,
-    page: int = 1,
-    page_size: int = 20,
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("teacher", "admin")),
 ):
     """学生候选列表——教师选择白名单学生用，只暴露 active student"""
-    page_size = max(1, min(page_size, 100))
+    page, page_size = pagination.page, pagination.page_size
     filters = (User.role == "student", User.status == "active")
     query = select(User).where(*filters)
     count_query = select(func.count()).select_from(User).where(*filters)

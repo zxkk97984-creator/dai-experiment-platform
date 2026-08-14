@@ -1,7 +1,7 @@
 from collections.abc import Callable
 
 import redis
-from fastapi import Depends
+from fastapi import Depends, Query
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
@@ -12,6 +12,24 @@ from .models import User
 from .security import decode_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+
+
+class PaginationParams:
+    """统一分页契约（TASK-021 / F-24）：page >= 1，1 <= page_size <= 100。
+
+    非法值由 FastAPI Query 校验统一返回 422；响应结构不变。
+    """
+
+    def __init__(self, page: int, page_size: int):
+        self.page = page
+        self.page_size = page_size
+
+
+def pagination(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> PaginationParams:
+    return PaginationParams(page=page, page_size=page_size)
 
 
 def get_db():
