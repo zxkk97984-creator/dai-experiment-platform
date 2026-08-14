@@ -1,7 +1,14 @@
-"""第六轮回归测试——7 项阻断修复的独立验证"""
+"""第六轮回归测试——7 项阻断修复的独立验证
+
+A/B/C 分类：B 类（最小父行）——student_id/exam_id 等外键经共享工厂
+make_student / make_exam / make_assignment 建真实父行。
+"""
+
 import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
+
+from conftest import make_assignment, make_course, make_exam, make_student
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -145,12 +152,14 @@ class TestSystemErrorNoScore:
         from pathlib import Path
         import tempfile
 
+        assignment_id = make_assignment(db_session_factory)
+        student = make_student(db_session_factory)
         with db_session_factory() as db:
-            q = JudgeQuestion(assignment_id=1, title="Q", function_name="f",
+            q = JudgeQuestion(assignment_id=assignment_id, title="Q", function_name="f",
                             hidden_tests="def test(): assert True",
                             grading_mode="legacy", test_groups=[])
             db.add(q); db.flush()
-            sub = Submission(question_id=q.id, student_id=1, code="def f(): pass",
+            sub = Submission(question_id=q.id, student_id=student.id, code="def f(): pass",
                            status="queued", grading_status="running")
             db.add(sub); db.commit()
 
@@ -175,14 +184,16 @@ class TestSystemErrorNoScore:
         import tempfile
         from pathlib import Path
 
+        exam_id = make_exam(db_session_factory)
+        student = make_student(db_session_factory)
         with db_session_factory() as db:
-            eq = ExamQuestion(exam_id=1, question_type="code", prompt="Q",
+            eq = ExamQuestion(exam_id=exam_id, question_type="code", prompt="Q",
                             correct_answer={"test_file": ""}, points=10,
                             grading_mode="shadow",
                             test_groups=[{"id":"F1","name":"F","dimension":"F","max_score":60,
                                          "tests":"def test(): assert True"}])
             db.add(eq); db.flush()
-            es = ExamSubmission(exam_id=1, student_id=1, status="grading")
+            es = ExamSubmission(exam_id=exam_id, student_id=student.id, status="grading")
             db.add(es); db.flush()
             ea = ExamAnswer(submission_id=es.id, question_id=eq.id, code_answer="def f(): pass",
                           grading_status="queued")
@@ -206,13 +217,15 @@ class TestSystemErrorNoScore:
         from app.models import Submission
         from app.services.judge_queue import requeue_stale_jobs, MAX_ATTEMPTS
 
+        assignment_id = make_assignment(db_session_factory)
+        student = make_student(db_session_factory)
         with db_session_factory() as db:
             from app.models import JudgeQuestion
-            q = JudgeQuestion(assignment_id=1, title="Q", function_name="f",
+            q = JudgeQuestion(assignment_id=assignment_id, title="Q", function_name="f",
                             hidden_tests="def test(): assert True",
                             grading_mode="legacy", test_groups=[])
             db.add(q); db.flush()
-            sub = Submission(question_id=q.id, student_id=1, code="def f(): pass",
+            sub = Submission(question_id=q.id, student_id=student.id, code="def f(): pass",
                            status="pending", grading_status="pending",
                            attempt_count=MAX_ATTEMPTS)
             db.add(sub); db.commit()
@@ -384,6 +397,7 @@ class TestAdminGradeQuery:
         from app.models import Assignment, Course, JudgeQuestion, Submission, CodeGrade, QuestionRubric, User
         from app.api.ai_grading import _build_grade_base_query
 
+        student = make_student(db_session_factory, username="aqa_s")
         with db_session_factory() as db:
             admin = User(username="aqa", real_name="AQA", role="admin",
                         status="active", password_hash="x")
@@ -401,7 +415,7 @@ class TestAdminGradeQuery:
                                 source_hash="a", source_snapshot={}, rubric_json={},
                                 model_name="m", locked_at=datetime.now(timezone.utc))
             db.add(rub); db.flush()
-            sub = Submission(question_id=q.id, student_id=1, code="def f(): pass",
+            sub = Submission(question_id=q.id, student_id=student.id, code="def f(): pass",
                             status="graded", grading_status="completed", score=80)
             db.add(sub); db.flush()
             cg = CodeGrade(submission_id=sub.id, rubric_id=rub.id, mode="active",
@@ -420,6 +434,7 @@ class TestAdminGradeQuery:
         from app.models import Course, Exam, ExamQuestion, ExamSubmission, ExamAnswer, CodeGrade, QuestionRubric, User
         from app.api.ai_grading import _build_grade_base_query
 
+        s55 = make_student(db_session_factory, username="aqe_s")
         with db_session_factory() as db:
             admin = User(username="aqe", real_name="AQE", role="admin",
                         status="active", password_hash="x")
@@ -435,7 +450,7 @@ class TestAdminGradeQuery:
                                 source_hash="a", source_snapshot={}, rubric_json={},
                                 model_name="m", locked_at=datetime.now(timezone.utc))
             db.add(rub); db.flush()
-            es = ExamSubmission(exam_id=e.id, student_id=55, status="grading")
+            es = ExamSubmission(exam_id=e.id, student_id=s55.id, status="grading")
             db.add(es); db.flush()
             ea = ExamAnswer(submission_id=es.id, question_id=eq.id, code_answer="x",
                            grading_status="completed", score=5)
@@ -445,7 +460,7 @@ class TestAdminGradeQuery:
             db.add(cg); db.commit()
 
             query, count_q = _build_grade_base_query(db, admin, kind="exam",
-                                                     question_id=None, student_id=55, status=None)
+                                                     question_id=None, student_id=s55.id, status=None)
             grades = db.scalars(query).all()
             total = db.scalar(count_q)
             assert len(grades) == 1
@@ -456,6 +471,7 @@ class TestAdminGradeQuery:
         from app.models import Assignment, Course, JudgeQuestion, Submission, CodeGrade, QuestionRubric, User
         from app.api.ai_grading import _build_grade_base_query
 
+        student = make_student(db_session_factory, username="ank_s")
         with db_session_factory() as db:
             admin = User(username="ank", real_name="ANK", role="admin",
                         status="active", password_hash="x")
@@ -473,7 +489,7 @@ class TestAdminGradeQuery:
                                 source_hash="a", source_snapshot={}, rubric_json={},
                                 model_name="m", locked_at=datetime.now(timezone.utc))
             db.add(rub); db.flush()
-            sub = Submission(question_id=q.id, student_id=1, code="def f(): pass",
+            sub = Submission(question_id=q.id, student_id=student.id, code="def f(): pass",
                             status="graded", grading_status="completed", score=80)
             db.add(sub); db.flush()
             cg = CodeGrade(submission_id=sub.id, rubric_id=rub.id, mode="active",
@@ -491,6 +507,7 @@ class TestAdminGradeQuery:
         from app.models import Assignment, Course, JudgeQuestion, Submission, CodeGrade, QuestionRubric, User
         from app.api.ai_grading import _build_grade_base_query
 
+        students = [make_student(db_session_factory, username=f"acm_s{i}") for i in range(3)]
         with db_session_factory() as db:
             admin = User(username="acm", real_name="ACM", role="admin",
                         status="active", password_hash="x")
@@ -509,9 +526,9 @@ class TestAdminGradeQuery:
                                 model_name="m", locked_at=datetime.now(timezone.utc))
             db.add(rub); db.flush()
 
-            # 创建 3 个 submissions
-            for i in range(3):
-                sub = Submission(question_id=q.id, student_id=i+1, code="def f(): pass",
+            # 创建 3 个 submissions（3 个真实学生）
+            for s in students:
+                sub = Submission(question_id=q.id, student_id=s.id, code="def f(): pass",
                                 status="graded", grading_status="completed", score=80)
                 db.add(sub); db.flush()
                 cg = CodeGrade(submission_id=sub.id, rubric_id=rub.id, mode="active",
@@ -591,12 +608,14 @@ class TestSystemErrorNotCounted:
 
         with db_session_factory() as db:
             from app.models import Exam, ExamQuestion
-            e = Exam(id=1, course_id=1, title="SE", status="published", duration_minutes=60)
+            course_id = make_course(db_session_factory)
+            student = make_student(db_session_factory)
+            e = Exam(course_id=course_id, title="SE", status="published", duration_minutes=60)
             db.add(e); db.flush()
             eq = ExamQuestion(exam_id=e.id, question_type="code", prompt="t",
                              correct_answer={"test_file": ""}, points=10, grading_mode="legacy")
             db.add(eq); db.flush()
-            es = ExamSubmission(exam_id=e.id, student_id=1, status="grading")
+            es = ExamSubmission(exam_id=e.id, student_id=student.id, status="grading")
             db.add(es); db.flush()
             ea = ExamAnswer(submission_id=es.id, question_id=eq.id, code_answer="x",
                            grading_status="system_error", score=None)  # system_error + score=None

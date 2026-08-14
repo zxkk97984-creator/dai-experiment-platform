@@ -14,6 +14,15 @@ from sqlalchemy.exc import IntegrityError
 
 from app import models
 from app.database import Base
+from conftest import (
+    make_exam,
+    make_exam_question,
+    make_experiment_module,
+    make_lesson,
+    make_student,
+    make_teacher,
+    make_template_version,
+)
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -45,8 +54,9 @@ def test_notebook_template_draft_fields_and_revision_default(db_session_factory)
         "owner_id",
     } <= set(table.c.keys())
 
+    teacher = make_teacher(db_session_factory)
     with db_session_factory() as db:
-        template = models.NotebookTemplate(name="线性回归实验", owner_id=1)
+        template = models.NotebookTemplate(name="线性回归实验", owner_id=teacher.id)
         db.add(template)
         db.commit()
         db.refresh(template)
@@ -59,8 +69,9 @@ def test_notebook_template_draft_fields_and_revision_default(db_session_factory)
 def test_notebook_template_version_number_is_unique_per_template(db_session_factory):
     assert hasattr(models, "NotebookTemplateVersion"), "NotebookTemplateVersion model is missing"
 
+    teacher = make_teacher(db_session_factory)
     with db_session_factory() as db:
-        template = models.NotebookTemplate(name="卷积实验", owner_id=1)
+        template = models.NotebookTemplate(name="卷积实验", owner_id=teacher.id)
         db.add(template)
         db.flush()
         db.add(
@@ -70,7 +81,7 @@ def test_notebook_template_version_number_is_unique_per_template(db_session_fact
                 sha256="a" * 64,
                 version_number=1,
                 assets_dir="templates/conv/1",
-                published_by_id=1,
+                published_by_id=teacher.id,
             )
         )
         db.commit()
@@ -82,7 +93,7 @@ def test_notebook_template_version_number_is_unique_per_template(db_session_fact
                 sha256="b" * 64,
                 version_number=1,
                 assets_dir="templates/conv/duplicate",
-                published_by_id=1,
+                published_by_id=teacher.id,
             )
         )
         with pytest.raises(IntegrityError):
@@ -90,24 +101,28 @@ def test_notebook_template_version_number_is_unique_per_template(db_session_fact
 
 
 @pytest.mark.parametrize(
-    ("lesson_id", "module_id"),
+    ("use_lesson", "use_module"),
     [
-        (None, None),
-        (10, 20),
+        (False, False),
+        (True, True),
     ],
 )
 def test_experiment_record_requires_exactly_one_parent(
     db_session_factory,
-    lesson_id,
-    module_id,
+    use_lesson,
+    use_module,
 ):
+    student = make_student(db_session_factory)
+    lesson_id = make_lesson(db_session_factory) if use_lesson else None
+    module_id = make_experiment_module(db_session_factory) if use_module else None
+    version_id = make_template_version(db_session_factory)
     with db_session_factory() as db:
         db.add(
             models.ExperimentRecord(
                 lesson_id=lesson_id,
                 module_id=module_id,
-                student_id=100,
-                template_version_id=200,
+                student_id=student.id,
+                template_version_id=version_id,
             )
         )
         with pytest.raises(IntegrityError):
@@ -115,18 +130,22 @@ def test_experiment_record_requires_exactly_one_parent(
 
 
 def test_experiment_record_is_unique_for_lesson_student(db_session_factory):
+    student = make_student(db_session_factory)
+    lesson_id = make_lesson(db_session_factory)
+    version_a = make_template_version(db_session_factory)
+    version_b = make_template_version(db_session_factory)
     with db_session_factory() as db:
         db.add_all(
             [
                 models.ExperimentRecord(
-                    lesson_id=10,
-                    student_id=100,
-                    template_version_id=200,
+                    lesson_id=lesson_id,
+                    student_id=student.id,
+                    template_version_id=version_a,
                 ),
                 models.ExperimentRecord(
-                    lesson_id=10,
-                    student_id=100,
-                    template_version_id=201,
+                    lesson_id=lesson_id,
+                    student_id=student.id,
+                    template_version_id=version_b,
                 ),
             ]
         )
@@ -135,18 +154,22 @@ def test_experiment_record_is_unique_for_lesson_student(db_session_factory):
 
 
 def test_experiment_record_is_unique_for_module_student(db_session_factory):
+    student = make_student(db_session_factory)
+    module_id = make_experiment_module(db_session_factory)
+    version_a = make_template_version(db_session_factory)
+    version_b = make_template_version(db_session_factory)
     with db_session_factory() as db:
         db.add_all(
             [
                 models.ExperimentRecord(
-                    module_id=20,
-                    student_id=100,
-                    template_version_id=200,
+                    module_id=module_id,
+                    student_id=student.id,
+                    template_version_id=version_a,
                 ),
                 models.ExperimentRecord(
-                    module_id=20,
-                    student_id=100,
-                    template_version_id=201,
+                    module_id=module_id,
+                    student_id=student.id,
+                    template_version_id=version_b,
                 ),
             ]
         )
@@ -168,10 +191,13 @@ def test_exam_answer_is_unique_per_submission_question(db_session_factory):
     assert hasattr(models, "ExamAnswer"), "ExamAnswer model is missing"
 
     now = datetime.now(UTC)
+    exam_id = make_exam(db_session_factory)
+    student = make_student(db_session_factory)
+    question_id = make_exam_question(db_session_factory, exam_id=exam_id)
     with db_session_factory() as db:
         submission = models.ExamSubmission(
-            exam_id=10,
-            student_id=100,
+            exam_id=exam_id,
+            student_id=student.id,
             status="started",
             started_at=now,
             expires_at=now + timedelta(hours=1),
@@ -182,12 +208,12 @@ def test_exam_answer_is_unique_per_submission_question(db_session_factory):
             [
                 models.ExamAnswer(
                     submission_id=submission.id,
-                    question_id=20,
+                    question_id=question_id,
                     selected_options=["A"],
                 ),
                 models.ExamAnswer(
                     submission_id=submission.id,
-                    question_id=20,
+                    question_id=question_id,
                     selected_options=["B"],
                 ),
             ]

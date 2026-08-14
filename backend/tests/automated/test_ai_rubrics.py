@@ -1,4 +1,8 @@
-"""Task 5: Rubric 生命周期测试——生成、锁定、发布门禁"""
+"""Task 5: Rubric 生命周期测试——生成、锁定、发布门禁
+
+A/B/C 分类：B 类（最小父行）——Rubric 的 judge_question_id 外键经
+共享工厂 make_judge_question 建真实题目，不再硬编码 question_id=1。
+"""
 import json
 
 import httpx
@@ -6,6 +10,8 @@ import pytest
 
 from app.config import Settings
 from app.services.ai_client import DeepSeekClient
+
+from conftest import make_judge_question
 
 
 def _build_snapshot(**overrides):
@@ -108,13 +114,14 @@ def test_generate_rubric_creates_draft(db_session_factory):
     from app.models import QuestionRubric
 
     fake_client = make_fake_client()
+    question_id = make_judge_question(db_session_factory)
 
     with db_session_factory() as db:
         rubric = generate_rubric(
             db,
             fake_client,
             kind="assignment",
-            question_id=1,
+            question_id=question_id,
             snapshot=_build_snapshot(),
         )
         assert rubric is not None
@@ -131,14 +138,15 @@ def test_lock_rubric_supersedes_old(db_session_factory):
     from app.models import QuestionRubric
 
     fake_client = make_fake_client()
+    question_id = make_judge_question(db_session_factory)
 
     with db_session_factory() as db:
-        rubric1 = generate_rubric(db, fake_client, kind="assignment", question_id=1, snapshot=_build_snapshot())
+        rubric1 = generate_rubric(db, fake_client, kind="assignment", question_id=question_id, snapshot=_build_snapshot())
         locked = lock_rubric(db, rubric1.id)
         assert locked.status == "locked"
         assert locked.locked_at is not None
 
-        rubric2 = generate_rubric(db, fake_client, kind="assignment", question_id=1, snapshot=_build_snapshot())
+        rubric2 = generate_rubric(db, fake_client, kind="assignment", question_id=question_id, snapshot=_build_snapshot())
         assert rubric2.version == 2
 
 
@@ -148,9 +156,10 @@ def test_update_draft_rubric(db_session_factory):
     from app.schemas.ai_grading import RubricDocument
 
     fake_client = make_fake_client()
+    question_id = make_judge_question(db_session_factory)
 
     with db_session_factory() as db:
-        rubric = generate_rubric(db, fake_client, kind="assignment", question_id=1, snapshot=_build_snapshot())
+        rubric = generate_rubric(db, fake_client, kind="assignment", question_id=question_id, snapshot=_build_snapshot())
         assert rubric.status == "draft"
 
         doc = RubricDocument(**rubric.rubric_json)
@@ -170,12 +179,13 @@ def test_get_latest_locked_rubric(db_session_factory):
     from app.services.rubric_service import generate_rubric, get_latest_locked_rubric, lock_rubric
 
     fake_client = make_fake_client()
+    question_id = make_judge_question(db_session_factory)
 
     with db_session_factory() as db:
-        rubric = generate_rubric(db, fake_client, kind="assignment", question_id=1, snapshot=_build_snapshot())
+        rubric = generate_rubric(db, fake_client, kind="assignment", question_id=question_id, snapshot=_build_snapshot())
         lock_rubric(db, rubric.id)
 
-        found = get_latest_locked_rubric(db, kind="assignment", question_id=1)
+        found = get_latest_locked_rubric(db, kind="assignment", question_id=question_id)
         assert found is not None
         assert found.id == rubric.id
         assert found.status == "locked"
@@ -186,11 +196,13 @@ def test_ensure_locked_rubrics_for_publish(db_session_factory):
     from app.services.rubric_service import ensure_locked_rubrics_for_publish
 
     fake_client = make_fake_client()
+    question_id = make_judge_question(db_session_factory)
 
+    question_id = make_judge_question(db_session_factory)
     with db_session_factory() as db:
         questions = [
             {
-                "id": 1,
+                "id": question_id,
                 "grading_mode": "shadow",
                 "title": "二分查找",
                 "description": "查找目标元素",
@@ -219,10 +231,12 @@ def test_ensure_locked_rubrics_reuses_valid_rubric(db_session_factory):
     )
 
     fake_client = make_fake_client()
+    question_id = make_judge_question(db_session_factory)
 
+    question_id = make_judge_question(db_session_factory)
     with db_session_factory() as db:
         questions = [{
-            "id": 1,
+            "id": question_id,
             "grading_mode": "shadow",
             "title": "二分查找",
             "description": "在有序数组中查找目标元素",
@@ -258,9 +272,10 @@ def test_ensure_locked_rubrics_raises_on_ai_failure(db_session_factory):
 
     fake_client = make_error_client()
 
+    question_id = make_judge_question(db_session_factory)
     with db_session_factory() as db:
         questions = [{
-            "id": 1,
+            "id": question_id,
             "grading_mode": "shadow",
             "title": "二分查找",
             "description": "",

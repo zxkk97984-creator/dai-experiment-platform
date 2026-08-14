@@ -1,4 +1,8 @@
-"""Task 8: AI 评分管道测试——队列、幂等、状态转换"""
+"""Task 8: AI 评分管道测试——队列、幂等、状态转换
+
+A/B/C 分类：B 类（最小父行）——CodeGrade 的 submission/rubric 外键经
+共享工厂 make_submission / make_rubric 建真实父行。
+"""
 import json
 
 import httpx
@@ -6,6 +10,8 @@ import pytest
 
 from app.config import Settings
 from app.services.ai_client import DeepSeekClient
+
+from conftest import make_rubric, make_submission
 
 
 def _make_fake_client():
@@ -52,9 +58,11 @@ def test_enqueue_transitions_pending_to_queued(db_session_factory, redis_client)
     from app.models import CodeGrade
     from app.services.ai_grading_queue import enqueue_ai_grade
 
+    submission_id = make_submission(db_session_factory)
+    rubric_id = make_rubric(db_session_factory)
     with db_session_factory() as db:
         grade = CodeGrade(
-            submission_id=1, rubric_id=1, mode="shadow", status="pending",
+            submission_id=submission_id, rubric_id=rubric_id, mode="shadow", status="pending",
         )
         db.add(grade)
         db.flush()
@@ -78,9 +86,11 @@ def test_enqueue_twice_only_queues_once(db_session_factory, redis_client):
     from app.models import CodeGrade
     from app.services.ai_grading_queue import enqueue_ai_grade
 
+    submission_id = make_submission(db_session_factory)
+    rubric_id = make_rubric(db_session_factory)
     with db_session_factory() as db:
         grade = CodeGrade(
-            submission_id=1, rubric_id=1, mode="shadow", status="pending",
+            submission_id=submission_id, rubric_id=rubric_id, mode="shadow", status="pending",
         )
         db.add(grade)
         db.flush()
@@ -98,9 +108,11 @@ def test_claim_queued_to_running(db_session_factory, redis_client):
     from app.models import CodeGrade
     from app.services.ai_grading_queue import claim_ai_grade, enqueue_ai_grade
 
+    submission_id = make_submission(db_session_factory)
+    rubric_id = make_rubric(db_session_factory)
     with db_session_factory() as db:
         grade = CodeGrade(
-            submission_id=1, rubric_id=1, mode="shadow", status="pending",
+            submission_id=submission_id, rubric_id=rubric_id, mode="shadow", status="pending",
         )
         db.add(grade)
         db.flush()
@@ -119,9 +131,11 @@ def test_fail_retryable_returns_to_queued(db_session_factory, redis_client):
     from app.models import CodeGrade
     from app.services.ai_grading_queue import fail_ai_grade
 
+    submission_id = make_submission(db_session_factory)
+    rubric_id = make_rubric(db_session_factory)
     with db_session_factory() as db:
         grade = CodeGrade(
-            submission_id=1, rubric_id=1, mode="shadow", status="running",
+            submission_id=submission_id, rubric_id=rubric_id, mode="shadow", status="running",
             attempt_count=1,
         )
         db.add(grade)
@@ -138,9 +152,11 @@ def test_fail_non_retryable_goes_to_review(db_session_factory, redis_client):
     from app.models import CodeGrade
     from app.services.ai_grading_queue import fail_ai_grade
 
+    submission_id = make_submission(db_session_factory)
+    rubric_id = make_rubric(db_session_factory)
     with db_session_factory() as db:
         grade = CodeGrade(
-            submission_id=1, rubric_id=1, mode="shadow", status="running",
+            submission_id=submission_id, rubric_id=rubric_id, mode="shadow", status="running",
             attempt_count=1,
         )
         db.add(grade)
@@ -158,9 +174,11 @@ def test_complete_sets_status(db_session_factory, redis_client):
     from app.models import CodeGrade
     from app.services.ai_grading_queue import complete_ai_grade
 
+    submission_id = make_submission(db_session_factory)
+    rubric_id = make_rubric(db_session_factory)
     with db_session_factory() as db:
         grade = CodeGrade(
-            submission_id=1, rubric_id=1, mode="shadow", status="running",
+            submission_id=submission_id, rubric_id=rubric_id, mode="shadow", status="running",
         )
         db.add(grade)
         db.flush()

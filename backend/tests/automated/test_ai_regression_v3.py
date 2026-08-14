@@ -1,4 +1,8 @@
-"""第三轮回归测试——P0 问题：缺配置/缺Rubric→系统错误、越权、考试结算"""
+"""第三轮回归测试——P0 问题：缺配置/缺Rubric→系统错误、越权、考试结算
+
+A/B/C 分类：B 类（最小父行）——题目/学生经共享工厂 make_judge_question /
+make_student 建真实父行，不再硬编码 assignment_id=1、student_id=1。
+"""
 import pytest
 
 
@@ -6,15 +10,17 @@ import pytest
 
 def test_v1_without_test_groups_system_error(db_session_factory):
     """非 legacy 无测试组→系统错误（score 不覆盖）"""
-    from app.models import JudgeQuestion, Submission
+    from app.models import Submission
     from app.services.judge_queue import enqueue_job
+    from conftest import make_judge_question, make_student
 
+    question_id = make_judge_question(
+        db_session_factory, grading_mode="shadow", test_groups=[],
+    )
+    student = make_student(db_session_factory)
     with db_session_factory() as db:
-        q = JudgeQuestion(assignment_id=1, title="Q", function_name="f",
-                          hidden_tests="def test(): assert True",
-                          grading_mode="shadow", test_groups=[])
-        db.add(q); db.flush()
-        sub = Submission(question_id=q.id, student_id=1, code="def f(): pass",
+        sub = Submission(question_id=question_id, student_id=student.id,
+                         code="def f(): pass",
                          status="queued", grading_status="pending")
         db.add(sub); db.commit()
         enqueue_job(db, job_type="assignment", object_id=sub.id)
@@ -35,15 +41,21 @@ def test_v1_missing_rubric_system_error(db_session_factory):
     from app.models import JudgeQuestion, Submission
     from app.worker.judge_worker import _v1_judge_submission
     from app.config import Settings
+    from conftest import make_judge_question, make_student
 
+    question_id = make_judge_question(
+        db_session_factory,
+        grading_mode="active",
+        test_groups=[
+            {"id": "F1", "name": "F", "dimension": "F", "max_score": 60, "tests": "def test(): assert True"},
+            {"id": "R1", "name": "R", "dimension": "R", "max_score": 10, "tests": "def test(): assert True"},
+        ],
+    )
+    student = make_student(db_session_factory)
     with db_session_factory() as db:
-        q = JudgeQuestion(assignment_id=1, title="Q", function_name="f",
-                          hidden_tests="def test(): assert True",
-                          grading_mode="active",
-                          test_groups=[{"id":"F1","name":"F","dimension":"F","max_score":60,"tests":"def test(): assert True"},
-                                       {"id":"R1","name":"R","dimension":"R","max_score":10,"tests":"def test(): assert True"}])
-        db.add(q); db.flush()
-        sub = Submission(question_id=q.id, student_id=1, code="def f(): pass",
+        q = db.get(JudgeQuestion, question_id)
+        sub = Submission(question_id=question_id, student_id=student.id,
+                         code="def f(): pass",
                          status="running", grading_status="running")
         db.add(sub); db.commit()
 
@@ -55,17 +67,19 @@ def test_v1_missing_rubric_system_error(db_session_factory):
 def test_legacy_fallback_only_for_legacy(db_session_factory):
     """legacy 模式正确走 legacy 路径（mock Docker 验证）"""
     from unittest.mock import patch
-    from app.models import JudgeQuestion, Submission
+    from app.models import Submission
     from app.worker.judge_worker import process_submission
     from app.config import Settings
     from app.services.judge_queue import enqueue_job
+    from conftest import make_judge_question, make_student
 
+    question_id = make_judge_question(
+        db_session_factory, grading_mode="legacy", test_groups=[],
+    )
+    student = make_student(db_session_factory)
     with db_session_factory() as db:
-        q = JudgeQuestion(assignment_id=1, title="Q", function_name="f",
-                          hidden_tests="def test(): assert True",
-                          grading_mode="legacy", test_groups=[])
-        db.add(q); db.flush()
-        sub = Submission(question_id=q.id, student_id=1, code="def f(): pass",
+        sub = Submission(question_id=question_id, student_id=student.id,
+                         code="def f(): pass",
                          status="queued", grading_status="pending")
         db.add(sub); db.commit()
         enqueue_job(db, job_type="assignment", object_id=sub.id)

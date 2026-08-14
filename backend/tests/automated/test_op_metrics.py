@@ -169,35 +169,17 @@ def test_middleware_path_template_is_low_cardinality(
 
 
 def test_fail_ai_grade_records_permanent_counter(db_session_factory, redis_client):
-    from app.models import CodeGrade, Course, JudgeQuestion, Assignment, Submission
+    from app.models import CodeGrade
     from app.services.ai_grading_queue import fail_ai_grade
     from app.config import Settings
+    from conftest import make_rubric, make_submission
 
+    submission_id = make_submission(
+        db_session_factory, status="queued", grading_status="queued",
+    )
+    rubric_id = make_rubric(db_session_factory)
     with db_session_factory() as db:
-        from conftest import create_user
-
-        teacher = create_user(db_session_factory, "ops-wt", "teacher")
-        student = create_user(db_session_factory, "ops-ws", "student")
-        course = Course(title="C", status="published", visibility="public",
-                        default_score=100, teacher_id=teacher.id)
-        db.add(course)
-        db.flush()
-        assignment = Assignment(course_id=course.id, title="A", status="published")
-        db.add(assignment)
-        db.flush()
-        question = JudgeQuestion(
-            assignment_id=assignment.id, title="Q", function_name="f",
-            hidden_tests="def test(): pass", grading_mode="active",
-        )
-        db.add(question)
-        db.flush()
-        submission = Submission(
-            question_id=question.id, student_id=student.id, code="x=1",
-            status="queued", grading_status="queued",
-        )
-        db.add(submission)
-        db.flush()
-        grade = CodeGrade(submission_id=submission.id, rubric_id=1,
+        grade = CodeGrade(submission_id=submission_id, rubric_id=rubric_id,
                           mode="active", status="running")
         db.add(grade)
         db.commit()

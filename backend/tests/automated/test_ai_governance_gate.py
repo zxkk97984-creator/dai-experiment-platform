@@ -4,11 +4,14 @@
 - 关闭时 Worker 零外呼：不构造客户端，任务以不可重试终态转 review_required（人工评分）
 - 状态端点：教师/管理员可查，学生 403
 - 人工评分（legacy）在 AI 关闭时仍可完成
+
+A/B/C 分类：B 类（最小父行）——CodeGrade 的 submission/rubric 外键经共享工厂
+make_submission / make_rubric 建真实父行。
 """
 from unittest.mock import MagicMock, patch
 
 import pytest
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_user, login, make_rubric, make_submission
 from sqlalchemy import select
 
 from app.config import Settings
@@ -56,32 +59,13 @@ def test_worker_zero_outbound_when_ai_disabled(db_session_factory, test_settings
         ai_enabled=False,
         ai_api_key="unused",
     )
+    submission_id = make_submission(
+        db_session_factory, status="queued", grading_status="queued",
+    )
+    rubric_id = make_rubric(db_session_factory)
     with db_session_factory() as db:
-        student = create_user(db_session_factory, "gov-zero", "student")
-        teacher = create_user(db_session_factory, "gov-zero-t", "teacher")
-        from app.models import Assignment, Course, JudgeQuestion
-
-        course = Course(title="C", status="published", visibility="public",
-                        default_score=100, teacher_id=teacher.id)
-        db.add(course)
-        db.flush()
-        assignment = Assignment(course_id=course.id, title="A", status="published")
-        db.add(assignment)
-        db.flush()
-        question = JudgeQuestion(
-            assignment_id=assignment.id, title="Q", function_name="f",
-            hidden_tests="def test(): pass", grading_mode="active",
-        )
-        db.add(question)
-        db.flush()
-        submission = Submission(
-            question_id=question.id, student_id=student.id, code="x=1",
-            status="queued", grading_status="queued",
-        )
-        db.add(submission)
-        db.flush()
         grade = CodeGrade(
-            submission_id=submission.id, rubric_id=1, mode="active",
+            submission_id=submission_id, rubric_id=rubric_id, mode="active",
             status="queued",
         )
         db.add(grade)
