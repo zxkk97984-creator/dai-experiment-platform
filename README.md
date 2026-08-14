@@ -316,6 +316,8 @@ volumes:
 
 生产发布顺序（TASK-014/TASK-016）：**先备份，再迁移，最后起新 API**——
 迁移由 compose 的一次性 `migrate` 服务执行，API 容器自身不再运行 Alembic。
+真实部署信息、责任人与恢复证据必须先按
+[`docs/backup-restore.md`](docs/backup-restore.md) 的待办表确认。
 
 ```bash
 # 1. 备份（TASK-014：自动化备份依赖真实部署主机信息，落地前须按部署环境
