@@ -375,8 +375,9 @@ set PYTEST_DEBUG_TEMPROOT=%LOCALAPPDATA%\Temp\dai-pytest-tmp
 .venv\Scripts\python.exe -m pytest tests\automated -q -p no:cacheprovider
 ```
 
-当前基线：**1023 项通过、3 项跳过、0 项失败**（2026-08-14，提交 `10f3a58`，
-Python 3.12）。精确数字以 CI `backend-test-sqlite` 门禁为准。
+当前基线：**1079 项通过、3 项跳过、0 项失败**（2026-08-15，SQLite 外键开启下
+实测，Python 3.12）。精确数字以 CI `backend-test-sqlite` 门禁为准。
+MySQL 门禁（`backend-test-mysql`）与 SQLite 同套件跑双库，双库 0 失败才算过。
 
 ### 前端测试与构建
 
@@ -386,8 +387,8 @@ npm test
 npm run build
 ```
 
-当前基线：**817 项测试全部通过**（2026-08-14，提交 `10f3a58`），生产构建成功。
-精确数字以 CI `frontend-test` 门禁为准。
+当前基线：**825 项测试全部通过**（2026-08-15），生产构建成功；测试已改为
+时区无关断言，UTC 机器（CI）与本地时区均可通过。精确数字以 CI `frontend-test` 门禁为准。
 
 ### 仓库清理边界
 
