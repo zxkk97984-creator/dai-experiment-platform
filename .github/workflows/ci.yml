@@ -160,6 +160,7 @@ jobs:
       DAI_SECRET_KEY: ci-e2e-secret-key
       DAI_CORS_ORIGINS: http://localhost:8080
       DAI_JUDGE_HOST_WORK_DIR: ${{ github.workspace }}/judge-work
+      DAI_ENV_BASE_IMAGE: python:3.12-slim@sha256:0000000000000000000000000000000000000000000000000000000000000000
     defaults:
       run:
         working-directory: frontend
@@ -175,12 +176,25 @@ jobs:
         run: |
           npm ci
           npx playwright install chromium --with-deps
-      - name: 启动全栈服务
+      - name: 构建判题镜像
         run: |
           cd ..
           mkdir -p judge-work
           docker build -t dai-judge-python:latest backend/docker/judge
           docker build -t dai-kernel-python:latest backend/docker/kernel
+      - name: 启动数据库与缓存
+        run: |
+          cd ..
+          docker compose -f docker-compose.prod.yml up -d --wait mysql redis
+      - name: 空库两步迁移（TASK-016）
+        run: |
+          cd ..
+          docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade b4c5d6e7f890
+          docker compose -f docker-compose.prod.yml run --rm migrate python /scripts/seed-basic-environment-mysql.py
+          docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade head
+      - name: 启动全栈服务
+        run: |
+          cd ..
           docker compose -f docker-compose.prod.yml up -d --wait
           docker compose -f docker-compose.prod.yml exec -T api python - < scripts/seed_e2e.py
       - name: 运行 E2E 测试
@@ -194,17 +208,26 @@ jobs:
   docker-smoke:
     name: Docker Compose 冒烟测试
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     needs: [backend-test-sqlite, frontend-test]
     env:
       DAI_ENVIRONMENT: production
       DAI_SECRET_KEY: ci-smoke-secret-key
       DAI_CORS_ORIGINS: https://example.com
       DAI_JUDGE_HOST_WORK_DIR: ${{ github.workspace }}/judge-work
+      DAI_ENV_BASE_IMAGE: python:3.12-slim@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      DAI_DB_PASSWORD: ci-smoke-db-password
     steps:
       - uses: actions/checkout@v4
       - name: 验证 Compose 配置
         run: docker compose -f docker-compose.prod.yml config -q
+      - name: 启动数据库与缓存
+        run: docker compose -f docker-compose.prod.yml up -d --wait mysql redis
+      - name: 空库两步迁移（TASK-016）
+        run: |
+          docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade b4c5d6e7f890
+          docker compose -f docker-compose.prod.yml run --rm migrate python /scripts/seed-basic-environment-mysql.py
+          docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade head
       - name: 启动服务
         run: |
           mkdir -p judge-work
