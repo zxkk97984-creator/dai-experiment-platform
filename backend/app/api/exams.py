@@ -29,6 +29,18 @@ def require_exam(exam_id: int, db: Session) -> Exam:
     return exam
 
 
+def _with_submission_aliases(session: dict) -> dict:
+    """兼容旧客户端的顶层提交字段，并以规范化后的嵌套值为唯一来源。"""
+    submission = session.get("submission") or {}
+    session.update({
+        "id": submission.get("id"),
+        "status": submission.get("status"),
+        "expires_at": submission.get("expires_at"),
+        "score": submission.get("score"),
+    })
+    return session
+
+
 def _submitted_ids(db: Session, exams: list[Exam], student_id: int) -> set[int]:
     """批量计算学生已提交的考试 id 集合，避免逐考试 N+1 查询。
 
@@ -259,15 +271,7 @@ def get_exam_session(
     exam = require_exam(exam_id, db)
     if exam.status != "published" or not can_access_course_content(exam.course, current_user, db):
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布或无权参加")
-    session = build_student_exam_session(exam, current_user, db)
-    submission = session.get("submission") or {}
-    session.update({
-        "id": submission.get("id"),
-        "status": submission.get("status"),
-        "expires_at": submission.get("expires_at"),
-        "score": submission.get("score"),
-    })
-    return session
+    return _with_submission_aliases(build_student_exam_session(exam, current_user, db))
 
 
 @router.post(
@@ -377,10 +381,8 @@ def start_exam(
         if exam.end_at is not None and as_utc(exam.end_at) <= now:
             raise api_error(403, "EXAM_EXPIRED", "考试已结束")
 
-    submission = svc_start_exam(exam, current_user, db)
-    session = build_student_exam_session(exam, current_user, db)
-    session.update({"id": submission.id, "status": submission.status, "expires_at": submission.expires_at, "score": None})
-    return session
+    svc_start_exam(exam, current_user, db)
+    return _with_submission_aliases(build_student_exam_session(exam, current_user, db))
 
 
 @router.post("/{exam_id}/submit", response_model=ExamSessionRead, status_code=status.HTTP_201_CREATED)
@@ -406,13 +408,9 @@ def submit_exam(
         raise api_error(403, "EXAM_NOT_STARTED", "请先开始考试")
     # 幂等：重复提交返回当前状态，不报错（review_required 不自动重试）
     if sub.status in ("submitted", "grading", "graded", "review_required"):
-        session = build_student_exam_session(exam, current_user, db)
-        session.update({"id": sub.id, "status": sub.status, "expires_at": sub.expires_at, "score": session.get("submission", {}).get("score")})
-        return session
-    submission = svc_submit_exam(exam, current_user, db)
-    session = build_student_exam_session(exam, current_user, db)
-    session.update({"id": submission.id, "status": submission.status, "expires_at": submission.expires_at, "score": session.get("submission", {}).get("score")})
-    return session
+        return _with_submission_aliases(build_student_exam_session(exam, current_user, db))
+    svc_submit_exam(exam, current_user, db)
+    return _with_submission_aliases(build_student_exam_session(exam, current_user, db))
 
 
 @router.post("/{exam_id}/submissions/{submission_id}/retry", response_model=ExamSubmissionRead)

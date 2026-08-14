@@ -633,10 +633,12 @@ def build_student_exam_session(exam: Exam, student: User, db: Session) -> dict:
             "status": submission.status,
             "score": submission.score if score_visible else None,
             "score_visible": score_visible,
-            "started_at": submission.started_at,
-            "expires_at": submission.expires_at,
-            "last_saved_at": submission.last_saved_at,
-            "submitted_at": submission.submitted_at,
+            # MySQL 的 DATETIME 会丢失 tzinfo；API 边界必须恢复 UTC 标识，
+            # 否则浏览器会按本地时区解析并导致倒计时提前归零。
+            "started_at": as_utc(submission.started_at),
+            "expires_at": as_utc(submission.expires_at),
+            "last_saved_at": as_utc(submission.last_saved_at),
+            "submitted_at": as_utc(submission.submitted_at),
             "submission_reason": submission.submission_reason,
             "review_reason": submission.review_reason,
         }

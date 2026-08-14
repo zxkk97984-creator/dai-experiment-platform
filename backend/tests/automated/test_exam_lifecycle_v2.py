@@ -72,7 +72,12 @@ def test_late_entry_receives_full_duration_not_global_window_cap(client, db_sess
     before = utc_now()
     started = client.post(f"{API}/exams/{ctx['exam_id']}/start", headers=auth_header(ctx["student"]))
     assert started.status_code == 201, started.text
-    expires = as_utc(datetime.fromisoformat(started.json()["expires_at"]))
+    payload = started.json()
+    expires_raw = datetime.fromisoformat(payload["expires_at"])
+    nested_expires_raw = datetime.fromisoformat(payload["submission"]["expires_at"])
+    assert expires_raw.tzinfo is not None
+    assert nested_expires_raw.tzinfo is not None
+    expires = as_utc(expires_raw)
     assert expires >= before + timedelta(minutes=59, seconds=50)
 
 

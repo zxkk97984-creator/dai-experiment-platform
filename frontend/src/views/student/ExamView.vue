@@ -56,10 +56,17 @@ const { nowMs, calibrate } = useServerClock(async () => {
   return response.data.server_now
 })
 
+function parseServerTimestamp(value) {
+  if (!value) return Number.NaN
+  const raw = String(value)
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw) ? raw : `${raw}Z`
+  return Date.parse(normalized)
+}
+
 const attemptExpiresAt = computed(() => submission.value?.expires_at || session.value?.expires_at || null)
 const secondsLeft = computed(() => {
   if (!active.value) return 0
-  const expiresMs = new Date(attemptExpiresAt.value).getTime()
+  const expiresMs = parseServerTimestamp(attemptExpiresAt.value)
   if (!Number.isFinite(expiresMs) || !nowMs.value) return null
   return Math.max(0, Math.ceil((expiresMs - nowMs.value) / 1000))
 })

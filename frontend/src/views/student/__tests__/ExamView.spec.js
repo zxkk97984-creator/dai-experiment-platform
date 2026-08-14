@@ -130,6 +130,15 @@ describe('ExamView 安全状态与结果展示', () => {
     wrapper.unmount()
   })
 
+  it('把后端无时区的考试截止时间按 UTC 解析', async () => {
+    vi.useFakeTimers()
+    const wrapper = await mountExam('started', {
+      submission: { expires_at: '2026-08-12T04:10:00' },
+    })
+    expect(wrapper.get('.timer strong').text()).toBe('00:10:00')
+    wrapper.unmount()
+  })
+
   it('starter code 不算已完成，运行当前版本后才标记编程题完成', async () => {
     const wrapper = await mountExam('started')
     const codeNav = wrapper.get('.exam-sidebar nav button:nth-child(3)')
