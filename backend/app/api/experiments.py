@@ -228,8 +228,11 @@ def list_student_module_catalog(
     total = db.scalar(count_query) or 0
 
     if sort == "recent_desc":
+        # 跨方言排序：MySQL 8 不支持 NULLS LAST（1064），用 CASE 排序键实现同一语义——
+        # 有学习记录的在前（键 0）、从未学过的（updated_at 为 NULL）沉底（键 1）。
         base_query = base_query.order_by(
-            ExperimentRecord.updated_at.desc().nullslast(),
+            case((ExperimentRecord.updated_at.is_(None), 1), else_=0),
+            ExperimentRecord.updated_at.desc(),
             ExperimentModule.id.asc(),
         )
     elif sort == "name_asc":

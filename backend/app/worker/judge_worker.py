@@ -41,6 +41,19 @@ def _make_work_dir(root: Path, prefix: str):
     return workdir, lambda: _shutil.rmtree(workdir, ignore_errors=True)
 
 
+def _settings_path_or_none(value):
+    """把设置项安全转成 Path：仅接受非空 str/os.PathLike，其余返回 None。
+
+    防再犯：os.fspath(MagicMock) 在 Python 3.12+ 返回 'MagicMock/mock.xxx/<id>'
+    这类伪路径，误传 mock settings 会在仓库根下递归建垃圾目录；
+    返回 None 让调用方回退到 TemporaryDirectory。
+    """
+    if not isinstance(value, (str, os.PathLike)):
+        return None
+    text = os.fspath(value)
+    return Path(text) if text else None
+
+
 def _get_timeout(question: JudgeQuestion, settings: Settings) -> int:
     raw = max(question.time_limit_ms, 1)
     return max(min(math.ceil(raw / 1000), settings.judge_timeout_seconds), 1)
@@ -570,8 +583,8 @@ def process_submission(db: Session, redis_client, settings: Settings, submission
         submission.status = "running"
         db.commit()
 
-        _work_root = Path(settings.judge_work_dir) if settings.judge_work_dir else None
-        _host_root = Path(settings.judge_host_work_dir) if settings.judge_host_work_dir else None
+        _work_root = _settings_path_or_none(settings.judge_work_dir)
+        _host_root = _settings_path_or_none(settings.judge_host_work_dir)
         _cleanup = None
         try:
             if _work_root:
@@ -648,8 +661,8 @@ def process_exam_answer(db: Session, redis_client, settings: Settings, answer_id
             _maybe_finalize_exam(answer.submission_id, db)
             return answer
 
-        _work_root = Path(settings.judge_work_dir) if settings.judge_work_dir else None
-        _host_root = Path(settings.judge_host_work_dir) if settings.judge_host_work_dir else None
+        _work_root = _settings_path_or_none(settings.judge_work_dir)
+        _host_root = _settings_path_or_none(settings.judge_host_work_dir)
         _cleanup = None
         try:
             if _work_root:
