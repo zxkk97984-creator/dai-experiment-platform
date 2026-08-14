@@ -1,7 +1,12 @@
-"""第五轮——真实 SQLite API 测试：教师 grades 查询 + 状态机修复"""
+"""第五轮——真实 SQLite API 测试：教师 grades 查询 + 状态机修复
+
+A/B/C 分类：B 类（最小父行）——submission/rubric 外键经共享工厂建真实父行；
+「关联缺失」fail-closed 场景在真实父行基础上临时绕过外键删除 submission 构造。
+"""
 import pytest
 from datetime import datetime, timezone
-from conftest import create_user, login, auth_header
+from conftest import auth_header, create_user, login, make_course, make_rubric, make_submission
+from sqlalchemy import text
 from app.dependencies import PaginationParams
 from app.models import Assignment, Course, Exam, ExamQuestion, ExamSubmission, ExamAnswer, JudgeQuestion, Submission, CodeGrade, QuestionRubric, User
 
@@ -275,19 +280,39 @@ class TestDetailFailClosed:
 
     def test_detail_denies_missing_submission(self, client, db_session_factory):
         teacher = create_user(db_session_factory, "dfc_t", "teacher")
+        # 教师必须有课程，否则会先命中「无权访问」分支而非「提交记录不存在」
+        make_course(db_session_factory, teacher_username="dfc_t")
+        submission_id = make_submission(db_session_factory)
+        rubric_id = make_rubric(db_session_factory)
 
         with db_session_factory() as db:
-            course = Course(title="CDF", status="published", teacher_id=teacher.id)
-            db.add(course); db.flush()
-            now = datetime.now(timezone.utc)
-            rub = QuestionRubric(judge_question_id=999, version=1, status="locked",
-                                source_hash="a", source_snapshot={}, rubric_json={},
-                                model_name="m", locked_at=now)
-            db.add(rub); db.flush()
-            cg = CodeGrade(submission_id=99999, rubric_id=rub.id, mode="active",
-                          status="completed", functional_score=60)
+            cg = CodeGrade(submission_id=submission_id, rubric_id=rubric_id,
+                           mode="active", status="completed", functional_score=60)
             db.add(cg); db.commit()
             grade_id = cg.id
+
+        # 构造「关联缺失」：删除 submission 行（临时绕过外键，仅用于测试 fail-closed 分支）
+        with db_session_factory() as db:
+            engine = db.get_bind()
+            if engine.dialect.name == "sqlite":
+                raw = engine.raw_connection()
+                try:
+                    cur = raw.cursor()
+                    cur.execute("PRAGMA foreign_keys=OFF")
+                    cur.execute("DELETE FROM submissions WHERE id = ?", (submission_id,))
+                    cur.execute("PRAGMA foreign_keys=ON")
+                    raw.commit()
+                    cur.close()
+                finally:
+                    raw.close()
+            else:
+                with engine.begin() as conn:
+                    conn.exec_driver_sql("SET FOREIGN_KEY_CHECKS=0")
+                    conn.execute(
+                        text("DELETE FROM submissions WHERE id = :sid"),
+                        {"sid": submission_id},
+                    )
+                    conn.exec_driver_sql("SET FOREIGN_KEY_CHECKS=1")
 
         tok, _ = login(client, "dfc_t")
         resp = client.get(

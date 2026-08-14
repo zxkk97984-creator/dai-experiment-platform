@@ -1,15 +1,30 @@
-"""Task 2: AI 评分数据模型测试——legacy 默认、XOR 约束、版本唯一、覆盖不可级联删除"""
+"""Task 2: AI 评分数据模型测试——legacy 默认、XOR 约束、版本唯一、覆盖不可级联删除
+
+A/B/C 分类：B 类（模型约束测试）——经共享工厂建最小真实父行，
+SQLite 外键开启后与 MySQL 一致，约束测试不再被 1452 外键错误抢先触发。
+"""
 import pytest
 from sqlalchemy.exc import IntegrityError
+
+from conftest import (
+    constraint_violation,
+    make_assignment,
+    make_exam,
+    make_judge_question,
+    make_rubric,
+    make_submission,
+    make_teacher,
+)
 
 
 def test_historical_questions_default_to_legacy(db_session_factory):
     """历史题目新建时 grading_mode 默认为 legacy"""
     from app.models import JudgeQuestion
 
+    assignment_id = make_assignment(db_session_factory)
     with db_session_factory() as db:
         question = JudgeQuestion(
-            assignment_id=1,
+            assignment_id=assignment_id,
             title="测试题",
             function_name="solve",
             hidden_tests="def test_x(): assert True",
@@ -24,9 +39,10 @@ def test_new_question_defaults_to_legacy(db_session_factory):
     """新建编程题默认 grading_mode 为 legacy（保持历史兼容）"""
     from app.models import JudgeQuestion
 
+    assignment_id = make_assignment(db_session_factory)
     with db_session_factory() as db:
         question = JudgeQuestion(
-            assignment_id=1,
+            assignment_id=assignment_id,
             title="新题目",
             function_name="solve",
             hidden_tests="def test_x(): assert True",
@@ -40,9 +56,10 @@ def test_exam_question_grading_fields(db_session_factory):
     """考试编程题具备 grading_mode 和相关配置字段"""
     from app.models import ExamQuestion
 
+    exam_id = make_exam(db_session_factory)
     with db_session_factory() as db:
         q = ExamQuestion(
-            exam_id=1,
+            exam_id=exam_id,
             question_type="code",
             prompt="写一个排序函数",
             correct_answer={"test_file": "def test_sort(): pass"},
@@ -71,7 +88,7 @@ def test_rubric_xor_target_required(db_session_factory):
             model_name="deepseek-v4-flash",
         )
         db.add(rubric)
-        with pytest.raises(IntegrityError):
+        with constraint_violation():
             db.flush()
 
 
@@ -79,9 +96,10 @@ def test_rubric_version_unique_per_question(db_session_factory):
     """同一题目内 Rubric 版本号必须唯一"""
     from app.models import QuestionRubric
 
+    question_id = make_judge_question(db_session_factory)
     with db_session_factory() as db:
         r1 = QuestionRubric(
-            judge_question_id=1,
+            judge_question_id=question_id,
             version=1,
             status="draft",
             source_hash="hash1",
@@ -93,7 +111,7 @@ def test_rubric_version_unique_per_question(db_session_factory):
         db.flush()
 
         r2 = QuestionRubric(
-            judge_question_id=1,
+            judge_question_id=question_id,
             version=1,  # 同一题目重复版本
             status="draft",
             source_hash="hash2",
@@ -110,14 +128,15 @@ def test_code_grade_xor_target(db_session_factory):
     """CodeGrade 必须关联 submission_id 或 exam_answer_id 之一"""
     from app.models import CodeGrade
 
+    rubric_id = make_rubric(db_session_factory)
     with db_session_factory() as db:
         grade = CodeGrade(
-            rubric_id=1,
+            rubric_id=rubric_id,
             mode="shadow",
             status="pending",
         )
         db.add(grade)
-        with pytest.raises(IntegrityError):
+        with constraint_violation():
             db.flush()
 
 
@@ -125,10 +144,12 @@ def test_code_grade_unique_per_target(db_session_factory):
     """同一 submission 只允许一份当前 CodeGrade"""
     from app.models import CodeGrade
 
+    submission_id = make_submission(db_session_factory)
+    rubric_id = make_rubric(db_session_factory)
     with db_session_factory() as db:
         cg1 = CodeGrade(
-            submission_id=1,
-            rubric_id=1,
+            submission_id=submission_id,
+            rubric_id=rubric_id,
             mode="shadow",
             status="pending",
         )
@@ -136,8 +157,8 @@ def test_code_grade_unique_per_target(db_session_factory):
         db.flush()
 
         cg2 = CodeGrade(
-            submission_id=1,  # 重复
-            rubric_id=1,
+            submission_id=submission_id,  # 重复
+            rubric_id=rubric_id,
             mode="shadow",
             status="pending",
         )
@@ -150,10 +171,13 @@ def test_override_does_not_cascade_delete_grade(db_session_factory):
     """删除评分主体时覆盖记录不能级联删除"""
     from app.models import CodeGrade, GradeOverride
 
+    submission_id = make_submission(db_session_factory)
+    rubric_id = make_rubric(db_session_factory)
+    teacher = make_teacher(db_session_factory)
     with db_session_factory() as db:
         cg = CodeGrade(
-            submission_id=1,
-            rubric_id=1,
+            submission_id=submission_id,
+            rubric_id=rubric_id,
             mode="shadow",
             status="completed",
             functional_score=54,
@@ -169,7 +193,7 @@ def test_override_does_not_cascade_delete_grade(db_session_factory):
             original_snapshot={"score": 79},
             replacement_snapshot={"score": 85},
             reason="修正算法分",
-            reviewer_id=1,
+            reviewer_id=teacher.id,
         )
         db.add(override)
         db.flush()
@@ -183,9 +207,10 @@ def test_rubric_locked_at_is_nullable(db_session_factory):
     """draft Rubric 的 locked_at 可以为空"""
     from app.models import QuestionRubric
 
+    question_id = make_judge_question(db_session_factory)
     with db_session_factory() as db:
         rubric = QuestionRubric(
-            judge_question_id=1,
+            judge_question_id=question_id,
             version=1,
             status="draft",
             source_hash="hash123",

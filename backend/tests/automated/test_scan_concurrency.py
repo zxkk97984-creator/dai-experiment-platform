@@ -76,34 +76,35 @@ class TestConcurrentJudgeRecovery:
             sub.queued_at = datetime.now(timezone.utc) - timedelta(seconds=300)
             db.commit()
 
-        push_counts = []
         results = []
         barrier = threading.Barrier(2, timeout=5)
         errors = []
+        # patch 栈是进程级的、非线程局部：两线程各自 with patch 同一目标时，
+        # rpush 会随机落到对方 mock 上导致计数错位（MySQL 时序下已复现）。
+        # 改为外层单一 patch + 共享 mock，双线程同时可见。
+        shared_redis = MagicMock()
 
         def do_scan(instance):
             try:
                 with db_session_factory() as db:
-                    with patch("app.services.judge_queue._get_redis") as mock_redis:
-                        mock_r = MagicMock()
-                        mock_redis.return_value = mock_r
-                        barrier.wait()
-                        stats = requeue_stale_jobs(db, job_type="assignment",
-                                                   stale_queued_seconds=120)
-                        results.append((instance, stats))
-                        push_counts.append(mock_r.rpush.call_count)
+                    barrier.wait()
+                    stats = requeue_stale_jobs(db, job_type="assignment",
+                                               stale_queued_seconds=120)
+                    results.append((instance, stats))
             except Exception as e:
                 errors.append((instance, str(e)))
 
-        t1 = threading.Thread(target=do_scan, args=("s1",))
-        t2 = threading.Thread(target=do_scan, args=("s2",))
-        t1.start(); t2.start()
-        t1.join(timeout=10); t2.join(timeout=10)
+        with patch("app.services.judge_queue._get_redis", return_value=shared_redis):
+            t1 = threading.Thread(target=do_scan, args=("s1",))
+            t2 = threading.Thread(target=do_scan, args=("s2",))
+            t1.start(); t2.start()
+            t1.join(timeout=10); t2.join(timeout=10)
 
         assert len(errors) == 0, f"并发恢复出错: {errors}"
         total = sum(s["queued_repushed"] for _, s in results)
         assert total == 1, f"同一轮最多一次重新推送: {results}"
-        assert sum(push_counts) == 1, f"rpush 最多一次: {push_counts}"
+        assert shared_redis.rpush.call_count == 1, \
+            f"rpush 最多一次: {shared_redis.rpush.call_count}"
 
 
 class TestAIFinalizeOnReviewRequired:

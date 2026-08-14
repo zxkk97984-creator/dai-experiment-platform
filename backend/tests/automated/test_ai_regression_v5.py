@@ -1,8 +1,13 @@
-"""Regression coverage for issues found while accepting the sixth review."""
+"""Regression coverage for issues found while accepting the sixth review.
+
+A/B/C 分类：B 类（最小父行）——assignment/exam/student 外键经共享工厂建真实父行。
+"""
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+from conftest import make_assignment, make_exam, make_student
 
 
 def _create_course_and_exam(client, db_session_factory, username: str):
@@ -144,9 +149,11 @@ def test_shadow_assignment_docker_exception_does_not_award_zero(
         "system_errors": [],
     }
 
+    assignment_id = make_assignment(db_session_factory)
+    student = make_student(db_session_factory)
     with db_session_factory() as db:
         question = JudgeQuestion(
-            assignment_id=1,
+            assignment_id=assignment_id,
             title="Shadow question",
             function_name="solve",
             hidden_tests="def test_hidden(): assert True",
@@ -168,7 +175,7 @@ def test_shadow_assignment_docker_exception_does_not_award_zero(
         db.add(rubric)
         submission = Submission(
             question_id=question.id,
-            student_id=1,
+            student_id=student.id,
             code="def solve(): pass",
             status="running",
             grading_status="running",
@@ -219,9 +226,11 @@ def test_shadow_assignment_docker_system_exit_does_not_award_zero(
         "system_errors": [],
     }
 
+    assignment_id = make_assignment(db_session_factory)
+    student = make_student(db_session_factory)
     with db_session_factory() as db:
         question = JudgeQuestion(
-            assignment_id=1,
+            assignment_id=assignment_id,
             title="Shadow question",
             function_name="solve",
             hidden_tests="def test_hidden(): assert True",
@@ -244,7 +253,7 @@ def test_shadow_assignment_docker_system_exit_does_not_award_zero(
         )
         submission = Submission(
             question_id=question.id,
-            student_id=1,
+            student_id=student.id,
             code="def solve(): pass",
             status="running",
             grading_status="running",
@@ -298,9 +307,11 @@ def test_shadow_exam_docker_system_exit_does_not_award_zero(db_session_factory):
         "system_errors": [],
     }
 
+    exam_id = make_exam(db_session_factory)
+    student = make_student(db_session_factory)
     with db_session_factory() as db:
         question = ExamQuestion(
-            exam_id=1,
+            exam_id=exam_id,
             question_type="code",
             prompt="Shadow exam question",
             correct_answer={},
@@ -323,7 +334,7 @@ def test_shadow_exam_docker_system_exit_does_not_award_zero(db_session_factory):
                 locked_at=datetime.now(timezone.utc),
             )
         )
-        exam_submission = ExamSubmission(exam_id=1, student_id=1, status="grading")
+        exam_submission = ExamSubmission(exam_id=exam_id, student_id=student.id, status="grading")
         db.add(exam_submission)
         db.flush()
         answer = ExamAnswer(

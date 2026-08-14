@@ -1,0 +1,9 @@
+# E2E 本地覆盖：仅重映射宿主机端口，避开本机已占用的 3306（dai-mysql 开发库）与 6379（dai-dev-redis）。
+# 用法：docker compose -p dai-e2e-local -f docker-compose.prod.yml -f docker-compose.e2e-local.yml ...
+services:
+  mysql:
+    ports:
+      - "3309:3306"
+  redis:
+    ports:
+      - "6380:6379"

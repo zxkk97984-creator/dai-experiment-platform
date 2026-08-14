@@ -4,6 +4,9 @@
 - 生产 JSON 日志格式的敏感键脱敏
 - /metrics 管理员权限与字段（无提交内容泄露）
 - 中间件状态类别计数 + 路径模板低基数
+
+A/B/C 分类：B 类（最小父行）——CodeGrade 的 submission/rubric 外键经共享工厂
+make_submission / make_rubric 建真实父行。
 """
 import json
 import logging
@@ -169,41 +172,26 @@ def test_middleware_path_template_is_low_cardinality(
 
 
 def test_fail_ai_grade_records_permanent_counter(db_session_factory, redis_client):
-    from app.models import CodeGrade, Course, JudgeQuestion, Assignment, Submission
+    from app.models import CodeGrade
     from app.services.ai_grading_queue import fail_ai_grade
     from app.config import Settings
+    from conftest import make_rubric, make_submission
 
+    submission_id = make_submission(
+        db_session_factory, status="queued", grading_status="queued",
+    )
+    rubric_id = make_rubric(db_session_factory)
     with db_session_factory() as db:
-        from conftest import create_user
-
-        teacher = create_user(db_session_factory, "ops-wt", "teacher")
-        student = create_user(db_session_factory, "ops-ws", "student")
-        course = Course(title="C", status="published", visibility="public",
-                        default_score=100, teacher_id=teacher.id)
-        db.add(course)
-        db.flush()
-        assignment = Assignment(course_id=course.id, title="A", status="published")
-        db.add(assignment)
-        db.flush()
-        question = JudgeQuestion(
-            assignment_id=assignment.id, title="Q", function_name="f",
-            hidden_tests="def test(): pass", grading_mode="active",
-        )
-        db.add(question)
-        db.flush()
-        submission = Submission(
-            question_id=question.id, student_id=student.id, code="x=1",
-            status="queued", grading_status="queued",
-        )
-        db.add(submission)
-        db.flush()
-        grade = CodeGrade(submission_id=submission.id, rubric_id=1,
+        grade = CodeGrade(submission_id=submission_id, rubric_id=rubric_id,
                           mode="active", status="running")
         db.add(grade)
         db.commit()
         grade_id = grade.id
 
     settings = Settings(_env_file=None, ai_enabled=False, ai_api_key="")
-    fail_ai_grade(db_session_factory(), redis_client, grade_id,
-                  "AI 服务未启用", retryable=False, max_attempts=3)
+    # 必须显式关闭 session：泄漏的连接会持有 MySQL 元数据锁，
+    # 导致 teardown 的 DROP TABLE 永久等待（2026-08 MySQL 回归卡死根因）。
+    with db_session_factory() as db:
+        fail_ai_grade(db, redis_client, grade_id,
+                      "AI 服务未启用", retryable=False, max_attempts=3)
     assert op_metrics.read(redis_client, "judge_failures_total", label="permanent") == 1

@@ -54,6 +54,7 @@ class BuildSpec:
     repository: str
     packages: tuple[PackageEntry, ...]  # 已按 pip_name 排序
     kernel_runner_source: str
+    pip_index_url: str | None = None  # 本地开发 pip 镜像源
 
     @property
     def image_tag(self) -> str:
@@ -147,6 +148,7 @@ def canonical_build_spec(
         repository=settings.env_image_repository,
         packages=tuple(entries),
         kernel_runner_source=_load_kernel_runner(),
+        pip_index_url=settings.env_pip_index_url,
     )
 
 
@@ -180,6 +182,8 @@ def render_dockerfile(spec: BuildSpec) -> str:
     - pytorch_cpu 包使用内置官方 CPU wheel index；URL 不来自请求
     - 复制可信 kernel_runner.py；创建 UID 1000 非 root 用户与 /course /work /tmp
     """
+    # 本地开发：国内网络直连 PyPI 不稳定，可通过 settings 指定镜像源（如清华 tuna）
+    _index_opt = f" --index-url {spec.pip_index_url}" if spec.pip_index_url else ""
     lines = [
         "# 自动生成——由服务端 canonical manifest 渲染，请勿手动编辑",
         f"FROM {spec.base_image}",
@@ -187,13 +191,13 @@ def render_dockerfile(spec: BuildSpec) -> str:
         "    PIP_NO_CACHE_DIR=1 \\",
         "    PIP_DISABLE_PIP_VERSION_CHECK=1",
         "# 平台固定运行依赖：ipykernel（Notebook）+ pytest（判题）",
-        f'RUN pip install --no-cache-dir "ipykernel=={IPYKERNEL_VERSION}" "pytest=={PYTEST_VERSION}"',
+        f'RUN pip install --no-cache-dir{_index_opt} "ipykernel=={IPYKERNEL_VERSION}" "pytest=={PYTEST_VERSION}"',
     ]
     pypi_pkgs = [p for p in spec.packages if p.source_key != "pytorch_cpu"]
     torch_pkgs = [p for p in spec.packages if p.source_key == "pytorch_cpu"]
     if pypi_pkgs:
         lines.append("# 档位教学包（精确版本锁定）")
-        lines.append("RUN pip install --no-cache-dir \\")
+        lines.append(f"RUN pip install --no-cache-dir{_index_opt} \\")
         for i, entry in enumerate(pypi_pkgs):
             sep = " \\" if i < len(pypi_pkgs) - 1 else ""
             lines.append(f"    {_pip_requirement(entry)}{sep}")

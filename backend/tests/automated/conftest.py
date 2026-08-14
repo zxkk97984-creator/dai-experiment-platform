@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 import fakeredis
+from sqlalchemy import text
 
 ROOT = Path(__file__).resolve().parents[2]
 PYTEST_TEMP_ROOT = ROOT / ".pytest-temp-root"
@@ -61,6 +62,13 @@ def db_session_factory(test_settings):
     try:
         yield SessionLocal
     finally:
+        # notebook_templates.current_version_id ↔ notebook_template_versions 是
+        # use_alter 循环外键：外键开启后 drop_all 按依赖序先删 versions，会被
+        # templates 的引用卡死（SQLite/MySQL 同病）。先清空引用再删表（方言无关）。
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE notebook_templates SET current_version_id = NULL")
+            )
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
 
@@ -259,5 +267,364 @@ def login(client, username, password="Passw0rd!"):
     return data["access_token"], refresh_token
 
 
+def constraint_violation():
+    """跨方言捕获 CHECK 约束违反。
+
+    SQLite 抛 sqlalchemy.exc.IntegrityError；MySQL 8 对 CHECK 违反抛
+    OperationalError(3819)。约束语义测试统一用本 helper 断言。
+    """
+    from sqlalchemy.exc import IntegrityError, OperationalError
+
+    return pytest.raises((IntegrityError, OperationalError))
+
+
 def auth_header(token):
     return {"Authorization": f"Bearer {token}"}
+
+
+# ═══════════════════════════════════════════════════════════
+# 共享领域工厂（A/B/C 分类法）
+#
+#  SQLite 测试引擎已开启外键（PRAGMA foreign_keys=ON，与 MySQL 对齐），
+#  任何插入都必须有真实父行。测试按需分三类：
+#   · C 类：纯校验/无 DB——不使用工厂；
+#   · B 类：最小父行——单个工厂（如 make_judge_question）；
+#   · A 类：完整领域图——组合工厂（如 make_submission 级联建全链）。
+#  修复外键违规时一律使用本层工厂，禁止在测试里散装硬编码父 ID。
+# ═══════════════════════════════════════════════════════════
+
+
+def get_or_create_user(db_session_factory, username, role, password="Passw0rd!"):
+    """幂等建用户：存在即复用。工厂组合时避免默认用户名重复创建冲突。"""
+    with db_session_factory() as db:
+        existing = db.query(User).filter(User.username == username).first()
+        if existing is not None:
+            return existing
+        user = User(
+            username=username,
+            real_name=username,
+            role=role,
+            status="active",
+            password_hash=hash_password(password),
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user
+
+
+def make_teacher(db_session_factory, username="teacher"):
+    """B 类：教师用户（幂等）"""
+    return get_or_create_user(db_session_factory, username, "teacher")
+
+
+def make_student(db_session_factory, username="student"):
+    """B 类：学生用户（幂等）"""
+    return get_or_create_user(db_session_factory, username, "student")
+
+
+def make_course(db_session_factory, *, teacher_username="teacher",
+                title="测试课程", status="published", **kwargs):
+    """B 类：课程（含教师，幂等）"""
+    get_or_create_user(db_session_factory, teacher_username, "teacher")
+    return create_course_db(
+        db_session_factory,
+        teacher_username=teacher_username,
+        title=title,
+        status=status,
+        **kwargs,
+    )
+
+
+def make_assignment(db_session_factory, *, course_id=None,
+                    teacher_username="teacher", title="测试作业",
+                    status="published", **kwargs):
+    """A 类：作业（无 course_id 时级联建课程）"""
+    if course_id is None:
+        course_id = make_course(db_session_factory, teacher_username=teacher_username)
+    get_or_create_user(db_session_factory, teacher_username, "teacher")
+    return create_assignment_db(
+        db_session_factory,
+        course_id=course_id,
+        teacher_username=teacher_username,
+        title=title,
+        status=status,
+        **kwargs,
+    )
+
+
+def make_judge_question(db_session_factory, *, assignment_id=None,
+                        title="测试题目", function_name="solve", **kwargs):
+    """A 类：判题题目（无 assignment_id 时级联建作业→课程→教师）"""
+    from app.models import JudgeQuestion
+
+    if assignment_id is None:
+        assignment_id = make_assignment(db_session_factory)
+    with db_session_factory() as db:
+        question = JudgeQuestion(
+            assignment_id=assignment_id,
+            title=title,
+            function_name=function_name,
+            hidden_tests=kwargs.pop("hidden_tests", "assert True"),
+            **kwargs,
+        )
+        db.add(question)
+        db.commit()
+        db.refresh(question)
+        return question.id
+
+
+def make_submission(db_session_factory, *, question_id=None,
+                    student_username="student", code="def solve():\n    return 0",
+                    **kwargs):
+    """A 类：作业提交（级联建题目→作业→课程→教师 + 学生）"""
+    from app.models import Submission
+
+    if question_id is None:
+        question_id = make_judge_question(db_session_factory)
+    student = get_or_create_user(db_session_factory, student_username, "student")
+    with db_session_factory() as db:
+        submission = Submission(
+            question_id=question_id,
+            student_id=student.id,
+            code=code,
+            **kwargs,
+        )
+        db.add(submission)
+        db.commit()
+        db.refresh(submission)
+        return submission.id
+
+
+def make_rubric(db_session_factory, *, judge_question_id=None,
+                exam_question_id=None, version=1, status="draft",
+                source_hash="a" * 64, **kwargs):
+    """A 类：题目 Rubric（judge_question_id/exam_question_id 二选一）"""
+    from app.models import QuestionRubric
+
+    if judge_question_id is None and exam_question_id is None:
+        judge_question_id = make_judge_question(db_session_factory)
+    with db_session_factory() as db:
+        rubric = QuestionRubric(
+            judge_question_id=judge_question_id,
+            exam_question_id=exam_question_id,
+            version=version,
+            status=status,
+            source_hash=source_hash,
+            source_snapshot=kwargs.pop("source_snapshot", {}),
+            rubric_json=kwargs.pop("rubric_json", {}),
+            model_name=kwargs.pop("model_name", "test-model"),
+            **kwargs,
+        )
+        db.add(rubric)
+        db.commit()
+        db.refresh(rubric)
+        return rubric.id
+
+
+def make_code_grade(db_session_factory, *, submission_id=None, rubric_id=None,
+                    mode="shadow", **kwargs):
+    """A 类：AI 评分记录（级联建提交链 + rubric）"""
+    from app.models import CodeGrade
+
+    if submission_id is None:
+        submission_id = make_submission(db_session_factory)
+    if rubric_id is None:
+        rubric_id = make_rubric(db_session_factory)
+    with db_session_factory() as db:
+        grade = CodeGrade(
+            submission_id=submission_id,
+            rubric_id=rubric_id,
+            mode=mode,
+            **kwargs,
+        )
+        db.add(grade)
+        db.commit()
+        db.refresh(grade)
+        return grade.id
+
+
+def make_exam(db_session_factory, *, course_id=None, title="测试考试",
+              status="published", **kwargs):
+    """A 类：考试（无 course_id 时级联建课程）"""
+    from app.models import Exam
+
+    if course_id is None:
+        course_id = make_course(db_session_factory)
+    with db_session_factory() as db:
+        exam = Exam(course_id=course_id, title=title, status=status, **kwargs)
+        db.add(exam)
+        db.commit()
+        db.refresh(exam)
+        return exam.id
+
+
+def make_exam_question(db_session_factory, *, exam_id=None, prompt="测试题",
+                       points=10, **kwargs):
+    """A 类：考试题（无 exam_id 时级联建考试→课程）"""
+    from app.models import ExamQuestion
+
+    if exam_id is None:
+        exam_id = make_exam(db_session_factory)
+    with db_session_factory() as db:
+        question = ExamQuestion(
+            exam_id=exam_id,
+            question_type=kwargs.pop("question_type", "code"),
+            prompt=prompt,
+            correct_answer=kwargs.pop("correct_answer", {}),
+            points=points,
+            **kwargs,
+        )
+        db.add(question)
+        db.commit()
+        db.refresh(question)
+        return question.id
+
+
+def make_exam_submission(db_session_factory, *, exam_id=None,
+                         student_username="student", status="grading", **kwargs):
+    """A 类：考试提交（级联建考试→课程 + 学生）"""
+    from app.models import ExamSubmission
+
+    if exam_id is None:
+        exam_id = make_exam(db_session_factory)
+    student = get_or_create_user(db_session_factory, student_username, "student")
+    with db_session_factory() as db:
+        submission = ExamSubmission(
+            exam_id=exam_id,
+            student_id=student.id,
+            status=status,
+            **kwargs,
+        )
+        db.add(submission)
+        db.commit()
+        db.refresh(submission)
+        return submission.id
+
+
+def make_exam_answer(db_session_factory, *, submission_id=None, question_id=None,
+                     code_answer="def solve():\n    return 0", **kwargs):
+    """A 类：考试答题（级联建提交/题目链 + 学生）"""
+    from app.models import ExamAnswer
+
+    if submission_id is None:
+        submission_id = make_exam_submission(db_session_factory)
+    if question_id is None:
+        question_id = make_exam_question(db_session_factory)
+    with db_session_factory() as db:
+        answer = ExamAnswer(
+            submission_id=submission_id,
+            question_id=question_id,
+            code_answer=code_answer,
+            **kwargs,
+        )
+        db.add(answer)
+        db.commit()
+        db.refresh(answer)
+        return answer.id
+
+
+def make_exam_chain(db_session_factory, *, student_username="student"):
+    """A 类：考试全链路（exam→question→submission→answer），返回各 id 字典"""
+    exam_id = make_exam(db_session_factory)
+    question_id = make_exam_question(db_session_factory, exam_id=exam_id)
+    submission_id = make_exam_submission(
+        db_session_factory, exam_id=exam_id, student_username=student_username
+    )
+    answer_id = make_exam_answer(
+        db_session_factory, submission_id=submission_id, question_id=question_id
+    )
+    return {
+        "exam_id": exam_id,
+        "question_id": question_id,
+        "submission_id": submission_id,
+        "answer_id": answer_id,
+    }
+
+
+def make_chapter(db_session_factory, *, course_id=None, title="测试章节", **kwargs):
+    """A 类：章节（无 course_id 时级联建课程）"""
+    from app.models import Chapter
+
+    if course_id is None:
+        course_id = make_course(db_session_factory)
+    with db_session_factory() as db:
+        chapter = Chapter(course_id=course_id, title=title, **kwargs)
+        db.add(chapter)
+        db.commit()
+        db.refresh(chapter)
+        return chapter.id
+
+
+def make_lesson(db_session_factory, *, chapter_id=None, title="测试课时", **kwargs):
+    """A 类：课时（无 chapter_id 时级联建章节→课程）"""
+    from app.models import Lesson
+
+    if chapter_id is None:
+        chapter_id = make_chapter(db_session_factory)
+    with db_session_factory() as db:
+        lesson = Lesson(chapter_id=chapter_id, title=title, **kwargs)
+        db.add(lesson)
+        db.commit()
+        db.refresh(lesson)
+        return lesson.id
+
+
+def make_experiment_module(db_session_factory, *, name="测试实验模块",
+                           owner_username="teacher", **kwargs):
+    """B 类：实验模块（owner 教师可空但默认建教师）"""
+    from app.models import ExperimentModule
+
+    owner = get_or_create_user(db_session_factory, owner_username, "teacher")
+    with db_session_factory() as db:
+        module = ExperimentModule(
+            name=name,
+            owner_id=owner.id,
+            status=kwargs.pop("status", "published"),
+            **kwargs,
+        )
+        db.add(module)
+        db.commit()
+        db.refresh(module)
+        return module.id
+
+
+def make_notebook_template(db_session_factory, *, name="测试模板",
+                           owner_username="teacher", **kwargs):
+    """B 类：实验模板（owner 教师）"""
+    from app.models import NotebookTemplate
+
+    owner = get_or_create_user(db_session_factory, owner_username, "teacher")
+    with db_session_factory() as db:
+        template = NotebookTemplate(
+            name=name,
+            owner_id=owner.id,
+            **kwargs,
+        )
+        db.add(template)
+        db.commit()
+        db.refresh(template)
+        return template.id
+
+
+def make_template_version(db_session_factory, *, template_id=None,
+                          published_by_username="teacher", version_number=1,
+                          **kwargs):
+    """A 类：模板不可变版本（级联建模板 + 发布者；依赖 auto-seed 的 basic 环境）"""
+    from app.models import NotebookTemplateVersion
+
+    if template_id is None:
+        template_id = make_notebook_template(db_session_factory)
+    publisher = get_or_create_user(db_session_factory, published_by_username, "teacher")
+    with db_session_factory() as db:
+        version = NotebookTemplateVersion(
+            template_id=template_id,
+            version_number=version_number,
+            sha256=kwargs.pop("sha256", "b" * 64),
+            published_by_id=publisher.id,
+            **kwargs,
+        )
+        db.add(version)
+        db.commit()
+        db.refresh(version)
+        return version.id

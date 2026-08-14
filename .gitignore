@@ -49,6 +49,10 @@ teacher-grading-detail-*.png
 /*-current.jpg
 *.png
 
+# 测试误用 mock settings 产生的伪路径垃圾目录（根因已修，防再入库）
+MagicMock/
+.pytest-temp-root/
+
 # 临时计划文件
 .pt-tmp/
 

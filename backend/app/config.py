@@ -149,6 +149,8 @@ class Settings(BaseSettings):
     env_image_repository: str = "dai-env"
     env_base_image: str = "python:3.12-slim"
     env_build_log_max_bytes: int = Field(default=60 * 1024, ge=1024, le=1024 * 1024)
+    # 本地开发：pip 镜像源（国内网络直连 PyPI 不稳定；构建环境镜像时注入 --index-url）
+    env_pip_index_url: str | None = None
 
 
 @lru_cache

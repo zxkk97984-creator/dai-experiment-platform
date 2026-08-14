@@ -479,14 +479,17 @@ def test_fail_ai_grade_does_not_override_completed(db_session_factory):
 def test_process_submission_unknown_exception_triggers_fail_job(db_session_factory):
     """process_submission 内部未知异常 → fail_job 退回 pending"""
     from app.worker.judge_worker import process_submission
-    from app.config import get_settings
+    from app.config import Settings
 
     sid = _setup_submission(db_session_factory)
-    settings = MagicMock()
-    settings.judge_timeout_seconds = 30
-    settings.judge_memory_limit_mb = 256
-    settings.judge_cpu_limit = 1.0
-    settings.judge_image = "dai-judge"
+    # 使用真实 Settings 而非 MagicMock：os.fspath(MagicMock) 会返回
+    # 'MagicMock/mock.judge_work_dir/<id>' 伪路径并在仓库根生成垃圾目录。
+    settings = Settings(
+        _env_file=None,
+        judge_use_docker=False,
+        judge_timeout_seconds=5,
+        judge_work_dir="",  # 空 → 回退 TemporaryDirectory
+    )
 
     with db_session_factory() as db:
         enqueue_job(db, job_type="assignment", object_id=sid)
@@ -501,6 +504,30 @@ def test_process_submission_unknown_exception_triggers_fail_job(db_session_facto
         sub = db.get(Submission, sid)
         assert sub.grading_status == "pending", f"未知异常应退回 pending: {sub.grading_status}"
         assert sub.last_error is not None, "应记录错误信息"
+
+
+def test_mock_settings_do_not_create_magicmock_workdirs(db_session_factory):
+    """回归：误传 MagicMock settings 时工作目录必须回退临时目录，
+    不得在仓库根生成 MagicMock/mock.judge_work_dir/<id> 垃圾目录。"""
+    from app.worker.judge_worker import process_submission
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2].parent
+    marker = repo_root / "MagicMock"
+    before = len(list(marker.rglob("*"))) if marker.exists() else 0
+
+    sid = _setup_submission(db_session_factory)
+    settings = MagicMock()
+    with db_session_factory() as db:
+        enqueue_job(db, job_type="assignment", object_id=sid)
+    with db_session_factory() as db:
+        with patch("app.worker.judge_worker._write_submission_files",
+                   side_effect=RuntimeError("模拟未知异常")):
+            process_submission(db, MagicMock(), settings, sid)
+
+    after = len(list(marker.rglob("*"))) if marker.exists() else 0
+    assert after == before, \
+        f"MagicMock settings 不得生成工作目录垃圾（{before} -> {after}）"
 
 
 def test_process_exam_answer_unknown_exception_triggers_fail_job(db_session_factory):

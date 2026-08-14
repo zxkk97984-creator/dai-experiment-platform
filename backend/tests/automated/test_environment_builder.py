@@ -150,7 +150,6 @@ def test_dockerfile_rendering_rules(db_session_factory, test_settings):
         _link_packages(db, ver.id, [pkg.id])
         spec = canonical_build_spec(ver.base_image_ref, prof.slug, ver.version_number, [pkg], test_settings)
         dockerfile = render_dockerfile(spec)
-
     # FROM 只能来自配置基础镜像（不可由请求注入）
     assert "FROM python:3.12-slim" in dockerfile
     # 平台固定依赖
@@ -168,6 +167,28 @@ def test_dockerfile_rendering_rules(db_session_factory, test_settings):
     assert "test -s /opt/dai/kernel_runner.py" in dockerfile
     # 无任意安装命令输入面：不得出现裸 pip install 之外的 argv 注入
     assert "--index-url https://download.pytorch.org/whl/cpu" not in dockerfile  # basic 无 torch
+
+
+def test_dockerfile_pip_index_url_injection(db_session_factory, test_settings):
+    """env_pip_index_url 配置时注入镜像源；默认不注入任何自定义 index-url。"""
+    with db_session_factory() as db:
+        prof = _make_profile(db, slug="basic")
+        ver = _make_version(db, prof.id)
+        pkg = _make_package(db, 1, name="numpy", version="2.1.3")
+        _link_packages(db, ver.id, [pkg.id])
+
+        # 显式置空：本地 .env 可能配置了 DAI_ENV_PIP_INDEX_URL，测试需确定性
+        unset_settings = test_settings.model_copy(update={"env_pip_index_url": None})
+        default_spec = canonical_build_spec(ver.base_image_ref, prof.slug, ver.version_number, [pkg], unset_settings)
+        default_dockerfile = render_dockerfile(default_spec)
+        assert "--index-url https://pypi.tuna.tsinghua.edu.cn/simple" not in default_dockerfile
+
+        mirrored = test_settings.model_copy(
+            update={"env_pip_index_url": "https://pypi.tuna.tsinghua.edu.cn/simple"}
+        )
+        spec = canonical_build_spec(ver.base_image_ref, prof.slug, ver.version_number, [pkg], mirrored)
+        dockerfile = render_dockerfile(spec)
+        assert "--index-url https://pypi.tuna.tsinghua.edu.cn/simple" in dockerfile
 
 
 def test_dockerfile_pytorch_cpu_uses_builtin_index(db_session_factory, test_settings):

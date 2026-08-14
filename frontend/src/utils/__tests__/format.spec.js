@@ -14,14 +14,23 @@ describe('formatDateTime', () => {
     expect(formatDateTime('2026-13-99')).toBe('—')
   })
 
+  // 时区无关断言（2026-08 修复 CI 红灯）：
+  // formatDateTime 按浏览器本地时区渲染，CI runner 是 UTC、开发机是 UTC+8，
+  // 直接断言某台机器的墙钟会随 TZ 漂移。改为断言「同一瞬间的不同时区表示
+  // 必须渲染成同一个字符串」+ 不受 TZ 影响的形状（分钟/秒不受时区偏移改变）。
   it('输出 2026-08-10 08:30 样式', () => {
-    expect(formatDateTime('2026-08-10T08:30:00+08:00')).toBe('2026-08-10 08:30')
+    const fromUtc = formatDateTime('2026-08-10T00:30:00Z')
+    const fromOffset = formatDateTime('2026-08-10T08:30:00+08:00')
+    expect(fromUtc).toBe(fromOffset)
+    expect(fromUtc).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:30$/)
   })
 
   it('seconds 选项开启时包含秒', () => {
-    expect(formatDateTime('2026-08-10T08:00:30+08:00', { seconds: true })).toMatch(/30/)
-    expect(formatDateTime('2026-08-10T08:00:30+08:00', { seconds: true })).toBe('2026-08-10 08:00:30')
-    expect(formatDateTime('2026-08-10T08:00:30+08:00')).not.toMatch(/30/)
+    const withSeconds = formatDateTime('2026-08-10T08:00:30+08:00', { seconds: true })
+    const utcWithSeconds = formatDateTime('2026-08-10T00:00:30Z', { seconds: true })
+    expect(withSeconds).toBe(utcWithSeconds)
+    expect(withSeconds).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:30$/)
+    expect(formatDateTime('2026-08-10T08:00:30+08:00')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
   })
 })
 

@@ -1,0 +1,26 @@
+diff --git a/backend/.dockerignore b/backend/.dockerignore
+index 386a5da..9089f86 100644
+--- a/backend/.dockerignore
++++ b/backend/.dockerignore
+@@ -1,3 +1,12 @@
++# 本地环境与凭据（示例配置保留，实际 .env 严禁进入构建上下文）
++.env
++.env.*
++!.env.example
++
++# 业务存储与教学内容（运行时由命名卷挂载，本地数据不进入镜像）
++storage/
++lesson_content/
++
+ # pytest 临时文件
+ .pytest-tmp
+ .pt-tmp
+@@ -24,3 +33,8 @@ build
+ # 测试报告
+ htmlcov
+ .coverage
++
++# 日志与缓存
++*.log
++*.pid
++.ruff_cache
