@@ -44,8 +44,8 @@ jobs:
   backend-test-mysql:
     name: 后端 pytest (MySQL)
     runs-on: ubuntu-latest
-    # 本地实测全套约 27 分钟，20 分钟会被 timeout 取消
-    timeout-minutes: 40
+    # 本地实测约 30 分钟；CI runner 更慢（2026-08 实测 40 分钟跑到 93% 被取消）
+    timeout-minutes: 60
     services:
       mysql:
         image: mysql:8.0
