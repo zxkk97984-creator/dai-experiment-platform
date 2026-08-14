@@ -440,3 +440,29 @@ def update_question(
     db.commit()
     db.refresh(question)
     return question
+
+
+@router.delete("/{assignment_id}/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_question(
+    assignment_id: int,
+    question_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """删除作业编程题（TASK-017）。
+
+    仅无任何提交的 draft 作业允许删除（已发布/有提交 → 409，复用评分可编辑守卫）；
+    同一事务清理题目从属 Rubric 数据，不级联删除提交/成绩（守卫保证本路径无提交记录）。
+    """
+    assignment = require_assignment(assignment_id, db)
+    ensure_assignment_manager(assignment, current_user, db)
+    ensure_scoring_editable(db, assignment)
+    question = db.get(JudgeQuestion, question_id)
+    if not question or question.assignment_id != assignment_id:
+        raise api_error(404, "QUESTION_NOT_FOUND", "题目不存在或不属于该作业")
+    db.execute(
+        delete(QuestionRubric).where(QuestionRubric.judge_question_id == question_id)
+    )
+    db.delete(question)
+    db.commit()
+    return None

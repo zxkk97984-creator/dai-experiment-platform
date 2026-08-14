@@ -34,6 +34,7 @@ vi.mock('../../../api/assignments', () => ({
     getQuestions: vi.fn(),
     createQuestion: vi.fn(),
     updateQuestion: vi.fn(),
+    deleteQuestion: vi.fn(),
     update: vi.fn(),
     publish: vi.fn(),
   },
@@ -761,5 +762,58 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     await flushPromises()
     expect(assignmentsAPI.createQuestion).toHaveBeenCalled()
     expect(wrapper.text()).toContain('取消')
+  })
+
+  // ══ TASK-017 题目删除 ════════════════════════════════════════════
+  const questionRows = {
+    items: [
+      { id: 42, title: '待删题', function_name: 'add', time_limit_ms: 10000, memory_limit_mb: 256, grading_mode: 'legacy' },
+    ],
+  }
+
+  it('草稿作业题目行显示删除按钮，确认后调用 deleteQuestion 并刷新列表', async () => {
+    assignmentsAPI.getQuestions.mockResolvedValue({ data: questionRows })
+    assignmentsAPI.deleteQuestion.mockResolvedValue({})
+    const wrapper = await mountPage()
+    await flushPromises()
+    expect(wrapper.text()).toContain('待删题')
+    await clickBtn(wrapper, '删除')
+    await flushPromises()
+    // 确认弹窗出现
+    const dialog = wrapper.find('.confirm-panel')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('删除题目')
+    expect(dialog.text()).toContain('待删题')
+    await clickBtn(dialog, '确认删除')
+    await flushPromises()
+    expect(assignmentsAPI.deleteQuestion).toHaveBeenCalledWith('7', 42)
+    expect(appStore.showToast).toHaveBeenCalledWith('题目已删除', 'success')
+    // 删除后重新拉取题目列表
+    expect(assignmentsAPI.getQuestions.mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('删除失败时展示后端错误信息', async () => {
+    assignmentsAPI.getQuestions.mockResolvedValue({ data: questionRows })
+    assignmentsAPI.deleteQuestion.mockRejectedValue({
+      response: { data: { detail: { message: '该作业已有学生提交，评分输入与规则不可修改' } } },
+    })
+    const wrapper = await mountPage()
+    await flushPromises()
+    await clickBtn(wrapper, '删除')
+    await flushPromises()
+    await clickBtn(wrapper.find('.confirm-panel'), '确认删除')
+    await flushPromises()
+    expect(appStore.showToast).toHaveBeenCalledWith(
+      '该作业已有学生提交，评分输入与规则不可修改', 'error',
+    )
+  })
+
+  it('已发布作业的题目行不显示删除按钮', async () => {
+    assignmentsAPI.get.mockResolvedValue({ data: { ...assignmentDraft, status: 'published' } })
+    assignmentsAPI.getQuestions.mockResolvedValue({ data: questionRows })
+    const wrapper = await mountPage()
+    await flushPromises()
+    const delBtns = wrapper.findAll('button').filter((b) => b.text().includes('删除'))
+    expect(delBtns.length).toBe(0)
   })
 })

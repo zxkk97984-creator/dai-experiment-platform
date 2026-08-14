@@ -12,4 +12,5 @@ export const assignmentsAPI = {
   createQuestion(assignmentId, data) { return client.post(`/assignments/${assignmentId}/questions`, data) },
   // Phase 4：题目编辑（环境覆盖/import 策略在 QuestionEditView 使用）
   updateQuestion(assignmentId, questionId, data) { return client.patch(`/assignments/${assignmentId}/questions/${questionId}`, data) },
+  deleteQuestion(assignmentId, questionId) { return client.delete(`/assignments/${assignmentId}/questions/${questionId}`) },
 }

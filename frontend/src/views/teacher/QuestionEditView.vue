@@ -417,6 +417,33 @@ function openAiConfig(q) {
  sideTab.value = 'ai'
 }
 
+// ── 删除题目（确认弹窗；仅草稿作业可用，后端 409 兜底） ─────────────
+const deleteTarget = ref(null)
+const deleting = ref(false)
+
+function askDeleteQuestion(q) { deleteTarget.value = q }
+
+async function confirmDeleteQuestion() {
+  if (deleting.value) return
+  deleting.value = true
+  try {
+    await assignmentsAPI.deleteQuestion(route.params.id, deleteTarget.value.id)
+    if (activeId.value === deleteTarget.value.id) {
+      activeId.value = null
+      editingId.value = null
+      resetQuestionForm()
+      runResult.value = null
+    }
+    deleteTarget.value = null
+    app.showToast('题目已删除', 'success')
+    fetch()
+  } catch (e) {
+    app.showToast(e.response?.data?.detail?.message || '删除失败', 'error')
+  } finally {
+    deleting.value = false
+  }
+}
+
 // 运行测试：调用后端 sample-run（该接口仅对学生开放，教师调用会返回 403，
 // 错误如实展示，不做假成功）
 async function runSample() {
@@ -542,6 +569,7 @@ onMounted(() => { fetch(); fetchEnv() })
             </div>
             <div class="qe-list-actions">
               <button v-if="assignmentDraft" class="btn-sm btn-outline" @click="openEdit(q)">编辑</button>
+              <button v-if="assignmentDraft" class="btn-sm btn-outline qe-delete-btn" @click="askDeleteQuestion(q)">删除</button>
               <!-- 收敛：不再行内展开第二个 AIQuestionConfig 实例，统一打开右侧栏 AI tab -->
               <button class="btn-sm btn-outline" @click="openAiConfig(q)">
                 <AppIcon name="settings" :size="14" />
@@ -823,6 +851,16 @@ onMounted(() => { fetch(); fetchEnv() })
         @confirm="saveSchedule()"
         @cancel="scheduleConfirmOpen = false"
       />
+      <ConfirmDialog
+        v-if="deleteTarget"
+        title="删除题目"
+        :message="`确定删除题目「${deleteTarget.title}」？该题相关的学生提交与评分记录将一并删除，此操作不可恢复。`"
+        confirm-text="确认删除"
+        :danger="true"
+        :busy="deleting"
+        @confirm="confirmDeleteQuestion"
+        @cancel="deleteTarget = null"
+      />
     </div>
   </AppLayout>
 </template>
@@ -1038,6 +1076,9 @@ onMounted(() => { fetch(); fetchEnv() })
  align-items: center;
  flex-shrink: 0;
 }
+
+.qe-delete-btn { color: var(--danger, #dc2626); }
+.qe-delete-btn:hover { border-color: var(--danger, #dc2626); background: #fef2f2; }
 
 .badge-mode {
  display: inline-block; padding: 1px 8px; border-radius: 10px;
