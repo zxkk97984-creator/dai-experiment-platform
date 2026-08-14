@@ -13,23 +13,27 @@ test.describe('考试开始答题交卷流程', () => {
     // 导航到考试详情（从列表动态进入，不依赖固定 id）——页面必须加载成功
     await page.goto('/student/exams')
     await expect(page).toHaveURL(/\/student\/exams$/, { timeout: 15000 })
-    await page.locator('article', { hasText: 'E2E 测试考试' }).first().click()
+    // 进入考试的点击事件绑定在卡片内的 .card-action 按钮上（点击 article 本身不跳转）
+    await page.locator('article.exam-card', { hasText: 'E2E 测试考试' }).locator('button.card-action').click()
     await expect(page).toHaveURL(/\/student\/exams\/\d+/, { timeout: 15000 })
 
     // 考试页面至少显示标题
     await expect(page.getByText('E2E 测试考试')).toBeVisible({ timeout: 10000 })
 
-    // 新种子数据库中必须能够开始考试
-    const startBtn = page.getByRole('button', { name: /开始考试|开始/ })
+    // 新种子数据库中必须能够开始考试：点击「确认并开始考试」→ 弹窗确认「开始计时」
+    const startBtn = page.getByRole('button', { name: '确认并开始考试' })
     await expect(startBtn).toBeVisible()
     await startBtn.click()
+    await page.getByRole('button', { name: '开始计时' }).click()
     await expect(page.locator('.question-card').first()).toBeVisible({ timeout: 10000 })
 
-    // 选择正确答案 B，并确认交卷
-    await page.locator('.option-row').filter({ hasText: 'B.' }).click()
-    page.once('dialog', dialog => dialog.accept())
-    await page.getByRole('button', { name: /交卷/ }).click()
-    await expect(page.locator('.result-card')).toContainText(/已交卷|已评分/, { timeout: 10000 })
+    // 选择正确答案 B（选项渲染为 .options label，含 B 的键标签）
+    await page.locator('.options label').filter({ hasText: 'B' }).click()
+
+    // 交卷：点击「提交试卷」→ 自定义确认弹窗点「确认交卷」
+    await page.getByRole('button', { name: '提交试卷' }).click()
+    await page.getByRole('button', { name: '确认交卷' }).click()
+    await expect(page.locator('.result-panel')).toContainText(/已交卷|已评分|已完成/, { timeout: 10000 })
   })
 })
 

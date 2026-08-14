@@ -65,8 +65,8 @@ test.describe('教师 AI 评分列表与详情', () => {
     await expect(page).toHaveURL(/\/teacher$/, { timeout: 15000 })
 
     await page.goto('/teacher/ai-grading')
-    // 列表页本身可用（有数据或空态均可）
-    await expect(page.locator('.grade-table, .loading, .error').first()).toBeVisible({ timeout: 15000 })
+    // 列表页本身可用（有数据 .grade-table，或空态 .state-panel，或加载骨架均可）
+    await expect(page.locator('.grade-table, .table-skeleton, .state-panel').first()).toBeVisible({ timeout: 15000 })
 
     expect(errors).toEqual([])
   })
@@ -78,11 +78,13 @@ test.describe('教师 AI 评分列表与详情', () => {
       if (msg.type() === 'error') errors.push(`console: ${msg.text()}`)
     })
 
-    // 拦截列表与详情（确定性数据，不依赖真实库）
-    await page.route('**/api/v1/ai-grading/grades', (route) => {
+    // 拦截列表与详情（确定性数据，不依赖真实库）。
+    // 列表请求带 query（page/page_size），glob `.../grades` 匹配不到完整 URL，
+    // 用 pathname 精确匹配；详情/复核用 `grades/**` 通配。
+    await page.route((url) => url.pathname === '/api/v1/ai-grading/grades', (route) => {
       route.fulfill({ json: { items: [LIST_ITEM], total: 1, page: 1, page_size: 20 } })
     })
-    await page.route('**/api/v1/ai-grading/grades/*', (route) => {
+    await page.route('**/api/v1/ai-grading/grades/**', (route) => {
       const req = route.request()
       if (req.method() === 'POST') {
         route.fulfill({ json: { ok: true } })

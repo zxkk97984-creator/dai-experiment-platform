@@ -7,7 +7,8 @@ test.describe('作业提交判题流程', () => {
     await page.fill('#login-username', 'student')
     await page.fill('#login-password', 'Passw0rd!')
     await page.click('button[type="submit"]')
-    await expect(page).toHaveURL(/\/student\/courses/, { timeout: 10000 })
+    // 新版学生首页在 /student（DashboardView），登录成功即到达
+    await expect(page).toHaveURL(/\/student(?:\/|$)/, { timeout: 10000 })
     await page.waitForTimeout(1000)
 
     // 导航到作业详情
