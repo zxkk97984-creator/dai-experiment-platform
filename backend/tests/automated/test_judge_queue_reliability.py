@@ -1,4 +1,10 @@
-"""Task 1: 判题队列可靠性测试——幂等入队、条件抢占、统一协议、恢复扫描"""
+"""Task 1: 判题队列可靠性测试——幂等入队、条件抢占、统一协议、恢复扫描
+
+A/B/C 分类：B 类——本文件全部用例依赖判题队列行为，默认用 fakeredis 打桩
+`_get_redis`（CI SQLite job 没有 Redis 服务，直连 localhost:6379 会
+ConnectionRefused 导致「已入队但断言 Redis 副作用」的用例假失败）；
+需要断言断连语义的用例在自身上下文内显式 patch 覆盖本默认。
+"""
 import json as _json
 
 import pytest
@@ -15,6 +21,13 @@ from app.services.judge_queue import (
     MAX_ATTEMPTS,
 )
 from conftest import auth_header, create_user, login, seed_basic_environment
+
+
+@pytest.fixture(autouse=True)
+def _default_fake_redis(redis_client):
+    """全文件默认：队列服务 `_get_redis` 返回 fakeredis（不依赖本地 Redis 服务）"""
+    with patch("app.services.judge_queue._get_redis", return_value=redis_client):
+        yield
 
 
 def _setup_assignment_submission(db_session_factory):
