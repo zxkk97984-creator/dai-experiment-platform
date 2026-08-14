@@ -1,0 +1,168 @@
+"""考试列表聚合查询测试（TASK-022 / F-25）。
+
+- 教师列表的题数/参与人数/应参加人数/最高分一次批量返回，payload 与逐项计算等价
+- 列表 SQL 数不随 N 线性增长：20 场考试下每页 ≤5 次 SQL
+- 空数据与多角色回归
+"""
+from datetime import timedelta
+
+import pytest
+import sqlalchemy as sa
+from conftest import auth_header, create_user, login
+from sqlalchemy import select
+
+from app.models import (
+    Course,
+    CourseEnrollment,
+    Exam,
+    ExamQuestion,
+    ExamSubmission,
+    User,
+)
+from app.services.time_utils import utc_now
+
+API = "/api/v1"
+
+PARTICIPANT_STATUSES = ("submitted", "grading", "graded", "review_required")
+
+
+@pytest.fixture()
+def exam_seed(db_session_factory):
+    """创建教师+课程+20 场考试（各 2 题、2 选课、1 参与者）。"""
+    teacher = create_user(db_session_factory, "agg-teacher", "teacher")
+    students = [
+        create_user(db_session_factory, f"agg-s{i}", "student") for i in range(2)
+    ]
+    now = utc_now()
+    with db_session_factory() as db:
+        course = Course(
+            title="聚合课", description="d", status="published",
+            visibility="class", default_score=100, teacher_id=teacher.id,
+        )
+        db.add(course)
+        db.flush()
+        for sid in students:
+            db.add(CourseEnrollment(course_id=course.id, student_id=sid.id, status="enrolled"))
+        db.flush()
+        for i in range(20):
+            exam = Exam(
+                course_id=course.id, title=f"考试{i}", status="published",
+                duration_minutes=60, start_at=now - timedelta(hours=2),
+                end_at=now + timedelta(hours=2),
+            )
+            db.add(exam)
+            db.flush()
+            db.add(ExamQuestion(
+                exam_id=exam.id, question_type="fill_blank", prompt=f"填空 [[blank:a]] {i}",
+                correct_answer={"blanks": [{"id": "a", "accepted_answers": ["x"]}]},
+                points=5, order_index=1,
+            ))
+            db.add(ExamQuestion(
+                exam_id=exam.id, question_type="fill_blank", prompt=f"填空 [[blank:b]] {i}",
+                correct_answer={"blanks": [{"id": "b", "accepted_answers": ["y"]}]},
+                points=7, order_index=2,
+            ))
+            if i % 2 == 0:
+                db.add(ExamSubmission(
+                    exam_id=exam.id, student_id=students[0].id, status="submitted",
+                    started_at=now, submitted_at=now,
+                ))
+        db.commit()
+        return course.id, teacher.id
+
+
+def _expected_payload(db_session_factory, exam_id, course_id):
+    with db_session_factory() as db:
+        question_count = db.scalar(
+            select(sa.func.count()).select_from(ExamQuestion).where(ExamQuestion.exam_id == exam_id)
+        ) or 0
+        participant_count = db.scalar(
+            select(sa.func.count()).select_from(ExamSubmission).where(
+                ExamSubmission.exam_id == exam_id,
+                ExamSubmission.status.in_(PARTICIPANT_STATUSES),
+            )
+        ) or 0
+        expected_count = db.scalar(
+            select(sa.func.count()).select_from(CourseEnrollment).where(
+                CourseEnrollment.course_id == course_id,
+                CourseEnrollment.status == "enrolled",
+            )
+        ) or 0
+        max_score = float(db.scalar(
+            select(sa.func.sum(ExamQuestion.points)).where(ExamQuestion.exam_id == exam_id)
+        ) or 0)
+    return question_count, participant_count, expected_count, max_score
+
+
+def test_teacher_list_payload_matches_per_item_computation(client, db_session_factory, exam_seed):
+    course_id, _ = exam_seed
+    token, _ = login(client, "agg-teacher")
+    resp = client.get(
+        f"{API}/exams", headers=auth_header(token), params={"page": 1, "page_size": 100},
+    )
+    assert resp.status_code == 200, resp.text
+    items = resp.json()["items"]
+    assert len(items) == 20
+    for item in items:
+        qc, pc, ec, ms = _expected_payload(db_session_factory, item["id"], course_id)
+        assert item["question_count"] == qc
+        assert item["participant_count"] == pc
+        assert item["expected_count"] == ec
+        assert abs(item["max_score"] - ms) < 1e-6
+        assert item["max_score"] == 12.0  # 5 + 7
+
+
+def test_list_sql_budget_bounded(client, db_session_factory, exam_seed):
+    """20 场考试列表 SQL 数 ≤5（不随 N 线性增长）。"""
+    token, _ = login(client, "agg-teacher")
+    with db_session_factory() as db:
+        engine = db.get_bind()
+    count = {"n": 0}
+
+    def _counter(*args, **kwargs):
+        count["n"] += 1
+
+    sa.event.listen(engine, "before_cursor_execute", _counter)
+    try:
+        resp = client.get(
+            f"{API}/exams", headers=auth_header(token), params={"page": 1, "page_size": 100},
+        )
+        assert resp.status_code == 200, resp.text
+        assert len(resp.json()["items"]) == 20
+    finally:
+        sa.event.remove(engine, "before_cursor_execute", _counter)
+    assert count["n"] <= 5, f"SQL 次数 {count['n']} 超过预算 5"
+
+
+def test_student_list_sql_budget_bounded(client, db_session_factory, exam_seed):
+    """学生视图同样使用批量最高分，SQL 数 ≤5。"""
+    token, _ = login(client, "agg-s0")
+    with db_session_factory() as db:
+        engine = db.get_bind()
+    count = {"n": 0}
+
+    def _counter(*args, **kwargs):
+        count["n"] += 1
+
+    sa.event.listen(engine, "before_cursor_execute", _counter)
+    try:
+        resp = client.get(
+            f"{API}/exams", headers=auth_header(token), params={"page": 1, "page_size": 100},
+        )
+        assert resp.status_code == 200, resp.text
+        items = resp.json()["items"]
+        assert len(items) == 20
+        # 学生口径：max_score 与教师一致
+        assert all(abs(item["max_score"] - 12.0) < 1e-6 for item in items)
+    finally:
+        sa.event.remove(engine, "before_cursor_execute", _counter)
+    assert count["n"] <= 5, f"SQL 次数 {count['n']} 超过预算 5"
+
+
+def test_empty_list_ok(client, db_session_factory):
+    create_user(db_session_factory, "agg-empty-t", "teacher")
+    token, _ = login(client, "agg-empty-t")
+    resp = client.get(f"{API}/exams", headers=auth_header(token))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["total"] == 0
+    assert resp.json()["items"] == []
