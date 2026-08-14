@@ -162,4 +162,23 @@ describe('LessonView 本地视频播放', () => {
     expect(coursesMock.getLessonVideoPlaybackUrl).toHaveBeenCalledTimes(2)
     expect(wrapper.find('video.lesson-video-player').exists()).toBe(true)
   })
+
+  it('组件卸载时清理待执行的 TOC 定时器', async () => {
+    vi.useFakeTimers()
+    const querySelectorAll = vi.spyOn(document, 'querySelectorAll')
+    try {
+      const wrapper = await mountPage([videoLesson({ content: '## 目录标题' })])
+      expect(vi.getTimerCount()).toBeGreaterThan(0)
+
+      querySelectorAll.mockClear()
+      wrapper.unmount()
+      vi.runAllTimers()
+
+      expect(querySelectorAll).not.toHaveBeenCalledWith('.lesson-content')
+    } finally {
+      querySelectorAll.mockRestore()
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
+  })
 })

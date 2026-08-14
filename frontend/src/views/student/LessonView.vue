@@ -259,6 +259,15 @@ function addHeadingIds(html, startIndex) {
 const tocItems = ref([])
 const activeTocId = ref('')
 let tocObserver = null
+const tocTimerIds = new Set()
+
+function scheduleTOC(delay) {
+  const timerId = setTimeout(() => {
+    tocTimerIds.delete(timerId)
+    extractTOC()
+  }, delay)
+  tocTimerIds.add(timerId)
+}
 
 function extractTOC() {
   const items = []
@@ -326,19 +335,23 @@ onMounted(async () => {
 // TOC 在 DOM 更新后提取
 onMounted(() => {
   nextTick(() => {
-    setTimeout(extractTOC, 200)
+    scheduleTOC(200)
   })
 })
 
 // 监听内容变化重新提取 TOC
 watch(() => lesson.value?.content, () => {
   nextTick(() => {
-    setTimeout(extractTOC, 300)
+    scheduleTOC(300)
   })
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClick)
+  for (const timerId of tocTimerIds) clearTimeout(timerId)
+  tocTimerIds.clear()
+  tocObserver?.disconnect()
+  tocObserver = null
 })
 
 // 路由参数变化时重新查找
