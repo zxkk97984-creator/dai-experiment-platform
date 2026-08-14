@@ -260,10 +260,13 @@ const tocItems = ref([])
 const activeTocId = ref('')
 let tocObserver = null
 const tocTimerIds = new Set()
+let tocDisposed = false
 
 function scheduleTOC(delay) {
+  if (tocDisposed) return
   const timerId = setTimeout(() => {
     tocTimerIds.delete(timerId)
+    if (tocDisposed) return
     extractTOC()
   }, delay)
   tocTimerIds.add(timerId)
@@ -347,6 +350,7 @@ watch(() => lesson.value?.content, () => {
 })
 
 onBeforeUnmount(() => {
+  tocDisposed = true
   document.removeEventListener('click', onDocClick)
   for (const timerId of tocTimerIds) clearTimeout(timerId)
   tocTimerIds.clear()

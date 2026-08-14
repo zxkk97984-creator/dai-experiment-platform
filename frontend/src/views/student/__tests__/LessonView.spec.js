@@ -181,4 +181,26 @@ describe('LessonView 本地视频播放', () => {
       vi.useRealTimers()
     }
   })
+
+  it('在 nextTick 执行前卸载时不再创建 TOC 定时器', async () => {
+    vi.useFakeTimers()
+    const querySelectorAll = vi.spyOn(document, 'querySelectorAll')
+    try {
+      coursesMock.get.mockResolvedValue({ data: course })
+      coursesMock.getChapters.mockResolvedValue({ data: [] })
+      const wrapper = mount(LessonView, {
+        global: { stubs: { AppLayout: { template: '<div><slot /></div>' } } },
+      })
+
+      wrapper.unmount()
+      await flushPromises()
+      vi.runAllTimers()
+
+      expect(querySelectorAll).not.toHaveBeenCalledWith('.lesson-content')
+    } finally {
+      querySelectorAll.mockRestore()
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
+  })
 })
