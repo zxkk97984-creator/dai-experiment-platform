@@ -56,7 +56,9 @@ class Settings(BaseSettings):
     judge_host_work_dir: str = ""
 
     # ── AI 智能代码评分（DeepSeek） ──
-    ai_enabled: bool = True
+    # TASK-020（F-21）：AI 数据治理上线门——审批完成前默认关闭。
+    # 生产通过 DAI_AI_ENABLED=true 显式启用（compose 默认 -false）；关闭时零外呼、保留人工评分。
+    ai_enabled: bool = False
     ai_base_url: str = "https://aihub.codingpython.cn"
     ai_api_key: SecretStr = SecretStr("")
     ai_model: str = "deepseek-v4-flash"

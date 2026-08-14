@@ -50,6 +50,7 @@ vi.mock('../../../api/judge', () => ({
 
 vi.mock('../../../api/aiGrading.js', () => ({
   aiGradingAPI: {
+    getStatus: vi.fn().mockResolvedValue({ data: { enabled: true, ready: true } }),
     getConfig: vi.fn().mockResolvedValue({ data: { grading_mode: 'legacy', teacher_constraints: {}, reference_solution: null, test_groups: [], score_cap_rules: [] } }),
     updateConfig: vi.fn().mockResolvedValue({ data: { ok: true } }),
     listRubrics: vi.fn().mockResolvedValue({ data: { items: [] } }),
@@ -815,5 +816,31 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     await flushPromises()
     const delBtns = wrapper.findAll('button').filter((b) => b.text().includes('删除'))
     expect(delBtns.length).toBe(0)
+  })
+
+  // ══ TASK-020 AI 治理门横幅 ═══════════════════════════════════════
+  it('AI 已启用且 Key 齐备时不显示治理横幅', async () => {
+    aiGradingAPI.getStatus.mockResolvedValue({ data: { enabled: true, ready: true } })
+    const wrapper = await mountPage()
+    await flushPromises()
+    expect(wrapper.find('.qe-ai-notice').exists()).toBe(false)
+  })
+
+  it('AI 未启用（未审批）时显示治理横幅', async () => {
+    aiGradingAPI.getStatus.mockResolvedValue({ data: { enabled: false, ready: false } })
+    const wrapper = await mountPage()
+    await flushPromises()
+    const notice = wrapper.find('.qe-ai-notice')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('未完成数据治理审批')
+  })
+
+  it('AI 已启用但缺 Key 时显示配置提示横幅', async () => {
+    aiGradingAPI.getStatus.mockResolvedValue({ data: { enabled: true, ready: false } })
+    const wrapper = await mountPage()
+    await flushPromises()
+    const notice = wrapper.find('.qe-ai-notice')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('未配置 API Key')
   })
 })

@@ -11,13 +11,13 @@ from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
 from app.config import Settings, get_settings
-from app.dependencies import get_db, get_redis_client
+from app.dependencies import get_db, get_redis_client, require_roles
 from app.errors import api_error
 from app.models import (
     Assignment, CodeGrade, Course, Exam, ExamAnswer, ExamQuestion,
     ExamSubmission, GradeOverride, JudgeQuestion, QuestionRubric, Submission, User,
 )
-from app.schemas import PaginatedResponse
+from app.schemas import AIServiceStatus, PaginatedResponse
 from app.schemas.ai_grading import (
     AIQuestionConfigUpdate, GradeOverrideCreate, RubricDocument,
     TestGroupsGenerateRequest, TestGroupsGenerateResponse,
@@ -42,6 +42,15 @@ router = APIRouter(prefix="/ai-grading", tags=["AI 评分"])
 def _teacher_or_admin(user: User):
     if user.role not in ("teacher", "admin"):
         raise api_error(403, "FORBIDDEN", "仅教师和管理员可访问")
+
+
+@router.get("/status", response_model=AIServiceStatus)
+def ai_service_status(
+    settings: Settings = Depends(get_settings),
+    _: User = Depends(require_roles("admin", "teacher", "developer")),
+):
+    """TASK-020：AI 服务状态——前端据此显示禁用提示（enabled=开关，ready=开关+Key 齐备）。"""
+    return AIServiceStatus(enabled=settings.ai_enabled, ready=settings.ai_ready)
 
 
 def _ensure_assignment_scoring_editable(db: Session, kind: str, question_id: int) -> None:

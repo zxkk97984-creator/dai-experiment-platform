@@ -1,6 +1,8 @@
 import client from './client.js'
 
 export const aiGradingAPI = {
+  /** TASK-020：AI 服务状态（enabled=开关，ready=开关+Key 齐备） */
+  getStatus() { return client.get('/ai-grading/status') },
   getConfig(kind, id) { return client.get(`/ai-grading/questions/${kind}/${id}/config`) },
   updateConfig(kind, id, data) { return client.put(`/ai-grading/questions/${kind}/${id}/config`, data) },
   listRubrics(kind, id) { return client.get(`/ai-grading/questions/${kind}/${id}/rubrics`) },

@@ -55,6 +55,14 @@ class PaginatedResponse(BaseModel):
     total: int = 0
 
 
+# ── AI 服务状态（TASK-020 / F-21） ─────────────────────────────
+
+
+class AIServiceStatus(BaseModel):
+    enabled: bool
+    ready: bool
+
+
 # ── 学习进度（TASK-018 / F-06） ────────────────────────────────
 
 

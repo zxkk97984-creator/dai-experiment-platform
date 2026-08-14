@@ -109,6 +109,17 @@ const questionEnvId = ref(null)
 const questionPolicyMode = ref('inherit')  // inherit | unrestricted | restricted
 const questionAllowedImports = ref([])
 const assignmentDraft = computed(() => assignment.value?.status === 'draft')
+// TASK-020：AI 服务状态（enabled/ready）——禁用时显示治理门提示，AI 动作被服务端拒绝前先行禁用
+const aiEnabled = ref(false)
+const aiReady = ref(false)
+const aiDisabledNotice = computed(() => {
+  if (aiEnabled.value) return ''
+  return 'AI 智能评分当前未启用（未完成数据治理审批）——题目仍可使用人工评分流程，AI 相关功能暂时不可用。'
+})
+const aiKeyMissingNotice = computed(() => {
+  if (!aiEnabled.value || aiReady.value) return ''
+  return 'AI 智能评分已启用但未配置 API Key——AI 相关功能暂时不可用，请联系管理员配置 DAI_AI_API_KEY。'
+})
 
 const envById = (id) => envOptions.value.find((o) => o.environment_version_id === id) || null
 const envImportCandidates = (envId) => {
@@ -480,7 +491,15 @@ function formatSavedAt(d) {
  return `${d.getMonth() + 1}月${d.getDate()}日 ${hh}:${mm}`
 }
 
-onMounted(() => { fetch(); fetchEnv() })
+async function fetchAiStatus() {
+  try {
+    const res = await aiGradingAPI.getStatus()
+    aiEnabled.value = res.data.enabled === true
+    aiReady.value = res.data.ready === true
+  } catch { /* 忽略——AI 调用由服务端兜底门禁 */ }
+}
+
+onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 </script>
 
 <template>
@@ -546,6 +565,9 @@ onMounted(() => { fetch(); fetchEnv() })
             <AppIcon name="plus" :size="14" />
             添加题目
           </button>
+          <p v-if="aiDisabledNotice || aiKeyMissingNotice" class="qe-ai-notice">
+            {{ aiDisabledNotice || aiKeyMissingNotice }}
+          </p>
         </div>
         <div v-if="loading" class="qe-list-loading">
           <div class="skeleton" style="height:20px;width:260px"></div>
@@ -1079,6 +1101,13 @@ onMounted(() => { fetch(); fetchEnv() })
 
 .qe-delete-btn { color: var(--danger, #dc2626); }
 .qe-delete-btn:hover { border-color: var(--danger, #dc2626); background: #fef2f2; }
+
+/* TASK-020：AI 治理门提示横幅（未审批/缺 Key） */
+.qe-ai-notice {
+  margin: 10px 0 0; padding: 10px 12px; border-radius: 8px;
+  font-size: 13px; line-height: 1.5;
+  color: #92400e; background: #fffbeb; border: 1px solid #fde68a;
+}
 
 .badge-mode {
  display: inline-block; padding: 1px 8px; border-radius: 10px;

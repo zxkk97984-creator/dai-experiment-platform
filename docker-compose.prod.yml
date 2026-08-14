@@ -92,8 +92,8 @@ services:
       # ── 课程封面 ──
       DAI_COVER_STORAGE_DIR: /app/storage/covers
       DAI_COVER_MAX_UPLOAD_BYTES: ${DAI_COVER_MAX_UPLOAD_BYTES:-5242880}
-      # ── AI 智能代码评分 ──
-      DAI_AI_ENABLED: ${DAI_AI_ENABLED:-true}
+      # ── AI 智能代码评分（TASK-020：审批前默认关闭，未审批环境无法意外启用） ──
+      DAI_AI_ENABLED: ${DAI_AI_ENABLED:-false}
       DAI_AI_BASE_URL: ${DAI_AI_BASE_URL:-https://aihub.codingpython.cn}
       DAI_AI_API_KEY: ${DAI_AI_API_KEY:-}
       DAI_AI_MODEL: ${DAI_AI_MODEL:-deepseek-v4-flash}
@@ -132,8 +132,8 @@ services:
       DAI_JUDGE_WORK_DIR: /judge-work
       DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须是宿主机判题目录的绝对路径}
       DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
-      # ── AI 智能代码评分 ──
-      DAI_AI_ENABLED: ${DAI_AI_ENABLED:-true}
+      # ── AI 智能代码评分（TASK-020：默认关闭） ──
+      DAI_AI_ENABLED: ${DAI_AI_ENABLED:-false}
       DAI_AI_BASE_URL: ${DAI_AI_BASE_URL:-https://aihub.codingpython.cn}
       DAI_AI_API_KEY: ${DAI_AI_API_KEY:-}
       DAI_AI_MODEL: ${DAI_AI_MODEL:-deepseek-v4-flash}
