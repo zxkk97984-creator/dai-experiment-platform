@@ -17,6 +17,14 @@ logger = logging.getLogger("dai.ai_client")
 _RETRYABLE_HTTP_STATUS = {429, 500, 502, 503, 504}
 _NON_RETRYABLE_HTTP_STATUS = {401, 403}
 
+# TASK-028/F-22：各操作 completion 预算（max_tokens）——防止无界输出与成本失控。
+# 新操作必须在此登记预算后才能调用 chat_json（未知操作 fail-closed）。
+OPERATION_MAX_TOKENS: dict[str, int] = {
+    "ai_grading": 1500,             # 单份作业/考试提交评分
+    "rubric_generation": 2000,      # Rubric 生成（教师触发/发布门禁）
+    "test_group_generation": 3000,  # 测试组生成（最高成本：F/R 用例代码）
+}
+
 
 class AIServiceError(RuntimeError):
     """AI 服务异常，含可重试标记"""
@@ -72,9 +80,12 @@ class DeepSeekClient:
     ):
         self._settings = settings
         self._endpoint = normalize_chat_endpoint(settings.ai_base_url)
+        # trust_env=False：出站 AI 调用不读环境代理变量（socks/http 代理注入会
+        # 导致请求失败甚至构造期崩溃）；如需代理应作为显式配置项提供。
         self._client = httpx.Client(
             timeout=httpx.Timeout(settings.ai_timeout_seconds),
             transport=transport,
+            trust_env=False,
         )
 
     def __repr__(self) -> str:
@@ -83,13 +94,22 @@ class DeepSeekClient:
             f"model={self._settings.ai_model!r})"
         )
 
-    def chat_json(self, messages: list[dict[str, str]]) -> dict:
-        """发送聊天请求并返回解析后的 JSON 对象"""
+    def chat_json(self, messages: list[dict[str, str]], *, operation: str) -> dict:
+        """发送聊天请求并返回解析后的 JSON 对象。
+
+        operation 必须在 OPERATION_MAX_TOKENS 中登记（TASK-028）：未登记的操作
+        fail-closed 拒绝调用，保证每次 AI 调用都有明确的 completion 预算。
+        """
+        max_tokens = OPERATION_MAX_TOKENS.get(operation)
+        if max_tokens is None:
+            raise ValueError(f"AI 操作 {operation!r} 未登记 completion 预算（OPERATION_MAX_TOKENS）")
+
         request_id = uuid.uuid4().hex[:12]
         payload = {
             "model": self._settings.ai_model,
             "messages": messages,
             "temperature": 0,
+            "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
         }
         headers = {
@@ -135,13 +155,21 @@ class DeepSeekClient:
                 response.raise_for_status()
                 data = response.json()
 
+                usage = data.get("usage") or {}
                 logger.info(
                     "ai_chat_completed",
                     extra={
                         "request_id": request_id,
+                        "operation": operation,
                         "model": self._settings.ai_model,
                         "status": response.status_code,
                         "elapsed_ms": round(elapsed * 1000),
+                        "attempts": attempt,
+                        # TASK-028：usage 缺失时记录 None，不阻断核算
+                        "prompt_tokens": usage.get("prompt_tokens"),
+                        "completion_tokens": usage.get("completion_tokens"),
+                        "total_tokens": usage.get("total_tokens"),
+                        "max_tokens": max_tokens,
                     },
                 )
 
@@ -164,6 +192,7 @@ class DeepSeekClient:
                     "ai_retryable_error",
                     extra={
                         "request_id": request_id,
+                        "operation": operation,
                         "attempt": attempt,
                         "code": exc.code,
                     },
@@ -176,7 +205,7 @@ class DeepSeekClient:
                 )
                 logger.warning(
                     "ai_timeout",
-                    extra={"request_id": request_id, "attempt": attempt},
+                    extra={"request_id": request_id, "operation": operation, "attempt": attempt},
                 )
             except httpx.NetworkError as exc:
                 last_error = AIServiceError(
@@ -186,7 +215,7 @@ class DeepSeekClient:
                 )
                 logger.warning(
                     "ai_network_error",
-                    extra={"request_id": request_id, "attempt": attempt},
+                    extra={"request_id": request_id, "operation": operation, "attempt": attempt},
                 )
             except (json.JSONDecodeError, ValueError) as exc:
                 last_error = AIServiceError(
@@ -196,7 +225,7 @@ class DeepSeekClient:
                 )
                 logger.warning(
                     "ai_bad_json",
-                    extra={"request_id": request_id, "attempt": attempt},
+                    extra={"request_id": request_id, "operation": operation, "attempt": attempt},
                 )
             except Exception as exc:
                 last_error = AIServiceError(
@@ -225,6 +254,10 @@ class DeepSeekClient:
         # 重试耗尽
         logger.error(
             "ai_retries_exhausted",
-            extra={"request_id": request_id, "attempts": max_attempts},
+            extra={
+                "request_id": request_id,
+                "operation": operation,
+                "attempts": max_attempts,
+            },
         )
         raise last_error  # type: ignore[misc]

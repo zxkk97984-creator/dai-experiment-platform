@@ -88,7 +88,8 @@ def generate_rubric(
     source_hash = _sha256(_canonical_json(hash_snapshot))
 
     messages = build_rubric_messages(snapshot)
-    raw_response = client.chat_json(messages)
+    # TASK-028：rubric_generation 预算 2000 completion tokens
+    raw_response = client.chat_json(messages, operation="rubric_generation")
     raw_json_str = json.dumps(raw_response, ensure_ascii=False)
 
     try:

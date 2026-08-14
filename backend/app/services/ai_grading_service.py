@@ -74,8 +74,8 @@ def grade_code_submission(
         rubric_version=rubric.version,
     )
 
-    # 调用 AI
-    raw_response = client.chat_json(messages)
+    # 调用 AI（TASK-028：ai_grading 预算 1500 completion tokens）
+    raw_response = client.chat_json(messages, operation="ai_grading")
     raw_json_str = json.dumps(raw_response, ensure_ascii=False)
 
     # Pydantic 校验
