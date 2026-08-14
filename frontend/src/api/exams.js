@@ -17,6 +17,7 @@ export const examsAPI = {
   deleteQuestion(examId, qId) { return client.delete(`/exams/${examId}/questions/${qId}`) },
   saveAnswer(examId, qId, data) { return client.put(`/exams/${examId}/answers/${qId}`, data) },
   saveAnswers(examId, answers) { return client.put(`/exams/${examId}/answers`, { answers }) },
+  sampleRun(examId, questionId, data) { return client.post(`/exams/${examId}/questions/${questionId}/sample-run`, data) },
   getMyGrade(id) { return client.get(`/exams/${id}/my-grade`) },
   releaseReview(id) { return client.post(`/exams/${id}/review-release`) },
   extendSubmission(examId, submissionId, minutes) {

@@ -49,6 +49,20 @@ describe('useAuthStore logout', () => {
     await logoutPromise
   })
 
+  it('退出时清除考试暂存答案和编程题运行状态', () => {
+    mocks.logout.mockResolvedValue({})
+    localStorage.setItem('exam-answer-queue:4:9', '{}')
+    localStorage.setItem('exam-code-runs:4:9', '{}')
+    localStorage.setItem('unrelated-setting', 'keep')
+    const auth = useAuthStore()
+
+    auth.logout()
+
+    expect(localStorage.getItem('exam-answer-queue:4:9')).toBeNull()
+    expect(localStorage.getItem('exam-code-runs:4:9')).toBeNull()
+    expect(localStorage.getItem('unrelated-setting')).toBe('keep')
+  })
+
   it('页面会话恢复期间发生退出时不接受迟到的刷新结果', async () => {
     let resolveRefresh
     mocks.refresh.mockImplementation(

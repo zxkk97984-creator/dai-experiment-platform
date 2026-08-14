@@ -113,7 +113,11 @@ export const useAuthStore = defineStore('auth', () => {
     // 使用同一台教学电脑的学生看到或误同步上一位学生的本地队列。
     for (let index = localStorage.length - 1; index >= 0; index -= 1) {
       const key = localStorage.key(index)
-      if (key?.startsWith('exam-answer-queue:') || key?.startsWith('exam-tab-lock:')) {
+      if (
+        key?.startsWith('exam-answer-queue:') ||
+        key?.startsWith('exam-code-runs:') ||
+        key?.startsWith('exam-tab-lock:')
+      ) {
         localStorage.removeItem(key)
       }
     }

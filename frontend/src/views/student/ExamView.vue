@@ -21,6 +21,8 @@ const questions = computed(() => session.value?.questions || [])
 const visibility = computed(() => session.value?.visibility || {})
 const answers = ref({})
 const versions = ref({})
+const codeRunVersions = ref({})
+const codeRuns = ref({})
 const pending = ref({})
 const saveState = ref('saved')
 const locked = ref(false)
@@ -29,6 +31,7 @@ const dialog = ref(null)
 const secondaryTab = ref(false)
 const autoSubmitting = ref(false)
 const currentQuestion = ref(null)
+const allowLeave = ref(false)
 let debounceTimer = null
 let fallbackTimer = null
 let warningTimer = null
@@ -37,6 +40,7 @@ const joinedAt = performance.now()
 const tabId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
 
 const queueKey = computed(() => `exam-answer-queue:${examId}:${submission.value?.id || 'pending'}`)
+const codeRunKey = computed(() => `exam-code-runs:${examId}:${submission.value?.id || 'pending'}`)
 const active = computed(() => submission.value?.status === 'started')
 const completed = computed(() => Boolean(submission.value && submission.value.status !== 'started'))
 const scoreVisible = computed(() => Boolean(submission.value?.score_visible && submission.value?.score != null))
@@ -52,17 +56,23 @@ const { nowMs, calibrate } = useServerClock(async () => {
   return response.data.server_now
 })
 
+const attemptExpiresAt = computed(() => submission.value?.expires_at || session.value?.expires_at || null)
 const secondsLeft = computed(() => {
-  if (!submission.value?.expires_at || !nowMs.value || !active.value) return 0
-  return Math.max(0, Math.ceil((new Date(submission.value.expires_at).getTime() - nowMs.value) / 1000))
+  if (!active.value) return 0
+  const expiresMs = new Date(attemptExpiresAt.value).getTime()
+  if (!Number.isFinite(expiresMs) || !nowMs.value) return null
+  return Math.max(0, Math.ceil((expiresMs - nowMs.value) / 1000))
 })
 const timeDisplay = computed(() => {
+  if (secondsLeft.value == null) return '--:--:--'
   const hours = Math.floor(secondsLeft.value / 3600)
   const minutes = Math.floor((secondsLeft.value % 3600) / 60)
   const seconds = secondsLeft.value % 60
   return [hours, minutes, seconds].map(value => String(value).padStart(2, '0')).join(':')
 })
 const answeredCount = computed(() => questions.value.filter(question => isAnswered(question, answers.value[question.id])).length)
+const unansweredCount = computed(() => Math.max(0, questions.value.length - answeredCount.value))
+const hasUnanswered = computed(() => active.value && unansweredCount.value > 0)
 const progressPercent = computed(() => questions.value.length ? Math.round(answeredCount.value * 100 / questions.value.length) : 0)
 
 const resultTitle = computed(() => {
@@ -79,6 +89,12 @@ const resultMessage = computed(() => {
 })
 
 function isAnswered(question, value) {
+  if (question.question_type === 'code') {
+    const code = String(value || '')
+    return code.trim().length > 0 &&
+      Object.hasOwn(codeRunVersions.value, question.id) &&
+      codeRunVersions.value[question.id] === (versions.value[question.id] || 0)
+  }
   if (question.question_type === 'fill_blank') {
     const ids = blankIds(question)
     return ids.length > 0 && ids.every(id => String(value?.[id] || '').trim())
@@ -109,8 +125,8 @@ function typeLabel(type) {
 }
 
 function hydrate(payload, { mergeQueue = true } = {}) {
-  session.value = payload
   calibrate(payload.server_now)
+  session.value = payload
   const nextAnswers = {}
   const nextVersions = {}
   for (const question of payload.questions || []) {
@@ -126,6 +142,8 @@ function hydrate(payload, { mergeQueue = true } = {}) {
   }
   answers.value = nextAnswers
   versions.value = nextVersions
+  codeRunVersions.value = {}
+  restoreCodeRuns()
   currentQuestion.value = payload.questions?.[0]?.id || null
   if (mergeQueue && payload.submission?.status === 'started') restoreLocalQueue()
   if (payload.submission?.status !== 'started') clearLocalQueue()
@@ -158,6 +176,13 @@ function answerPayload(questionId, value) {
 function stageAnswer(questionId, value) {
   if (!canEdit.value) return
   answers.value = { ...answers.value, [questionId]: value }
+  const question = questions.value.find(item => item.id === Number(questionId))
+  if (question?.question_type === 'code' && Object.hasOwn(codeRunVersions.value, questionId)) {
+    const nextRuns = { ...codeRunVersions.value }
+    delete nextRuns[questionId]
+    codeRunVersions.value = nextRuns
+    persistCodeRuns()
+  }
   pending.value = { ...pending.value, [questionId]: value }
   saveState.value = navigator.onLine ? 'pending' : 'offline'
   persistLocalQueue()
@@ -229,6 +254,53 @@ function clearLocalQueue() {
   saveState.value = 'saved'
 }
 
+function persistCodeRuns() {
+  if (!submission.value?.id) return
+  if (!Object.keys(codeRunVersions.value).length) { localStorage.removeItem(codeRunKey.value); return }
+  localStorage.setItem(codeRunKey.value, JSON.stringify(codeRunVersions.value))
+}
+
+function restoreCodeRuns() {
+  try {
+    const raw = localStorage.getItem(codeRunKey.value)
+    const parsed = raw ? JSON.parse(raw) : {}
+    codeRunVersions.value = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    localStorage.removeItem(codeRunKey.value)
+    codeRunVersions.value = {}
+  }
+}
+
+async function runCode(question) {
+  if (!canEdit.value || codeRuns.value[question.id]?.running) return
+  const code = String(answers.value[question.id] || '')
+  codeRuns.value = { ...codeRuns.value, [question.id]: { running: true, result: null } }
+  stageAnswer(question.id, code)
+  window.clearTimeout(debounceTimer)
+  const saved = await flushPending()
+  if (!saved.ok) {
+    codeRuns.value = { ...codeRuns.value, [question.id]: { running: false, result: { status: 'error', output: '答案保存失败，请检查网络后重试。' } } }
+    return
+  }
+  try {
+    const response = await examsAPI.sampleRun(examId, question.id, { code })
+    codeRunVersions.value = { ...codeRunVersions.value, [question.id]: versions.value[question.id] || 0 }
+    persistCodeRuns()
+    codeRuns.value = { ...codeRuns.value, [question.id]: { running: false, result: response.data } }
+  } catch (error) {
+    const message = error.response?.data?.detail?.message || '自测请求失败'
+    codeRuns.value = { ...codeRuns.value, [question.id]: { running: false, result: { status: 'error', output: message } } }
+    app.showToast(message, 'error')
+  }
+}
+
+function runStatusLabel(status) {
+  return {
+    accepted: '公开样例全部通过', wrong_answer: '公开样例未通过', runtime_error: '代码运行错误',
+    time_limit_exceeded: '运行超时', system_error: '判题服务异常', no_public_cases: '暂无公开样例', error: '自测失败',
+  }[status] || '自测完成'
+}
+
 function activateTabCoordination() {
   if (channel || !('BroadcastChannel' in window)) return
   channel = new BroadcastChannel(`exam-attempt:${examId}:${submission.value?.id}`)
@@ -256,7 +328,7 @@ async function startExam() {
 
 async function submitExam({ forced = false, confirmed = false } = {}) {
   if (autoSubmitting.value || completed.value) return
-  if (!forced && !confirmed) { dialog.value = { kind: 'submit' }; return }
+  if (!forced && !confirmed) { dialog.value = { kind: hasUnanswered.value ? 'submit-incomplete' : 'submit' }; return }
   dialog.value = null
   autoSubmitting.value = true
   locked.value = true
@@ -285,10 +357,11 @@ async function submitExam({ forced = false, confirmed = false } = {}) {
 
 function confirmDialog() {
   if (dialog.value?.kind === 'start') return startExam()
-  if (dialog.value?.kind === 'submit') return submitExam({ confirmed: true })
-  if (dialog.value?.kind === 'leave') {
+  if (['submit', 'submit-incomplete'].includes(dialog.value?.kind)) return submitExam({ confirmed: true })
+  if (['leave-incomplete', 'leave-unsynced'].includes(dialog.value?.kind)) {
     const target = dialog.value.target
     dialog.value = null
+    allowLeave.value = true
     flushPending().finally(() => router.push(target))
     return
   }
@@ -307,7 +380,7 @@ function scrollToQuestion(id) {
 }
 
 function onBeforeUnload(event) {
-  if (!active.value || !Object.keys(pending.value).length) return
+  if (!active.value || (!hasUnanswered.value && !Object.keys(pending.value).length)) return
   event.preventDefault()
   event.returnValue = ''
 }
@@ -327,9 +400,15 @@ watch(secondsLeft, (seconds, previous) => {
 }, { immediate: true })
 
 onBeforeRouteLeave((to, _from, next) => {
-  if (active.value && Object.keys(pending.value).length) {
+  if (allowLeave.value || !active.value) { next(); return }
+  if (hasUnanswered.value) {
     next(false)
-    dialog.value = { kind: 'leave', target: to.fullPath }
+    dialog.value = { kind: 'leave-incomplete', target: to.fullPath }
+    return
+  }
+  if (Object.keys(pending.value).length) {
+    next(false)
+    dialog.value = { kind: 'leave-unsynced', target: to.fullPath }
     return
   }
   next()
@@ -363,7 +442,7 @@ onBeforeUnmount(() => {
           <p class="eyebrow">{{ completed ? '考试结果' : active ? '答题进行中' : '考试说明' }}</p>
           <h1>{{ exam.title }}</h1>
         </div>
-        <div v-if="active" class="timer" :class="{ urgent: secondsLeft <= 60 }">
+        <div v-if="active" class="timer" :class="{ urgent: secondsLeft != null && secondsLeft <= 60 }">
           <span>剩余时间</span><strong>{{ timeDisplay }}</strong><small>服务器计时</small>
         </div>
       </header>
@@ -432,7 +511,19 @@ onBeforeUnmount(() => {
             <div v-else-if="question.question_type === 'multi_choice'" class="options">
               <label v-for="(option, key) in question.options" :key="key" :class="{ selected: (answers[question.id] || []).includes(key) }"><input type="checkbox" :disabled="!canEdit" :checked="(answers[question.id] || []).includes(key)" @change="stageAnswer(question.id, (answers[question.id] || []).includes(key) ? answers[question.id].filter(item => item !== key) : [...(answers[question.id] || []), key])"><b>{{ key }}</b><span>{{ option }}</span></label>
             </div>
-            <textarea v-else-if="question.question_type === 'code'" class="code-editor" :value="answers[question.id] || ''" :disabled="!canEdit" rows="12" spellcheck="false" @input="stageAnswer(question.id, $event.target.value)" @blur="flushPending"></textarea>
+            <template v-else-if="question.question_type === 'code'">
+              <textarea class="code-editor" :value="answers[question.id] || ''" :disabled="!canEdit" rows="12" spellcheck="false" @input="stageAnswer(question.id, $event.target.value)" @blur="flushPending"></textarea>
+              <div class="code-actions">
+                <button type="button" class="run-button" :data-action="`run-code-${question.id}`" :disabled="!canEdit || codeRuns[question.id]?.running" @click="runCode(question)">
+                  {{ codeRuns[question.id]?.running ? '运行中…' : '运行自测' }}
+                </button>
+                <span>仅运行教师公开样例，不影响最终得分</span>
+              </div>
+              <div v-if="codeRuns[question.id]?.result" class="run-result" :class="codeRuns[question.id].result.status" role="status">
+                <strong>{{ runStatusLabel(codeRuns[question.id].result.status) }}</strong>
+                <pre v-if="codeRuns[question.id].result.output">{{ codeRuns[question.id].result.output }}</pre>
+              </div>
+            </template>
           </article>
         </section>
       </div>
@@ -440,11 +531,11 @@ onBeforeUnmount(() => {
 
     <ConfirmDialog
       v-if="dialog"
-      :title="dialog.kind === 'scheduled' ? '考试尚未开始' : dialog.kind === 'start' ? '确认开始考试' : dialog.kind === 'submit' ? '确认提交试卷' : '仍有答案尚未同步'"
-      :message="dialog.kind === 'scheduled' ? `本场考试将于 ${formatDateTime(exam?.start_at)} 开放，系统以服务器时间为准。` : dialog.kind === 'start' ? `开始后将获得 ${exam?.duration_minutes} 分钟完整作答时间，倒计时不会因退出或刷新暂停。` : dialog.kind === 'submit' ? '系统会先保存最新答案。交卷完成后将无法继续修改。' : '离开前系统会尝试同步答案；网络异常时建议留在本页等待恢复。'"
-      :confirm-text="dialog.kind === 'scheduled' ? '返回考试中心' : dialog.kind === 'start' ? '开始计时' : dialog.kind === 'submit' ? '确认交卷' : '保存并离开'"
+      :title="dialog.kind === 'scheduled' ? '考试尚未开始' : dialog.kind === 'start' ? '确认开始考试' : dialog.kind.startsWith('submit') ? '确认提交试卷' : '确认退出考试'"
+      :message="dialog.kind === 'scheduled' ? `本场考试将于 ${formatDateTime(exam?.start_at)} 开放，系统以服务器时间为准。` : dialog.kind === 'start' ? `开始后将获得 ${exam?.duration_minutes} 分钟完整作答时间，倒计时不会因退出或刷新暂停。` : dialog.kind === 'submit-incomplete' ? '当前尚有未完成的题目，确定交卷吗' : dialog.kind === 'submit' ? '系统会先保存最新答案。交卷完成后将无法继续修改。' : dialog.kind === 'leave-incomplete' ? '当前尚有未完成的题目，退出将暂存题目' : '仍有答案尚未同步，确定保存并退出吗？'"
+      :confirm-text="dialog.kind === 'scheduled' ? '返回考试中心' : dialog.kind === 'start' ? '开始计时' : ['submit-incomplete', 'leave-incomplete'].includes(dialog.kind) ? '确定' : dialog.kind === 'submit' ? '确认交卷' : '保存并离开'"
       :cancel-text="dialog.kind === 'scheduled' ? '关闭' : '取消'"
-      :danger="dialog.kind === 'submit'"
+      :danger="dialog.kind.startsWith('submit')"
       @confirm="confirmDialog"
       @cancel="cancelDialog"
     />
@@ -458,8 +549,8 @@ onBeforeUnmount(() => {
 .minute-warning { position:fixed;z-index:70;top:22px;left:50%;transform:translateX(-50%);display:flex;gap:14px;align-items:center;min-width:min(520px,calc(100vw - 32px));padding:15px 18px;border-radius:13px;background:#9f1239;color:white;box-shadow:0 14px 35px rgba(159,18,57,.25); }.minute-warning span { font-size:13px;opacity:.9 }.tab-warning { display:flex;align-items:center;gap:12px;padding:14px 18px;border:1px solid #fde68a;border-radius:12px;background:#fffbeb;color:#92400e;font-size:13px}.tab-warning span{color:#a16207}
 .result-panel { display:grid;grid-template-columns:auto 1fr minmax(220px,auto);align-items:center;gap:22px;padding:28px;border:1px solid var(--border);border-radius:18px;background:var(--surface);box-shadow:0 10px 30px rgba(15,23,42,.04)}.result-mark{display:grid;place-items:center;width:52px;height:52px;border-radius:16px;background:#ecfdf5;color:#059669;font-size:26px}.result-kicker{margin:0 0 5px;color:#64748b;font-size:12px;font-weight:650}.result-copy h2{margin:0;color:var(--ink);font-size:30px}.result-copy h2 span{font-size:16px;color:#64748b;font-weight:500}.result-copy>p:last-child{margin:6px 0 0;color:#64748b;font-size:13px}.result-panel dl,.start-panel dl{margin:0;display:grid;gap:8px}.result-panel dl div,.start-panel dl div{display:flex;justify-content:space-between;gap:30px;font-size:12px}.result-panel dt,.start-panel dt{color:#94a3b8}.result-panel dd,.start-panel dd{margin:0;color:var(--ink);font-weight:600}
 .start-panel{max-width:640px;margin:34px auto;padding:42px;border:1px solid var(--border);border-radius:18px;background:var(--surface);text-align:center}.start-icon{display:grid;place-items:center;width:52px;height:52px;margin:0 auto 15px;border-radius:16px;background:#eff6ff;color:#2563eb;font-size:18px}.start-panel h2{margin:0 0 10px;color:var(--ink);font-size:21px}.start-panel>p{max-width:510px;margin:0 auto 24px;color:#64748b;font-size:13px;line-height:1.8}.start-panel dl{padding:18px;border-radius:12px;background:#f8fafc;text-align:left}.start-button{margin-top:22px;padding:11px 30px}.start-panel.missed .start-icon{background:#fef2f2;color:#dc2626}
-.workspace{display:grid;grid-template-columns:220px minmax(0,780px);gap:22px;align-items:start}.exam-sidebar{position:sticky;top:24px;padding:20px;border:1px solid var(--border);border-radius:15px;background:var(--surface)}.save-row{display:flex;align-items:center;gap:8px;color:var(--ink);font-size:12px}.save-dot{width:7px;height:7px;border-radius:50%;background:#16a34a}.save-dot.saving,.save-dot.pending{background:#f59e0b}.save-dot.danger{background:#ef4444}.progress-line{height:6px;margin:16px 0 8px;border-radius:999px;background:#e2e8f0;overflow:hidden}.progress-line span{display:block;height:100%;border-radius:inherit;background:#2563eb;transition:width .25s}.exam-sidebar>p,.exam-sidebar>small{color:#64748b;font-size:11px}.exam-sidebar nav{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:20px 0}.exam-sidebar nav button{aspect-ratio:1;border:1px solid #dbe3ee;border-radius:7px;background:white;color:#64748b;cursor:pointer}.exam-sidebar nav button.answered{border-color:#86efac;background:#f0fdf4;color:#15803d}.exam-sidebar nav button.current{outline:2px solid #93c5fd}.submit-button{width:100%;padding:10px;border:0;border-radius:9px;background:#0f172a;color:white;font-weight:650;cursor:pointer}.submit-button:disabled{opacity:.5}.exam-sidebar>small{display:block;margin-top:9px;text-align:center;line-height:1.5}
-.questions-column{display:grid;gap:16px}.question-card{scroll-margin-top:20px;padding:25px;border:1px solid var(--border);border-radius:15px;background:var(--surface)}.question-card>header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.question-card>header>div{display:flex;align-items:center;gap:9px}.question-index{font:750 18px/1 var(--font-mono);color:var(--ink)}.type-chip{padding:4px 8px;border-radius:999px;background:#eff6ff;color:#1d4ed8;font-size:10px;font-weight:700}.question-card>header>strong{color:#64748b;font-size:12px}.prompt,.fill-prompt{margin:0 0 20px;color:var(--ink);font-size:14px;line-height:1.9;white-space:pre-wrap}.fill-prompt input{display:inline-block;width:150px;margin:3px 7px;padding:7px 9px;border:0;border-bottom:2px solid #93c5fd;background:#eff6ff;color:var(--ink);font:600 13px var(--font-sans);outline:none}.fill-prompt input:focus{border-color:#2563eb;background:#dbeafe}.options{display:grid;gap:8px}.options label{display:grid;grid-template-columns:auto 28px 1fr;align-items:center;gap:9px;padding:11px 13px;border:1px solid #e2e8f0;border-radius:10px;cursor:pointer}.options label.selected{border-color:#93c5fd;background:#eff6ff}.options input{accent-color:#2563eb}.options b{color:#475569;font-size:12px}.options span{color:var(--ink);font-size:13px}.code-editor{box-sizing:border-box;width:100%;padding:16px;border:1px solid #1e293b;border-radius:10px;background:#0f172a;color:#e2e8f0;font:13px/1.65 var(--font-mono);resize:vertical;outline:none}.code-editor:focus{border-color:#f97316;box-shadow:0 0 0 3px rgba(249,115,22,.14)}
+.workspace{display:grid;grid-template-columns:220px minmax(0,780px);gap:22px;align-items:start}.exam-sidebar{position:sticky;top:24px;min-width:0;padding:20px;border:1px solid var(--border);border-radius:15px;background:var(--surface)}.save-row{display:flex;align-items:center;gap:8px;color:var(--ink);font-size:12px}.save-dot{width:7px;height:7px;border-radius:50%;background:#16a34a}.save-dot.saving,.save-dot.pending{background:#f59e0b}.save-dot.danger{background:#ef4444}.progress-line{height:6px;margin:16px 0 8px;border-radius:999px;background:#e2e8f0;overflow:hidden}.progress-line span{display:block;height:100%;border-radius:inherit;background:#2563eb;transition:width .25s}.exam-sidebar>p,.exam-sidebar>small{color:#64748b;font-size:11px}.exam-sidebar nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin:20px 0}.exam-sidebar nav button{box-sizing:border-box;width:100%;min-width:0;min-height:0;aspect-ratio:1;border:1px solid #dbe3ee;border-radius:7px;background:white;color:#64748b;cursor:pointer}.exam-sidebar nav button.answered{border-color:#86efac;background:#f0fdf4;color:#15803d}.exam-sidebar nav button.current{outline:2px solid #93c5fd}.submit-button{width:100%;padding:10px;border:0;border-radius:9px;background:#0f172a;color:white;font-weight:650;cursor:pointer}.submit-button:disabled{opacity:.5}.exam-sidebar>small{display:block;margin-top:9px;text-align:center;line-height:1.5}
+.questions-column{display:grid;min-width:0;gap:16px}.question-card{min-width:0;scroll-margin-top:20px;padding:25px;border:1px solid var(--border);border-radius:15px;background:var(--surface)}.question-card>header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.question-card>header>div{display:flex;align-items:center;gap:9px}.question-index{font:750 18px/1 var(--font-mono);color:var(--ink)}.type-chip{padding:4px 8px;border-radius:999px;background:#eff6ff;color:#1d4ed8;font-size:10px;font-weight:700}.question-card>header>strong{color:#64748b;font-size:12px}.prompt,.fill-prompt{margin:0 0 20px;color:var(--ink);font-size:14px;line-height:1.9;white-space:pre-wrap}.fill-prompt input{display:inline-block;width:150px;margin:3px 7px;padding:7px 9px;border:0;border-bottom:2px solid #93c5fd;background:#eff6ff;color:var(--ink);font:600 13px var(--font-sans);outline:none}.fill-prompt input:focus{border-color:#2563eb;background:#dbeafe}.options{display:grid;gap:8px}.options label{display:grid;grid-template-columns:auto 28px 1fr;align-items:center;gap:9px;padding:11px 13px;border:1px solid #e2e8f0;border-radius:10px;cursor:pointer}.options label.selected{border-color:#93c5fd;background:#eff6ff}.options input{accent-color:#2563eb}.options b{color:#475569;font-size:12px}.options span{color:var(--ink);font-size:13px}.code-editor{box-sizing:border-box;width:100%;padding:16px;border:1px solid #1e293b;border-radius:10px;background:#0f172a;color:#e2e8f0;font:13px/1.65 var(--font-mono);resize:vertical;outline:none}.code-editor:focus{border-color:#f97316;box-shadow:0 0 0 3px rgba(249,115,22,.14)}.code-actions{display:flex;align-items:center;gap:12px;margin-top:12px}.code-actions span{color:#64748b;font-size:11px}.run-button{min-height:38px;padding:0 15px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;color:#1d4ed8;font-weight:650;cursor:pointer}.run-button:disabled{cursor:not-allowed;opacity:.55}.run-result{margin-top:12px;padding:12px;border:1px solid #dbeafe;border-radius:9px;background:#f8fafc;color:#334155;font-size:12px}.run-result.accepted{border-color:#bbf7d0;background:#f0fdf4;color:#166534}.run-result strong{display:block}.run-result pre{max-height:180px;margin:8px 0 0;overflow:auto;white-space:pre-wrap;word-break:break-word;font:11px/1.6 var(--font-mono)}
 .review-section{display:grid;gap:14px}.section-head{display:flex;justify-content:space-between;align-items:end}.section-head h2{margin:0;color:var(--ink)}.review-badge{padding:6px 10px;border-radius:999px;background:#ecfdf5;color:#047857;font-size:11px}.review-card{padding:20px;border:1px solid var(--border);border-radius:13px;background:var(--surface)}.review-card header{display:flex;justify-content:space-between}.review-card header span{color:#64748b;font-size:12px}.review-prompt{white-space:pre-wrap;line-height:1.7}.standard-answer{display:flex;gap:12px;padding:12px;border-radius:9px;background:#f0fdf4}.standard-answer span{color:#15803d;font-size:12px}.standard-answer code{white-space:pre-wrap;word-break:break-all;color:#166534}
 @keyframes pulse{50%{transform:scale(1.025)}}
 @media(max-width:860px){.workspace{grid-template-columns:1fr}.exam-sidebar{position:static}.exam-sidebar nav{grid-template-columns:repeat(8,1fr)}.result-panel{grid-template-columns:auto 1fr}.result-panel dl{grid-column:1/-1;padding-top:15px;border-top:1px solid var(--border)}}
