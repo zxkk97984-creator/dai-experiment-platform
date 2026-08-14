@@ -195,6 +195,10 @@ jobs:
           docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade b4c5d6e7f890
           docker compose -f docker-compose.prod.yml run --rm migrate python /scripts/seed-basic-environment-mysql.py
           docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade head
+      - name: 构建 basic 环境镜像并回写 digest（判题/Kernel 依赖）
+        run: |
+          cd ..
+          bash scripts/build-basic-environment-ci.sh
       - name: 启动全栈服务
         run: |
           cd ..

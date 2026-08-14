@@ -83,7 +83,8 @@ test.describe('学生参考 UI 冒烟（非破坏）', () => {
     await expect(page).toHaveURL(/\/student\/feedback$/)
     await expect(page.locator('.page-title')).toContainText('提交与反馈')
     await expect(page.locator('.status-tabs')).toBeVisible()
-    await expect(page.locator('.page-footer')).toBeVisible()
+    // 反馈页整页渲染完再断言页脚（全量并行跑时首帧较慢，5s 会假失败）
+    await expect(page.locator('.page-footer')).toBeVisible({ timeout: 15000 })
 
     // 侧栏 /student/feedback 高亮首页（镜像参考图 01）
     await expect(page.locator('button.nav-item[aria-label="首页"]')).toHaveClass(/active/)
