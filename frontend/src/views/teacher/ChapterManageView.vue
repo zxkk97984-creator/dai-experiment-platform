@@ -103,6 +103,20 @@ const stats = computed(() => [
   { value: courseStatusLabel.value, label: '课程状态' },
 ])
 
+function settingsFromCourse(value) {
+  return {
+    title: value?.title || '',
+    description: value?.description || '',
+    status: value?.status || 'draft',
+    // datetime-local 只需 YYYY-MM-DDTHH:mm，截掉秒与时区
+    start_time: (value?.start_time || '').slice(0, 16),
+    visibility: value?.visibility || 'class',
+    default_score: value?.default_score ?? 100,
+    academic_term_id: value?.academic_term_id ?? null,
+    teaching_class_ids: (value?.teaching_classes || []).map((item) => item.id),
+  }
+}
+
 async function loadPage() {
   loading.value = true
   try {
@@ -113,17 +127,7 @@ async function loadPage() {
     course.value = courseResponse.data
     const raw = chapterResponse.data
     chapters.value = Array.isArray(raw) ? raw : (raw.items || [])
-    settings.value = {
-      title: course.value.title || '',
-      description: course.value.description || '',
-      status: course.value.status || 'draft',
-      // datetime-local 只需 YYYY-MM-DDTHH:mm，截掉秒与时区
-      start_time: (course.value.start_time || '').slice(0, 16),
-      visibility: course.value.visibility || 'class',
-      default_score: course.value.default_score ?? 100,
-      academic_term_id: course.value.academic_term_id ?? null,
-      teaching_class_ids: (course.value.teaching_classes || []).map((item) => item.id),
-    }
+    settings.value = settingsFromCourse(course.value)
     restoreExpandedState()
   } catch {
     app.showToast('课程内容加载失败', 'error')
@@ -167,7 +171,7 @@ function onKeydown(event) {
   editingChapter.value = null
   movingLesson.value = null
   deleteTarget.value = null
-  settingsOpen.value = false
+  closeCourseSettings()
 }
 
 // ── 展示辅助 ──────────────────────────────────────────────────────────
@@ -632,13 +636,21 @@ async function saveSettings() {
 
 function openCourseSettings() {
   publishMissingFields.value = []
+  settings.value = settingsFromCourse(course.value)
   settingsOpen.value = true
+}
+
+function closeCourseSettings() {
+  settings.value = settingsFromCourse(course.value)
+  publishMissingFields.value = []
+  settingsOpen.value = false
 }
 
 async function publishCourse() {
   if (!course.value || publishingCourse.value || !canPublishCourse.value) return
   const missing = getCoursePublishMissingFields(course.value)
   if (missing.length) {
+    settings.value = settingsFromCourse(course.value)
     publishMissingFields.value = missing
     settingsOpen.value = true
     app.showToast(`发布前请完善：${missing.join('、')}`, 'error')
@@ -887,7 +899,7 @@ onBeforeUnmount(() => {
       panel-class="side-panel course-settings-panel"
       body-class="course-settings-body"
       actions-class="form-actions"
-      @close="settingsOpen = false"
+      @close="closeCourseSettings"
       @submit="saveSettings"
     >
         <div class="course-settings-content">
@@ -980,7 +992,7 @@ onBeforeUnmount(() => {
           <CourseRosterManager :course-id="courseId" @changed="loadPage" />
         </div>
         <template #actions>
-          <button class="button button-secondary" type="button" @click="settingsOpen = false">取消</button>
+          <button class="button button-secondary" type="button" @click="closeCourseSettings">取消</button>
           <button class="button button-primary" type="submit" :disabled="savingSettings || coverBusy">
             {{ savingSettings ? '保存中…' : '保存设置' }}
           </button>

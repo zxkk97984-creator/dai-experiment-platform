@@ -718,17 +718,21 @@ describe('课程可见范围设置', () => {
     expect(wrapper.find('.whitelist-manager').exists()).toBe(true)
   })
 
-  it('关闭再打开设置抽屉时保留可见范围选择（不丢失未保存修改）', async () => {
+  it('点击取消后丢弃未保存的可见范围修改', async () => {
     const wrapper = await mountWithSettings()
+    const updateCallsBeforeCancel = coursesAPI.update.mock.calls.length
     await visSelect(wrapper).setValue('class')
-    await wrapper.find('.panel-header .icon-button').trigger('click')
+    const cancelButton = wrapper.findAll('button').find((button) => button.text() === '取消')
+    await cancelButton.trigger('click')
     await flushPromises()
     expect(wrapper.find('.side-panel').exists()).toBe(false)
-    // 重新打开：可见范围选择保留
+    expect(coursesAPI.update).toHaveBeenCalledTimes(updateCallsBeforeCancel)
+
+    // 重新打开时必须从服务端课程快照恢复，而不是沿用已取消的草稿。
     const openSettingsButton = wrapper.findAll('button').find((b) => b.text().includes('课程设置'))
     await openSettingsButton.trigger('click')
     await flushPromises()
-    expect(visSelect(wrapper).element.value).toBe('class')
+    expect(visSelect(wrapper).element.value).toBe('private')
     expect(wrapper.find('.whitelist-manager').exists()).toBe(false)
   })
 })
