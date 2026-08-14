@@ -231,6 +231,35 @@ class CourseEnrollment(TimestampMixin, Base):
     student: Mapped[User] = relationship()
 
 
+class LessonProgress(TimestampMixin, Base):
+    """TASK-018：服务端学习进度事实（跨设备一致）。
+
+    - 唯一键 (lesson_id, student_id)；状态仅 in_progress/completed
+    - 打开课时只记录 in_progress 与最后访问时间；完成必须显式操作
+    - 不记录视频播放位置/停留时长，不做自动完成
+    """
+    __tablename__ = "lesson_progress"
+    __table_args__ = (
+        UniqueConstraint("lesson_id", "student_id", name="uq_lesson_progress_lesson_student"),
+        Index("ix_lesson_progress_student_status", "student_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lesson_id: Mapped[int] = mapped_column(
+        ForeignKey("lessons.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="in_progress")
+    last_accessed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    lesson: Mapped[Lesson] = relationship()
+    student: Mapped[User] = relationship()
+
+
 class CourseWhitelistStudent(TimestampMixin, Base):
     """课程白名单——教师指定可见的学生（与选课关系相互独立）"""
     __tablename__ = "course_whitelist_students"

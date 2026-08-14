@@ -55,6 +55,28 @@ class PaginatedResponse(BaseModel):
     total: int = 0
 
 
+# ── 学习进度（TASK-018 / F-06） ────────────────────────────────
+
+
+class LessonProgressRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    lesson_id: int
+    status: Literal["in_progress", "completed"]
+    last_accessed_at: datetime | None
+
+
+class CourseProgressRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    course_id: int
+    total: int
+    completed: int
+    percent: int
+    next_lesson_id: int | None
+    items: list[LessonProgressRead]
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str

@@ -20,18 +20,6 @@ function startOfDay(ts) {
   return d.getTime()
 }
 
-/** 读取课程已完成课时 id 列表；存储损坏返回 [] */
-function readCompleted(courseId, storage) {
-  try {
-    const raw = storage?.getItem?.(`course_${courseId}_completed`)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
 /** 钳制 0–100，非法值视为 0 */
 export function clampProgress(value) {
   const v = Number(value)
@@ -39,29 +27,8 @@ export function clampProgress(value) {
   return Math.round(Math.min(100, Math.max(0, v)))
 }
 
-/** 课程学习进度百分比（基于 localStorage 的已完成课时，与 CourseDetailView 同一 key） */
-export function getCourseProgress(courseId, chapters, storage) {
-  const completed = readCompleted(courseId, storage)
-  let total = 0
-  for (const ch of chapters || []) total += ch?.lessons?.length || 0
-  if (total === 0) return 0
-  // 只统计本课程实际存在的课时，避免其他课程 id 混入
-  const done = completed.filter((id) =>
-    (chapters || []).some((ch) => (ch?.lessons || []).some((l) => l?.id === id)),
-  ).length
-  return Math.round((done / total) * 100)
-}
-
-/** 第一个未完成课时；全部完成返回 null */
-export function getFirstIncompleteLesson(courseId, chapters, storage) {
-  const completed = new Set(readCompleted(courseId, storage))
-  for (const ch of chapters || []) {
-    for (const lesson of ch?.lessons || []) {
-      if (lesson?.id != null && !completed.has(lesson.id)) return lesson
-    }
-  }
-  return null
-}
+// 注意（TASK-018）：课程学习进度已改为服务端事实（progressAPI / lesson_progress 表），
+// 这里不再提供基于 localStorage 的完成进度计算——旧本地记录不作为完成事实。
 
 function courseTitleOf(courseMap, courseId) {
   return courseMap?.[courseId]?.title ?? ''

@@ -35,7 +35,26 @@ NEW_REVISION = "b4c5d6e7f890"
 REVISION_A = "b4c5d6e7f890"
 REVISION_B = "c5d6e7f8a901"
 REVISION_FIX = "d6e7f8a9b012"
-CURRENT_HEAD = "20260813_0002"
+
+
+def _derive_current_head() -> str:
+    """从 alembic 脚本目录推导当前 head（随新增迁移自动前移，避免硬编码漂移）。
+
+    显式以绝对路径覆盖 script_location：从仓库根目录收集测试时 cwd 不是 backend，
+    相对路径会指向不存在的目录。
+    """
+    from alembic.config import Config as AlembicConfig
+    from alembic.script import ScriptDirectory
+
+    cfg = AlembicConfig(str(BACKEND_DIR / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    script = ScriptDirectory.from_config(cfg)
+    heads = script.get_heads()
+    assert len(heads) == 1, f"迁移链出现多个 head: {heads}"
+    return heads[0]
+
+
+CURRENT_HEAD = _derive_current_head()
 
 CONTROL_TABLES = [
     "package_catalog",

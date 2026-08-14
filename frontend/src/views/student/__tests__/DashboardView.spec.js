@@ -22,10 +22,12 @@ vi.mock('vue-router', async (importOriginal) => {
 const studentMock = vi.hoisted(() => ({ student: vi.fn() }))
 const markReadMock = vi.hoisted(() => ({ markRead: vi.fn() }))
 const coursesMock = vi.hoisted(() => ({ getChapters: vi.fn() }))
+const progressMock = vi.hoisted(() => ({ getCourse: vi.fn() }))
 
 vi.mock('../../../api/dashboard.js', () => ({ dashboardAPI: studentMock }))
 vi.mock('../../../api/announcements.js', () => ({ announcementsAPI: markReadMock }))
 vi.mock('../../../api/courses.js', () => ({ coursesAPI: coursesMock }))
+vi.mock('../../../api/progress.js', () => ({ progressAPI: progressMock }))
 
 import DashboardView from '../DashboardView.vue'
 
@@ -114,6 +116,7 @@ beforeEach(() => {
   studentMock.student.mockReset()
   markReadMock.markRead.mockReset()
   coursesMock.getChapters.mockReset()
+  progressMock.getCourse.mockReset()
 })
 
 describe('学生首页 DashboardView（参考图 04 构成）', () => {
@@ -160,10 +163,11 @@ describe('学生首页 DashboardView（参考图 04 构成）', () => {
     expect(wrapper.get('.greeting-date').text()).toMatch(/月|日/)
   })
 
-  it('续学面板展示真实课程标题、副标题与本地进度', async () => {
+  it('续学面板展示真实课程标题、副标题与服务端进度（TASK-018）', async () => {
     studentMock.student.mockResolvedValue({ data: dashboardData() })
-    coursesMock.getChapters.mockResolvedValue({ data: chaptersData })
-    localStorage.setItem('course_2_completed', JSON.stringify([8]))
+    progressMock.getCourse.mockResolvedValue({
+      data: { course_id: 2, total: 2, completed: 1, percent: 50, next_lesson_id: 9, items: [] },
+    })
     const wrapper = mountView()
     await flushPromises()
     const panel = wrapper.get('.continue-panel')
@@ -171,6 +175,7 @@ describe('学生首页 DashboardView（参考图 04 构成）', () => {
     expect(panel.text()).toContain('机器学习导论')
     expect(panel.text()).toContain('50%')
     expect(panel.find('.ui-progress').exists()).toBe(true)
+    expect(progressMock.getCourse).toHaveBeenCalledWith(2)
   })
 
   it('续学按钮跳转服务端路由且只接受 /student 前缀', async () => {

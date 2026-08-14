@@ -13,10 +13,10 @@ import AppIcon from '../../components/ui/AppIcon.vue'
 import UiPanel from '../../components/ui/UiPanel.vue'
 import UiProgress from '../../components/ui/UiProgress.vue'
 import { announcementsAPI } from '../../api/announcements.js'
-import { coursesAPI } from '../../api/courses.js'
+import { progressAPI } from '../../api/progress.js'
 import { dashboardAPI } from '../../api/dashboard.js'
 import { useAuthStore } from '../../stores/auth.js'
-import { feedbackStatus, getCourseProgress } from '../../utils/studentUi.js'
+import { feedbackStatus } from '../../utils/studentUi.js'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -62,7 +62,7 @@ async function loadDashboard() {
   }
 }
 
-/** 从服务端续学路由提取课程 id，拉真实章节计算本地学习进度 */
+/** 从服务端续学路由提取课程 id，拉服务端学习进度（TASK-018） */
 async function loadContinueProgress() {
   continueLoaded.value = false
   continueProgress.value = null
@@ -73,12 +73,11 @@ async function loadContinueProgress() {
     return
   }
   const courseId = Number(m[1])
-  const [chaptersRes] = await Promise.allSettled([coursesAPI.getChapters(courseId)])
+  try {
+    const res = await progressAPI.getCourse(courseId)
+    continueProgress.value = res.data.percent ?? 0
+  } catch { /* 失败保持 null，不伪造 */ }
   continueLoaded.value = true
-  if (chaptersRes.status === 'fulfilled') {
-    const chapters = chaptersRes.value.data?.items || chaptersRes.value.data || []
-    continueProgress.value = getCourseProgress(courseId, chapters, localStorage)
-  }
 }
 
 async function markRead(notice) {
