@@ -1,3 +1,8 @@
+"""checkpoint1 模型约束测试。
+
+A/B/C 分类：B 类（约束语义测试）——外键开启后必须建真实父行，
+让 XOR/UNIQUE 约束（而非 1452 外键错误）真正被触发；父行统一走共享工厂。
+"""
 from __future__ import annotations
 
 import subprocess

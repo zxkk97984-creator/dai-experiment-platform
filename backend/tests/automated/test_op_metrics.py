@@ -4,6 +4,9 @@
 - 生产 JSON 日志格式的敏感键脱敏
 - /metrics 管理员权限与字段（无提交内容泄露）
 - 中间件状态类别计数 + 路径模板低基数
+
+A/B/C 分类：B 类（最小父行）——CodeGrade 的 submission/rubric 外键经共享工厂
+make_submission / make_rubric 建真实父行。
 """
 import json
 import logging
