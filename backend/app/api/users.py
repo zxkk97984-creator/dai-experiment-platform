@@ -6,7 +6,7 @@ from app.dependencies import get_current_user, get_db, require_roles, Pagination
 from app.errors import api_error
 from app.models import User
 from app.schemas import PaginatedResponse, PasswordUpdate, StatusUpdate, UserCreate, UserRead, UserUpdate
-from app.security import hash_password, verify_password
+from app.security import hash_password, validate_password_rules, verify_password
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -53,7 +53,9 @@ def create_user(
         raise api_error(422, "STUDENT_NO_REQUIRED", "新建学生必须填写学号")
     if student_no and db.scalar(select(User).where(User.student_no == student_no)):
         raise api_error(409, "STUDENT_NO_EXISTS", "学号已存在")
-    if payload.password.strip().lower() == (payload.username or "").strip().lower():
+    try:
+        validate_password_rules(payload.password, payload.username)
+    except ValueError:
         raise api_error(422, "PASSWORD_EQUALS_USERNAME", "密码不能与用户名相同")
     user = User(
         username=payload.username,
@@ -160,7 +162,9 @@ def update_password(
         ):
             raise api_error(401, "CURRENT_PASSWORD_INVALID", "当前密码不正确")
     # 密码不得等同规范化用户名（共享边界）
-    if payload.password.strip().lower() == (user.username or "").strip().lower():
+    try:
+        validate_password_rules(payload.password, user.username)
+    except ValueError:
         raise api_error(422, "PASSWORD_EQUALS_USERNAME", "密码不能与用户名相同")
     user.password_hash = hash_password(payload.password)
     # 改密/重置立即撤销该用户全部会话（原子递增）

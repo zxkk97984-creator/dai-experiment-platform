@@ -5,11 +5,30 @@
 - 本人改密必须提交正确的 current_password；管理员重置无需旧密码。
 """
 
+import pytest
+
+from app import cli
 from conftest import auth_header, create_user, login
 
 API = "/api/v1"
 
 RIGHT = "Passw0rd!"
+
+
+@pytest.mark.parametrize(
+    ("username", "password"),
+    [("cli_admin", "short"), ("same_admin", "same_admin")],
+)
+def test_create_admin_cli_rejects_invalid_password_before_database(
+    monkeypatch, username, password
+):
+    def unexpected_database_access(*args, **kwargs):
+        raise AssertionError("invalid CLI password reached the database")
+
+    monkeypatch.setattr(cli.Base.metadata, "create_all", unexpected_database_access)
+
+    with pytest.raises(SystemExit, match="密码不符合要求"):
+        cli.create_admin(username, password, "Administrator")
 
 
 def _create_student(client, db_session_factory, username, password=RIGHT):

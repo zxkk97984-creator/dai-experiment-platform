@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.environments import EnvironmentSummaryRead, ImportDiagnosticRead
+from app.security import validate_password_rules
 
 # ── 输入硬上限（TASK-004） ────────────────────────────────────
 # 超限在 Schema 校验层拒绝（422），发生在写库、入队或启动 Docker 之前。
@@ -32,20 +33,6 @@ def validate_code_size(v: str) -> str:
 
 def validate_text_answer_size(v: str) -> str:
     return _bounded(v, "文本答案", MAX_TEXT_ANSWER_CHARS, MAX_TEXT_ANSWER_BYTES)
-
-
-# ── 密码边界（TASK-011） ─────────────────────────────────────
-MAX_PASSWORD_BYTES = 72  # bcrypt 上限
-
-
-def validate_password_shape(v: str) -> str:
-    if len(v) < 8:
-        raise ValueError("密码至少需要 8 个字符")
-    if _utf8_bytes(v) > MAX_PASSWORD_BYTES:
-        raise ValueError("密码 UTF-8 字节数超过上限 72")
-    if not v.strip():
-        raise ValueError("密码不能为全空白")
-    return v
 
 
 class PaginatedResponse(BaseModel):
@@ -128,7 +115,8 @@ class UserCreate(BaseModel):
     @field_validator("password")
     @classmethod
     def _limit_password(cls, v: str) -> str:
-        return validate_password_shape(v)
+        validate_password_rules(v)
+        return v
 
 
 class UserUpdate(BaseModel):
@@ -146,7 +134,8 @@ class PasswordUpdate(BaseModel):
     @field_validator("password")
     @classmethod
     def _limit_password(cls, v: str) -> str:
-        return validate_password_shape(v)
+        validate_password_rules(v)
+        return v
 
 
 class StatusUpdate(BaseModel):

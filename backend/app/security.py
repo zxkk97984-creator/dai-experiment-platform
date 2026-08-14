@@ -16,6 +16,18 @@ def verify_password(password: str, password_hash: str) -> bool:
     return password_context.verify(password, password_hash)
 
 
+def validate_password_rules(password: str, username: str | None = None) -> None:
+    """校验所有密码入口共享的 TASK-011 边界。"""
+    if len(password) < 8:
+        raise ValueError("密码至少需要 8 个字符")
+    if len(password.encode("utf-8")) > 72:
+        raise ValueError("密码 UTF-8 字节数超过上限 72")
+    if not password.strip():
+        raise ValueError("密码不能为全空白")
+    if username is not None and password.strip().casefold() == username.strip().casefold():
+        raise ValueError("密码不能与用户名相同")
+
+
 def create_token(
     *,
     subject: int,
