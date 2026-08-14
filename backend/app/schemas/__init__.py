@@ -115,7 +115,7 @@ class UserCreate(BaseModel):
     real_name: str
     student_no: str | None = None
     role: str
-    status: str = "active"
+    status: Literal["active", "disabled"] = "active"
 
     @field_validator("password")
     @classmethod
@@ -127,7 +127,7 @@ class UserUpdate(BaseModel):
     real_name: str | None = None
     student_no: str | None = None
     role: str | None = None
-    status: str | None = None
+    status: Literal["active", "disabled"] | None = None
 
 
 class PasswordUpdate(BaseModel):
@@ -142,7 +142,7 @@ class PasswordUpdate(BaseModel):
 
 
 class StatusUpdate(BaseModel):
-    status: str
+    status: Literal["active", "disabled"]
 
 
 # class 为新的“教学班可见”；public 仅作为旧数据/旧客户端兼容值保留。
@@ -350,7 +350,7 @@ class LessonCreate(BaseModel):
     notebook_path: str | None = None
     video_url: str | None = None
     order_index: int = 0
-    status: str = "draft"
+    status: Literal["draft", "published", "pending"] = "draft"
 
     @field_validator("video_url")
     @classmethod
@@ -368,7 +368,7 @@ class LessonUpdate(BaseModel):
     video_url: str | None = None
     order_index: int | None = None
     chapter_id: int | None = None
-    status: str | None = None
+    status: Literal["draft", "published", "pending"] | None = None
 
     @field_validator("video_url")
     @classmethod
@@ -657,7 +657,7 @@ class SampleRunResponse(BaseModel):
 class ExamCreate(BaseModel):
     course_id: int
     title: str
-    status: str = "draft"
+    status: Literal["draft"] = "draft"
     duration_minutes: int = 60
     start_at: datetime | None = None
     end_at: datetime | None = None
@@ -668,7 +668,7 @@ class ExamCreate(BaseModel):
 
 class ExamUpdate(BaseModel):
     title: str | None = None
-    status: str | None = None
+    status: Literal["draft", "published"] | None = None
     duration_minutes: int | None = None
     start_at: datetime | None = None
     end_at: datetime | None = None
