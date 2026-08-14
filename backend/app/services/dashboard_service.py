@@ -14,6 +14,7 @@ from app.models import (
 from app.services.announcement_service import (
     list_visible_announcements, unread_announcement_count,
 )
+from app.services.course_access_service import student_visible_course_predicate
 from app.schemas.dashboard import (
     ContinueLearning, CourseHealth, CourseSnapshot, ManagedCourse,
     PriorityItem, RecentFeedback, StudentDashboardRead, StudentSummary,
@@ -83,7 +84,7 @@ def build_student_dashboard(db: Session, user: User, now: datetime | None = None
             .where(
                 CourseEnrollment.student_id == user.id,
                 CourseEnrollment.status == "enrolled",
-                Course.status == "published",
+                student_visible_course_predicate(user.id),
             )
         ).all()
     )

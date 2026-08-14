@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, status
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -7,6 +7,7 @@ from app.config import Settings, get_settings
 from app.dependencies import PaginationParams, get_current_user, get_db, pagination, require_roles
 from app.errors import api_error
 from app.services.lesson_video_service import remove_storage_key
+from app.services.course_access_service import student_visible_course_predicate
 from app.models import (
     AcademicTerm, Chapter, Course, CourseEnrollment, CourseTeachingClass,
     CourseWhitelistStudent, Lesson, TeachingClass, TeachingClassStudent, User,
@@ -221,57 +222,7 @@ def list_courses(
     count_query = select(func.count()).select_from(Course)
     access_filters = []
     if current_user.role == "student":
-        # 可见范围：class 接受绑定教学班成员或教师手动加入；whitelist 需白名单关联；private 需存量有效选课。
-        whitelist_exists = (
-            select(CourseWhitelistStudent.id)
-            .where(
-                CourseWhitelistStudent.course_id == Course.id,
-                CourseWhitelistStudent.student_id == current_user.id,
-            )
-            .exists()
-        )
-        enrolled_exists = (
-            select(CourseEnrollment.id)
-            .where(
-                CourseEnrollment.course_id == Course.id,
-                CourseEnrollment.student_id == current_user.id,
-                CourseEnrollment.status == "enrolled",
-            )
-            .exists()
-        )
-        manual_enrollment_exists = (
-            select(CourseEnrollment.id)
-            .where(
-                CourseEnrollment.course_id == Course.id,
-                CourseEnrollment.student_id == current_user.id,
-                CourseEnrollment.status == "enrolled",
-                CourseEnrollment.origin == "manual",
-            )
-            .exists()
-        )
-        class_member_exists = (
-            select(TeachingClassStudent.id)
-            .join(
-                CourseTeachingClass,
-                CourseTeachingClass.teaching_class_id == TeachingClassStudent.teaching_class_id,
-            )
-            .where(
-                CourseTeachingClass.course_id == Course.id,
-                TeachingClassStudent.student_id == current_user.id,
-                TeachingClassStudent.status == "active",
-            )
-            .exists()
-        )
-        student_predicate = and_(
-            Course.status == "published",
-            or_(
-                Course.visibility == "public",
-                and_(Course.visibility == "class", or_(class_member_exists, manual_enrollment_exists)),
-                and_(Course.visibility == "whitelist", whitelist_exists),
-                and_(Course.visibility == "private", enrolled_exists),
-            ),
-        )
-        access_filters.append(student_predicate)
+        access_filters.append(student_visible_course_predicate(current_user.id))
     elif current_user.role == "teacher":
         access_filters.append(Course.teacher_id == current_user.id)
     elif current_user.role == "developer":

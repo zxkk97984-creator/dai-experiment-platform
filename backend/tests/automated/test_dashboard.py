@@ -175,6 +175,44 @@ def test_student_dashboard_real_data(client, db_session_factory):
     assert body["summary"]["unread_announcement_count"] == 1
 
 
+def test_student_dashboard_excludes_self_enrollment_hidden_by_class_visibility(
+    client, db_session_factory,
+):
+    """首页课程、计数与学生课程列表必须使用同一套 class 可见性规则。"""
+    from app.models import Course, CourseEnrollment
+
+    teacher = create_user(db_session_factory, "dash-class-teacher", "teacher")
+    student = create_user(db_session_factory, "dash-class-student", "student")
+    with db_session_factory() as db:
+        course = Course(
+            title="已切换为教学班可见",
+            status="published",
+            visibility="class",
+            teacher_id=teacher.id,
+        )
+        db.add(course)
+        db.flush()
+        db.add(CourseEnrollment(
+            course_id=course.id,
+            student_id=student.id,
+            status="enrolled",
+            origin="self",
+        ))
+        db.commit()
+
+    token, _ = login(client, "dash-class-student")
+    headers = auth_header(token)
+
+    course_list = client.get("/api/v1/courses", headers=headers)
+    assert course_list.status_code == 200
+    assert course_list.json()["total"] == 0
+
+    dashboard = client.get("/api/v1/dashboard/student", headers=headers)
+    assert dashboard.status_code == 200
+    assert dashboard.json()["summary"]["course_count"] == 0
+    assert dashboard.json()["courses"] == []
+
+
 def test_priority_experiments_only_unsubmitted(client, db_session_factory):
     """待办实验仅显示 started（未提交）；submitted/graded 已交记录不进 priority_items"""
     from app.models import (
