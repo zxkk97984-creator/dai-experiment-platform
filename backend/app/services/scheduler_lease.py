@@ -10,12 +10,16 @@
 import logging
 
 from sqlalchemy import func, insert, or_, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.models import SchedulerLease
 
 logger = logging.getLogger("dai.scheduler_lease")
+
+# MySQL 并发首插可抛锁等待超时（1205）或死锁（1213）——语义上等价于
+# 「被对方抢赢」，应回滚后走 CAS 重试而非向上抛错（多实例生产真实场景）。
+_RETRYABLE_MYSQL_LOCK_CODES = (1205, 1213)
 
 
 def _db_now(db: Session):
@@ -53,22 +57,32 @@ def try_acquire_lease(db: Session, task_name: str, owner_id: str, ttl_seconds: i
         db.commit()
         return True
 
-    # 2. 无行：首次插入（并发下 PK 冲突由 IntegrityError 处理，重试一次 CAS）
-    try:
-        db.execute(
-            insert(SchedulerLease).values(
-                task_name=task_name, owner_id=owner_id,
-                lease_until=lease_until, heartbeat_at=now,
+    # 2. 无行：首次插入。并发下三种可恢复竞争都回滚后走 CAS 重试：
+    #    · IntegrityError：对方先插（PK 冲突）
+    #    · MySQL 1205 锁等待超时 / 1213 死锁：插入意向锁与对方行锁互等
+    for _attempt in range(3):
+        try:
+            db.execute(
+                insert(SchedulerLease).values(
+                    task_name=task_name, owner_id=owner_id,
+                    lease_until=lease_until, heartbeat_at=now,
+                )
             )
-        )
-        db.commit()
-        return True
-    except IntegrityError:
-        db.rollback()
-        now2 = _db_now(db)
-        lease_until2 = now2 + timedelta(seconds=ttl_seconds)
-        if _try_cas_acquire(db, task_name, owner_id, lease_until2, now2):
+            db.commit()
+            return True
+        except IntegrityError:
+            db.rollback()
+        except OperationalError as exc:
+            orig_code = getattr(getattr(exc, "orig", None), "args", (None,))[0]
+            if orig_code not in _RETRYABLE_MYSQL_LOCK_CODES:
+                raise
+            db.rollback()
+            logger.warning("租约并发竞争（%s），重试 CAS: %s", orig_code, task_name)
+
+        now = _db_now(db)
+        lease_until = now + timedelta(seconds=ttl_seconds)
+        if _try_cas_acquire(db, task_name, owner_id, lease_until, now):
             db.commit()
             return True
         db.rollback()
-        return False
+    return False
