@@ -90,6 +90,7 @@ function navigate(path) {
         class="nav-item"
         :class="{ active: isActive(item.path) }"
         :aria-label="item.label"
+        :aria-current="isActive(item.path) ? 'page' : undefined"
         @click="navigate(item.path)"
         :title="app.sidebarCollapsed ? item.label : ''"
       >
@@ -106,7 +107,7 @@ function navigate(path) {
         class="collapse-btn"
         @click="app.toggleSidebar()"
         :title="app.sidebarCollapsed ? '展开侧栏' : '收起侧栏'"
-        aria-label="Toggle sidebar"
+        :aria-label="app.sidebarCollapsed ? '展开侧栏' : '收起侧栏'"
       >
         <span class="collapse-arrow" :class="{ 'is-collapsed': app.sidebarCollapsed }" aria-hidden="true">
           <AppIcon name="chevron-right" :size="16" />
