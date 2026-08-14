@@ -9,7 +9,7 @@
 ### 环境要求
 
 - **Docker Desktop**（运行 MySQL、Redis、判题沙箱）
-- **Python 3.11+**（后端）
+- **Python 3.12**（后端；与 CI 及 Dockerfile 基线一致，仓库含 `backend/.python-version`）
 - **Node.js 18+**（前端）
 
 ### 1. 克隆项目

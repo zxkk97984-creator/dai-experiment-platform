@@ -10,7 +10,8 @@ jobs:
   backend-test-sqlite:
     name: 后端 pytest (SQLite)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 全套约 15+ 分钟（2026-08 实测 15 分钟跑到 80% 被取消），留足余量
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: backend
@@ -43,7 +44,8 @@ jobs:
   backend-test-mysql:
     name: 后端 pytest (MySQL)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 本地实测全套约 27 分钟，20 分钟会被 timeout 取消
+    timeout-minutes: 40
     services:
       mysql:
         image: mysql:8.0
@@ -93,8 +95,9 @@ jobs:
             sleep 2
           done
           mysql -h 127.0.0.1 -u root -ptest_root -e "CREATE DATABASE IF NOT EXISTS dai_platform"
-      - name: 等 Redis 就绪
-        run: redis-cli -h 127.0.0.1 ping
+      # 说明：不单独 ping Redis——ubuntu-24.04 runner 没有 redis-cli（2026-08 两次
+      # 因此 exit 127 挂掉）。redis 服务容器已配置 --health-cmd "redis-cli ping"，
+      # GitHub Actions 会等服务 healthy 后才开始执行步骤，无需重复探测。
       - name: 迁移第一步（环境控制面迁移 A）
         run: alembic upgrade b4c5d6e7f890
       - name: 种入 basic 可用版本（迁移 B 前置，等价生产 seed-environments 后构建完成）
@@ -122,7 +125,7 @@ jobs:
       - name: 安装 Ruff
         run: pip install ruff
       - name: 高信号规则阻断（TASK-026：仅 E9/F63/F7/F82/F811，禁止新增）
-        run: ruff check app/ --select E9,F63,F7,F82,F811
+        run: ruff check app/
 
   frontend-test:
     name: 前端 test + build
