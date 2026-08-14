@@ -1,8 +1,9 @@
 """实验 API 测试 — v5 统一模型后的验收测试"""
-from conftest import auth_header, create_course_db, create_user, login
+from conftest import auth_header, create_course_db, create_user, login, seed_basic_environment
 
 
 def _seed_student_catalog(db_session_factory):
+    seed_basic_environment(db_session_factory)
     """创建四态目录数据，并放入一条其他学生记录验证隔离。"""
     from datetime import datetime, timedelta, timezone
 

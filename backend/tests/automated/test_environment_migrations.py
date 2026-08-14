@@ -9,6 +9,8 @@
 - 绝不触碰开发库（DAI_DATABASE_URL 指向临时文件）
 """
 from __future__ import annotations
+import pytest
+pytestmark = pytest.mark.no_auto_env_seed
 
 import importlib.util
 import os
@@ -16,7 +18,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 import sqlalchemy as sa
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -34,7 +35,7 @@ NEW_REVISION = "b4c5d6e7f890"
 REVISION_A = "b4c5d6e7f890"
 REVISION_B = "c5d6e7f8a901"
 REVISION_FIX = "d6e7f8a9b012"
-CURRENT_HEAD = "20260812_0002"
+CURRENT_HEAD = "20260813_0001"
 
 CONTROL_TABLES = [
     "package_catalog",

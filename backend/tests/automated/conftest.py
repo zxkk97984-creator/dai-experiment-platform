@@ -128,6 +128,7 @@ def create_course_db(
     """
     from app.models import Course
 
+    seed_basic_environment(db_session_factory)
     with db_session_factory() as db:
         teacher = db.query(User).filter(User.username == teacher_username).first()
         course = Course(
@@ -164,20 +165,79 @@ def create_assignment_db(
     """
     from app.models import Assignment
 
+    seed_basic_environment(db_session_factory)
     with db_session_factory() as db:
         teacher = db.query(User).filter(User.username == teacher_username).first()
-        assignment = Assignment(
+        kwargs = dict(
             course_id=course_id,
             title=title,
             status=status,
             due_at=due_at,
-            environment_version_id=environment_version_id,
             created_by_id=teacher.id if teacher else None,
         )
+        # 环境版本 NOT NULL：显式传 None 会绕过模型 default，仅非 None 时传参
+        if environment_version_id is not None:
+            kwargs["environment_version_id"] = environment_version_id
+        assignment = Assignment(**kwargs)
         db.add(assignment)
         db.commit()
         db.refresh(assignment)
         return assignment.id
+
+
+def seed_basic_environment(db_or_factory):
+    """幂等 seed：basic 档位 available 版本（带 digest）。
+
+    模型层 environment_version_id 已与迁移 B 对齐为 NOT NULL，
+    未显式绑定环境的测试记录依赖 resolve_basic_env_version_id 惰性默认，
+    需要库中存在 basic 可用版本；环境控制面自身的测试不要调用本 helper。
+    参数可以是 session factory，也可以是一个已打开的 Session。
+    """
+    from app.models import EnvironmentProfile, EnvironmentVersion
+
+    def _seed(session):
+        if (
+            session.query(EnvironmentProfile)
+            .filter(EnvironmentProfile.slug == "basic")
+            .first()
+            is not None
+        ):
+            return
+        profile = EnvironmentProfile(
+            slug="basic", display_name="Python 基础", status="active"
+        )
+        session.add(profile)
+        session.flush()
+        version = EnvironmentVersion(
+            profile_id=profile.id,
+            version_number=1,
+            status="available",
+            base_image_ref="python:3.12-slim@sha256:" + "0" * 64,
+            image_digest="sha256:" + "1" * 64,
+            python_version="3.12",
+            minimum_memory_mb=256,
+            manifest_sha256="c" * 64,
+        )
+        session.add(version)
+        session.commit()
+
+    if hasattr(db_or_factory, "query") and hasattr(db_or_factory, "add"):
+        _seed(db_or_factory)
+    else:
+        with db_or_factory() as session:
+            _seed(session)
+
+
+@pytest.fixture(autouse=True)
+def _auto_seed_basic_environment(request, db_session_factory):
+    """所有测试默认预置 basic 可用环境版本（模型层 environment_version_id 已 NOT NULL）。
+
+    直接操作环境控制面表的测试（environment_*/seed_data）自行管理种子数据，
+    通过 pytestmark = pytest.mark.no_auto_env_seed 关闭本 fixture。
+    """
+    marker = request.node.get_closest_marker("no_auto_env_seed")
+    if marker is None:
+        seed_basic_environment(db_session_factory)
 
 
 def login(client, username, password="Passw0rd!"):

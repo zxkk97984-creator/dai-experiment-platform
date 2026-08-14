@@ -11,6 +11,8 @@
 说明：开发库（MySQL）尚未跑迁移 A/B，本测试全部使用隔离 SQLite 测试库。
 """
 from __future__ import annotations
+import pytest
+pytestmark = pytest.mark.no_auto_env_seed
 
 from sqlalchemy import select
 
@@ -245,16 +247,20 @@ def test_experiment_record_binds_environment(db_session_factory, test_settings):
         assert record.environment_version_id == basic_id
 
 
-def test_no_seed_environment_allows_null_model(db_session_factory):
-    """无种子环境时模型层可空（测试库宽容），Phase 4 前创建路径不因新字段中断"""
+def test_no_seed_environment_rejects_null_model(db_session_factory):
+    """无可用 basic 版本时模型层 NOT NULL 生效：创建路径必须显式绑定环境版本
+
+    （TASK-010 对齐迁移 B：environment_version_id 回填后已 NOT NULL；
+    旧语义「无种子允许 NULL」已废弃，服务层必须提供环境绑定。）
+    """
+    from sqlalchemy.exc import IntegrityError
+
     with db_session_factory() as db:
         course = Course(title="C1", status="published")
         db.add(course)
         db.commit()
         db.refresh(course)
-        assignment = Assignment(course_id=course.id, title="A1", status="draft")
-        db.add(assignment)
-        db.commit()
-        assert assignment.environment_version_id is None
-        assert assignment.import_policy_mode == "unrestricted"
-        assert assignment.allowed_imports == []
+        with pytest.raises(IntegrityError):
+            assignment = Assignment(course_id=course.id, title="A1", status="draft")
+            db.add(assignment)
+            db.commit()

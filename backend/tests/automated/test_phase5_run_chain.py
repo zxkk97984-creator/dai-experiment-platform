@@ -16,6 +16,8 @@
 mock 版本验证；Docker 调用全部 patch 捕获 argv。
 """
 from __future__ import annotations
+import pytest
+pytestmark = pytest.mark.no_auto_env_seed
 
 import json
 from pathlib import Path
@@ -357,7 +359,16 @@ def test_missing_digest_fails_closed_system_error(db_session_factory, test_setti
         db.add(course)
         db.commit()
         db.refresh(course)
-        assignment = Assignment(course_id=course.id, title="A1", status="published")
+        draft_version = db.scalar(
+            select(EnvironmentVersion)
+            .join(EnvironmentProfile, EnvironmentProfile.id == EnvironmentVersion.profile_id)
+            .where(EnvironmentProfile.slug == "basic", EnvironmentVersion.version_number == 1)
+        )
+        # 模型层 environment_version_id 已 NOT NULL：显式绑定 draft 版本（无 digest）
+        assignment = Assignment(
+            course_id=course.id, title="A1", status="published",
+            environment_version_id=draft_version.id,
+        )
         db.add(assignment)
         db.commit()
         db.refresh(assignment)
@@ -368,11 +379,6 @@ def test_missing_digest_fails_closed_system_error(db_session_factory, test_setti
         db.add(question)
         db.commit()
         db.refresh(question)
-        draft_version = db.scalar(
-            select(EnvironmentVersion)
-            .join(EnvironmentProfile, EnvironmentProfile.id == EnvironmentVersion.profile_id)
-            .where(EnvironmentProfile.slug == "basic", EnvironmentVersion.version_number == 1)
-        )
         submission = Submission(
             question_id=question.id, student_id=student.id, code="def add(a,b): return a+b",
             environment_version_id=draft_version.id,  # draft 状态、无 digest

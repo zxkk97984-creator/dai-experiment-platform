@@ -6,7 +6,7 @@ finished_at/execution_time_ms 的取值规则；进行中评分 finished_at 为�
 """
 from datetime import datetime, timezone
 
-from conftest import create_user, login, auth_header
+from conftest import create_user, login, auth_header, seed_basic_environment
 
 from app.models import (
     Assignment, CodeGrade, Course, Exam, ExamAnswer, ExamQuestion,
@@ -26,6 +26,7 @@ def _iso(v):
 def _seed_assignment_grade(db, teacher, student, *, status="completed", finished=True,
                            execution_time_ms=120):
     """建作业类评分链，返回 (grade_id, 期望上下文)"""
+    seed_basic_environment(db)
     course = Course(title="C上下文", status="published", teacher_id=teacher.id)
     db.add(course)
     db.flush()
@@ -76,6 +77,7 @@ def _seed_assignment_grade(db, teacher, student, *, status="completed", finished
 
 def _seed_exam_grade(db, teacher, student, *, status="completed", finished=True):
     """建考试类评分链，返回 (grade_id, 期望上下文)"""
+    seed_basic_environment(db)
     course = Course(title="C考试课", status="published", teacher_id=teacher.id)
     db.add(course)
     db.flush()

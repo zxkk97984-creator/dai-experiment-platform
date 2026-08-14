@@ -6,8 +6,9 @@ from unittest.mock import MagicMock, patch
 
 
 def _create_course_and_exam(client, db_session_factory, username: str):
-    from conftest import auth_header, create_user, login
+    from conftest import auth_header, create_user, login, seed_basic_environment
 
+    seed_basic_environment(db_session_factory)
     create_user(db_session_factory, username, "teacher")
     token, _ = login(client, username)
     headers = auth_header(token)

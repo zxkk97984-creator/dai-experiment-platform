@@ -14,7 +14,7 @@ from app.services.judge_queue import (
     RETRYABLE_STATUSES,
     MAX_ATTEMPTS,
 )
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_user, login, seed_basic_environment
 
 
 def _setup_assignment_submission(db_session_factory):

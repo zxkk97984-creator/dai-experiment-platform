@@ -15,7 +15,7 @@ from sqlalchemy import select
 from app import models
 from app.database import Base
 from app.services.kernel_manager import KernelManager, KernelSession, get_kernel_manager
-from conftest import auth_header, create_assignment_db, create_course_db, create_user, login
+from conftest import auth_header, create_assignment_db, create_course_db, create_user, login, seed_basic_environment
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 

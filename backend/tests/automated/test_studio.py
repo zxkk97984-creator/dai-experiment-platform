@@ -19,7 +19,7 @@ from app.models import (
     NotebookTemplate,
     NotebookTemplateVersion,
 )
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_user, login, seed_basic_environment
 
 
 def _cell(
@@ -57,6 +57,7 @@ def studio_context(client, db_session_factory):
         users[username] = create_user(db_session_factory, username, role)
         tokens[username], _ = login(client, username)
 
+    seed_basic_environment(db_session_factory)
     with db_session_factory() as db:
         course = Course(
             title="Studio course",

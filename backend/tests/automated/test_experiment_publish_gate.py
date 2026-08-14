@@ -2,13 +2,14 @@
 publish 需模板就绪、unpublish 专用端点、角色可见性。"""
 
 from app import models
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_user, login, seed_basic_environment
 
 API = "/api/v1"
 
 
 def _create_template_with_version(db_session_factory, name="模板"):
     """DB 领域 fixture：模板 + 已发布版本（current_version_id 就绪）"""
+    seed_basic_environment(db_session_factory)
     with db_session_factory() as db:
         tmpl = models.NotebookTemplate(name=name, status="published", draft_cells=[], owner_id=1)
         db.add(tmpl)
@@ -29,6 +30,7 @@ def _create_template_with_version(db_session_factory, name="模板"):
 
 
 def _create_template_without_version(db_session_factory, name="无版本模板"):
+    seed_basic_environment(db_session_factory)
     with db_session_factory() as db:
         tmpl = models.NotebookTemplate(name=name, status="draft", draft_cells=[], owner_id=1)
         db.add(tmpl)

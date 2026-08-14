@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_user, login, seed_basic_environment
 
 # 冻结在模块导入时刻，供种子数据相对偏移；HTTP 端点内部 now 与它仅差毫秒级
 NOW = datetime.now(timezone.utc)
@@ -14,6 +14,7 @@ def _build_graph(db_session_factory):
     一场 upcoming 考试、一条最新实验记录（含已复核与未复核提交）、
     一条需教师复核的 AI 评分、一条可见与一条不可见课程公告。
     """
+    seed_basic_environment(db_session_factory)
     from app.models import (
         Announcement, Assignment, Chapter, CodeGrade, Course, CourseEnrollment,
         Exam, ExperimentRecord, ExperimentSubmission, JudgeQuestion, Lesson,
@@ -311,6 +312,7 @@ def test_teacher_deadline_window_covers_seven_days(client, db_session_factory):
     from app.models import Assignment, Course, CourseEnrollment, JudgeQuestion
 
     teacher = create_user(db_session_factory, "dl-seven-teacher", "teacher")
+    seed_basic_environment(db_session_factory)
     student = create_user(db_session_factory, "dl-seven-student", "student")
     with db_session_factory() as db:
         course = Course(title="七日窗口课", status="published", teacher_id=teacher.id)
@@ -341,6 +343,7 @@ def test_deadline_submitted_requires_all_questions_completed(client, db_session_
 
     teacher = create_user(db_session_factory, "dl-partial-teacher", "teacher")
     student = create_user(db_session_factory, "dl-partial-student", "student")
+    seed_basic_environment(db_session_factory)
     with db_session_factory() as db:
         course = Course(title="多选题课", status="published", teacher_id=teacher.id)
         db.add(course)
@@ -374,6 +377,7 @@ def test_deadline_full_participation_omits_work_item(client, db_session_factory)
     from app.models import Assignment, Course, CourseEnrollment, JudgeQuestion, Submission
 
     teacher = create_user(db_session_factory, "dl-full-teacher", "teacher")
+    seed_basic_environment(db_session_factory)
     student = create_user(db_session_factory, "dl-full-student", "student")
     with db_session_factory() as db:
         course = Course(title="全答课", status="published", teacher_id=teacher.id)
@@ -412,6 +416,7 @@ def test_deadline_submitted_counts_only_currently_enrolled(client, db_session_fa
     from app.models import Assignment, Course, CourseEnrollment, JudgeQuestion, Submission
 
     teacher = create_user(db_session_factory, "dl-withdrawn-teacher", "teacher")
+    seed_basic_environment(db_session_factory)
     student = create_user(db_session_factory, "dl-withdrawn-student", "student")
     with db_session_factory() as db:
         course = Course(title="退课课", status="published", teacher_id=teacher.id)

@@ -9,6 +9,8 @@
 - available 教师端点：只返回 available 且不含 digest/tag/构建日志；teacher 可访问、student 拒绝
 """
 from __future__ import annotations
+import pytest
+pytestmark = pytest.mark.no_auto_env_seed
 
 from sqlalchemy import select
 

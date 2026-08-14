@@ -4,6 +4,8 @@
 注意：SQLite 下 BigInteger 主键不是 rowid 别名，插入时必须显式传 id。
 """
 from __future__ import annotations
+import pytest
+pytestmark = pytest.mark.no_auto_env_seed
 
 import sqlalchemy as sa
 from sqlalchemy import select

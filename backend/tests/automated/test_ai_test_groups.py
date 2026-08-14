@@ -679,8 +679,9 @@ class FakeAIClient:
 def _create_question(client, db_session_factory, teacher_username="gen_teacher",
                      kind="assignment", **question_kwargs):
     """创建教师 + 课程 + 题目，返回 (headers, question_id)"""
-    from conftest import auth_header, create_user, login
+    from conftest import auth_header, create_user, login, seed_basic_environment
 
+    seed_basic_environment(db_session_factory)
     create_user(db_session_factory, teacher_username, "teacher")
     token, _ = login(client, teacher_username)
     headers = auth_header(token)

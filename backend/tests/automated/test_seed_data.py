@@ -1,6 +1,7 @@
+import pytest
+pytestmark = pytest.mark.no_auto_env_seed
 import re
 
-import pytest
 from sqlalchemy import func, select
 
 from app.models import (

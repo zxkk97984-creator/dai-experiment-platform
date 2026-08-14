@@ -13,7 +13,7 @@ from app.services.judge_queue import (
     fail_job,
     requeue_stale_jobs,
 )
-from conftest import auth_header, create_user, login
+from conftest import auth_header, create_user, login, seed_basic_environment
 
 
 def _setup_submission(db_session_factory):

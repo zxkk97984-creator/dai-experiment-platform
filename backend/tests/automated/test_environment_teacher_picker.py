@@ -12,6 +12,8 @@
 - Studio 发布时草稿环境不可用 → 409
 """
 from __future__ import annotations
+import pytest
+pytestmark = pytest.mark.no_auto_env_seed
 
 import json
 

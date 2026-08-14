@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from app import models
 from app.database import Base
 from app.services.kernel_manager import KernelManager
-from conftest import auth_header, create_course_db, create_user, login
+from conftest import auth_header, create_course_db, create_user, login, seed_basic_environment
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -201,7 +201,8 @@ class FakeKernelManager:
         self.sessions = {}       # {record_id: FakeSession}
         self.initialized_versions = set()
 
-    def get_or_create_session(self, record_id, lesson_storage_dir=""):
+    def get_or_create_session(self, record_id, lesson_storage_dir="", **kwargs):
+        # image_ref / environment_version_id 等运行参数由真实实现消费，fake 忽略
         if record_id not in self.sessions:
             self.sessions[record_id] = FakeSession()
         return self.sessions[record_id]

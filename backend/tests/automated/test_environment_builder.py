@@ -7,12 +7,13 @@
 - seed 幂等与入队
 """
 from __future__ import annotations
+import pytest
+pytestmark = pytest.mark.no_auto_env_seed
 
 import json
 from datetime import timedelta
 from unittest.mock import patch
 
-import pytest
 
 from app.models import (
     EnvironmentBuildJob,

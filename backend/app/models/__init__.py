@@ -64,9 +64,10 @@ class User(TimestampMixin, Base):
 
 class AcademicTerm(TimestampMixin, Base):
     __tablename__ = "academic_terms"
+    __table_args__ = (UniqueConstraint("code", name="uq_academic_terms_code"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    code: Mapped[str] = mapped_column(String(50))
     name: Mapped[str] = mapped_column(String(120))
     start_date: Mapped[date] = mapped_column(Date)
     end_date: Mapped[date] = mapped_column(Date)
@@ -97,12 +98,17 @@ class TeachingClass(TimestampMixin, Base):
 
 class TeachingClassStudent(TimestampMixin, Base):
     __tablename__ = "teaching_class_students"
-    __table_args__ = (UniqueConstraint("teaching_class_id", "student_id", name="uq_teaching_class_student"),)
+    __table_args__ = (
+        UniqueConstraint("teaching_class_id", "student_id", name="uq_teaching_class_student"),
+        Index("ix_class_students_class", "teaching_class_id"),
+        Index("ix_class_students_student", "student_id"),
+        Index("ix_class_students_status", "status"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    teaching_class_id: Mapped[int] = mapped_column(ForeignKey("teaching_classes.id", ondelete="CASCADE"), index=True)
-    student_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    teaching_class_id: Mapped[int] = mapped_column(ForeignKey("teaching_classes.id", ondelete="CASCADE"))
+    student_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(20), default="active")
 
     teaching_class: Mapped[TeachingClass] = relationship(back_populates="student_memberships")
     student: Mapped[User] = relationship(back_populates="teaching_class_memberships")
@@ -110,11 +116,15 @@ class TeachingClassStudent(TimestampMixin, Base):
 
 class CourseTeachingClass(TimestampMixin, Base):
     __tablename__ = "course_teaching_classes"
-    __table_args__ = (UniqueConstraint("course_id", "teaching_class_id", name="uq_course_teaching_class"),)
+    __table_args__ = (
+        UniqueConstraint("course_id", "teaching_class_id", name="uq_course_teaching_class"),
+        Index("ix_course_classes_course", "course_id"),
+        Index("ix_course_classes_class", "teaching_class_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), index=True)
-    teaching_class_id: Mapped[int] = mapped_column(ForeignKey("teaching_classes.id", ondelete="CASCADE"), index=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"))
+    teaching_class_id: Mapped[int] = mapped_column(ForeignKey("teaching_classes.id", ondelete="CASCADE"))
 
     course: Mapped["Course"] = relationship(back_populates="teaching_class_links")
     teaching_class: Mapped[TeachingClass] = relationship(back_populates="course_links")
@@ -251,8 +261,8 @@ class Assignment(TimestampMixin, Base):
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     # ── 环境档位绑定（Phase 3：迁移 B） ────────────────────────
     # 作业默认环境；发布后不可直接修改（Phase 4 门禁），历史提交保留自己的快照
-    environment_version_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("environment_versions.id"), nullable=True,
+    environment_version_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), nullable=False,
         default=resolve_basic_env_version_id, index=True,
     )
     import_policy_mode: Mapped[str] = mapped_column(
@@ -306,6 +316,9 @@ class JudgeQuestion(TimestampMixin, Base):
 
 class Submission(TimestampMixin, Base):
     __tablename__ = "submissions"
+    __table_args__ = (
+        Index("ix_submissions_gs_updated", "grading_status", "updated_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     question_id: Mapped[int] = mapped_column(ForeignKey("judge_questions.id"), index=True)
@@ -313,7 +326,7 @@ class Submission(TimestampMixin, Base):
     code: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(40), default="queued", index=True)
     # ── 判题队列状态机（Task 1） ──────────────────────────────
-    grading_status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    grading_status: Mapped[str] = mapped_column(String(20), default="pending")
     # pending / queued / running / completed / system_error
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -328,8 +341,8 @@ class Submission(TimestampMixin, Base):
     execution_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # ── 环境档位快照（Phase 3：迁移 B） ────────────────────────
     # 入队前冻结实际使用的环境版本与 import 策略，历史重判不受作业重新发布影响
-    environment_version_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("environment_versions.id"), nullable=True,
+    environment_version_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), nullable=False,
         default=resolve_basic_env_version_id, index=True,
     )
     import_policy_mode_snapshot: Mapped[str] = mapped_column(
@@ -471,6 +484,7 @@ class ExamAnswer(TimestampMixin, Base):
     __tablename__ = "exam_answers"
     __table_args__ = (
         UniqueConstraint("submission_id", "question_id", name="uq_exam_answer_q"),
+        Index("ix_exam_answers_gs_updated", "grading_status", "updated_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -482,7 +496,7 @@ class ExamAnswer(TimestampMixin, Base):
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     # ── 判题队列状态机（Task 1） ──────────────────────────────
-    grading_status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    grading_status: Mapped[str] = mapped_column(String(20), default="pending")
     # pending / queued / running / completed / system_error
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -524,8 +538,8 @@ class NotebookTemplate(TimestampMixin, Base):
     draft_assets_dir: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # ── 草稿环境绑定（Phase 3：迁移 B） ────────────────────────
     # 发布时复制到新的 NotebookTemplateVersion，历史版本不更新
-    draft_environment_version_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("environment_versions.id"), nullable=True,
+    draft_environment_version_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), nullable=False,
         default=resolve_basic_env_version_id, index=True,
     )
     draft_import_policy_mode: Mapped[str] = mapped_column(
@@ -551,6 +565,7 @@ class NotebookTemplateVersion(Base):
     __tablename__ = "notebook_template_versions"
     __table_args__ = (
         UniqueConstraint("template_id", "version_number", name="uq_version_number_per_template"),
+        Index("ix_template_versions_environment_version_id", "environment_version_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -561,13 +576,15 @@ class NotebookTemplateVersion(Base):
     cell_order: Mapped[list] = mapped_column(JSON, default=list)
     notebook_metadata: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     assets_dir: Mapped[str | None] = mapped_column(String(500), nullable=True)  # 相对路径
-    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, server_default=func.now()
+    )
     published_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     # ── 发布环境快照（Phase 3：迁移 B） ────────────────────────
     # 从草稿复制，发布后不可变；已开始实验的记录不随新版本自动升级
-    environment_version_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("environment_versions.id"), nullable=True,
-        default=resolve_basic_env_version_id, index=True,
+    environment_version_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), nullable=False,
+        default=resolve_basic_env_version_id,
     )
     import_policy_mode: Mapped[str] = mapped_column(
         String(16), nullable=False, default="unrestricted"
@@ -628,8 +645,8 @@ class ExperimentRecord(TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # ── 环境快照（Phase 3：迁移 B） ────────────────────────────
     # 创建记录时从 NotebookTemplateVersion 复制；已存在记录不随模板新版本自动升级
-    environment_version_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("environment_versions.id"), nullable=True,
+    environment_version_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), nullable=False,
         default=resolve_basic_env_version_id, index=True,
     )
 
@@ -874,17 +891,19 @@ class EnvironmentVersion(TimestampMixin, Base):
         UniqueConstraint("profile_id", "version_number", name="uq_env_version_per_profile"),
         UniqueConstraint("image_tag", name="uq_env_version_image_tag"),
         UniqueConstraint("image_digest", name="uq_env_version_image_digest"),
+        Index("ix_env_versions_profile_id", "profile_id"),
+        Index("ix_env_versions_status", "status"),
     )
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
     profile_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("environment_profiles.id"), nullable=False, index=True
+        BigInteger, ForeignKey("environment_profiles.id"), nullable=False
     )
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     source_version_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("environment_versions.id"), nullable=True
     )
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft", index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     # draft | queued | building | available | failed | inactive
     base_image_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     image_tag: Mapped[str | None] = mapped_column(String(255), nullable=True)
