@@ -34,6 +34,20 @@ def validate_text_answer_size(v: str) -> str:
     return _bounded(v, "文本答案", MAX_TEXT_ANSWER_CHARS, MAX_TEXT_ANSWER_BYTES)
 
 
+# ── 密码边界（TASK-011） ─────────────────────────────────────
+MAX_PASSWORD_BYTES = 72  # bcrypt 上限
+
+
+def validate_password_shape(v: str) -> str:
+    if len(v) < 8:
+        raise ValueError("密码至少需要 8 个字符")
+    if _utf8_bytes(v) > MAX_PASSWORD_BYTES:
+        raise ValueError("密码 UTF-8 字节数超过上限 72")
+    if not v.strip():
+        raise ValueError("密码不能为全空白")
+    return v
+
+
 class PaginatedResponse(BaseModel):
     items: list[Any]
     page: int = 1
@@ -81,6 +95,11 @@ class UserCreate(BaseModel):
     role: str
     status: str = "active"
 
+    @field_validator("password")
+    @classmethod
+    def _limit_password(cls, v: str) -> str:
+        return validate_password_shape(v)
+
 
 class UserUpdate(BaseModel):
     real_name: str | None = None
@@ -90,7 +109,14 @@ class UserUpdate(BaseModel):
 
 
 class PasswordUpdate(BaseModel):
+    # 本人改密必须提交 current_password；管理员重置无需旧密码
     password: str
+    current_password: str | None = None
+
+    @field_validator("password")
+    @classmethod
+    def _limit_password(cls, v: str) -> str:
+        return validate_password_shape(v)
 
 
 class StatusUpdate(BaseModel):
