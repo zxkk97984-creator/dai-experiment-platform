@@ -61,6 +61,7 @@ backend/manual-tools/
 
 # 判题工作目录
 judge-work/
+.judge_work/
 
 # 运行时代码样本（不纳入版本控制）
 backend/storage/exec*.json

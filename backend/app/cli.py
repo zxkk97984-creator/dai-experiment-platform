@@ -59,6 +59,32 @@ def seed_environments(enqueue: bool):
         print(f"Skipped: {result.skipped}")
 
 
+def seed_demo(reset: bool, reference_date: str | None, skip_env_check: bool, force_fixture: bool):
+    """播种 Demo 演示数据（评审 3.3）：幂等、固定参考日期、仅清理 Demo 自有数据。"""
+    from app.seed_demo import run_demo_seed
+
+    with SessionLocal() as db:
+        summary = run_demo_seed(
+            db,
+            reference_date=reference_date,
+            reset=reset,
+            skip_env_check=skip_env_check,
+            force_fixture=force_fixture,
+        )
+        print("=" * 64)
+        print("DAI 实验平台 —— Demo 演示数据播种完成")
+        print("=" * 64)
+        for key, value in summary.items():
+            print(f"{key:24s}: {value}")
+        print("\n固定演示账号（默认密码 Demo1234!，DAI_DEMO_PASSWORD 可覆盖）：")
+        print("  管理端: demo_admin")
+        print("  教师端: teacher_zhang / teacher_chen / teacher_zhao")
+        print("  开发者: demo_developer")
+        print("  学生端: demo_student_elite / demo_student_average /")
+        print("          demo_student_struggling / demo_student_new")
+        print("  背景学生: student_24621601_01 .. student_24621606_10")
+
+
 def main():
     parser = argparse.ArgumentParser(description="DAI backend management commands")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -68,11 +94,22 @@ def main():
     admin_parser.add_argument("--real-name", default="Administrator")
     seed_parser = subparsers.add_parser("seed-environments", help="初始化环境档位种子（幂等）")
     seed_parser.add_argument("--enqueue", action="store_true", help="同时入队构建任务")
+    demo_parser = subparsers.add_parser("seed-demo", help="播种 Demo 演示数据（幂等，仅清理 Demo 自有数据）")
+    demo_parser.add_argument("--reset-demo", action="store_true",
+                             help="先按所有权登记表清理既有 Demo 数据再播种")
+    demo_parser.add_argument("--reference-date",
+                             help="参考日期：now|today 取运行当日，YYYY-MM-DD 钉死；缺省用固定默认（2026-12-07）")
+    demo_parser.add_argument("--skip-env-check", action="store_true",
+                             help="跳过 basic 环境版本前置校验（仅供测试）")
+    demo_parser.add_argument("--force-fixture", action="store_true",
+                             help="强制全部提交使用 seed_fixture（不做真实 Docker 判题）")
     args = parser.parse_args()
     if args.command == "create-admin":
         create_admin(args.username, args.password, args.real_name)
     elif args.command == "seed-environments":
         seed_environments(args.enqueue)
+    elif args.command == "seed-demo":
+        seed_demo(args.reset_demo, args.reference_date, args.skip_env_check, args.force_fixture)
 
 
 if __name__ == "__main__":

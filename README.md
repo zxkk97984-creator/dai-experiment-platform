@@ -117,6 +117,31 @@ npm run dev
 
 ---
 
+### 6. Demo 演示数据（可选）
+
+一键生成一套真实、可重复的演示数据（固定账号 / 课程 / 作业 / 考试 / AI 评分 / 实验全链路）：
+
+```bash
+cd backend
+.venv/bin/python -m alembic upgrade head   # 1. 迁移（dev 库为空时必须）
+# 2. 环境：basic 档位需 available（详见 docs/demo-data.md）
+.venv/bin/python -m app.cli seed-demo      # 3. 播种（幂等）
+.venv/bin/python -m app.cli seed-demo --reset-demo   # 重建：仅清 Demo 数据再播种
+```
+
+固定演示账号（密码 `Demo1234!`，`DAI_DEMO_PASSWORD` 可覆盖）：
+
+| 角色 | 用户名 |
+|---|---|
+| 管理员 | `demo_admin` |
+| 教师 | `teacher_zhang` / `teacher_chen` / `teacher_zhao` |
+| 学生 | `demo_student_elite` / `demo_student_average` / `demo_student_struggling` / `demo_student_new` |
+| 开发者 | `demo_developer` |
+
+详细说明（前置条件 / 故事线 / 数据规模 / 验证结果）见 [docs/demo-data.md](docs/demo-data.md)。
+
+---
+
 ## 判题架构
 
 ### 正式提交（异步）
