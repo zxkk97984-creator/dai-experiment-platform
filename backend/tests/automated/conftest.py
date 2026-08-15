@@ -242,7 +242,7 @@ def seed_basic_environment(db_or_factory):
 def _auto_seed_basic_environment(request, db_session_factory):
     """所有测试默认预置 basic 可用环境版本（模型层 environment_version_id 已 NOT NULL）。
 
-    直接操作环境控制面表的测试（environment_*/seed_data）自行管理种子数据，
+    直接操作环境控制面表的测试（environment_* 等）自行管理种子数据，
     通过 pytestmark = pytest.mark.no_auto_env_seed 关闭本 fixture。
     """
     marker = request.node.get_closest_marker("no_auto_env_seed")
