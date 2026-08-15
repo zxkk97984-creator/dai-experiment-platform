@@ -324,10 +324,13 @@ npm run dev
 ## Docker Compose 生产部署
 
 ```bash
-# 环境变量（必填）
+# 环境变量（必填；缺任何一项 compose 都会在启动前校验失败）
 export DAI_SECRET_KEY=<至少16字符的唯一密钥>
 export DAI_CORS_ORIGINS=https://your-domain.com
 export DAI_DB_PASSWORD=<数据库密码>
+export DAI_DB_ROOT_PASSWORD=<数据库 root 密码>
+export DAI_JUDGE_HOST_WORK_DIR=/opt/dai/judge-work   # 宿主机判题工作目录绝对路径
+export DAI_ENV_BASE_IMAGE=python:3.12-slim@sha256:<真实digest>  # 环境构建基础镜像，必须带 digest
 
 # 启动全栈
 docker compose -f docker-compose.prod.yml up -d
@@ -455,9 +458,9 @@ Notebook 前端现统一使用 Studio 和 Experiment 链路；旧版前端 Noteb
 |------|------|
 | 前端 | Vue 3 + Vite + Pinia + Vue Router + CodeMirror 6 + Marked |
 | 后端 | FastAPI + SQLAlchemy + Alembic + Pydantic |
-| 数据库 | MySQL 8.4 |
-| 缓存/队列 | Redis 7.4 |
-| 判题沙箱 | Docker + pytest |
+| 数据库 | MySQL 8.0（生产/CI）；8.4 亦经本地开发验证 |
+| 缓存/队列 | Redis 7 |
+| 判题沙箱 | Docker + pytest（经环境版本 digest 冻结镜像） |
 | 交互实验 | Docker ipykernel（持久化 Kernel Session） |
 
 ---
@@ -488,7 +491,7 @@ Notebook 前端现统一使用 Studio 和 Experiment 链路；旧版前端 Noteb
 │       ├── utils/            # 工具函数
 │       └── views/            # 页面（按角色分目录）
 ├── docs/                     # 架构和部署运维文档
-├── scripts/                  # 验收与演示辅助脚本
+├── scripts/                  # 开发/CI/E2E 辅助脚本（dev-up/down、环境镜像构建、验收种子等）
 ├── judge-work/               # 本地判题与 Kernel 运行目录（不提交）
 ├── docker-compose.yml        # 本地 MySQL 与 Redis
 ├── docker-compose.prod.yml   # 生产部署编排
@@ -501,7 +504,7 @@ Notebook 前端现统一使用 Studio 和 Experiment 链路；旧版前端 Noteb
 
 | 角色 | 首页 | 主要权限 |
 |------|------|----------|
-| 学生 `student` | 课程列表 | 选课、学习课时、提交作业、参加考试、进入实验 |
+| 学生 `student` | 学生首页 Dashboard（`/student`，含课程列表入口） | 选课、学习课时、提交作业、参加考试、进入实验 |
 | 教师 `teacher` | 课程管理 | 创建课程/作业/考试、管理题目、查看成绩 |
 | 管理员 `admin` | 用户管理 | 创建用户、管理全部资源 |
 | 开发者 `developer` | 模板管理 | 管理 Notebook 模板和实验模块 |
@@ -546,3 +549,16 @@ DAI_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ### Docker 未启动
 
 确保 Docker Desktop 在运行，任务栏应有 Docker 图标。Windows 下可能需要以管理员身份运行。
+
+### 8000 端口被占用（后端起不来）
+
+本机 8000 已被其他程序占用时，uvicorn 会报 `address already in use`。两种处理方式：
+
+```bash
+# 方式一（推荐）：一键脚本用 8001
+DAI_DEV_API_PORT=8001 ./scripts/dev-up.sh
+
+# 方式二：手动启动时改端口，并在 backend/.env 的 DAI_CORS_ORIGINS 中
+# 同步前端代理基地址
+.venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
+```
