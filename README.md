@@ -29,7 +29,7 @@ docker compose up -d mysql redis
 
 ```bash
 ./scripts/dev-up.sh     # MySQL/Redis → 幂等迁移(alembic upgrade head) → 判题镜像 → API + 判题 Worker + 环境构建 Worker + 前端
-./scripts/dev-down.sh   # 停止全部应用进程与 MySQL/Redis 容器（数据卷保留，重启不丢数据）
+./scripts/dev-down.sh   # 停止全部应用进程（含清扫未登记残留）与 MySQL/Redis 容器（数据卷保留，重启不丢数据）
 ```
 
 脚本幂等：已运行的服务自动跳过；进程 PID 与日志在 `/tmp/dai-dev/`。启动成功后会**自动用默认浏览器打开** `http://localhost:5173`（`DAI_DEV_NO_BROWSER=1` 可关闭）。API 端口被占用时脚本会立即报错并给出换端口指引；前端 vite 代理会**自动跟随** API 端口（无需手动改配置）。
