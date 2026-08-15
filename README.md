@@ -25,7 +25,28 @@ cd "DAI Experiment Platform"
 docker compose up -d mysql redis
 ```
 
+#### 2.1 一键启动/关闭（Linux/macOS，推荐）
+
+```bash
+./scripts/dev-up.sh     # MySQL/Redis → 幂等迁移(alembic upgrade head) → 判题镜像 → API + 判题 Worker + 环境构建 Worker + 前端
+./scripts/dev-down.sh   # 停止全部应用进程与 MySQL/Redis 容器（数据卷保留，重启不丢数据）
+```
+
+脚本幂等：已运行的服务自动跳过；进程 PID 与日志在 `/tmp/dai-dev/`。
+
+可用环境变量：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `DAI_PYTHON` | `backend/.venv/bin/python` | 后端解释器（仓库标准为 Python 3.12 venv） |
+| `DAI_DEV_API_PORT` | `8000` | API 监听端口；**本机 8000 被其他项目占用时用 8001**，如 `DAI_DEV_API_PORT=8001 ./scripts/dev-up.sh` |
+| `DAI_DEV_RUN_DIR` | `/tmp/dai-dev` | PID/日志目录 |
+
+首次使用前需初始化后端环境（见下节；`uv venv backend/.venv --python 3.12` + `uv pip install -r backend/requirements.txt`）。
+
 ### 3. 初始化后端
+
+Windows（PowerShell / cmd）：
 
 ```bash
 cd backend
@@ -34,12 +55,26 @@ cd backend
 py -3 -m venv .venv
 .venv\Scripts\python.exe -m pip install --upgrade pip
 .venv\Scripts\python.exe -m pip install -r requirements.txt
+```
 
+Linux/macOS（Python 3.12，与 CI/Dockerfile 基线一致；仓库含 `backend/.python-version`）：
+
+```bash
+cd backend
+uv venv .venv --python 3.12        # 或 python3.12 -m venv .venv
+uv pip install -r requirements.txt
+```
+
+两种环境通用的后续步骤：
+
+```bash
 # 配置环境变量
-copy .env.example .env
+copy .env.example .env             # Windows
+# cp .env.example .env             # Linux/macOS
 
-# 数据库迁移
-.venv\Scripts\python.exe -m alembic upgrade head
+# 数据库迁移（开发库跟随最新 head；生产用 docker-compose.prod.yml 的 migrate 服务）
+.venv\Scripts\python.exe -m alembic upgrade head   # Windows
+# .venv/bin/python -m alembic upgrade head          # Linux/macOS
 
 # 创建管理员账号
 .venv\Scripts\python.exe -m app.cli create-admin --username admin --password Test1234! --real-name Administrator
@@ -49,14 +84,18 @@ docker build -t dai-judge-python:latest docker\judge
 docker build -t dai-kernel-python:latest docker\kernel
 ```
 
+> 注意：TASK-016 后 API 启动不再自动执行 Alembic 迁移。手动启动时务必先
+> `alembic upgrade head`（`dev-up.sh` 已自动包含此步骤）。
+
 ### 4. 启动后端服务
 
-需要打开三个终端窗口：
+需要打开三个终端窗口（Windows 示例；Linux/macOS 把 `.venv\Scripts\` 换成 `.venv/bin/`，或用 `scripts/dev-up.sh` 一键启动）：
 
 ```bash
 # 终端 1：后端 API
 cd backend
 .venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# 8000 被占用时（如本机同时跑其他项目）：--port 8001，前端代理基地址随之调整
 
 # 终端 2：判题 Worker（按需启动）
 cd backend
@@ -102,8 +141,9 @@ cd backend
 每场考试包含 1 道选择题和 1 道已锁定 Rubric 的 AI 评分编程题。学生端使用
 `student_24621600_01 / Test1234!` 登录后即可查看。
 
-也可以使用 Windows 一键内测启动模式。它会启动环境构建 Worker，等待三类环境
-构建完成，写入全量内测数据，然后启动 API、判题 Worker 和前端：
+也可以使用 Windows 一键内测启动模式（`start.bat` 为本机辅助脚本、未入库；
+若仓库中没有该文件，按上文 `dev-up.sh` 流程手动启动）。它会启动环境构建 Worker，
+等待三类环境构建完成，写入全量内测数据，然后启动 API、判题 Worker 和前端：
 
 ```bat
 start.bat --internal
