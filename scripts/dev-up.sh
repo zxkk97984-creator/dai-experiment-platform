@@ -25,6 +25,7 @@ fail() { printf '\033[31m[dev-up]\033[0m %s\n' "$*" >&2; exit 1; }
 [ -x "$PY" ] || fail "未找到后端 Python: $PY（可用 DAI_PYTHON=/path/to/python 覆盖；建议: uv venv backend/.venv --python 3.12 && uv pip install -r backend/requirements.txt）"
 "$PY" -c 'import fastapi, sqlalchemy' 2>/dev/null \
     || fail "后端 .venv 缺少依赖，请先: cd backend && uv pip install -r requirements.txt"
+[ -f "$PROJECT_DIR/backend/.env" ] || fail "缺少 backend/.env（首次使用请: cd backend && cp .env.example .env，默认值适配本地 docker compose）"
 command -v npm >/dev/null 2>&1 || fail "未找到 npm"
 
 # Docker 访问方式：当前会话可用 → 直接调用；否则走 sudo（需 sudoers NOPASSWD 或输密码）
