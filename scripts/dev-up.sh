@@ -10,6 +10,7 @@
 #   DAI_PYTHON       后端 Python 解释器（默认 backend/.venv/bin/python，Python 3.12）
 #   DAI_DEV_API_PORT API 监听端口（默认 8000；本机 8000 被占用时用 8001）
 #   DAI_DEV_RUN_DIR  运行目录（PID/日志，默认 /tmp/dai-dev）
+#   DAI_DEV_NO_BROWSER=1  启动成功后不自动打开浏览器
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27,6 +28,12 @@ fail() { printf '\033[31m[dev-up]\033[0m %s\n' "$*" >&2; exit 1; }
     || fail "后端 .venv 缺少依赖，请先: cd backend && uv pip install -r requirements.txt"
 [ -f "$PROJECT_DIR/backend/.env" ] || fail "缺少 backend/.env（首次使用请: cd backend && cp .env.example .env，默认值适配本地 docker compose）"
 command -v npm >/dev/null 2>&1 || fail "未找到 npm"
+
+# 端口预检：被占用时立即失败并给出指引，而不是等 30 秒健康检查超时
+if (exec 3<>"/dev/tcp/127.0.0.1/$API_PORT") 2>/dev/null; then
+    exec 3>&-
+    fail "端口 $API_PORT 已被占用（本机常见：另一个项目的后端）。换端口重跑: DAI_DEV_API_PORT=8001 ./scripts/dev-up.sh"
+fi
 
 # Docker 访问方式：当前会话可用 → 直接调用；否则走 sudo（需 sudoers NOPASSWD 或输密码）
 if docker info >/dev/null 2>&1; then
@@ -91,7 +98,8 @@ launch envbuilder  "$PY" -m app.worker.environment_builder_worker
 # ── 5. 前端 ──────────────────────────────────────────────────
 cd "$PROJECT_DIR/frontend"
 [ -d node_modules ] || { log "安装前端依赖..."; npm install --silent; }
-launch frontend npm run dev
+# vite 代理目标跟随 API 端口（默认 8000），避免 API 换端口后前端仍请求旧端口
+launch frontend env VITE_API_PROXY_TARGET="http://localhost:${API_PORT}" npm run dev
 
 # ── 6. 健康检查 ──────────────────────────────────────────────
 log "等待后端就绪..."
@@ -112,3 +120,16 @@ printf '  健康检查:   http://localhost:%s/api/v1/health/ready\n' "$API_PORT"
 printf '  运行目录:   %s （PID 与日志）\n' "$RUN_DIR"
 printf '  测试账号:   admin / Test1234! （教师 teacher_john、学生 student_alice 等，同密码）\n\n'
 printf '  关闭:       ./scripts/dev-down.sh\n'
+
+# ── 7. 自动打开浏览器（可用 DAI_DEV_NO_BROWSER=1 关闭）────────
+if [ "${DAI_DEV_NO_BROWSER:-0}" != "1" ]; then
+    if command -v xdg-open >/dev/null 2>&1; then
+        nohup xdg-open http://localhost:5173 >/dev/null 2>&1 || true
+        log "已尝试用默认浏览器打开 http://localhost:5173"
+    elif command -v open >/dev/null 2>&1; then
+        nohup open http://localhost:5173 >/dev/null 2>&1 || true
+        log "已尝试用默认浏览器打开 http://localhost:5173"
+    else
+        log "未找到 xdg-open/open，请手动打开 http://localhost:5173"
+    fi
+fi

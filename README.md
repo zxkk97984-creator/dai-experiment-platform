@@ -32,7 +32,7 @@ docker compose up -d mysql redis
 ./scripts/dev-down.sh   # 停止全部应用进程与 MySQL/Redis 容器（数据卷保留，重启不丢数据）
 ```
 
-脚本幂等：已运行的服务自动跳过；进程 PID 与日志在 `/tmp/dai-dev/`。
+脚本幂等：已运行的服务自动跳过；进程 PID 与日志在 `/tmp/dai-dev/`。启动成功后会**自动用默认浏览器打开** `http://localhost:5173`（`DAI_DEV_NO_BROWSER=1` 可关闭）。API 端口被占用时脚本会立即报错并给出换端口指引；前端 vite 代理会**自动跟随** API 端口（无需手动改配置）。
 
 可用环境变量：
 
@@ -41,6 +41,7 @@ docker compose up -d mysql redis
 | `DAI_PYTHON` | `backend/.venv/bin/python` | 后端解释器（仓库标准为 Python 3.12 venv） |
 | `DAI_DEV_API_PORT` | `8000` | API 监听端口；**本机 8000 被其他项目占用时用 8001**，如 `DAI_DEV_API_PORT=8001 ./scripts/dev-up.sh` |
 | `DAI_DEV_RUN_DIR` | `/tmp/dai-dev` | PID/日志目录 |
+| `DAI_DEV_NO_BROWSER` | 未设置 | 设为 `1` 时启动成功后不自动打开浏览器 |
 
 首次使用前需初始化后端环境（见下节；`uv venv backend/.venv --python 3.12` + `uv pip install -r backend/requirements.txt`）。
 
@@ -95,7 +96,8 @@ docker build -t dai-kernel-python:latest docker\kernel
 # 终端 1：后端 API
 cd backend
 .venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-# 8000 被占用时（如本机同时跑其他项目）：--port 8001，前端代理基地址随之调整
+# 8000 被占用时（如本机同时跑其他项目）：API 改 --port 8001，
+# 前端启动时加 VITE_API_PROXY_TARGET=http://localhost:8001
 
 # 终端 2：判题 Worker（按需启动）
 cd backend
@@ -552,13 +554,16 @@ DAI_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 
 ### 8000 端口被占用（后端起不来）
 
-本机 8000 已被其他程序占用时，uvicorn 会报 `address already in use`。两种处理方式：
+本机 8000 已被其他程序占用时，一键脚本会在启动前直接报错并给出指引；手动启动则 uvicorn 会报 `address already in use`。处理方式：
 
 ```bash
-# 方式一（推荐）：一键脚本用 8001
+# 方式一（推荐）：一键脚本用 8001，vite 代理自动跟随
 DAI_DEV_API_PORT=8001 ./scripts/dev-up.sh
 
-# 方式二：手动启动时改端口，并在 backend/.env 的 DAI_CORS_ORIGINS 中
-# 同步前端代理基地址
+# 方式二：手动启动时同步改两个端口
 .venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
+VITE_API_PROXY_TARGET=http://localhost:8001 npm run dev   # 前端代理必须指向新端口
 ```
+
+> 注意：`backend/.env` 的 `DAI_CORS_ORIGINS` 配置的是浏览器来源（`localhost:5173`），
+> 与 API 端口无关，换端口**不需要**改 CORS。
