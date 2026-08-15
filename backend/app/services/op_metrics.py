@@ -3,7 +3,7 @@
 设计约束：
 - 指标名与标签值均为固定白名单（防高基数：绝不把用户 id/题目 id/路径原文当标签）；
 - Redis 故障时静默降级（指标绝不阻断业务路径）；
-- 窗口按整点小时，保留 25 小时；读取方（/metrics、scripts/check_ops_health.py）只取当前小时。
+- 窗口按整点小时，保留 25 小时；读取方（/metrics 等）只取当前小时。
 """
 from __future__ import annotations
 

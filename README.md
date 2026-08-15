@@ -115,115 +115,6 @@ npm run dev
 - Swagger 文档：<http://localhost:8000/docs>
 - 健康检查：<http://localhost:8000/api/v1/health/ready>
 
-### 6. 生产前内测全量数据
-
-全量内测种子会清理业务演示数据，保留管理员和环境控制面数据。脚本拒绝在
-`DAI_ENVIRONMENT=production` 下执行，并且必须显式确认重置。
-
-首次使用前，先初始化并构建三类运行环境：
-
-```bash
-cd backend
-.venv\Scripts\python.exe -m app.cli seed-environments --enqueue
-```
-
-等待 `basic`、`data`、`torch-cpu` 三个版本均为 `available` 后运行：
-
-```bash
-.venv\Scripts\python.exe -m app.seed_data --confirm-internal-reset
-```
-
-如果全量内测数据已经存在，只想补充典型课程的 AI 评分演示数据，可执行：
-
-```bash
-.venv\Scripts\python.exe -m app.seed_data --augment-ai-demo
-```
-
-该增量命令不会清理现有业务数据，会幂等补充 3 个已发布 AI 评分作业和 3 个已发布考试；
-每场考试包含 1 道选择题和 1 道已锁定 Rubric 的 AI 评分编程题。学生端使用
-`student_24621600_01 / Test1234!` 登录后即可查看。
-
-也可以使用 Windows 一键内测启动模式（`start.bat` 为本机辅助脚本、未入库；
-若仓库中没有该文件，按上文 `dev-up.sh` 流程手动启动）。它会启动环境构建 Worker，
-等待三类环境构建完成，写入全量内测数据，然后启动 API、判题 Worker 和前端：
-
-```bat
-start.bat --internal
-```
-
-普通执行 `start.bat` 不会重置数据库；`start.bat --internal` 每次执行都会重建
-内测业务数据，请只在本地或预生产测试库使用。
-
-数据规模：3 位教师、400 位学生、10 个教学班（每班 40 人）、30 门课程、12 个
-Notebook 实验模块。典型课程包含至少 6 个章节、24 个课时、10 个作业和 10 场考试。
-
-账号示例：
-
-| 用户名 | 默认密码 | 角色 |
-|--------|----------|------|
-| `admin` | `Test1234!` | 管理员 |
-| `teacher_zhang` | `Test1234!` | 典型教师 |
-| `teacher_chen` | `Test1234!` | 教师 |
-| `teacher_zhao` | `Test1234!` | 教师 |
-| `developer_lab` | `Test1234!` | 实验开发者 |
-| `student_24621600_01` | `Test1234!` | 学生 |
-
-密码可通过以下环境变量覆盖：
-`DAI_SEED_ADMIN_PASSWORD`、`DAI_SEED_TEACHER_PASSWORD`、
-`DAI_SEED_STUDENT_PASSWORD`、`DAI_SEED_DEVELOPER_PASSWORD`。
-
-学生学号使用 `24621600` 至 `24621609` 作为班级前缀，最后两位为 `01` 至 `40`。
-
-**注意**：这是预生产/内测重置脚本，不应在正式生产库执行。
-
----
-
----
-## 完整验收数据
-
-用于验收课程管理、作业、考试、代码判题和 AI 评分全流程的幂等演示数据脚本。
-
-### 前置条件
-
-- Docker 服务已启动（`docker compose up -d`）
-- 后端环境已配置 DeepSeek API Key（环境变量 `DAI_AI_API_KEY`），模型为 `deepseek-v4-flash`
-- 后端 API 在 <http://localhost:8080> 可访问
-- 不需要把 API Key 放进命令行参数
-
-### 运行
-
-```bat
-cd backend
-.venv\Scripts\python.exe seed_acceptance_data.py --base-url http://localhost:8080/api/v1
-```
-
-### 验收账号
-
-| 角色 | 用户名 | 默认密码 | 用途 |
-|------|--------|----------|------|
-| 教师 | `teacher` | `Passw0rd!` | 课程、作业、考试和成绩验收 |
-| 学生甲 | `accept_student_a` | `Passw0rd!` | 正确/高质量提交 |
-| 学生乙 | `accept_student_b` | `Passw0rd!` | 错误或部分正确提交 |
-| 管理员 | `admin` | `Passw0rd!` | 仅用于创建学生账号 |
-
-密码可通过环境变量覆盖：`DAI_SEED_ADMIN_PASSWORD`、`DAI_SEED_TEACHER_PASSWORD`、`DAI_SEED_STUDENT_PASSWORD`。
-
-### 创建的课程
-
-| 课程 | 章节 | 课时 | 作业 | 考试 |
-|------|------|------|------|------|
-| `[验收] Python 算法与工程实践` | 3 章 | 6 课时 | 2 份（6 道编程题） | 1 份（6 道题，含 AI 评分） |
-| `[验收] 数据分析与机器学习入门` | 3 章 | 6 课时 | 1 份（3 道编程题） | 1 份（6 道题，含 AI 评分） |
-
-教师管理页 URL（脚本结束后输出课程 ID）：
-```text
-http://localhost:8080/teacher/courses/<脚本输出的课程ID>/manage
-```
-
-### 幂等性
-
-脚本可重复执行，第二次不会重复创建数据。所有资源按精确的 `[验收]` 标题和用户名识别，已存在的课程、章节、课时、作业、题目、考试和提交全部复用。
-
 ---
 
 ## 判题架构
@@ -420,8 +311,9 @@ set PYTEST_DEBUG_TEMPROOT=%LOCALAPPDATA%\Temp\dai-pytest-tmp
 .venv\Scripts\python.exe -m pytest tests\automated -q -p no:cacheprovider
 ```
 
-当前基线：**1079 项通过、3 项跳过、0 项失败**（2026-08-15，SQLite 外键开启下
-实测，Python 3.12）。精确数字以 CI `backend-test-sqlite` 门禁为准。
+当前基线：**1042 项通过、3 项跳过、0 项失败**（2026-08-15，SQLite 外键开启下
+实测，Python 3.12；清理内测/验收种子测试后）。精确数字以 CI
+`backend-test-sqlite` 门禁为准。
 MySQL 门禁（`backend-test-mysql`）与 SQLite 同套件跑双库，双库 0 失败才算过。
 
 ### 前端测试与构建
