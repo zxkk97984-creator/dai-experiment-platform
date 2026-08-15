@@ -118,7 +118,9 @@ printf '  前端页面:   http://localhost:5173\n'
 printf '  Swagger:    http://localhost:%s/docs\n' "$API_PORT"
 printf '  健康检查:   http://localhost:%s/api/v1/health/ready\n' "$API_PORT"
 printf '  运行目录:   %s （PID 与日志）\n' "$RUN_DIR"
-printf '  测试账号:   admin / Test1234! （教师 teacher_john、学生 student_alice 等，同密码）\n\n'
+printf '  登录账号:   库内种子账号密码因种子而异——admin 常为 Passw0rd! 或 Test1234!；\n'
+printf '              teacher_john / student_alice 等内测账号为 Test1234!；\n'
+printf '              全新库请先按 README §3 创建管理员（app.cli create-admin）。\n\n'
 printf '  关闭:       ./scripts/dev-down.sh\n'
 
 # ── 7. 自动打开浏览器（可用 DAI_DEV_NO_BROWSER=1 关闭）────────
