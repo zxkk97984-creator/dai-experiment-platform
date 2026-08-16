@@ -209,7 +209,7 @@ onMounted(fetchDetail)
         </section>
 
         <div class="workbench">
-          <div class="wb-col stack">
+          <div class="wb-col stack wb-col--sticky">
             <div class="code-panel">
               <div class="code-panel-head">
                 <span class="fname">submission.py</span>
@@ -366,9 +366,20 @@ onMounted(fetchDetail)
   align-items: start;
   min-width: 0;
 }
-.wb-col.stack { gap: var(--space-4); min-width: 0; }
+.wb-col.stack { min-width: 0; }
+
+/* 左列（代码 + 确定性测试）在滚动复核右列时保持可见，避免页面下半部大段留白。 */
+.wb-col--sticky {
+  position: sticky;
+  top: calc(var(--header-height) + var(--page-pad));
+  align-self: start;
+  max-height: calc(100vh - var(--header-height) - 2 * var(--page-pad));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 
 .test-groups { gap: 12px; }
+.test-groups > * { margin-top: 0; }
 .test-group { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .test-meta { margin: 6px 0 0; font-size: var(--text-sm); }
 .sys-errors { margin: 10px 0 0; padding: 0; list-style: none; color: var(--danger); font-size: var(--text-sm); line-height: 1.6; }
@@ -389,6 +400,7 @@ onMounted(fetchDetail)
 .evidence-empty { margin: 0; font-size: var(--text-xs); color: var(--faint); }
 
 .feedback-blocks { gap: 12px; }
+.feedback-blocks > * { margin-top: 0; }
 .feedback-block { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .feedback-block__title { margin: 0 0 6px; font-size: var(--text-md); font-weight: 600; color: var(--fg); }
 .feedback-block__list { margin: 0; padding: 0; list-style: none; font-size: var(--text-base); color: var(--muted); line-height: 1.7; }
@@ -396,6 +408,7 @@ onMounted(fetchDetail)
 .feedback-block__list li::before { content: '·'; position: absolute; left: 2px; color: var(--faint); }
 .feedback-block__empty { margin: 0; font-size: var(--text-base); color: var(--faint); }
 .rubric-body { gap: 12px; }
+.rubric-body > * { margin-top: 0; }
 .rubric-row { display: flex; flex-direction: column; gap: 6px; }
 
 .advanced-info { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
@@ -427,6 +440,12 @@ onMounted(fetchDetail)
 @media (max-width: 1024px) {
   .workbench { grid-template-columns: 1fr; }
   .score-strip { grid-template-columns: 1fr; }
+  .wb-col--sticky {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+    overscroll-behavior: auto;
+  }
 }
 @media (max-width: 820px) {
   .advanced-info__grid { grid-template-columns: 1fr; }
