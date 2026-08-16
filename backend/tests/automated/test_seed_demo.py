@@ -9,6 +9,7 @@
 from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy import func, select
 
 
 def _seed_basic_env(db_session_factory):
@@ -104,6 +105,20 @@ def test_seed_demo_runs_and_is_idempotent(db_session_factory):
             text("SELECT username, COUNT(*) c FROM users GROUP BY username HAVING c > 1")
         ).all()
         assert not dup, f"用户名重复: {dup}"
+
+    # 回归：期末已发布未开始，不得出现未来 started 提交（曾导致倒计时显示 817 小时）
+    from app.models import Exam, ExamSubmission
+
+    with db_session_factory() as db:
+        final = db.scalar(select(Exam).where(Exam.title == "期末上机考试：Python 与 AI 综合"))
+        assert final is not None
+        started_count = db.scalar(
+            select(func.count()).select_from(ExamSubmission).where(
+                ExamSubmission.exam_id == final.id,
+                ExamSubmission.status == "started",
+            )
+        ) or 0
+        assert started_count == 0, f"期末未开始却存在 started 提交: {started_count}"
 
 
 def test_seed_demo_reset_then_reseed_matches(db_session_factory):

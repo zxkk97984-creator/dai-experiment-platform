@@ -515,6 +515,12 @@ def student_exam_status(exam: Exam, submission: ExamSubmission | None, now=None)
     from app.services.time_utils import as_utc, utc_now
     now = now or utc_now()
     if submission:
+        # 防御异常数据（如 Demo 种子曾把未来考试写成 started）：作答尚未真正开始
+        # 前，不得暴露为 in_progress，否则倒计时会按 expires_at 显示 817:xx:xx。
+        if submission.status == "started":
+            started_at = as_utc(submission.started_at)
+            if started_at is not None and now < started_at:
+                return "scheduled", False, False
         mapping = {
             "started": "in_progress",
             "submitted": "submitted",
@@ -616,7 +622,8 @@ def build_student_exam_session(exam: Exam, student: User, db: Session) -> dict:
     score_visible = bool(submission and submission.status == "graded" and exam.show_score_after_grading)
     questions_visible = bool(exam.review_released_at and exam.show_questions_after_review)
     answers_visible = bool(questions_visible and exam.show_answers_after_review)
-    active = bool(submission and submission.status == "started")
+    student_status, _is_completed, _can_start = student_exam_status(exam, submission, now)
+    active = bool(submission and student_status == "in_progress")
     include_questions = active or questions_visible
     questions = list_questions(db, exam.id) if include_questions else []
     saved_answers = []
