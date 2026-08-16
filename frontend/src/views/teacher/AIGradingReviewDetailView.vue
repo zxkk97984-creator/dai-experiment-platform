@@ -124,6 +124,7 @@ async function handleOverride(payload) {
     await aiGradingAPI.overrideGrade(gradeId, payload)
     await fetchDetail()
     reviewPanelRef.value?.clearDraft()
+    reviewPanelRef.value?.closeEditor()
   } catch (e) {
     error.value = e.response?.data?.detail?.message || e.message || '覆盖失败'
   } finally {
@@ -303,15 +304,16 @@ onMounted(fetchDetail)
               </div>
             </div>
 
-            <TeacherReviewPanel
-              ref="reviewPanelRef"
-              :detail="detail"
-              :teacher-id="auth.user?.id"
-              :submitting="submitting"
-              @submit="handleOverride"
-            />
           </div>
         </div>
+
+        <TeacherReviewPanel
+          ref="reviewPanelRef"
+          :detail="detail"
+          :teacher-id="auth.user?.id"
+          :submitting="submitting"
+          @submit="handleOverride"
+        />
 
         <details class="advanced-info">
           <summary>高级信息（开发与审计）</summary>

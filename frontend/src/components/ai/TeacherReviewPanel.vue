@@ -121,7 +121,13 @@ function clearDraft() {
   }
 }
 
-defineExpose({ clearDraft })
+/** 覆盖成功后由页面调用：关闭调整评分弹窗 */
+function closeEditor() {
+  editing.value = false
+  confirmOpen.value = false
+}
+
+defineExpose({ clearDraft, closeEditor })
 
 onMounted(() => {
   if (loadDraft()) {
@@ -164,81 +170,24 @@ const historyRows = computed(() => {
 <template>
   <section class="review-panel evidence-block teacher">
     <header class="review-panel__head">
-      <h3 class="review-panel__title">教师复核</h3>
-      <span v-if="!editing" class="review-panel__status">{{ panelTitle }}</span>
-    </header>
-
-    <!-- 只读模式：completed 默认展示，保留调整入口 -->
-    <div v-if="!editing" class="review-readonly">
-      <p class="review-readonly__lead">评分已经生效</p>
-      <div class="ro-row">
-        <span>当前正式得分</span>
-        <strong>{{ origFinal ?? '—' }}</strong>
+      <div class="review-panel__heading">
+        <h3 class="review-panel__title">教师复核</h3>
+        <span class="review-panel__status">{{ panelTitle }}</span>
       </div>
-      <div class="ro-row">
-        <span>是否经教师调整</span>
-        <strong>{{ historyRows.length ? `已调整 ${historyRows.length} 次` : '尚未经过教师调整' }}</strong>
+      <div class="review-panel__summary">
+        <div class="summary-item">
+          <span>当前正式得分</span>
+          <strong>{{ origFinal ?? '—' }}</strong>
+        </div>
+        <div class="summary-item">
+          <span>是否经教师调整</span>
+          <strong>{{ historyRows.length ? `已调整 ${historyRows.length} 次` : '尚未经过教师调整' }}</strong>
+        </div>
       </div>
       <button type="button" class="btn-outline review-edit-btn" @click="editing = true">
-        调整评分
+        {{ isReview ? '立即复核' : '调整评分' }}
       </button>
-    </div>
-
-    <!-- 编辑模式 -->
-    <div v-else class="review-form">
-      <div class="field">
-        <label class="field__label" for="ov-a">算法关键步骤 A</label>
-        <input id="ov-a" v-model.number="a" type="number" min="0" max="20" step="0.1" />
-        <p class="field__hint">当前 {{ origA ?? '—' }} 分，范围 0–20</p>
-      </div>
-
-      <div class="field">
-        <label class="field__label" for="ov-q">代码质量 Q</label>
-        <input id="ov-q" v-model.number="q" type="number" min="0" max="10" step="0.1" />
-        <p class="field__hint">当前 {{ origQ ?? '—' }} 分，范围 0–10</p>
-      </div>
-
-      <label class="final-switch">
-        <input v-model="useFinal" type="checkbox" />
-        <span>直接调整总分</span>
-      </label>
-
-      <div v-if="useFinal" class="field">
-        <label class="field__label" for="ov-final">调整后总分</label>
-        <input id="ov-final" v-model.number="final" type="number" min="0" max="100" step="0.1" />
-        <p class="field__hint">范围 0–100</p>
-      </div>
-
-      <div class="preview">
-        <div class="preview__head">
-          <span>调整后总分</span>
-          <strong class="preview__value">{{ preview.final }}</strong>
-        </div>
-        <p class="preview__hint">
-          {{ useFinal ? '将按手动总分提交' : '系统自动计算（F+R+A+Q）' }}，提交后以后端合分为准
-        </p>
-      </div>
-
-      <div class="field">
-        <label class="field__label" for="ov-reason">调整理由</label>
-        <textarea id="ov-reason" v-model="reason" rows="3" placeholder="请填写调整原因..."></textarea>
-        <p class="field__hint">必填，将记录在评分历史中</p>
-      </div>
-
-      <p v-if="!valid" class="form-error">
-        请至少修改一个评分项，并填写调整理由（将记录在评分历史中）。
-      </p>
-      <p v-if="restoredTip" class="draft-tip">已恢复本机未提交的调整内容</p>
-
-      <button
-        type="button"
-        class="btn-primary review-submit"
-        :disabled="!valid || submitting"
-        @click="confirmOpen = true"
-      >
-        {{ confirmTitle }}
-      </button>
-    </div>
+    </header>
 
     <!-- 评分历史 -->
     <div v-if="historyRows.length" class="review-history">
@@ -252,8 +201,73 @@ const historyRows = computed(() => {
       </ol>
     </div>
 
+    <!-- 调整评分弹窗：字段与原先内嵌表单一致，仅从页面内嵌改为弹窗填写 -->
+    <div v-if="editing" class="confirm-overlay" @click.self="editing = false">
+      <div class="review-dialog" role="dialog" aria-modal="true" aria-label="教师复核调整">
+        <h3 class="review-dialog__title">{{ isReview ? '教师复核' : '调整评分' }}</h3>
+
+        <div class="review-form">
+          <div class="field">
+            <label class="field__label" for="ov-a">算法关键步骤 A</label>
+            <input id="ov-a" v-model.number="a" type="number" min="0" max="20" step="0.1" />
+            <p class="field__hint">当前 {{ origA ?? '—' }} 分，范围 0–20</p>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="ov-q">代码质量 Q</label>
+            <input id="ov-q" v-model.number="q" type="number" min="0" max="10" step="0.1" />
+            <p class="field__hint">当前 {{ origQ ?? '—' }} 分，范围 0–10</p>
+          </div>
+
+          <label class="final-switch">
+            <input v-model="useFinal" type="checkbox" />
+            <span>直接调整总分</span>
+          </label>
+
+          <div v-if="useFinal" class="field">
+            <label class="field__label" for="ov-final">调整后总分</label>
+            <input id="ov-final" v-model.number="final" type="number" min="0" max="100" step="0.1" />
+            <p class="field__hint">范围 0–100</p>
+          </div>
+
+          <div class="preview">
+            <div class="preview__head">
+              <span>调整后总分</span>
+              <strong class="preview__value">{{ preview.final }}</strong>
+            </div>
+            <p class="preview__hint">
+              {{ useFinal ? '将按手动总分提交' : '系统自动计算（F+R+A+Q）' }}，提交后以后端合分为准
+            </p>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="ov-reason">调整理由</label>
+            <textarea id="ov-reason" v-model="reason" rows="3" placeholder="请填写调整原因..."></textarea>
+            <p class="field__hint">必填，将记录在评分历史中</p>
+          </div>
+
+          <p v-if="!valid" class="form-error">
+            请至少修改一个评分项，并填写调整理由（将记录在评分历史中）。
+          </p>
+          <p v-if="restoredTip" class="draft-tip">已恢复本机未提交的调整内容</p>
+        </div>
+
+        <div class="review-dialog__actions">
+          <button type="button" class="btn-outline" @click="editing = false">取消</button>
+          <button
+            type="button"
+            class="btn-primary review-submit"
+            :disabled="!valid || submitting"
+            @click="confirmOpen = true"
+          >
+            {{ confirmTitle }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- 确认弹窗 -->
-    <div v-if="confirmOpen" class="confirm-overlay" @click.self="confirmOpen = false">
+    <div v-if="confirmOpen" class="confirm-overlay confirm-overlay--above" @click.self="confirmOpen = false">
       <div class="confirm-dialog" role="dialog" aria-modal="true" aria-label="确认覆盖评分">
         <h3 class="confirm-dialog__title">确认{{ confirmTitle }}？</h3>
         <dl class="confirm-dialog__list">
@@ -289,15 +303,21 @@ const historyRows = computed(() => {
 <style scoped>
 /* V2 教师终审面板：accent 实线证据块 + .field/.input/.textarea + .btn 体系。 */
 .review-panel { display: flex; flex-direction: column; gap: 14px; }
-.review-panel__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.review-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.review-panel__heading { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .review-panel__title { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--fg); }
 .review-panel__status { font-size: var(--text-xs); font-weight: 600; color: var(--faint); }
 
-.review-readonly { display: flex; flex-direction: column; gap: 10px; }
-.review-readonly__lead { margin: 0; font-size: var(--text-md); color: var(--muted); }
-.ro-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: var(--text-md); color: var(--muted); }
-.ro-row strong { color: var(--fg); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-.review-edit-btn { align-self: flex-start; margin-top: 4px; }
+.review-panel__summary { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; min-width: 0; }
+.summary-item { display: flex; align-items: baseline; gap: 8px; font-size: var(--text-md); color: var(--muted); }
+.summary-item strong { color: var(--fg); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.review-edit-btn { flex-shrink: 0; }
 
 .review-form { display: flex; flex-direction: column; gap: 12px; }
 .field { display: flex; flex-direction: column; gap: 4px; }
@@ -348,7 +368,23 @@ const historyRows = computed(() => {
 
 .form-error { margin: 0; font-size: var(--text-xs); color: var(--danger); line-height: 1.6; }
 .draft-tip { margin: 0; font-size: var(--text-xs); color: var(--warning); }
-.review-submit { width: 100%; justify-content: center; }
+.review-submit { min-width: 120px; justify-content: center; }
+
+.review-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.review-dialog__title { margin: 0; font-size: var(--text-xl); font-weight: 600; color: var(--fg); }
+.review-dialog__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 2px; }
 
 .review-history { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .review-history__title { margin: 0; font-size: var(--text-md); font-weight: 600; color: var(--fg); }
@@ -368,6 +404,7 @@ const historyRows = computed(() => {
   padding: var(--space-4);
   background: oklch(0.2 0.01 150 / 0.35);
 }
+.confirm-overlay--above { z-index: 310; }
 .confirm-dialog {
   width: min(420px, calc(100vw - 32px));
   padding: 20px;

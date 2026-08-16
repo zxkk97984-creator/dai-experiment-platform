@@ -41,12 +41,14 @@ describe('TeacherReviewPanel', () => {
     expect(wrapper.text()).toContain('当前 13 分')
   })
 
-  it('completed 默认只读，点击"调整评分"进入编辑', async () => {
+  it('completed 默认只读，点击"调整评分"弹出编辑弹窗', async () => {
     const wrapper = mountPanel(DONE_DETAIL)
-    expect(wrapper.find('.review-readonly').exists()).toBe(true)
+    expect(wrapper.find('.review-panel__summary').exists()).toBe(true)
+    expect(wrapper.find('.review-edit-btn').text()).toContain('调整评分')
     expect(wrapper.find('input#ov-a').exists()).toBe(false)
 
-    await wrapper.findAll('button').find((b) => b.text().includes('调整评分')).trigger('click')
+    await wrapper.find('.review-edit-btn').trigger('click')
+    expect(wrapper.find('.review-dialog').exists()).toBe(true)
     expect(wrapper.find('input#ov-a').exists()).toBe(true)
     expect(wrapper.text()).toContain('确认覆盖评分')
   })
