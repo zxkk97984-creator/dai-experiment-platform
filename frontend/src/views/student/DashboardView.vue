@@ -47,6 +47,16 @@ const kindLabel = { assignment: '作业', exam: '考试', experiment: '实验' }
 const feedbackLabel = { pending: '待评分', needs_revision: '需修改', passed: '已通过' }
 const feedbackTone = { pending: 'warning', needs_revision: 'danger', passed: 'success' }
 
+function courseMeta(course) {
+  const term = course.academic_term || ''
+  const classes = (course.teaching_classes || []).filter((name) => name && name !== term)
+  const parts = [term || '未设置学期']
+  if (classes.length) parts.push(classes.join('、'))
+  else if (!term) parts.push('未设置教学班')
+  parts.push(`${course.pending_assignment_count ?? 0} 份待交`)
+  return parts.join(' · ')
+}
+
 async function loadDashboard() {
   loading.value = true
   error.value = false
@@ -305,7 +315,7 @@ onMounted(async () => {
               <div class="ph-label"><p class="eyebrow">Courses</p><h3>我的课程</h3></div>
               <button type="button" class="btn btn-ghost btn-sm view-all-btn" @click="router.push('/student/courses')">全部 →</button>
             </div>
-            <div class="panel-body">
+            <div class="panel-body panel-list-body">
               <DashboardAsyncState
                 :loading="loading"
                 :error="error"
@@ -319,11 +329,11 @@ onMounted(async () => {
                     v-for="course in dashboard.courses.slice(0, 3)"
                     :key="course.id"
                     type="button"
-                    class="health-row course-row-link"
+                    class="course-row-link"
                     @click="go(course.route)"
                   >
-                    <span class="health-title">{{ course.title }}</span>
-                    <span class="health-meta">{{ course.academic_term || '未设置学期' }} · {{ course.teaching_classes?.join('、') || '未设置教学班' }} · {{ course.pending_assignment_count }} 份待交</span>
+                    <span class="course-row-title">{{ course.title }}</span>
+                    <span class="course-row-meta">{{ courseMeta(course) }}</span>
                   </button>
                 </div>
               </DashboardAsyncState>
@@ -336,8 +346,9 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.dash { display: flex; flex-direction: column; gap: var(--space-5); }
-.dash-col { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.dash { display: flex; flex-direction: column; gap: var(--space-4); }
+.dash-col { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.dash-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-3); }
 
 /* 续学面板 */
 .continue-body { display: flex; align-items: center; gap: var(--space-6); }
@@ -392,16 +403,16 @@ onMounted(async () => {
 .learning-progress { display: flex; flex-direction: column; gap: 6px; }
 .learning-stat { font-size: var(--text-base); color: var(--muted); }
 
-.health-row {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
-  width: 100%; padding: 10px 0; border: 0; border-bottom: 1px solid var(--border);
+.course-row-link {
+  display: flex; flex-direction: column; gap: 3px;
+  width: 100%; padding: 11px 16px; border: 0; border-bottom: 1px solid var(--border);
   border-radius: 0; background: transparent; text-align: left;
 }
-.health-row:last-child { border-bottom: 0; }
-.health-row:hover { background: var(--surface-sunken); }
-.health-title { font-size: var(--text-md); font-weight: 500; color: var(--fg); }
-.health-row:hover .health-title { color: var(--accent); }
-.health-meta { font-size: var(--text-sm); color: var(--muted); flex-shrink: 0; }
+.course-row-link:last-child { border-bottom: 0; }
+.course-row-link:hover { background: var(--surface-sunken); }
+.course-row-title { font-size: var(--text-md); font-weight: 500; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.course-row-link:hover .course-row-title { color: var(--accent); }
+.course-row-meta { font-size: var(--text-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 1024px) {
   .dash-grid { grid-template-columns: 1fr; }
