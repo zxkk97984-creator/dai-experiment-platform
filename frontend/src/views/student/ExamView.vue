@@ -41,7 +41,7 @@ const tabId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random(
 
 const queueKey = computed(() => `exam-answer-queue:${examId}:${submission.value?.id || 'pending'}`)
 const codeRunKey = computed(() => `exam-code-runs:${examId}:${submission.value?.id || 'pending'}`)
-const active = computed(() => submission.value?.status === 'started')
+const active = computed(() => submission.value?.status === 'started' && exam.value?.student_status === 'in_progress')
 const completed = computed(() => Boolean(submission.value && submission.value.status !== 'started'))
 const scoreVisible = computed(() => Boolean(submission.value?.score_visible && submission.value?.score != null))
 const canEdit = computed(() => active.value && !locked.value && !secondaryTab.value && !autoSubmitting.value)
@@ -152,9 +152,9 @@ function hydrate(payload, { mergeQueue = true } = {}) {
   codeRunVersions.value = {}
   restoreCodeRuns()
   currentQuestion.value = payload.questions?.[0]?.id || null
-  if (mergeQueue && payload.submission?.status === 'started') restoreLocalQueue()
-  if (payload.submission?.status !== 'started') clearLocalQueue()
-  if (payload.submission?.status === 'started') activateTabCoordination()
+  if (mergeQueue && active.value) restoreLocalQueue()
+  if (!active.value) clearLocalQueue()
+  if (active.value) activateTabCoordination()
 }
 
 async function load() {

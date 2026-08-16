@@ -118,7 +118,7 @@ Notebook 模板（published）→ 挂课时 + 独立模块 → 学生打开（st
 | teaching_classes | 6 | judge_questions | 15 |
 | teaching_class_students | 60 | submissions | ~636 |
 | courses | 7 | exams / exam_questions | 3 / 15 |
-| chapters | 19 | exam_submissions / exam_answers | ~77 / ~370 |
+| chapters | 19 | exam_submissions / exam_answers | ~72 / ~360 |
 | lessons | 63 | notebook_templates / versions | 4 / 4 |
 | course_enrollments | 210 | experiment_modules / records / submissions | 4 / ~157 / ~156 |
 | question_rubrics | 5 | code_grades | ~180 |

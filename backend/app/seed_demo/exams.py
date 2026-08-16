@@ -3,7 +3,7 @@
 
 状态机（当前代码为准）：exam.status draft/published；exam_submissions.status
 started/submitted/grading/graded/review_required。期中全量 graded 且复核已发布；
-期末已发布未开始（部分 started）；章节测验混合状态。
+期末已发布未开始；章节测验混合状态。
 """
 from __future__ import annotations
 
@@ -197,7 +197,7 @@ def create_exam_submissions(
     """创建考试提交与答案。
 
     - 期中：全部选课学生 graded（成绩已发布）；
-    - 期末：仅少量学生 started（未交卷）；
+    - 期末：已发布未开始，不创建 started 提交；
     - 测验：混合状态（graded/submitted/review_required/missed）。
     """
     students: list[User] = users["students"]
@@ -342,45 +342,12 @@ def _fill_midterm(db, clock, users, exam, students, archetype_map):
 
 
 def _fill_final(db, clock, users, exam, students, archetype_map):
-    """期末：仅 5 名学生 started（未交卷），其余未开始。"""
-    questions = _exam_questions(db, exam)
-    # 固定选择：elite + 4 名背景学生（稳定）
-    started_usernames = ["demo_student_elite"] + [u.username for u in students if u.username.startswith("student_")][:4]
-    for username in started_usernames:
-        student = next(s for s in students if s.username == username)
-        rng = make_rng("exam_final", student.username, exam.id)
-        sub = db.scalar(
-            select(ExamSubmission).where(
-                ExamSubmission.exam_id == exam.id,
-                ExamSubmission.student_id == student.id,
-            )
-        )
-        if sub is not None:
-            mark(db, "exam_submissions", sub.id)
-            continue
-        started_at = clock.final_start() + timedelta(minutes=rng.randint(0, 30))
-        sub = ExamSubmission(
-            exam_id=exam.id,
-            student_id=student.id,
-            status="started",
-            started_at=started_at,
-            expires_at=started_at + timedelta(minutes=exam.duration_minutes),
-            last_saved_at=started_at,
-        )
-        db.add(sub)
-        db.flush()
-        mark(db, "exam_submissions", sub.id)
-        # 已答部分选择题
-        for question in questions[:2]:
-            if question.question_type == "single_choice":
-                ans = ExamAnswer(
-                    submission_id=sub.id, question_id=question.id,
-                    selected_options=[list(question.options.keys())[0]],
-                    score=None, grading_status="pending",
-                )
-                db.add(ans)
-                db.flush()
-                mark(db, "exam_answers", ans.id)
+    """期末：已发布未开始，不创建 started 提交。
+
+    历史版本曾用 clock.final_start() 创建未来 started 提交，导致学生端把
+    60 分钟的考试倒计时显示为 817 小时（expires_at 远晚于服务器当前时间）。
+    """
+    return
 
 
 def _fill_quiz(db, clock, users, exam, students, archetype_map):

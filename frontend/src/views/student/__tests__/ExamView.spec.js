@@ -139,6 +139,37 @@ describe('ExamView 安全状态与结果展示', () => {
     wrapper.unmount()
   })
 
+  it('未来 started 的异常数据不展示答题界面和倒计时', async () => {
+    const wrapper = await mountExam('started', {
+      exam: { student_status: 'scheduled' },
+      submission: { expires_at: '2026-09-19T10:22:00Z' },
+    })
+    expect(wrapper.find('.timer').exists()).toBe(false)
+    expect(wrapper.find('.workspace').exists()).toBe(false)
+    expect(wrapper.text()).toContain('考试尚未开始')
+    wrapper.unmount()
+  })
+
+  it('退出考试界面后重进按服务器时间继续倒计时，不暂停', async () => {
+    vi.useFakeTimers()
+    const firstPayload = sessionFor('started')
+    examsAPI.getSession.mockResolvedValue({ data: firstPayload })
+    const first = mount(ExamView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' } } } })
+    await flushPromises()
+    expect(first.get('.timer strong').text()).toBe('00:10:00')
+    first.unmount()
+
+    const secondPayload = sessionFor('started')
+    secondPayload.server_now = '2026-08-12T04:05:00Z'
+    secondPayload.exam.server_now = secondPayload.server_now
+    secondPayload.submission.expires_at = '2026-08-12T04:10:00Z'
+    examsAPI.getSession.mockResolvedValue({ data: secondPayload })
+    const second = mount(ExamView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' } } } })
+    await flushPromises()
+    expect(second.get('.timer strong').text()).toBe('00:05:00')
+    second.unmount()
+  })
+
   it('starter code 不算已完成，运行当前版本后才标记编程题完成', async () => {
     const wrapper = await mountExam('started')
     const codeNav = wrapper.get('.exam-sidebar nav button:nth-child(3)')

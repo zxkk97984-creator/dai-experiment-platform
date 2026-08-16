@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from app.models import Exam, ExamSubmission
+from app.models import Exam, ExamSubmission, User
 from app.services.time_utils import as_utc, utc_now
 from conftest import auth_header, create_course_db, create_user, login
 
@@ -79,6 +79,28 @@ def test_late_entry_receives_full_duration_not_global_window_cap(client, db_sess
     assert nested_expires_raw.tzinfo is not None
     expires = as_utc(expires_raw)
     assert expires >= before + timedelta(minutes=59, seconds=50)
+
+
+def test_future_started_submission_is_scheduled_not_in_progress(client, db_session_factory):
+    """回归：异常未来 started 提交不得进入答题态，避免 60 分钟考试倒计时显示 817 小时。"""
+    ctx = _seed(client, db_session_factory, start_delta=30, end_delta=60)
+    client.patch(f"{API}/exams/{ctx['exam_id']}", headers=auth_header(ctx["teacher"]), json={"status": "published"})
+    now = utc_now()
+    started_at = now + timedelta(minutes=40)  # 在考试窗口内但尚未到点
+    with db_session_factory() as db:
+        student = db.scalar(select(User).where(User.username == "life_student"))
+        assert student is not None
+        sub = ExamSubmission(
+            exam_id=ctx["exam_id"], student_id=student.id, status="started",
+            started_at=started_at, expires_at=started_at + timedelta(minutes=60),
+        )
+        db.add(sub)
+        db.commit()
+
+    session = client.get(f"{API}/exams/{ctx['exam_id']}/session", headers=auth_header(ctx["student"])).json()
+    assert session["exam"]["student_status"] == "scheduled"
+    assert session["questions"] == []
+    assert session["submission"]["status"] == "started"  # 原始状态不篡改，只控制展示
 
 
 def test_autosave_versions_restore_and_detect_conflicts(client, db_session_factory):
