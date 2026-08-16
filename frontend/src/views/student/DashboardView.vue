@@ -47,6 +47,16 @@ const kindLabel = { assignment: '作业', exam: '考试', experiment: '实验' }
 const feedbackLabel = { pending: '待评分', needs_revision: '需修改', passed: '已通过' }
 const feedbackTone = { pending: 'warning', needs_revision: 'danger', passed: 'success' }
 
+function courseMeta(course) {
+  const term = course.academic_term || ''
+  const classes = (course.teaching_classes || []).filter((name) => name && name !== term)
+  const parts = [term || '未设置学期']
+  if (classes.length) parts.push(classes.join('、'))
+  else if (!term) parts.push('未设置教学班')
+  parts.push(`${course.pending_assignment_count ?? 0} 份待交`)
+  return parts.join(' · ')
+}
+
 async function loadDashboard() {
   loading.value = true
   error.value = false
@@ -299,45 +309,46 @@ onMounted(async () => {
               />
             </div>
           </section>
-
-          <section class="panel courses-panel">
-            <div class="panel-head">
-              <div class="ph-label"><p class="eyebrow">Courses</p><h3>我的课程</h3></div>
-              <button type="button" class="btn btn-ghost btn-sm view-all-btn" @click="router.push('/student/courses')">全部 →</button>
-            </div>
-            <div class="panel-body">
-              <DashboardAsyncState
-                :loading="loading"
-                :error="error"
-                :empty="!dashboard?.courses?.length"
-                empty-title="暂无课程"
-                empty-body="加入课程后将在这里展示学习动态"
-                @retry="loadDashboard"
-              >
-                <div v-if="dashboard" class="course-list">
-                  <button
-                    v-for="course in dashboard.courses.slice(0, 3)"
-                    :key="course.id"
-                    type="button"
-                    class="health-row course-row-link"
-                    @click="go(course.route)"
-                  >
-                    <span class="health-title">{{ course.title }}</span>
-                    <span class="health-meta">{{ course.academic_term || '未设置学期' }} · {{ course.teaching_classes?.join('、') || '未设置教学班' }} · {{ course.pending_assignment_count }} 份待交</span>
-                  </button>
-                </div>
-              </DashboardAsyncState>
-            </div>
-          </section>
         </div>
       </div>
+
+      <section class="panel courses-panel">
+        <div class="panel-head">
+          <div class="ph-label"><p class="eyebrow">Courses</p><h3>我的课程</h3></div>
+          <button type="button" class="btn btn-ghost btn-sm view-all-btn" @click="router.push('/student/courses')">全部 →</button>
+        </div>
+        <div class="panel-body">
+          <DashboardAsyncState
+            :loading="loading"
+            :error="error"
+            :empty="!dashboard?.courses?.length"
+            empty-title="暂无课程"
+            empty-body="加入课程后将在这里展示学习动态"
+            @retry="loadDashboard"
+          >
+            <div v-if="dashboard" class="course-list">
+              <button
+                v-for="course in dashboard.courses.slice(0, 3)"
+                :key="course.id"
+                type="button"
+                class="course-row-link"
+                @click="go(course.route)"
+              >
+                <span class="course-row-title">{{ course.title }}</span>
+                <span class="course-row-meta">{{ courseMeta(course) }}</span>
+              </button>
+            </div>
+          </DashboardAsyncState>
+        </div>
+      </section>
     </div>
   </AppLayout>
 </template>
 
 <style scoped>
-.dash { display: flex; flex-direction: column; gap: var(--space-5); }
-.dash-col { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.dash { display: flex; flex-direction: column; gap: var(--space-4); }
+.dash-col { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.dash-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-3); }
 
 /* 续学面板 */
 .continue-body { display: flex; align-items: center; gap: var(--space-6); }
@@ -350,7 +361,8 @@ onMounted(async () => {
 
 /* 列表行：沿用 V2 work-row 语义，行点击整行可导航 */
 .panel-list-body { padding: 4px 0; }
-.task-list, .feedback-list, .course-list { display: flex; flex-direction: column; }
+.task-list, .feedback-list { display: flex; flex-direction: column; }
+.course-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--space-3); }
 .work-row {
   display: flex;
   align-items: center;
@@ -392,16 +404,17 @@ onMounted(async () => {
 .learning-progress { display: flex; flex-direction: column; gap: 6px; }
 .learning-stat { font-size: var(--text-base); color: var(--muted); }
 
-.health-row {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
-  width: 100%; padding: 10px 0; border: 0; border-bottom: 1px solid var(--border);
-  border-radius: 0; background: transparent; text-align: left;
+.course-row-link {
+  display: flex; flex-direction: column; gap: 6px;
+  min-width: 0; padding: 14px 16px;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface-subtle); text-align: left;
+  transition: border-color 0.12s ease, background 0.12s ease;
 }
-.health-row:last-child { border-bottom: 0; }
-.health-row:hover { background: var(--surface-sunken); }
-.health-title { font-size: var(--text-md); font-weight: 500; color: var(--fg); }
-.health-row:hover .health-title { color: var(--accent); }
-.health-meta { font-size: var(--text-sm); color: var(--muted); flex-shrink: 0; }
+.course-row-link:hover { border-color: var(--accent); background: var(--accent-faint); }
+.course-row-title { font-size: var(--text-md); font-weight: 500; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.course-row-link:hover .course-row-title { color: var(--accent); }
+.course-row-meta { font-size: var(--text-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 1024px) {
   .dash-grid { grid-template-columns: 1fr; }

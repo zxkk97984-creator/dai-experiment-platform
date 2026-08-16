@@ -128,7 +128,7 @@ describe('学生首页 DashboardView（参考图 04 构成）', () => {
     expect(studentMock.student).toHaveBeenCalledTimes(1)
   })
 
-  it('渲染顺序：问候 → 续学面板 → 四摘要卡 → 双列', async () => {
+  it('渲染顺序：问候 → 续学面板 → 四摘要卡 → 双列 → 我的课程通栏', async () => {
     studentMock.student.mockResolvedValue({ data: dashboardData() })
     coursesMock.getChapters.mockResolvedValue({ data: chaptersData })
     const wrapper = mountView()
@@ -138,9 +138,10 @@ describe('学生首页 DashboardView（参考图 04 构成）', () => {
     expect(order[1]).toMatch(/continue-panel/)
     expect(order[2]).toMatch(/summary-cards/)
     expect(order[3]).toMatch(/dash-grid/)
+    expect(order[4]).toMatch(/courses-panel/)
   })
 
-  it('双列内部顺序：左列待办→反馈；右列学习概览→公告→我的课程', async () => {
+  it('双列内部顺序：左列待办→反馈；右列学习概览→公告；课程在双列下方通栏', async () => {
     studentMock.student.mockResolvedValue({ data: dashboardData() })
     coursesMock.getChapters.mockResolvedValue({ data: chaptersData })
     const wrapper = mountView()
@@ -151,7 +152,8 @@ describe('学生首页 DashboardView（参考图 04 构成）', () => {
     const right = wrapper.findAll('.col-right > *').map((n) => n.classes().join(' '))
     expect(right[0]).toMatch(/learning-panel/)
     expect(right[1]).toMatch(/announcement-panel-wrap/)
-    expect(right[2]).toMatch(/courses-panel/)
+    expect(right).toHaveLength(2)
+    expect(wrapper.find('.courses-panel').exists()).toBe(true)
   })
 
   it('问候显示姓名与格式化日期', async () => {
