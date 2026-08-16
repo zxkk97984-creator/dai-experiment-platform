@@ -19,6 +19,22 @@ const filteredStudents = computed(() => {
   return students.value.filter((student) => `${student.real_name || ''} ${student.student_no || ''} ${student.username || ''}`.toLowerCase().includes(q))
 })
 
+function classTitle(item) {
+  const name = item.name || ''
+  const code = item.code || ''
+  return code && name !== code ? code : name
+}
+
+function classSubtitle(item) {
+  const name = item.name || ''
+  const code = item.code || ''
+  const term = code && name.endsWith(code) ? name.slice(0, -code.length).trim() : name
+  const parts = []
+  if (term && term !== code) parts.push(term)
+  parts.push(`${item.student_count} 人`)
+  return parts.join(' · ')
+}
+
 async function load() {
   loading.value = true
   try {
@@ -90,8 +106,8 @@ onMounted(load)
                 :class="{ active: selectedClassId === String(item.id) }"
                 @click="selectClass(item)"
               >
-                <span class="class-title">{{ item.name }}</span>
-                <span class="class-meta">{{ item.code }} · {{ item.student_count }} 人</span>
+                <span class="class-title">{{ classTitle(item) }}</span>
+                <span class="class-meta">{{ classSubtitle(item) }}</span>
               </button>
             </div>
           </div>

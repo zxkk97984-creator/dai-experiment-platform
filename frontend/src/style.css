@@ -88,7 +88,7 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
-  height: var(--h-btn);
+  min-height: var(--h-btn);
   padding: 0 14px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
