@@ -78,12 +78,12 @@ onMounted(fetch)
 
       <!-- ── Empty ──────────────────────────────────────────────────────── -->
       <div v-else-if="modules.length === 0" class="empty-state">
-        <p>🧪 暂无实验模块</p>
+        <p>暂无实验模块</p>
       </div>
 
       <!-- ── Table ──────────────────────────────────────────────────────── -->
       <div v-else class="card table-card">
-        <table>
+        <table class="ds-table">
           <thead>
             <tr><th>名称</th><th>描述</th><th>状态</th><th>操作</th></tr>
           </thead>
@@ -123,11 +123,11 @@ onMounted(fetch)
 }
 .page-title {
   font-size: 28px; font-weight: 700;
-  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
+  color: var(--fg); letter-spacing: -0.02em; line-height: 1.15;
   margin: 0 0 6px;
 }
 .page-sub {
-  font-size: var(--text-sm); color: var(--text-secondary); margin: 0;
+  font-size: var(--text-sm); color: var(--muted); margin: 0;
 }
 
 /* ── Create Form ───────────────────────────────────────────────────── */
@@ -156,7 +156,7 @@ onMounted(fetch)
 .w-40 { width: 40%; }
 
 /* ── Cells ─────────────────────────────────────────────────────────── */
-.title-cell { font-weight: 500; color: var(--ink); }
+.title-cell { font-weight: 500; color: var(--fg); }
 
 @media (max-width: 768px) {
   .page-head { flex-direction: column; }

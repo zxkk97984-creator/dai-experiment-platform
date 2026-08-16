@@ -73,7 +73,7 @@ defineEmits(['login'])
 <style scoped>
 .roles {
   padding: 80px 56px;
-  background: #F8FAFF;
+  background: var(--surface-subtle);
 }
 
 .roles-inner {
@@ -90,7 +90,7 @@ defineEmits(['login'])
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.18em;
-  color: #7359ED;
+  color: var(--info);
   margin: 0 0 12px;
 }
 
@@ -98,13 +98,13 @@ defineEmits(['login'])
   font-size: 32px;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: #13213A;
+  color: var(--fg);
   margin: 0 0 12px;
 }
 
 .roles-sub {
   font-size: 16px;
-  color: #6E7B92;
+  color: var(--muted);
   max-width: 560px;
   line-height: 1.5;
   margin: 0;
@@ -118,9 +118,9 @@ defineEmits(['login'])
 
 .role-card {
   position: relative;
-  background: #fff;
-  border: 1px solid #E2E8F0;
-  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   overflow: hidden;
   cursor: pointer;
   transition: all 0.35s ease;
@@ -134,42 +134,42 @@ defineEmits(['login'])
 .role-card:hover,
 .role-card.hovered {
   transform: translateY(-4px);
-  box-shadow: 0 16px 48px rgba(0,0,0,0.08);
-  border-color: #CBD5E1;
+  box-shadow: 0 16px 48px oklch(0 0 0 / 0.08);
+  border-color: var(--border-strong);
 }
 
 .role-card--student:hover,
-.role-card--student.hovered { border-color: #2467ED; }
+.role-card--student.hovered { border-color: var(--accent); }
 
 .role-card--teacher:hover,
-.role-card--teacher.hovered { border-color: #7359ED; }
+.role-card--teacher.hovered { border-color: var(--info); }
 
 .role-card--admin:hover,
-.role-card--admin.hovered { border-color: #58DDA7; }
+.role-card--admin.hovered { border-color: var(--success); }
 
 .role-card--developer:hover,
-.role-card--developer.hovered { border-color: #2467ED; }
+.role-card--developer.hovered { border-color: var(--accent); }
 
 .role-chrome {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 12px 16px;
-  background: #FAFBFC;
-  border-bottom: 1px solid #F1F5F9;
+  background: var(--surface-subtle);
+  border-bottom: 1px solid var(--surface-subtle);
 }
 
 .role-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #CBD5E1;
+  background: var(--border-strong);
 }
 
 .role-label {
   margin-left: auto;
   font-size: 11px;
-  color: #94A3B8;
+  color: var(--faint);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -183,8 +183,8 @@ defineEmits(['login'])
 .role-sidebar {
   width: 48px;
   padding: 14px 10px;
-  background: #FAFBFC;
-  border-right: 1px solid #F1F5F9;
+  background: var(--surface-subtle);
+  border-right: 1px solid var(--surface-subtle);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -192,8 +192,8 @@ defineEmits(['login'])
 
 .role-sidebar-item {
   height: 6px;
-  background: #E2E8F0;
-  border-radius: 3px;
+  background: var(--border);
+  border-radius: var(--radius-sm);
 }
 
 .role-sidebar-item:nth-child(1) { width: 85%; }
@@ -216,14 +216,14 @@ defineEmits(['login'])
 .role-name {
   font-size: 17px;
   font-weight: 600;
-  color: #13213A;
+  color: var(--fg);
   margin: 0;
 }
 
 .role-desc {
   font-size: 13px;
   line-height: 1.6;
-  color: #6E7B92;
+  color: var(--muted);
   margin: 0 0 14px;
 }
 
@@ -238,14 +238,14 @@ defineEmits(['login'])
   align-items: center;
   gap: 5px;
   font-size: 12px;
-  color: #64748B;
+  color: var(--muted);
 }
 
 .role-feature-dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #2467ED;
+  background: var(--accent);
   flex-shrink: 0;
   transition: transform 0.25s ease;
 }
@@ -260,8 +260,8 @@ defineEmits(['login'])
 .role-feature:nth-child(4) .role-feature-dot { animation-delay: 0.18s; }
 @keyframes featureDotPulse {
   0% { transform: scale(1); }
-  50% { transform: scale(1.8); background: #7359ED; }
-  100% { transform: scale(1); background: #2467ED; }
+  50% { transform: scale(1.8); background: var(--info); }
+  100% { transform: scale(1); background: var(--accent); }
 }
 
 /* Sidebar items animate on hover */
@@ -270,14 +270,14 @@ defineEmits(['login'])
 }
 .role-card:hover .role-sidebar-item,
 .role-card.hovered .role-sidebar-item {
-  background: #CBD5E1;
+  background: var(--border-strong);
   animation: sidebarSlide 0.5s ease forwards;
   animation-delay: calc(var(--i) * 0.08s);
 }
 @keyframes sidebarSlide {
   0% { transform: translateX(0); }
-  50% { transform: translateX(4px); background: #2467ED; }
-  100% { transform: translateX(0); background: #CBD5E1; }
+  50% { transform: translateX(4px); background: var(--accent); }
+  100% { transform: translateX(0); background: var(--border-strong); }
 }
 
 /* Accent line at bottom */
@@ -288,14 +288,14 @@ defineEmits(['login'])
   left: 50%;
   width: 0;
   height: 3px;
-  border-radius: 3px 3px 0 0;
+  border-radius: var(--radius-sm) 3px 0 0;
   transform: translateX(-50%);
   transition: width 0.35s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
-.role-card--student::after { background: #2467ED; }
-.role-card--teacher::after { background: #7359ED; }
-.role-card--admin::after { background: #58DDA7; }
-.role-card--developer::after { background: #2467ED; }
+.role-card--student::after { background: var(--accent); }
+.role-card--teacher::after { background: var(--info); }
+.role-card--admin::after { background: var(--success); }
+.role-card--developer::after { background: var(--accent); }
 .role-card:hover::after,
 .role-card.hovered::after {
   width: 50%;
@@ -306,21 +306,21 @@ defineEmits(['login'])
   margin-top: 72px;
   text-align: center;
   padding: 56px 32px;
-  background: linear-gradient(135deg, rgba(36,103,237,0.04), rgba(115,89,237,0.04)), #fff;
-  border: 1px solid rgba(36,103,237,0.1);
-  border-radius: 24px;
+  background: linear-gradient(135deg, oklch(0.52 0.095 158 / 0.04), oklch(0.52 0.09 235 / 0.04)), var(--surface);
+  border: 1px solid oklch(0.52 0.095 158 / 0.1);
+  border-radius: var(--radius-lg);
 }
 
 .cta-title {
   font-size: clamp(22px, 2.8vw, 30px);
   font-weight: 700;
-  color: #13213A;
+  color: var(--fg);
   margin: 0 0 10px;
 }
 
 .cta-desc {
   font-size: 15px;
-  color: #6E7B92;
+  color: var(--muted);
   margin: 0 0 24px;
 }
 
@@ -332,18 +332,18 @@ defineEmits(['login'])
   font-size: 15px;
   font-weight: 600;
   font-family: inherit;
-  color: #fff;
-  background: #2467ED;
+  color: var(--surface);
+  background: var(--accent);
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .cta-btn:hover {
-  background: #1D4ED8;
+  background: var(--accent-hover);
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(36,103,237,0.3);
+  box-shadow: var(--shadow-md);
 }
 
 /* ====== Responsive ====== */

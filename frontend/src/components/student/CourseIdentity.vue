@@ -85,8 +85,8 @@ const tileTone = computed(() => TILE_TONES[iconName.value] || 'tone-blue')
 }
 
 .course-identity__icon {
-  background: var(--primary-light);
-  color: var(--primary);
+  background: var(--accent-soft);
+  color: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -95,14 +95,14 @@ const tileTone = computed(() => TILE_TONES[iconName.value] || 'tone-blue')
 .course-identity__cover {
   display: block;
   object-fit: contain;
-  background: var(--surface-raised, #f1f5f9);
+  background: var(--surface-raised, var(--surface-subtle));
 }
 
 /* 浅色 tile 色调（非渐变） */
-.course-identity__icon.tone-blue   { background: var(--primary-light); color: var(--primary); }
-.course-identity__icon.tone-purple { background: var(--purple-light);  color: var(--purple); }
-.course-identity__icon.tone-green  { background: var(--success-light);  color: var(--success); }
-.course-identity__icon.tone-orange { background: var(--warning-light);  color: var(--warning); }
+.course-identity__icon.tone-blue   { background: var(--accent-soft); color: var(--accent); }
+.course-identity__icon.tone-purple { background: var(--info-bg);  color: var(--info); }
+.course-identity__icon.tone-green  { background: var(--success-bg);  color: var(--success); }
+.course-identity__icon.tone-orange { background: var(--warning-bg);  color: var(--warning); }
 
 .course-identity__text {
   min-width: 0;
@@ -115,7 +115,7 @@ const tileTone = computed(() => TILE_TONES[iconName.value] || 'tone-blue')
   margin: 0;
   font-size: 18px;
   font-weight: 700;
-  color: var(--ink);
+  color: var(--fg);
   line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
@@ -124,7 +124,7 @@ const tileTone = computed(() => TILE_TONES[iconName.value] || 'tone-blue')
 
 .course-identity__meta {
   font-size: var(--text-sm);
-  color: var(--text-secondary);
+  color: var(--muted);
   line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;

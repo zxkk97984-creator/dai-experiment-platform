@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, status
+import csv
+import io
+
+from fastapi import APIRouter, Depends, File, UploadFile, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
@@ -21,6 +24,8 @@ from app.schemas import (
     CourseListSummary,
     CourseRead,
     CourseStudentCreate,
+    CourseStudentImportResult,
+    CourseStudentImportRow,
     CourseStudentRead,
     CourseUpdate,
     CourseWhitelistCreate,
@@ -231,8 +236,8 @@ def list_courses(
     count_query = count_query.where(*access_filters)
     if q:
         like = f"%{q}%"
-        query = query.where(or_(Course.title.ilike(like), Course.description.ilike(like)))
-        count_query = count_query.where(or_(Course.title.ilike(like), Course.description.ilike(like)))
+        query = query.where(or_(Course.title.ilike(like), Course.code.ilike(like), Course.description.ilike(like)))
+        count_query = count_query.where(or_(Course.title.ilike(like), Course.code.ilike(like), Course.description.ilike(like)))
     if status_filter:
         query = query.where(Course.status == status_filter)
         count_query = count_query.where(Course.status == status_filter)
@@ -527,6 +532,118 @@ def list_course_students(course_id: int,
         items.append(CourseStudentRead(id=student.id, username=student.username, student_no=student.student_no,
             real_name=student.real_name, status=student.status, enrollment_origin=origin, teaching_classes=classes))
     return PaginatedResponse(items=items, page=page, page_size=page_size, total=total)
+
+
+def _parse_student_csv(content: bytes) -> tuple[list[dict], str | None]:
+    """解析 UTF-8（含 BOM）或 GB18030 CSV；返回行列表或错误信息。"""
+    for encoding in ("utf-8-sig", "gb18030"):
+        try:
+            text = content.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        return [], "仅支持 UTF-8 或 GB18030 编码的 CSV 文件"
+
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        return [], "CSV 缺少表头"
+    normalized = {name.strip().lower(): name for name in reader.fieldnames}
+    rows = []
+    for row in reader:
+        cleaned = {key.strip(): value.strip() for key, value in row.items() if key}
+        if not any(cleaned.values()):
+            continue
+        rows.append(cleaned)
+    return rows, None
+
+
+def _student_identifier(row: dict, normalized: dict) -> tuple[str | None, str | None, str | None]:
+    def pick(*keys):
+        for key in keys:
+            for alias in key:
+                if alias in normalized and row.get(normalized[alias]):
+                    return row[normalized[alias]]
+        return None
+    student_no = pick(("学号", "student_no", "studentno", "student number"))
+    username = pick(("账号", "用户名", "username", "user"))
+    real_name = pick(("姓名", "name", "real_name"))
+    return student_no, username, real_name
+
+
+@router.post("/courses/{course_id}/students/import", response_model=CourseStudentImportResult)
+async def import_course_students(
+    course_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """CSV 导入课程名单：按学号优先、账号兜底匹配 active 学生；不存在的行跳过并报告。"""
+    course = require_course(course_id, db)
+    ensure_course_manager(course, current_user)
+    _ensure_course_term_writable(course)
+
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise api_error(422, "CSV_TOO_LARGE", "CSV 文件不能超过 2 MB")
+    rows, error = _parse_student_csv(content)
+    if error:
+        raise api_error(422, "CSV_INVALID", error)
+
+    result = CourseStudentImportResult()
+    seen_students: set[int] = set()
+    for index, raw in enumerate(rows, start=1):
+        student_no, username, real_name = _student_identifier(raw, {k.lower(): k for k in raw})
+        student_no = student_no or None
+        username = username or None
+        if not student_no and not username:
+            result.errors.append(CourseStudentImportRow(
+                row=index, student_no=student_no, username=username,
+                status="skipped", message="缺少学号或账号列",
+            ))
+            result.skipped += 1
+            continue
+        student = db.scalar(
+            select(User).where(
+                User.role == "student",
+                User.status == "active",
+                or_(
+                    User.student_no == student_no if student_no else User.id == -1,
+                    User.username == username if username else User.id == -1,
+                ),
+            )
+        )
+        if student is None:
+            result.errors.append(CourseStudentImportRow(
+                row=index, student_no=student_no, username=username,
+                status="skipped", message=f"学生不存在或不可用（{real_name or student_no or username}）",
+            ))
+            result.skipped += 1
+            continue
+        if student.id in seen_students:
+            result.skipped += 1
+            continue
+        seen_students.add(student.id)
+        enrollment = db.scalar(
+            select(CourseEnrollment).where(
+                CourseEnrollment.course_id == course.id,
+                CourseEnrollment.student_id == student.id,
+            )
+        )
+        if enrollment is None:
+            db.add(CourseEnrollment(
+                course_id=course.id, student_id=student.id,
+                status="enrolled", origin="manual",
+            ))
+            result.created += 1
+        elif enrollment.status == "enrolled":
+            result.updated += 1
+        else:
+            enrollment.status = "enrolled"
+            enrollment.origin = "manual"
+            result.updated += 1
+    db.commit()
+    return result
 
 
 @router.post("/courses/{course_id}/students", response_model=CourseStudentRead, status_code=status.HTTP_201_CREATED)

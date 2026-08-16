@@ -228,11 +228,11 @@ function handleUpdateSource(cellId, source) {
 }
 .error-icon { font-size: 48px; margin-bottom: var(--space-4); }
 .error-title {
-  font-size: var(--text-xl); font-weight: 600; color: var(--ink);
+  font-size: var(--text-xl); font-weight: 600; color: var(--fg);
   margin: 0 0 var(--space-2);
 }
 .error-msg {
-  font-size: var(--text-sm); color: var(--text-secondary);
+  font-size: var(--text-sm); color: var(--muted);
   margin: 0 0 var(--space-6);
 }
 .skeleton-bar {
@@ -252,10 +252,10 @@ function handleUpdateSource(cellId, source) {
 .btn-back {
   display: inline-flex; align-items: center; gap: 4px;
   background: none; border: none; cursor: pointer;
-  color: var(--text-secondary); font-size: var(--text-sm);
+  color: var(--muted); font-size: var(--text-sm);
   white-space: nowrap;
 }
-.btn-back:hover { color: var(--text); }
+.btn-back:hover { color: var(--fg); }
 .topbar-center { flex: 1; min-width: 0; }
 .player-title {
   font-size: var(--text-lg); font-weight: 600; margin: 0;
@@ -263,9 +263,9 @@ function handleUpdateSource(cellId, source) {
 }
 .topbar-right { display: flex; align-items: center; gap: var(--space-3); }
 
-.save-status { display: flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--text-secondary); white-space: nowrap; }
+.save-status { display: flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--muted); white-space: nowrap; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
-.save-status.dirty .status-dot { background: var(--primary); }
+.save-status.dirty .status-dot { background: var(--accent); }
 .save-status.saving .status-dot { animation: pulse 0.8s infinite; }
 .save-status.conflict .status-dot { background: var(--error); }
 .save-status.saved .status-dot { background: var(--success); }
@@ -274,49 +274,49 @@ function handleUpdateSource(cellId, source) {
 .menu-container { position: relative; }
 .btn-icon {
   background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 4px 8px; cursor: pointer; color: var(--text-secondary);
+  padding: 4px 8px; cursor: pointer; color: var(--muted);
 }
-.btn-icon:hover { border-color: var(--border-strong); color: var(--text); }
+.btn-icon:hover { border-color: var(--border-strong); color: var(--fg); }
 .menu-dropdown {
   position: absolute; right: 0; top: calc(100% + 4px); z-index: 10;
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-md); box-shadow: 0 4px 12px rgba(0,0,0,.08);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-md);
   display: flex; flex-direction: column; min-width: 160px;
 }
 .menu-item {
   background: none; border: none; padding: 8px 16px; text-align: left;
-  cursor: pointer; font-size: var(--text-sm); color: var(--text);
+  cursor: pointer; font-size: var(--text-sm); color: var(--fg);
 }
-.menu-item:hover { background: var(--surface-raised); }
+.menu-item:hover { background: var(--surface-subtle); }
 .menu-item:disabled { opacity: .4; cursor: not-allowed; }
 .menu-divider { border-top: 1px solid var(--border); margin: 4px 0; }
-.menu-submit { color: var(--primary); font-weight: 500; }
+.menu-submit { color: var(--accent); font-weight: 500; }
 
 .submit-bar {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 12px; margin-bottom: var(--space-3);
-  background: var(--surface-raised); border-radius: var(--radius-md);
-  font-size: var(--text-xs); color: var(--text-secondary);
+  background: var(--surface-subtle); border-radius: var(--radius-md);
+  font-size: var(--text-xs); color: var(--muted);
   flex-wrap: wrap;
 }
-.submit-status.submitting { color: var(--primary); }
+.submit-status.submitting { color: var(--accent); }
 .submit-status.submitted { color: var(--success); }
 .submit-history-hint { opacity: 0.7; }
 
-.player-desc { font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--space-4); }
+.player-desc { font-size: var(--text-sm); color: var(--muted); margin-bottom: var(--space-4); }
 
 /* Phase 5：学生端环境提示条 */
 .player-env {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 8px 12px; margin-bottom: var(--space-3);
-  background: var(--surface-raised); border: 1px solid var(--border);
-  border-left: 3px solid var(--primary); border-radius: var(--radius-md);
-  font-size: var(--text-xs); color: var(--text-secondary);
+  background: var(--surface-subtle); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent); border-radius: var(--radius-md);
+  font-size: var(--text-xs); color: var(--muted);
 }
-.env-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); flex-shrink: 0; }
-.env-name { color: var(--ink); font-weight: 600; white-space: nowrap; }
+.env-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+.env-name { color: var(--fg); font-weight: 600; white-space: nowrap; }
 .env-imports { font-family: var(--font-mono); opacity: 0.85; }
-.player-empty { text-align: center; padding: var(--space-12); color: var(--text-secondary); }
+.player-empty { text-align: center; padding: var(--space-12); color: var(--muted); }
 .cell-wrapper { margin-bottom: var(--space-3); }
 
 @media (max-width: 768px) {

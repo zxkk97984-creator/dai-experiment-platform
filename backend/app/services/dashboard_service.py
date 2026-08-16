@@ -17,13 +17,18 @@ from app.services.announcement_service import (
 from app.services.course_access_service import student_visible_course_predicate
 from app.schemas.dashboard import (
     ContinueLearning, CourseHealth, CourseSnapshot, ManagedCourse,
-    PriorityItem, RecentFeedback, StudentDashboardRead, StudentSummary,
-    TeacherActivity, TeacherDashboardRead, TeacherSummary, WorkItem,
+    PriorityItem, RecentFeedback, RecentSubmission, StudentDashboardRead,
+    StudentSummary, TeacherActivity, TeacherDashboardRead, TeacherSummary,
+    WorkItem,
+)
+from app.services.submission_status import (
+    assignment_display, exam_display, experiment_display,
 )
 
 PRIORITY_CAP = 8
 FEEDBACK_CAP = 5
 ACTIVITY_CAP = 8
+RECENT_SUBMISSION_CAP = 8
 URGENT_HOURS = 24
 SOON_HOURS = 72
 # 截止风险窗口：计划规定"未来 7 天内的截止"；urgency 分级仍用 24/72 小时
@@ -402,8 +407,10 @@ def _teacher_pending_review_rows(db: Session, owned_ids: list[int]):
     """教师课程内的待复核数据：实验提交（未复核）与 AI 评分（需复核）"""
     exp_rows = db.execute(
         select(
-            ExperimentSubmission, ExperimentRecord, User.real_name,
-            Lesson.title, ExperimentModule.name, Course.id, Course.title,
+            ExperimentSubmission, ExperimentRecord, User.real_name, User.student_no,
+            Lesson.id, Lesson.title, Lesson.due_at,
+            ExperimentModule.id, ExperimentModule.name, ExperimentModule.due_at,
+            Course.id, Course.title,
         )
         .join(ExperimentRecord, ExperimentRecord.id == ExperimentSubmission.record_id)
         .outerjoin(Lesson, Lesson.id == ExperimentRecord.lesson_id)
@@ -489,12 +496,201 @@ def _deadline_stats_batch(db: Session, assignments: list[Assignment]) -> dict[in
     }
 
 
+def _task_urgency(now: datetime, due_at: datetime | None, oldest_at: datetime | None) -> str:
+    """工作队列 urgency：优先使用截止时间；无截止时间时按最旧待办滞留时长分级。"""
+    if due_at is not None:
+        return _urgency(_hours_until(now, due_at))
+    if oldest_at is None:
+        return "normal"
+    waiting_hours = -_hours_until(now, oldest_at)
+    if waiting_hours >= 48:
+        return "urgent"
+    if waiting_hours >= 24:
+        return "soon"
+    return "normal"
+
+
+def _exp_entry_route(lesson_id, module_id):
+    if lesson_id is not None:
+        return f"/teacher/submissions/unified?kind=experiment&entry_id={lesson_id}&status=pending_grading"
+    if module_id is not None:
+        return f"/teacher/submissions/unified?kind=experiment&entry_id={module_id}&status=pending_grading"
+    return "/teacher/submissions/unified?kind=experiment&status=pending_grading"
+
+
+def _teacher_pending_assignment_rows(db: Session, owned_ids: list[int]):
+    """教师课程内仍在判题队列中的作业提交，按提交行返回供工作队列聚合。"""
+    return db.execute(
+        select(Submission, Assignment, JudgeQuestion.title, Course.id, Course.title)
+        .join(JudgeQuestion, JudgeQuestion.id == Submission.question_id)
+        .join(Assignment, Assignment.id == JudgeQuestion.assignment_id)
+        .join(Course, Course.id == Assignment.course_id)
+        .where(
+            Course.id.in_(owned_ids),
+            Assignment.status == "published",
+            Submission.grading_status.in_(("pending", "queued", "running")),
+        )
+        .order_by(Submission.created_at)
+    ).all()
+
+
+def _teacher_pending_exam_release_rows(db: Session, owned_ids: list[int], now: datetime):
+    """已结束、有交卷数据且未发布讲评/成绩的考试。"""
+    return db.execute(
+        select(Exam, Course.id, Course.title)
+        .join(Course, Course.id == Exam.course_id)
+        .where(
+            Exam.course_id.in_(owned_ids),
+            Exam.status == "published",
+            Exam.review_released_at.is_(None),
+            Exam.end_at.is_not(None),
+            Exam.end_at <= now,
+            ~exists().where(
+                ExamSubmission.exam_id == Exam.id,
+                ExamSubmission.status == "in_progress",
+            ),
+            exists().where(
+                ExamSubmission.exam_id == Exam.id,
+                ExamSubmission.status.in_(("submitted", "grading", "graded", "review_required")),
+            ),
+        )
+        .order_by(Exam.end_at)
+    ).all()
+
+
+def _teacher_recent_submissions(db: Session, owned_ids: list[int]):
+    """最近实验/作业/考试提交摘要；各源取最近 8 条后在 Python 中合并排序。"""
+    rows: list[tuple] = []
+
+    exp_rows = db.execute(
+        select(
+            ExperimentSubmission, User.real_name, User.student_no,
+            Lesson.title, ExperimentModule.name, Course.id, Course.title,
+        )
+        .join(ExperimentRecord, ExperimentRecord.id == ExperimentSubmission.record_id)
+        .outerjoin(Lesson, Lesson.id == ExperimentRecord.lesson_id)
+        .outerjoin(ExperimentModule, ExperimentModule.id == ExperimentRecord.module_id)
+        .outerjoin(Chapter, Chapter.id == Lesson.chapter_id)
+        .outerjoin(Course, Course.id == Chapter.course_id)
+        .join(User, User.id == ExperimentRecord.student_id)
+        .where(Course.id.in_(owned_ids))
+        .order_by(ExperimentSubmission.submitted_at.desc(), ExperimentSubmission.id.desc())
+        .limit(RECENT_SUBMISSION_CAP)
+    ).all()
+    for sub, name, student_no, lesson_title, module_name, course_id, course_title in exp_rows:
+        status, tone = experiment_display(sub)
+        rows.append((
+            sub.submitted_at,
+            "experiment", sub.id, name, student_no, lesson_title or module_name,
+            course_id, course_title, status, tone, None, None, None, sub.score,
+            sub.submitted_at, f"/teacher/submissions/{sub.id}",
+        ))
+
+    assign_rows = db.execute(
+        select(
+            Submission, User.real_name, User.student_no, JudgeQuestion.title,
+            Assignment.title, Course.id, Course.title, CodeGrade,
+        )
+        .join(JudgeQuestion, JudgeQuestion.id == Submission.question_id)
+        .join(Assignment, Assignment.id == JudgeQuestion.assignment_id)
+        .join(Course, Course.id == Assignment.course_id)
+        .join(User, User.id == Submission.student_id)
+        .outerjoin(CodeGrade, CodeGrade.submission_id == Submission.id)
+        .where(Course.id.in_(owned_ids))
+        .order_by(Submission.created_at.desc(), Submission.id.desc())
+        .limit(RECENT_SUBMISSION_CAP)
+    ).all()
+    for sub, name, student_no, question_title, assignment_title, course_id, course_title, cg in assign_rows:
+        status, tone = assignment_display(sub, cg)
+        submitted_at = sub.created_at
+        rows.append((
+            submitted_at,
+            "assignment", sub.id, name, student_no,
+            f"{assignment_title} · {question_title}",
+            course_id, course_title, status, tone,
+            sub.tests_passed, sub.tests_total,
+            cg.final_score_100 if cg is not None else None,
+            sub.score, submitted_at, f"/teacher/judge-submissions/{sub.id}",
+        ))
+
+    exam_rows = db.execute(
+        select(
+            ExamSubmission, User.real_name, User.student_no,
+            Exam.title, Course.id, Course.title,
+        )
+        .join(Exam, Exam.id == ExamSubmission.exam_id)
+        .join(Course, Course.id == Exam.course_id)
+        .join(User, User.id == ExamSubmission.student_id)
+        .where(Course.id.in_(owned_ids))
+        .order_by(ExamSubmission.submitted_at.desc(), ExamSubmission.id.desc())
+        .limit(RECENT_SUBMISSION_CAP)
+    ).all()
+    for sub, name, student_no, exam_title, course_id, course_title in exam_rows:
+        status, tone = exam_display(sub)
+        submitted_at = sub.submitted_at or sub.last_saved_at
+        rows.append((
+            submitted_at,
+            "exam", sub.id, name, student_no, exam_title,
+            course_id, course_title, status, tone, None, None, None, sub.score,
+            submitted_at, f"/teacher/exams/{sub.exam_id}/grades/{sub.id}",
+        ))
+
+    rows.sort(key=lambda r: _desc_sort_key(r[0]))
+    return rows[:RECENT_SUBMISSION_CAP]
+
+
+def build_teacher_dashboard_counts(db: Session, user: User, now: datetime | None = None):
+    """侧栏徽标轻量计数；只统计数量，不组装工作队列与最近提交明细。"""
+    now = now or datetime.now(timezone.utc)
+    owned_ids = list(db.scalars(select(Course.id).where(Course.teacher_id == user.id)).all())
+    if not owned_ids:
+        unread = unread_announcement_count(db, user, now)
+        from app.schemas.dashboard import TeacherDashboardCounts
+
+        return TeacherDashboardCounts(unread_announcement_count=unread)
+
+    from app.schemas.dashboard import TeacherDashboardCounts
+
+    exp_rows, ai_rows, exam_ai_rows = _teacher_pending_review_rows(db, owned_ids)
+    pending_review = len(exp_rows) + len(ai_rows) + len(exam_ai_rows)
+    assignment_pending = db.scalar(
+        select(func.count(Submission.id))
+        .join(JudgeQuestion, JudgeQuestion.id == Submission.question_id)
+        .join(Assignment, Assignment.id == JudgeQuestion.assignment_id)
+        .join(Course, Course.id == Assignment.course_id)
+        .where(
+            Course.id.in_(owned_ids),
+            Assignment.status == "published",
+            Submission.grading_status.in_(("pending", "queued", "running")),
+        )
+    ) or 0
+    pending_grading = len(exp_rows) + assignment_pending
+    upcoming_deadlines = db.scalar(
+        select(func.count(Assignment.id))
+        .where(
+            Assignment.course_id.in_(owned_ids),
+            Assignment.status == "published",
+            Assignment.due_at > now,
+            Assignment.due_at <= now + timedelta(hours=DEADLINE_WINDOW_HOURS),
+        )
+    ) or 0
+    pending_release = len(_teacher_pending_exam_release_rows(db, owned_ids, now))
+    return TeacherDashboardCounts(
+        pending_grading_count=pending_grading,
+        pending_review_count=pending_review,
+        upcoming_deadline_count=upcoming_deadlines,
+        pending_release_count=pending_release,
+        unread_announcement_count=unread_announcement_count(db, user, now),
+    )
+
+
 def build_teacher_dashboard(db: Session, user: User, now: datetime | None = None):
     now = now or datetime.now(timezone.utc)
     summary = TeacherSummary()
     work_items: list[WorkItem] = []
     course_health: list[CourseHealth] = []
     activity: list[TeacherActivity] = []
+    recent_submissions: list[RecentSubmission] = []
     managed: list[ManagedCourse] = []
 
     courses = (
@@ -504,6 +700,9 @@ def build_teacher_dashboard(db: Session, user: User, now: datetime | None = None
     )
     owned_ids = [course.id for course in courses]
     summary.course_count = len(courses)
+    summary.active_course_count = sum(
+        1 for course in courses if course.status == "published"
+    )
     managed = [ManagedCourse(id=course.id, title=course.title) for course in courses]
 
     if owned_ids:
@@ -518,7 +717,11 @@ def build_teacher_dashboard(db: Session, user: User, now: datetime | None = None
         )
 
         exp_rows, ai_rows, exam_ai_rows = _teacher_pending_review_rows(db, owned_ids)
+        assignment_pending_rows = _teacher_pending_assignment_rows(db, owned_ids)
+        exam_release_rows = _teacher_pending_exam_release_rows(db, owned_ids, now)
         summary.pending_review_count = len(exp_rows) + len(ai_rows) + len(exam_ai_rows)
+        summary.pending_grading_count = len(exp_rows) + len(assignment_pending_rows)
+        summary.pending_release_count = len(exam_release_rows)
 
         # ── 7 天内截止的作业（urgency 分级仍按 24/72 小时）──
         deadline_rows = db.execute(
@@ -534,41 +737,128 @@ def build_teacher_dashboard(db: Session, user: User, now: datetime | None = None
         ).all()
         summary.upcoming_deadline_count = len(deadline_rows)
 
-        # ── 工作队列 ──
-        for sub, record, student_name, lesson_title, module_name, course_id, course_title in exp_rows:
-            item_title = lesson_title or module_name
+        # ── 工作队列：实验待评分按课程+入口聚合 ──
+        exp_groups: dict[tuple, dict] = {}
+        for sub, record, student_name, student_no, lesson_id, lesson_title, lesson_due, module_id, module_name, module_due, course_id, course_title in exp_rows:
+            key = (course_id or 0, lesson_id, module_id)
+            bucket = exp_groups.setdefault(key, {
+                "count": 0, "oldest": sub.submitted_at, "last": sub.submitted_at,
+                "title": lesson_title or module_name,
+                "due_at": lesson_due or module_due,
+                "course_title": course_title,
+            })
+            bucket["count"] += 1
+            if sub.submitted_at is not None and (
+                bucket["oldest"] is None or sub.submitted_at < bucket["oldest"]
+            ):
+                bucket["oldest"] = sub.submitted_at
+            if sub.submitted_at is not None and (
+                bucket["last"] is None or sub.submitted_at > bucket["last"]
+            ):
+                bucket["last"] = sub.submitted_at
+        for (course_id, lesson_id, module_id), bucket in exp_groups.items():
             work_items.append(
                 WorkItem(
-                    kind="experiment_review", id=sub.id,
-                    title=f"{student_name} 提交了{item_title}",
-                    course_id=course_id, course_title=course_title,
-                    detail="等待教师反馈", time_at=sub.submitted_at,
-                    urgency=_urgency(_hours_until(now, sub.submitted_at)),
-                    route=f"/teacher/submissions/{sub.id}",
+                    kind="experiment_review",
+                    id=lesson_id or module_id or course_id,
+                    title=f"{bucket['title']} · {bucket['count']} 份提交待评分",
+                    course_id=course_id or None,
+                    course_title=bucket["course_title"],
+                    detail=f"共 {bucket['count']} 份等待教师反馈",
+                    count=bucket["count"], status="pending_grading",
+                    time_at=bucket["due_at"] or bucket["oldest"],
+                    urgency=_task_urgency(now, bucket["due_at"], bucket["oldest"]),
+                    route=_exp_entry_route(lesson_id, module_id),
                 )
             )
+
+        # ── 作业判题队列待评分，按作业聚合 ──
+        assign_groups: dict[int, dict] = {}
+        for sub, assignment, question_title, course_id, course_title in assignment_pending_rows:
+            bucket = assign_groups.setdefault(assignment.id, {
+                "count": 0, "oldest": sub.created_at, "title": assignment.title,
+                "due_at": assignment.due_at, "course_id": course_id,
+                "course_title": course_title,
+            })
+            bucket["count"] += 1
+            if sub.created_at is not None and (
+                bucket["oldest"] is None or sub.created_at < bucket["oldest"]
+            ):
+                bucket["oldest"] = sub.created_at
+        for assignment_id, bucket in assign_groups.items():
+            work_items.append(
+                WorkItem(
+                    kind="assignment_grading",
+                    id=assignment_id,
+                    title=f"{bucket['title']} · {bucket['count']} 份提交待评分",
+                    course_id=bucket["course_id"],
+                    course_title=bucket["course_title"],
+                    detail=f"{bucket['count']} 份提交仍在判题队列",
+                    count=bucket["count"], status="pending_grading",
+                    time_at=bucket["due_at"] or bucket["oldest"],
+                    urgency=_task_urgency(now, bucket["due_at"], bucket["oldest"]),
+                    route=f"/teacher/submissions/unified?kind=assignment&entry_id={assignment_id}&status=pending_grading",
+                )
+            )
+
+        # ── AI 评分待复核，按作业/考试聚合 ──
+        ai_groups: dict[tuple, dict] = {}
         for cg, sub, assignment, course_id, course_title, student_name in ai_rows:
-            work_items.append(
-                WorkItem(
-                    kind="ai_review", id=cg.id,
-                    title=f"{student_name} 提交了{assignment.title}",
-                    course_id=course_id, course_title=course_title,
-                    detail="AI 评分待复核", time_at=cg.finished_at,
-                    urgency=_urgency(_hours_until(now, cg.finished_at)),
-                    route=f"/teacher/ai-grading/{cg.id}",
-                )
-            )
+            key = ("assignment", assignment.id)
+            bucket = ai_groups.setdefault(key, {
+                "count": 0, "id": cg.id, "oldest": cg.finished_at,
+                "title": assignment.title, "course_id": course_id,
+                "course_title": course_title,
+            })
+            bucket["count"] += 1
+            if cg.finished_at is not None and (
+                bucket["oldest"] is None or cg.finished_at < bucket["oldest"]
+            ):
+                bucket["oldest"] = cg.finished_at
         for cg, answer, exam, course_id, course_title, student_name in exam_ai_rows:
+            key = ("exam", exam.id)
+            bucket = ai_groups.setdefault(key, {
+                "count": 0, "id": cg.id, "oldest": cg.finished_at,
+                "title": exam.title, "course_id": course_id,
+                "course_title": course_title,
+            })
+            bucket["count"] += 1
+            if cg.finished_at is not None and (
+                bucket["oldest"] is None or cg.finished_at < bucket["oldest"]
+            ):
+                bucket["oldest"] = cg.finished_at
+        for (ai_kind, _target_id), bucket in ai_groups.items():
             work_items.append(
                 WorkItem(
-                    kind="ai_review", id=cg.id,
-                    title=f"{student_name} 提交了{exam.title}",
-                    course_id=course_id, course_title=course_title,
-                    detail="AI 评分待复核", time_at=cg.finished_at,
-                    urgency=_urgency(_hours_until(now, cg.finished_at)),
-                    route=f"/teacher/ai-grading/{cg.id}",
+                    kind="ai_review",
+                    id=bucket["id"],
+                    title=f"AI 评分待复核 · {bucket['count']} 份",
+                    course_id=bucket["course_id"],
+                    course_title=bucket["course_title"],
+                    detail=f"{bucket['title']} · 模型已给出建议分",
+                    count=bucket["count"], status="review_required",
+                    time_at=bucket["oldest"],
+                    urgency=_task_urgency(now, None, bucket["oldest"]),
+                    route=f"/teacher/ai-grading?kind={ai_kind}",
                 )
             )
+
+        # ── 考试待发布成绩 ──
+        for exam, course_id, course_title in exam_release_rows:
+            work_items.append(
+                WorkItem(
+                    kind="exam_release",
+                    id=exam.id,
+                    title=f"{exam.title} · 待发布成绩",
+                    course_id=course_id, course_title=course_title,
+                    detail="已全部判题，等待发布讲评",
+                    count=None, status="pending_release",
+                    time_at=exam.end_at,
+                    urgency=_task_urgency(now, exam.end_at, exam.end_at),
+                    route=f"/teacher/exams/{exam.id}/grades",
+                )
+            )
+
         deadline_stats = _deadline_stats_batch(db, [a for a, _cid, _ct in deadline_rows])
         for assignment, course_id, course_title in deadline_rows:
             submitted, expected = deadline_stats[assignment.id]
@@ -592,7 +882,7 @@ def build_teacher_dashboard(db: Session, user: User, now: datetime | None = None
         # ── 课程概览：按课程聚合待复核与截止数 ──
         exp_by_course: dict[int, int] = {}
         ai_by_course: dict[int, int] = {}
-        for sub, record, _n, _l, _m, course_id, _ct in exp_rows:
+        for sub, record, _n, _no, _lid, _lt, _ld, _mid, _mn, _md, course_id, _ct in exp_rows:
             exp_by_course[course_id] = exp_by_course.get(course_id, 0) + 1
         for cg, _s, _a, course_id, _ct, _n in ai_rows:
             ai_by_course[course_id] = ai_by_course.get(course_id, 0) + 1
@@ -640,7 +930,7 @@ def build_teacher_dashboard(db: Session, user: User, now: datetime | None = None
             )
         )
 
-        # ── 最近动态：真实实验提交 ──
+        # ── 最近动态：真实实验提交（兼容旧客户端） ──
         activity_rows = db.execute(
             select(
                 ExperimentSubmission, User.real_name,
@@ -667,9 +957,29 @@ def build_teacher_dashboard(db: Session, user: User, now: datetime | None = None
                 )
             )
 
+        # ── 最近提交表格（混合实验/作业/考试） ──
+        for row in _teacher_recent_submissions(db, owned_ids):
+            (
+                _submitted_at, kind, item_id, student_name, student_no, entry_title,
+                course_id, course_title, status, status_tone,
+                tests_passed, tests_total, ai_score, score, _time_at, route,
+            ) = row
+            recent_submissions.append(
+                RecentSubmission(
+                    kind=kind, id=item_id, student_name=student_name,
+                    student_no=student_no, entry_title=entry_title,
+                    course_id=course_id, course_title=course_title,
+                    status=status, status_tone=status_tone,
+                    tests_passed=tests_passed, tests_total=tests_total,
+                    ai_score=ai_score, score=score, submitted_at=_time_at,
+                    route=route,
+                )
+            )
+
     announcements = list_visible_announcements(db, user, now, limit=PRIORITY_CAP)
+    summary.unread_announcement_count = unread_announcement_count(db, user, now)
     return TeacherDashboardRead(
         summary=summary, work_items=work_items, course_health=course_health,
-        recent_activity=activity, managed_courses=managed,
-        announcements=announcements,
+        recent_activity=activity, recent_submissions=recent_submissions,
+        managed_courses=managed, announcements=announcements,
     )

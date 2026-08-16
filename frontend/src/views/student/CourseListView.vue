@@ -4,7 +4,7 @@
 // 进度与下一步全部来自本地真实学习记录，失败降级为 0 而不是隐藏课程。
 
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import AppLayout from '../../components/layout/AppLayout.vue'
 import CourseIdentity from '../../components/student/CourseIdentity.vue'
@@ -16,6 +16,7 @@ import { progressAPI } from '../../api/progress.js'
 import { useAppStore } from '../../stores/app.js'
 import { getCourseCoverUrl } from '../../utils/courseCover.js'
 
+const route = useRoute()
 const router = useRouter()
 const app = useAppStore()
 
@@ -24,7 +25,7 @@ const rows = ref([])
 const loading = ref(true)
 const error = ref(false)
 const activeTab = ref('all')
-const query = ref('')
+const query = ref(typeof route.query?.q === 'string' ? route.query.q : '')
 
 async function fetchCourses() {
   loading.value = true
@@ -125,17 +126,18 @@ onMounted(fetchCourses)
   <AppLayout>
     <div class="page">
       <!-- 页头 -->
-      <header class="page-head">
-        <div>
+      <section class="page-head">
+        <div class="ph-title">
+          <p class="eyebrow">学习 / 课程</p>
           <h1 class="page-title">我的课程</h1>
-          <p class="page-sub">查看课程进度，继续你的学习旅程</p>
+          <p class="lead page-sub">查看课程进度，继续你的学习旅程</p>
         </div>
-        <div class="page-count">{{ rows.length }} 门课程</div>
-      </header>
+        <div class="ph-actions"><span class="page-count">{{ rows.length }} 门课程</span></div>
+      </section>
 
       <!-- 标签页 + 搜索 -->
       <div class="course-toolbar">
-        <div class="tabs" role="tablist" aria-label="课程状态">
+        <div class="tabs course-tabs" role="tablist" aria-label="课程状态">
           <button
             v-for="tab in [
               { key: 'all', label: '全部课程' },
@@ -144,7 +146,7 @@ onMounted(fetchCourses)
             ]"
             :key="tab.key"
             type="button"
-            class="tab-btn"
+            class="tab tab-btn"
             :class="{ active: activeTab === tab.key }"
             role="tab"
             :aria-selected="activeTab === tab.key"
@@ -153,16 +155,16 @@ onMounted(fetchCourses)
             {{ tab.label }}
           </button>
         </div>
-        <div class="search-box">
-          <span class="search-icon" aria-hidden="true"><AppIcon name="search" :size="16" /></span>
+        <label class="searchbox search-box" style="width: 260px;">
+          <AppIcon name="search" :size="15" />
           <input
             v-model="query"
             type="search"
-            class="search-input"
+            class="input search-input"
             placeholder="搜索课程"
             aria-label="搜索课程"
           />
-        </div>
+        </label>
       </div>
 
       <!-- 状态区 -->
@@ -227,175 +229,41 @@ onMounted(fetchCourses)
 </template>
 
 <style scoped>
-.class-enrolled{padding:6px 9px;border-radius:999px;background:var(--primary-light);color:var(--primary);font-size:12px;white-space:nowrap}
-.page { display: flex; flex-direction: column; gap: 20px; }
+.page { display: flex; flex-direction: column; gap: var(--space-5); }
+.page-title { margin: 0; font-size: var(--text-3xl); font-weight: 600; color: var(--fg); letter-spacing: -0.01em; line-height: var(--lh-tight); font-family: var(--font-display); }
+.page-sub { margin-top: 6px; }
+.page-count { padding: 4px 10px; background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: var(--text-sm); color: var(--muted); font-weight: 500; }
 
-/* ── 页头 ─────────────────────────────────────────────────────── */
-.page-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-}
-.page-title {
-  margin: 0 0 6px;
-  font-size: 30px;
-  font-weight: 700;
-  color: var(--ink);
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-}
-.page-sub {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-.page-count {
-  flex-shrink: 0;
-  padding: 7px 13px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-  font-weight: 500;
-}
+.course-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.course-tabs { flex: 1; }
+.search-box { flex: none; }
+.search-input { width: 100%; height: 30px; border: 0; box-shadow: none !important; }
 
-/* ── 工具栏 ───────────────────────────────────────────────────── */
-.course-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.tabs {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-}
-.tab-btn {
-  padding: 8px 18px;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-control);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-.tab-btn.active {
-  background: var(--primary-light);
-  color: var(--primary);
-  font-weight: 600;
-}
-
-.search-box {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  min-width: 240px;
-}
-.search-icon {
-  display: inline-flex;
-  color: var(--text-tertiary);
-  flex-shrink: 0;
-}
-.search-input {
-  border: none;
-  background: transparent;
-  padding: 9px 0;
-  font-size: var(--text-sm);
-}
-.search-input:focus { outline: none; box-shadow: none; border-color: transparent; }
-
-/* ── 课程行（176–194px 高） ───────────────────────────────────── */
-.course-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
+.course-list { display: flex; flex-direction: column; gap: 12px; }
 .course-row {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  min-height: 180px;
-  padding: 24px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
+  display: flex; align-items: center; gap: 24px; min-height: 132px; padding: 20px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
 }
+.course-row:hover { background: var(--surface); border-color: var(--border-strong); }
+.course-row-link { flex: 0 0 34%; justify-content: flex-start; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.course-row-progress { flex: 0 0 22%; display: flex; flex-direction: column; gap: 8px; }
+.progress-text { font-size: var(--text-sm); font-weight: 600; color: var(--fg); }
+.course-row-action { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.action-next { font-size: var(--text-sm); color: var(--muted); text-align: right; }
+.action-buttons { display: flex; gap: 8px; }
+.btn-outline { height: 32px; padding: 0 12px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md); font-size: var(--text-md); font-weight: 500; color: var(--fg); cursor: pointer; }
+.btn-outline:hover { border-color: var(--fg); }
+.class-enrolled { padding: 4px 8px; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent); font-size: var(--text-sm); white-space: nowrap; }
 
-.course-row-link {
-  flex: 0 0 34%;
-  justify-content: flex-start; /* 覆盖全局 button 的 center：内容不满时身份块不能居中，须与同行其他卡片左对齐 */
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  text-align: left;
-}
-
-.course-row-progress {
-  flex: 0 0 22%;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.progress-text {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.course-row-action {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 10px;
-}
-.action-next {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  text-align: right;
-}
-.action-buttons {
-  display: flex;
-  gap: 10px;
-}
-.btn-outline {
-  padding: 9px 18px;
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-control);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--primary);
-  cursor: pointer;
-}
-.btn-outline:hover { background: var(--primary-light); border-color: var(--primary-soft); }
-
-/* ── 响应式 ───────────────────────────────────────────────────── */
-@media (max-width: 1199px) {
+@media (max-width: 1024px) {
   .course-row { flex-wrap: wrap; }
   .course-row-link { flex: 1 1 100%; }
   .course-row-progress { flex: 1 1 40%; }
   .course-row-action { flex: 1 1 50%; }
 }
-@media (max-width: 767.98px) {
-  .page-title { font-size: 24px; }
+@media (max-width: 820px) {
   .course-toolbar { flex-direction: column; align-items: stretch; }
-  .search-box { min-width: 0; }
+  .search-box { width: 100% !important; }
   .course-row { padding: 16px; gap: 16px; }
   .course-row-progress, .course-row-action { flex: 1 1 100%; align-items: flex-start; }
   .action-next { text-align: left; }

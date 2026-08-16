@@ -51,14 +51,14 @@ function openExam(exam) {
 <template>
   <AppLayout>
     <main class="exam-center">
-      <header class="page-head">
-        <div>
+      <section class="page-head">
+        <div class="ph-title">
           <p class="eyebrow">ASSESSMENTS</p>
           <h1>考试中心</h1>
-          <p class="subtitle">按服务器时间开放考试，进行中的作答可随时继续</p>
+          <p class="lead subtitle">按服务器时间开放考试，进行中的作答可随时继续</p>
         </div>
-        <div class="count-pill"><span></span>{{ totalText }}</div>
-      </header>
+        <div class="ph-actions"><span class="count-pill"><span></span>{{ totalText }}</span></div>
+      </section>
 
       <div v-if="loading" class="exam-grid" aria-label="正在加载考试">
         <div v-for="i in 4" :key="i" class="exam-card skeleton-card">
@@ -68,9 +68,9 @@ function openExam(exam) {
         </div>
       </div>
 
-      <section v-else-if="exams.length === 0" class="empty-card">
-        <div class="empty-icon">✓</div>
-        <h2>当前没有考试安排</h2>
+      <section v-else-if="exams.length === 0" class="empty empty-card">
+        <div class="empty-mark empty-icon">✓</div>
+        <h3>当前没有考试安排</h3>
         <p>教师发布考试后会显示在这里。</p>
       </section>
 
@@ -117,38 +117,40 @@ function openExam(exam) {
 </template>
 
 <style scoped>
-.exam-center { display: flex; flex-direction: column; gap: 26px; }
-.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
-.eyebrow { margin: 0 0 8px; color: var(--primary); font: 700 11px/1 var(--font-mono); letter-spacing: .16em; }
-h1 { margin: 0; color: var(--ink); font-size: 30px; letter-spacing: -.035em; }
-.subtitle { margin: 8px 0 0; color: var(--text-secondary); font-size: 14px; }
-.count-pill { display: inline-flex; align-items: center; gap: 9px; padding: 9px 14px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-secondary); font-size: 13px; }
-.count-pill span { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 4px rgba(16,185,129,.12); }
-.exam-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
-.exam-card { min-height: 252px; padding: 24px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: 0 8px 24px rgba(15,23,42,.035); transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease; }
-.exam-card:not(.disabled):hover { transform: translateY(-2px); border-color: #bfd2ef; box-shadow: 0 12px 28px rgba(30,64,175,.08); }
+.exam-center { display: flex; flex-direction: column; gap: var(--space-5); }
+.eyebrow { margin: 0 0 8px; color: var(--accent); font: 700 11px/1 var(--font-mono); letter-spacing: .16em; }
+h1 { margin: 0; color: var(--fg); font-family: var(--font-display); font-size: var(--text-3xl); font-weight: 600; letter-spacing: -.01em; }
+.subtitle { margin-top: 6px; }
+.count-pill { display: inline-flex; align-items: center; gap: 9px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--muted); font-size: var(--text-sm); }
+.count-pill span { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.exam-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.exam-card { min-height: 230px; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+.exam-card:not(.disabled):hover { border-color: var(--border-strong); }
 .card-top { display: flex; align-items: center; gap: 8px; min-height: 24px; }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; }
-.status-label { font-size: 12px; font-weight: 700; color: #64748b; }
-.status-hint { margin-left: auto; padding: 3px 8px; border-radius: 999px; background: #f1f5f9; color: #64748b; font-size: 11px; }
-.is-ready .status-dot { background: #16a34a; box-shadow: 0 0 0 4px rgba(22,163,74,.12); }
-.is-ready .status-label { color: #15803d; }
-.is-progress .status-dot { background: #f97316; box-shadow: 0 0 0 4px rgba(249,115,22,.12); }
-.is-progress .status-label { color: #c2410c; }
-.is-done .status-dot { background: #2563eb; }
-.is-done .status-label { color: #1d4ed8; }
-.is-missed { background: #f8fafc; }
-.is-missed .status-dot { background: #ef4444; }
-.exam-card h2 { margin: 18px 0 20px; color: var(--ink); font-size: 18px; line-height: 1.45; }
-dl { display: grid; gap: 9px; margin: 0; padding: 15px 0; border-block: 1px solid var(--border); }
-dl div { display: flex; justify-content: space-between; gap: 16px; font-size: 12px; }
-dt { color: var(--text-secondary); } dd { margin: 0; color: var(--ink); font-weight: 500; text-align: right; }
-.card-action { width: 100%; margin-top: 16px; padding: 7px 0; border: 0; background: transparent; color: var(--primary); font-weight: 650; text-align: left; cursor: pointer; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.status-label { font-size: var(--text-sm); font-weight: 600; color: var(--muted); }
+.status-hint { margin-left: auto; padding: 2px 8px; border-radius: var(--radius-sm); background: var(--surface-subtle); color: var(--muted); font-size: var(--text-xs); }
+.is-ready .status-dot { background: var(--success); }
+.is-ready .status-label { color: var(--success); }
+.is-progress .status-dot { background: var(--warning); }
+.is-progress .status-label { color: var(--warning); }
+.is-done .status-dot { background: var(--accent); }
+.is-done .status-label { color: var(--accent); }
+.is-missed { background: var(--surface-subtle); }
+.is-missed .status-dot { background: var(--danger); }
+.exam-card h2 { margin: 14px 0 16px; color: var(--fg); font-size: var(--text-xl); font-weight: 600; line-height: 1.4; }
+dl { display: grid; gap: 9px; margin: 0; padding: 14px 0; border-block: 1px solid var(--border); }
+dl div { display: flex; justify-content: space-between; gap: 16px; font-size: var(--text-sm); }
+dt { color: var(--muted); }
+dd { margin: 0; color: var(--fg); font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
+.card-action { width: 100%; margin-top: 14px; padding: 0; border: 0; background: transparent; color: var(--accent); font-weight: 600; text-align: left; cursor: pointer; }
 .card-action span { float: right; }
-.card-action:disabled { color: #94a3b8; cursor: not-allowed; }
-.empty-card { padding: 72px 24px; border: 1px dashed var(--border); border-radius: 16px; text-align: center; background: var(--surface); }
-.empty-icon { display: grid; place-items: center; width: 46px; height: 46px; margin: 0 auto 14px; border-radius: 14px; background: #ecfdf5; color: #16a34a; font-size: 22px; }
-.empty-card h2 { margin: 0 0 7px; font-size: 17px; }.empty-card p { margin: 0; color: var(--text-secondary); font-size: 13px; }
-.skeleton-card { pointer-events: none; }.line { height: 13px; width: 55%; margin: 18px 0; }.line.wide { width: 80%; }.line.short { width: 38%; }
-@media (max-width: 760px) { .exam-grid { grid-template-columns: 1fr; }.page-head { flex-direction: column; }h1 { font-size: 26px; }.exam-card { min-height: 0; } }
+.card-action:disabled { color: var(--faint); cursor: not-allowed; }
+.empty-card { border: 1px dashed var(--border-strong); background: var(--surface); }
+.empty-icon { color: var(--success); font-size: 20px; }
+.skeleton-card { pointer-events: none; }
+.line { height: 13px; width: 55%; margin: 18px 0; }
+.line.wide { width: 80%; }
+.line.short { width: 38%; }
+@media (max-width: 820px) { .exam-grid { grid-template-columns: 1fr; } .page-head { flex-direction: column; } }
 </style>

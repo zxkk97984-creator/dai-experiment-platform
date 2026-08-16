@@ -157,7 +157,7 @@ function actionLabel(value) {
   gap: 16px;
   min-height: 58px;
   padding: 0 14px 0 20px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xs);
@@ -177,7 +177,7 @@ function actionLabel(value) {
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: 14px;
   font-weight: 500;
   white-space: nowrap;
@@ -186,7 +186,7 @@ function actionLabel(value) {
 
 .status-tabs button:hover,
 .status-tabs button.active {
-  color: var(--primary);
+  color: var(--accent);
   background: transparent;
   transform: none;
 }
@@ -198,13 +198,13 @@ function actionLabel(value) {
   bottom: -1px;
   left: 0;
   height: 3px;
-  border-radius: 3px 3px 0 0;
-  background: var(--primary);
+  border-radius: var(--radius-sm) 3px 0 0;
+  background: var(--accent);
 }
 
 .status-tabs button span {
   margin-left: 3px;
-  color: var(--text-tertiary);
+  color: var(--faint);
   font-size: 11px;
 }
 
@@ -221,14 +221,14 @@ function actionLabel(value) {
   height: 36px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: #fff;
+  background: var(--surface);
   transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 
 .search-box:focus-within,
 .sort-select:focus-within {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--primary-light);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .search-box {
@@ -243,7 +243,7 @@ function actionLabel(value) {
   height: 16px;
   flex: 0 0 auto;
   fill: none;
-  stroke: var(--text-tertiary);
+  stroke: var(--faint);
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -258,7 +258,7 @@ function actionLabel(value) {
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--ink);
+  color: var(--fg);
   font-family: var(--font-body);
   font-size: 13px;
   box-shadow: none;
@@ -298,13 +298,13 @@ function actionLabel(value) {
 }
 
 .catalog-heading span {
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: 13px;
 }
 
 .table-shell {
   overflow: hidden;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xs);
@@ -318,8 +318,8 @@ function actionLabel(value) {
 .catalog-table th {
   height: 46px;
   padding: 0 20px;
-  background: #f8fafc;
-  color: var(--text-secondary);
+  background: var(--surface-subtle);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 600;
 }
@@ -340,12 +340,12 @@ function actionLabel(value) {
   transition: background var(--duration-fast);
 }
 
-.catalog-table tbody tr:hover { background: #f8fbff; }
+.catalog-table tbody tr:hover { background: var(--surface-sunken); }
 
 .module-name {
   display: block;
   overflow: hidden;
-  color: var(--ink);
+  color: var(--fg);
   font-size: 14px;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -353,7 +353,7 @@ function actionLabel(value) {
 }
 
 .last-learning {
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -363,10 +363,10 @@ function actionLabel(value) {
 .retry-button {
   min-height: 32px;
   padding: 6px 14px;
-  border: 1px solid var(--primary-soft);
+  border: 1px solid var(--accent-soft);
   border-radius: var(--radius-md);
-  background: #fff;
-  color: var(--primary);
+  background: var(--surface);
+  color: var(--accent);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
@@ -374,8 +374,8 @@ function actionLabel(value) {
 
 .enter-button:hover,
 .retry-button:hover {
-  border-color: var(--primary);
-  background: var(--primary-light);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .state-panel {
@@ -391,7 +391,7 @@ function actionLabel(value) {
 .state-panel strong { font-size: 16px; }
 .state-panel p {
   margin: 8px 0 18px;
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -415,7 +415,7 @@ function actionLabel(value) {
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   min-height: 40px;
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -431,20 +431,20 @@ function actionLabel(value) {
   padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: #fff;
-  color: var(--text-secondary);
+  background: var(--surface);
+  color: var(--muted);
   font-size: 12px;
 }
 
 .pagination button:hover:not(:disabled) {
-  border-color: var(--primary-soft);
-  color: var(--primary);
+  border-color: var(--accent-soft);
+  color: var(--accent);
 }
 
 .pagination button.active {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: #fff;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--surface);
 }
 
 .pagination button:disabled { cursor: not-allowed; opacity: .45; }
@@ -491,7 +491,7 @@ function actionLabel(value) {
     gap: 14px 18px;
     margin-bottom: 10px;
     padding: 18px;
-    background: #fff;
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-xs);
@@ -508,7 +508,7 @@ function actionLabel(value) {
   .catalog-table td:nth-child(3) { align-self: center; }
   .catalog-table td:nth-child(3)::before {
     content: '最近学习  ';
-    color: var(--text-tertiary);
+    color: var(--faint);
   }
   .catalog-table .action-column { grid-column: 1 / -1; justify-self: end; }
   .module-name { white-space: normal; }
@@ -520,7 +520,7 @@ function actionLabel(value) {
     padding: 18px;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    background: #fff;
+    background: var(--surface);
   }
   .skeleton-date { display: none; }
   .pagination { grid-template-columns: 1fr auto; }

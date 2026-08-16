@@ -1,6 +1,8 @@
 import client from './client.js'
 
 export const usersAPI = {
+  getMyPreferences() { return client.get('/users/me/preferences') },
+  updateMyPreferences(data) { return client.patch('/users/me/preferences', data) },
   list(params) { return client.get('/users', { params }) },
   create(data) { return client.post('/users', data) },
   get(id) { return client.get(`/users/${id}`) },

@@ -1,7 +1,7 @@
 <template>
   <div class="ai-config" v-if="expanded">
     <div class="ai-config-header">
-      <h4>🤖 AI 评分配置</h4>
+      <h4>AI 评分配置</h4>
       <button class="btn-sm" @click="$emit('close')">收起</button>
     </div>
 
@@ -47,7 +47,7 @@
         <div class="section-header">
           <h5>评分标准 (Rubric)</h5>
           <button class="btn-sm btn-primary" :disabled="rubricLoading" @click="generateRubricAction">
-            {{ rubricLoading ? '生成中...' : '🤖 AI 生成 Rubric' }}
+            {{ rubricLoading ? '生成中...' : 'AI 生成 Rubric' }}
           </button>
         </div>
         <div v-if="rubrics.length === 0 && !rubricLoading" class="hint">尚无 Rubric，请先生成。</div>
@@ -256,42 +256,42 @@ watch(() => props.questionId, () => { if (props.expanded) load() })
 
 <style scoped>
 .ai-config {
-  background: #f8f9fa; border: 1px solid #e2e8f0; border-radius: 8px;
+  background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);
   padding: 16px; margin-top: 12px;
 }
 .ai-config-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .ai-config-header h4 { margin: 0; font-size: 15px; }
 .section { margin: 16px 0; }
 .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.section-header h5 { margin: 0; font-size: 13px; font-weight: 600; color: #475569; }
-.rubric-row { display: flex; gap: 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid #eee; }
-.badge-sm { padding: 1px 6px; border-radius: 10px; font-size: 11px; }
-.badge-draft { background: #fef3c7; color: #92400e; }
-.badge-locked { background: #d1fae5; color: #065f46; }
-.badge-superseded { background: #e2e8f0; color: #64748b; }
+.section-header h5 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
+.rubric-row { display: flex; gap: 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.badge-sm { padding: 1px 6px; border-radius: var(--radius-md); font-size: 11px; }
+.badge-draft { background: var(--warning-bg); color: var(--warning); }
+.badge-locked { background: var(--success-bg); color: var(--success); }
+.badge-superseded { background: var(--border); color: var(--muted); }
 .actions { margin-top: 16px; display: flex; gap: 12px; align-items: center; }
-.btn-sm { padding: 4px 12px; font-size: 12px; border-radius: 4px; cursor: pointer; border: 1px solid #ddd; background: #fff; }
-.btn-primary { padding: 6px 16px; background: #3b82f6; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+.btn-sm { padding: 4px 12px; font-size: 12px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--border-strong); background: var(--surface); }
+.btn-primary { padding: 6px 16px; background: var(--accent); color: var(--surface); border: none; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-outline { border: 1px solid #3b82f6; color: #3b82f6; background: #fff; }
-.loading { color: #666; }
-.error { color: #dc3545; font-size: 13px; }
-.success { color: #16a34a; font-size: 13px; }
+.btn-outline { border: 1px solid var(--accent); color: var(--accent); background: var(--surface); }
+.loading { color: var(--muted); }
+.error { color: var(--danger); font-size: 13px; }
+.success { color: var(--success); font-size: 13px; }
 .text-sm { font-size: 12px; }
-.text-secondary { color: #94a3b8; }
+.text-secondary { color: var(--faint); }
 /* 测试组生成状态：成功绿 / 失败红（保留旧草稿，展示逐项问题） */
-.gen-success { margin: 10px 0; padding: 8px 12px; border: 1px solid #86efac; border-radius: 6px; background: #f0fdf4; }
-.gen-error { margin: 10px 0; padding: 8px 12px; border: 1px solid #fca5a5; border-radius: 6px; background: #fef2f2; }
+.gen-success { margin: 10px 0; padding: 8px 12px; border: 1px solid var(--success-bg); border-radius: var(--radius-md); background: var(--success-bg); }
+.gen-error { margin: 10px 0; padding: 8px 12px; border: 1px solid var(--danger-bg); border-radius: var(--radius-md); background: var(--danger-bg); }
 .gen-msg { margin: 0; font-size: 12.5px; font-weight: 600; }
-.gen-success .gen-msg { color: #15803d; }
-.gen-error .gen-msg { color: #b91c1c; }
+.gen-success .gen-msg { color: var(--success); }
+.gen-error .gen-msg { color: var(--danger); }
 .gen-issues { margin: 6px 0 0; padding-left: 18px; }
-.gen-issues li { font-size: 12px; color: #991b1b; line-height: 1.6; }
+.gen-issues li { font-size: 12px; color: var(--danger); line-height: 1.6; }
 /* Rubric 门禁前置提示（浅橙警告卡，与 QuestionEditView 的 qe-warn-card 一致） */
 .gate-warn {
   margin: 0 0 12px; padding: 10px 12px;
-  border: 1px solid rgba(245, 138, 7, 0.35); border-radius: 8px;
-  background: #fffbeb;
+  border: 1px solid oklch(0.66 0.14 75 / 0.35); border-radius: var(--radius-md);
+  background: var(--warning-bg);
 }
-.gate-warn-text { margin: 0; font-size: 12.5px; font-weight: 600; color: #b45309; line-height: 1.5; }
+.gate-warn-text { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--warning); line-height: 1.5; }
 </style>

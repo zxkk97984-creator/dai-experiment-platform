@@ -12,15 +12,16 @@ defineEmits(['action'])
 </script>
 
 <template>
-  <header class="teacher-page-header">
-    <div class="teacher-page-heading">
+  <header class="page-head teacher-page-header">
+    <div class="ph-title">
+      <p class="eyebrow">DAI · {{ title }}</p>
       <h1>{{ title }}</h1>
-      <p>{{ subtitle }}</p>
+      <p class="lead">{{ subtitle }}</p>
     </div>
-    <div v-if="$slots.actions || actionLabel" class="teacher-page-actions">
+    <div v-if="$slots.actions || actionLabel" class="ph-actions teacher-page-actions">
       <slot name="actions">
-        <button class="btn-primary teacher-page-action" type="button" @click="$emit('action')">
-          <AppIcon :name="actionIcon" :size="18" />
+        <button class="btn btn-primary btn-lg" type="button" @click="$emit('action')">
+          <AppIcon :name="actionIcon" :size="15" />
           {{ actionLabel }}
         </button>
       </slot>
@@ -29,49 +30,6 @@ defineEmits(['action'])
 </template>
 
 <style scoped>
-.teacher-page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-}
-
-.teacher-page-heading { min-width: 0; }
-
-h1 {
-  margin: 0 0 6px;
-  color: var(--ink);
-  font-size: 30px;
-  font-weight: 700;
-  letter-spacing: -.025em;
-  line-height: 1.15;
-}
-
-p {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 1.55;
-}
-
-.teacher-page-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  flex: 0 0 auto;
-}
-
-.teacher-page-action {
-  min-height: 46px;
-  padding: 0 18px;
-  font-size: 14px;
-}
-
-@media (max-width: 720px) {
-  .teacher-page-header { align-items: stretch; flex-direction: column; gap: 14px; }
-  h1 { font-size: 26px; }
-  .teacher-page-actions { justify-content: stretch; }
-  .teacher-page-actions :deep(button) { flex: 1; }
-}
+/* 视觉来自全局 .page-head；仅保留组件槽位差异。 */
+.teacher-page-header { margin-bottom: 0; }
 </style>

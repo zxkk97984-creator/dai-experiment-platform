@@ -320,8 +320,8 @@ onMounted(() => { fetch(); fetchCourses() })
       <TeacherPageHeader title="作业管理" subtitle="布置作业、编写判题题目与测试用例" action-label="布置作业" @action="openCreateModal" />
 
       <TeacherMetricGrid aria-label="作业统计" :items="[{ key: 'total', label: '全部作业', icon: 'assignment', tone: 'blue', value: summary.total, unit: '个' }, { key: 'published', label: '已发布', icon: 'send', tone: 'green', value: summary.published, unit: '个' }, { key: 'draft', label: '草稿', icon: 'draft', tone: 'orange', value: summary.draft, unit: '个' }, { key: 'ended', label: '已截止', icon: 'clock', tone: 'purple', value: summary.ended, unit: '个' }]" />
-      <section class="data-panel">
-        <div class="filter-bar">
+      <section class="table-wrap data-panel">
+        <div class="toolbar filter-bar">
           <label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索作业名称" @input="resetPage" /></label>
           <select v-model="statusFilter" aria-label="发布状态筛选" @change="resetPage"><option value="all">发布：全部</option><option value="published">已发布</option><option value="draft">草稿</option></select>
           <select v-model="deadlineFilter" aria-label="时限状态筛选" @change="resetPage"><option value="all">时限：全部</option><option value="open">进行中</option><option value="ended">已截止</option><option value="none">无截止</option></select>
@@ -552,15 +552,15 @@ onMounted(() => { fetch(); fetchCourses() })
 }
 .page-title {
   font-size: 28px; font-weight: 700;
-  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
+  color: var(--fg); letter-spacing: -0.02em; line-height: 1.15;
   margin: 0 0 6px;
 }
 .page-sub {
-  font-size: var(--text-sm); color: var(--text-secondary); margin: 0;
+  font-size: var(--text-sm); color: var(--muted); margin: 0;
 }
 
 /* ── 创建弹窗表单（modal-backdrop 体系内） ─────────────────────────── */
-.form-hint { margin: 6px 0 0; font-size: var(--text-sm); color: var(--text-secondary); }
+.form-hint { margin: 6px 0 0; font-size: var(--text-sm); color: var(--muted); }
 /* 创建弹窗主体：内容不多，不设内部滚动（避免出现多余滚动条） */
 .create-modal-body {
   display: flex; flex-direction: column; gap: 4px;
@@ -572,12 +572,12 @@ onMounted(() => { fetch(); fetchCourses() })
   padding: 9px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control, 7px);
-  background: var(--surface, #fff);
-  color: var(--ink, #223);
+  background: var(--surface, var(--surface));
+  color: var(--fg);
   font-family: inherit;
   font-size: var(--text-sm, 13px);
 }
-.env-warn { color: var(--warning, #b7791f); }
+.env-warn { color: var(--warning, var(--warning)); }
 .import-candidates {
   display: flex;
   flex-wrap: wrap;
@@ -589,8 +589,8 @@ onMounted(() => { fetch(); fetchCourses() })
   gap: 6px;
   padding: 5px 10px;
   border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-raised, #f4f6f8);
+  border-radius: var(--radius-full);
+  background: var(--surface-raised, var(--surface-subtle));
   font-size: var(--text-sm, 13px);
   cursor: pointer;
 }
@@ -607,14 +607,14 @@ onMounted(() => { fetch(); fetchCourses() })
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
-  color: var(--ink);
+  color: var(--fg);
   font-size: 14px;
   text-align: left;
   cursor: pointer;
 }
 .course-picker:hover { border-color: var(--accent); }
-.course-picker .placeholder { color: var(--text-secondary); }
-.picker-chevron { flex: none; color: var(--text-secondary); }
+.course-picker .placeholder { color: var(--muted); }
+.picker-chevron { flex: none; color: var(--muted); }
 
 /* ── 课程选择弹窗（modal-backdrop 体系，--modal-left 相对内容区居中） ── */
 .modal-backdrop {
@@ -624,7 +624,7 @@ onMounted(() => { fetch(); fetchCourses() })
   inset: 0 0 0 var(--modal-left, 0);
   display: flex;
   justify-content: flex-end;
-  background: rgba(15, 23, 42, 0.25);
+  background: oklch(0.2 0.01 150 / 0.25);
 }
 /* 双类选择器压过基础 .modal-backdrop 的 justify-content: flex-end */
 .modal-backdrop.create-backdrop {
@@ -634,10 +634,10 @@ onMounted(() => { fetch(); fetchCourses() })
 .create-panel {
   width: min(480px, calc(100% - 32px));
   padding: 24px;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--border);
-  background: #fff;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
 }
 .create-heading {
   display: flex;
@@ -645,7 +645,7 @@ onMounted(() => { fetch(); fetchCourses() })
   justify-content: space-between;
   margin-bottom: 16px;
 }
-.create-heading strong { font-size: 17px; color: var(--ink); }
+.create-heading strong { font-size: 17px; color: var(--fg); }
 .create-close {
   display: inline-flex;
   align-items: center;
@@ -655,11 +655,11 @@ onMounted(() => { fetch(); fetchCourses() })
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--text-secondary);
-  border-radius: 7px;
+  color: var(--muted);
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
-.create-close:hover { background: var(--hover-bg, #f1f5f9); color: var(--ink); }
+.create-close:hover { background: var(--hover-bg, var(--surface-subtle)); color: var(--fg); }
 .course-picker-body { display: flex; flex-direction: column; gap: 12px; }
 .manual-row { display: flex; gap: 8px; }
 .manual-row .course-id-input { flex: 1; }
@@ -676,16 +676,16 @@ onMounted(() => { fetch(); fetchCourses() })
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
-  color: var(--ink);
+  color: var(--fg);
   font-size: 14px;
   text-align: left;
   cursor: pointer;
 }
-.course-item:hover { border-color: var(--primary); }
+.course-item:hover { border-color: var(--accent); }
 .course-item.active {
-  border-color: var(--primary);
-  background: var(--primary-light);
-  color: var(--primary-dark);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-hover);
   font-weight: 600;
 }
 .empty-tip {
@@ -693,7 +693,7 @@ onMounted(() => { fetch(); fetchCourses() })
   padding: 16px 0;
   text-align: center;
   font-size: var(--text-sm);
-  color: var(--text-secondary);
+  color: var(--muted);
 }
 .create-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 
@@ -717,10 +717,14 @@ onMounted(() => { fetch(); fetchCourses() })
 .w-35 { width: 35%; }
 
 /* ── Cells ─────────────────────────────────────────────────────────── */
-.title-cell { font-weight: 500; color: var(--ink); }
+.title-cell { font-weight: 500; color: var(--fg); }
 
 /* ── Actions ───────────────────────────────────────────────────────── */
-.actions-cell { display: flex; gap: 8px; }
+.actions-cell {
+  display: table-cell;
+  vertical-align: middle;
+  white-space: nowrap;
+}
 .btn-publish {
   color: var(--accent);
   border-color: var(--accent);
@@ -735,7 +739,7 @@ onMounted(() => { fetch(); fetchCourses() })
 .btn-delete-text {
   border: none;
   background: none;
-  color: var(--danger, #dc2626);
+  color: var(--danger, var(--danger));
   cursor: pointer;
 }
 .btn-delete-text:hover { opacity: 0.85; }
@@ -744,7 +748,7 @@ onMounted(() => { fetch(); fetchCourses() })
   .page-head { flex-direction: column; }
   .page-title { font-size: 24px; }
 }
-.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px;margin-bottom:22px}.metric-card{display:flex;align-items:center;gap:18px;min-height:106px;padding:20px;border:1px solid var(--border);border-radius:12px;background:var(--surface);box-shadow:var(--shadow-card)}.metric-icon{display:grid;place-items:center;width:54px;height:54px;border-radius:15px}.metric-icon.blue{color:var(--primary);background:#edf4ff}.metric-icon.green{color:#10a66a;background:#eaf9f2}.metric-icon.orange{color:#ef8b10;background:#fff4e7}.metric-icon.purple{color:#7c4ce0;background:#f3edff}.metric-card span:last-child{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}.metric-card small{width:100%;color:var(--text-secondary);font-size:14px}.metric-card strong{color:var(--ink);font-size:27px;line-height:1}.metric-card em{color:var(--text-secondary);font-size:13px;font-style:normal}.data-panel{overflow:hidden;border:1px solid var(--border);border-radius:12px;background:var(--surface);box-shadow:var(--shadow-card)}.filter-bar{display:grid;grid-template-columns:minmax(220px,1.4fr) repeat(3,minmax(150px,.8fr));gap:14px;padding:18px;border-bottom:1px solid var(--border)}.search-control{display:flex;align-items:center;gap:9px;padding:0 13px;border:1px solid var(--border);border-radius:8px;color:var(--text-tertiary)}.search-control input{min-width:0;padding:0;border:0;box-shadow:none!important}.filter-bar select{height:44px;min-width:0}.table-scroll{overflow-x:auto}.table-scroll table{width:100%;min-width:1000px;margin:0}.table-scroll th{height:44px;background:#f8fafc}.table-scroll td{height:68px;padding:10px 16px}.table-scroll td small{display:block;margin-top:3px;color:var(--text-tertiary);font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.status-pill{display:inline-flex;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:600}.status-pill.published{color:#099b61;background:#e9f8f1}.status-pill.draft{color:#ef8b10;background:#fff4e7}.status-pill.ended{color:#7443d5;background:#f1ebfd}.text-action,.publish-action,.delete-action{padding:5px 7px;border:0;background:transparent;color:var(--primary);font-size:13px;white-space:nowrap}.publish-action{color:var(--warning)}.delete-action{color:var(--danger)}.pagination-bar{display:flex;justify-content:space-between;padding:14px 18px;border-top:1px solid var(--border);color:var(--text-secondary);font-size:13px}.active-page{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:7px;color:#fff;background:var(--primary)}.loading-list{display:grid;gap:1px;background:var(--border)}.loading-list .skeleton{height:68px}@media(max-width:1100px){.metric-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{grid-template-columns:1fr 1fr}}@media(max-width:700px){.metric-grid{grid-template-columns:1fr 1fr;gap:10px}.filter-bar{grid-template-columns:1fr}.table-scroll table{min-width:900px}}
+.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px;margin-bottom:22px}.metric-card{display:flex;align-items:center;gap:18px;min-height:106px;padding:20px;border:1px solid var(--border);border-radius: var(--radius-lg);background:var(--surface);box-shadow:none}.metric-icon{display:grid;place-items:center;width:54px;height:54px;border-radius:15px}.metric-icon.blue{color:var(--accent);background:var(--accent-soft)}.metric-icon.green{color:var(--success);background:var(--success-bg)}.metric-icon.orange{color:var(--warning);background:var(--warning-bg)}.metric-icon.purple{color:var(--info);background:var(--info-bg)}.metric-card span:last-child{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}.metric-card small{width:100%;color:var(--muted);font-size:14px}.metric-card strong{color:var(--fg);font-size:27px;line-height:1}.metric-card em{color:var(--muted);font-size:13px;font-style:normal}.data-panel{overflow:hidden;border:1px solid var(--border);border-radius: var(--radius-lg);background:var(--surface);box-shadow:none}.filter-bar{display:grid;grid-template-columns:minmax(220px,1.4fr) repeat(3,minmax(150px,.8fr));gap:14px;padding:18px;border-bottom:1px solid var(--border)}.search-control{display:flex;align-items:center;gap:9px;padding:0 13px;border:1px solid var(--border);border-radius: var(--radius-md);color:var(--faint)}.search-control input{min-width:0;padding:0;border:0;box-shadow:none!important}.filter-bar select{height:44px;min-width:0}.table-scroll{overflow-x:auto}.table-scroll table{width:100%;min-width:1000px;margin:0}.table-scroll th{height:44px;background:var(--surface-subtle)}.table-scroll td{height:68px;padding:10px 16px}.table-scroll td small{display:block;margin-top:3px;color:var(--faint);font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.status-pill{display:inline-flex;padding:4px 11px;border-radius: var(--radius-full);font-size:12px;font-weight:600}.status-pill.published{color:var(--success);background:var(--success-bg)}.status-pill.draft{color:var(--warning);background:var(--warning-bg)}.status-pill.ended{color:var(--info);background:var(--info-bg)}.text-action,.publish-action,.delete-action{padding:5px 7px;border:0;background:transparent;color:var(--accent);font-size:13px;white-space:nowrap}.publish-action{color:var(--warning)}.delete-action{color:var(--danger)}.pagination-bar{display:flex;justify-content:space-between;padding:14px 18px;border-top:1px solid var(--border);color:var(--muted);font-size:13px}.active-page{display:inline-grid;place-items:center;width:30px;height:30px;border-radius: var(--radius-md);color:var(--surface);background:var(--accent)}.loading-list{display:grid;gap:1px;background:var(--border)}.loading-list .skeleton{height:68px}@media(max-width:1100px){.metric-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{grid-template-columns:1fr 1fr}}@media(max-width:700px){.metric-grid{grid-template-columns:1fr 1fr;gap:10px}.filter-bar{grid-template-columns:1fr}.table-scroll table{min-width:900px}}
 /* 侧栏展开时以内容容器宽度为准，避免作业列表被固定最小宽度推出可视区 */
 .data-panel{min-width:0}
 .filter-bar{min-width:0}
@@ -754,24 +758,25 @@ onMounted(() => { fetch(); fetchCourses() })
 .table-scroll table{width:100%;min-width:0!important;table-layout:fixed}
 .table-scroll th,.table-scroll td{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .table-scroll th:nth-child(1){width:20%}.table-scroll th:nth-child(2){width:17%}.table-scroll th:nth-child(3){width:10%}.table-scroll th:nth-child(4){width:12%}.table-scroll th:nth-child(5){width:10%}.table-scroll th:nth-child(6){width:9%}.table-scroll th:nth-child(7){width:22%}
-.table-scroll td{white-space:nowrap}.table-scroll td strong,.table-scroll td small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.actions-cell{display:flex;flex-wrap:wrap;align-items:center;gap:0;white-space:normal}.actions-cell button{flex:0 0 auto;padding:4px 5px;font-size:12px;white-space:nowrap}
+.table-scroll td{white-space:nowrap}.table-scroll td strong,.table-scroll td small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.actions-cell{display:table-cell;vertical-align:middle;white-space:nowrap}.actions-cell button{display:inline-flex;align-items:center;flex:0 0 auto;padding:4px 5px;font-size:12px;white-space:nowrap}
 @container (max-width:1050px){.filter-bar{grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,.7fr))}.table-scroll th:nth-child(1){width:28%}.table-scroll th:nth-child(2){width:25%}.table-scroll th:nth-child(3){width:15%}.table-scroll th:nth-child(7){width:32%}.table-scroll th:nth-child(4),.table-scroll td:nth-child(4),.table-scroll th:nth-child(5),.table-scroll td:nth-child(5),.table-scroll th:nth-child(6),.table-scroll td:nth-child(6){display:none}.table-scroll td:last-child{padding-left:8px;padding-right:8px}.actions-cell button{padding:4px;font-size:12px}}
-@container (max-width:760px){.filter-bar{grid-template-columns:1fr;padding:12px}.table-scroll{overflow:visible;padding:12px;background:#f8fafc}.table-scroll table,.table-scroll tbody{display:block;width:100%;min-width:0!important}.table-scroll thead{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.table-scroll tbody{display:grid;gap:12px}.table-scroll tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:hidden;border:1px solid var(--border);border-radius:10px;background:var(--surface)}.table-scroll td,.table-scroll td:nth-child(4),.table-scroll td:nth-child(5),.table-scroll td:nth-child(6){display:flex;width:auto;height:auto;min-height:58px;padding:10px 12px;flex-direction:column;justify-content:center;gap:5px;border-bottom:1px solid var(--border);overflow:visible;white-space:normal}.table-scroll td::before{color:var(--text-tertiary);font-size:11px;font-weight:500}.table-scroll td:nth-child(1)::before{content:'作业名称'}.table-scroll td:nth-child(2)::before{content:'所属课程 / 班级'}.table-scroll td:nth-child(3)::before{content:'状态'}.table-scroll td:nth-child(4)::before{content:'截止时间'}.table-scroll td:nth-child(5)::before{content:'提交进度'}.table-scroll td:nth-child(6)::before{content:'最近更新'}.table-scroll td:nth-child(7)::before{content:'操作'}.table-scroll td:nth-child(1),.table-scroll td:nth-child(2),.table-scroll td:nth-child(7){grid-column:1/-1}.table-scroll td:nth-child(6),.table-scroll td:nth-last-child(-n+2){border-bottom:0}.table-scroll td strong,.table-scroll td small{overflow:visible;white-space:normal}.table-scroll .actions-cell{display:flex;flex-direction:row;align-items:center;justify-content:flex-end;gap:6px}.table-scroll .actions-cell::before{margin-right:auto}.actions-cell button{padding:6px 8px}}
+@container (max-width:760px){.filter-bar{grid-template-columns:1fr;padding:12px}.table-scroll{overflow:visible;padding:12px;background:var(--surface-subtle)}.table-scroll table,.table-scroll tbody{display:block;width:100%;min-width:0!important}.table-scroll thead{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.table-scroll tbody{display:grid;gap:12px}.table-scroll tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:hidden;border:1px solid var(--border);border-radius: var(--radius-md);background:var(--surface)}.table-scroll td,.table-scroll td:nth-child(4),.table-scroll td:nth-child(5),.table-scroll td:nth-child(6){display:flex;width:auto;height:auto;min-height:58px;padding:10px 12px;flex-direction:column;justify-content:center;gap:5px;border-bottom:1px solid var(--border);overflow:visible;white-space:normal}.table-scroll td::before{color:var(--faint);font-size:11px;font-weight:500}.table-scroll td:nth-child(1)::before{content:'作业名称'}.table-scroll td:nth-child(2)::before{content:'所属课程 / 班级'}.table-scroll td:nth-child(3)::before{content:'状态'}.table-scroll td:nth-child(4)::before{content:'截止时间'}.table-scroll td:nth-child(5)::before{content:'提交进度'}.table-scroll td:nth-child(6)::before{content:'最近更新'}.table-scroll td:nth-child(7)::before{content:'操作'}.table-scroll td:nth-child(1),.table-scroll td:nth-child(2),.table-scroll td:nth-child(7){grid-column:1/-1}.table-scroll td:nth-child(6),.table-scroll td:nth-last-child(-n+2){border-bottom:0}.table-scroll td strong,.table-scroll td small{overflow:visible;white-space:normal}.table-scroll .actions-cell{display:flex;flex-direction:row;align-items:center;justify-content:flex-end;gap:6px}.table-scroll .actions-cell::before{margin-right:auto}.actions-cell button{padding:6px 8px}}
 
 /* 发布与截止：发布状态和时限状态分维度展示，避免把“已截止”误当发布状态 */
 .filter-bar{grid-template-columns:minmax(220px,1.35fr) repeat(4,minmax(125px,.72fr))}
-.schedule-cell{display:flex;flex-direction:column;justify-content:center;gap:4px;white-space:normal!important}
+.schedule-cell{display:table-cell;vertical-align:middle;white-space:normal!important}
+.schedule-cell > span + span{margin-top:4px}
 .schedule-cell span{display:flex;align-items:center;gap:5px;font-size:12px;line-height:1.35}
-.schedule-cell em{min-width:28px;color:var(--text-tertiary);font-size:11px;font-style:normal}
+.schedule-cell em{min-width:28px;color:var(--faint);font-size:11px;font-style:normal}
 .deadline-ended{color:var(--danger)!important}
 .schedule-modal{width:min(520px,calc(100vw - 32px))}
 .schedule-modal .create-heading>div{display:flex;min-width:0;flex-direction:column;gap:3px}
-.schedule-modal .create-heading small{max-width:380px;overflow:hidden;color:var(--text-tertiary);font-size:12px;text-overflow:ellipsis;white-space:nowrap}
+.schedule-modal .create-heading small{max-width:380px;overflow:hidden;color:var(--faint);font-size:12px;text-overflow:ellipsis;white-space:nowrap}
 .schedule-modal-body{padding:20px 22px}
 .schedule-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 18px}
-.schedule-summary div{padding:12px;border:1px solid var(--border);border-radius:9px;background:#f8fafc}
-.schedule-summary dt{color:var(--text-tertiary);font-size:12px}
-.schedule-summary dd{margin:5px 0 0;color:var(--ink);font-size:14px;font-weight:600}
+.schedule-summary div{padding:12px;border:1px solid var(--border);border-radius: var(--radius-md);background:var(--surface-subtle)}
+.schedule-summary dt{color:var(--faint);font-size:12px}
+.schedule-summary dd{margin:5px 0 0;color:var(--fg);font-size:14px;font-weight:600}
 @container (max-width:1050px){.filter-bar{grid-template-columns:repeat(2,minmax(0,1fr))}.search-control{grid-column:1/-1}}
 @container (max-width:760px){.filter-bar{grid-template-columns:1fr}.search-control{grid-column:auto}.table-scroll td:nth-child(4)::before{content:'时间安排'}.schedule-summary{grid-template-columns:1fr}}
 </style>

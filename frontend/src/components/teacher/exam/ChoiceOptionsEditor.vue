@@ -175,23 +175,23 @@ defineExpose({ validate })
 <style scoped>
 .choice-editor { margin-top: 20px; }
 .choice-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:12px; }
-.choice-head h4 { margin:0 0 4px; font-size:15px; color:var(--ink); }
-.choice-head p, .scoring-box p, .json-panel p { margin:0; color:var(--text-secondary); font-size:12px; line-height:1.5; }
+.choice-head h4 { margin:0 0 4px; font-size:15px; color:var(--fg); }
+.choice-head p, .scoring-box p, .json-panel p { margin:0; color:var(--muted); font-size:12px; line-height:1.5; }
 .option-list { display:flex; flex-direction:column; gap:8px; }
-.option-row { display:grid; grid-template-columns:24px 76px minmax(180px,1fr) auto auto; gap:8px; align-items:center; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:var(--surface); }
-.option-row input[type="radio"], .option-row input[type="checkbox"] { width:17px; height:17px; accent-color:var(--primary); }
-.option-key, .option-text { width:100%; padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:var(--ink); }
+.option-row { display:grid; grid-template-columns:24px 76px minmax(180px,1fr) auto auto; gap:8px; align-items:center; padding:10px 12px; border:1px solid var(--border); border-radius: var(--radius-md); background:var(--surface); }
+.option-row input[type="radio"], .option-row input[type="checkbox"] { width:17px; height:17px; accent-color:var(--accent); }
+.option-key, .option-text { width:100%; padding:9px 10px; border:1px solid var(--border); border-radius: var(--radius-md); background:var(--surface); color:var(--fg); }
 .option-key { text-align:center; font-weight:700; }
-.correct-tag { color:#15803d; background:#dcfce7; border-radius:999px; padding:3px 8px; font-size:11px; white-space:nowrap; }
+.correct-tag { color:var(--success); background:var(--success-bg); border-radius: var(--radius-full); padding:3px 8px; font-size:11px; white-space:nowrap; }
 .remove-option { border:0; background:none; color:var(--danger); cursor:pointer; }
-.remove-option:disabled { color:var(--text-tertiary); cursor:not-allowed; }
-.scoring-box { margin-top:14px; padding:14px; border-radius:10px; background:var(--surface-sunken); }
+.remove-option:disabled { color:var(--faint); cursor:not-allowed; }
+.scoring-box { margin-top:14px; padding:14px; border-radius: var(--radius-md); background:var(--surface-sunken); }
 .scoring-box label { display:block; font-size:13px; font-weight:600; margin-bottom:6px; }
 .scoring-box select { width:100%; margin-bottom:6px; }
 .json-import { margin-top:22px; padding-top:16px; border-top:1px dashed var(--border); }
-.json-toggle { border:0; background:none; color:var(--primary); padding:0; cursor:pointer; font-weight:600; }
-.json-panel { margin-top:10px; padding:14px; border:1px solid var(--border); border-radius:10px; background:var(--surface-sunken); }
-.json-panel pre { white-space:pre-wrap; margin:8px 0; padding:10px; border-radius:8px; background:#0f172a; color:#e2e8f0; font-size:12px; }
+.json-toggle { border:0; background:none; color:var(--accent); padding:0; cursor:pointer; font-weight:600; }
+.json-panel { margin-top:10px; padding:14px; border:1px solid var(--border); border-radius: var(--radius-md); background:var(--surface-sunken); }
+.json-panel pre { white-space:pre-wrap; margin:8px 0; padding:10px; border-radius: var(--radius-md); background:var(--fg); color:var(--border); font-size:12px; }
 .json-panel textarea { width:100%; font-family:var(--font-mono); font-size:12px; }
 .import-error { color:var(--danger)!important; margin-top:6px!important; }
 .import-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }

@@ -1,15 +1,35 @@
 <script setup>
+import { onMounted } from 'vue'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
 import { useAppStore } from '../../stores/app.js'
+import { useAuthStore } from '../../stores/auth.js'
+import { usersAPI } from '../../api/users.js'
 
 const app = useAppStore()
+const auth = useAuthStore()
+
+onMounted(async () => {
+  if (!auth.isAuthenticated) return
+  try {
+    const { data } = await usersAPI.getMyPreferences()
+    const prefs = data?.preferences || {}
+    if (typeof prefs.sidebar_collapsed === 'boolean') {
+      app.sidebarCollapsed = prefs.sidebar_collapsed
+    }
+  } catch {
+    // 偏好加载失败时保留本地状态
+  }
+})
 </script>
 
 <template>
-  <div class="layout">
+  <div
+    class="shell"
+    :class="{ 'is-collapsed': app.sidebarCollapsed, 'mobile-nav-open': app.mobileNavOpen }"
+  >
     <AppSidebar />
-    <div class="main-area" :class="{ collapsed: app.sidebarCollapsed }">
+    <div class="main">
       <AppHeader />
       <main class="content">
         <div class="content-inner">
@@ -21,46 +41,6 @@ const app = useAppStore()
 </template>
 
 <style scoped>
-.layout {
-  display: flex;
-  height: 100vh;
-  overflow: hidden;
-  background: var(--paper);
-}
-
-.main-area {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  margin-left: var(--sidebar-width, 264px);
-  /* 弹窗遮罩的左侧起点：随侧栏宽度变化，保证 fixed 弹窗相对内容区居中 */
-  --modal-left: var(--sidebar-width, 264px);
-  transition: margin-left var(--duration-slow) var(--ease-out);
-  min-width: 0;
-  background: var(--paper);
-}
-.main-area.collapsed { margin-left: var(--sidebar-collapsed-width, 64px); --modal-left: var(--sidebar-collapsed-width, 64px); }
-
-/* 内容区：fluid，页面自身滚动，侧栏不滚动 */
-.content {
-  flex: 1;
-  overflow-y: auto;
-  background: var(--paper);
-}
-
-.content-inner {
-  max-width: var(--content-max, 1440px);
-  margin: 0 auto;
-  padding: 28px 36px 80px;
-}
-
-/* ≤1199px：64px 折叠侧栏 + 单列内容 */
-@media (max-width: 1199px) {
-  .main-area { margin-left: var(--sidebar-collapsed-width, 64px); --modal-left: var(--sidebar-collapsed-width, 64px); }
-}
-
-@media (max-width: 767.98px) {
-  .content-inner { padding: 20px 16px 60px; }
-  .main-area { margin-left: var(--sidebar-collapsed-width, 64px); --modal-left: var(--sidebar-collapsed-width, 64px); }
-}
+/* App Shell 视觉与断点全部来自全局 dai-ds-v2.css 的 .shell/.sidebar/.main/.content。
+   组件内不再重复定义宽度、高度、断点或固定侧栏 margin。 */
 </style>

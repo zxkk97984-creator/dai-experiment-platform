@@ -96,7 +96,7 @@ onMounted(load)
 
       <!-- ── Template List ──────────────────────────────────────────────── -->
       <div v-else class="card table-card">
-        <table>
+        <table class="ds-table">
           <thead>
             <tr><th>模板名称</th><th>状态</th><th>版本</th><th>操作</th></tr>
           </thead>
@@ -139,11 +139,11 @@ onMounted(load)
 }
 .page-title {
   font-size: 28px; font-weight: 700;
-  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
+  color: var(--fg); letter-spacing: -0.02em; line-height: 1.15;
   margin: 0 0 6px;
 }
 .page-sub {
-  font-size: var(--text-sm); color: var(--text-secondary); margin: 0;
+  font-size: var(--text-sm); color: var(--muted); margin: 0;
 }
 .header-actions {
   display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center;
@@ -157,11 +157,11 @@ onMounted(load)
 .form-input {
   padding: 8px 12px; background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--radius-sm);
-  color: var(--ink); font-size: var(--text-sm); outline: none;
+  color: var(--fg); font-size: var(--text-sm); outline: none;
   flex: 1; min-width: 180px;
   transition: border-color var(--duration-fast) var(--ease-out);
 }
-.form-input:focus { border-color: var(--primary); box-shadow: var(--shadow-glow-primary); }
+.form-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 /* ── Import button ─────────────────────────────────────────────────── */
 .btn-import {
@@ -190,7 +190,7 @@ onMounted(load)
 .w-40 { width: 40%; }
 
 /* ── Cells ─────────────────────────────────────────────────────────── */
-.title-cell { font-weight: 500; color: var(--ink); }
+.title-cell { font-weight: 500; color: var(--fg); }
 
 @media (max-width: 768px) {
   .page-head { flex-direction: column; }

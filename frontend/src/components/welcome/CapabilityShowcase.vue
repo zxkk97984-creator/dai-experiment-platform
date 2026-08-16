@@ -51,7 +51,7 @@ const hoveredId = ref(null)
 <style scoped>
 .cap {
   padding: 80px 56px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .cap-inner {
@@ -69,7 +69,7 @@ const hoveredId = ref(null)
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.18em;
-  color: #7359ED;
+  color: var(--info);
   margin: 0 0 12px;
 }
 
@@ -77,13 +77,13 @@ const hoveredId = ref(null)
   font-size: 32px;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: #13213A;
+  color: var(--fg);
   margin: 0 0 12px;
 }
 
 .cap-sub {
   font-size: 16px;
-  color: #6E7B92;
+  color: var(--muted);
   max-width: 560px;
   margin: 0 auto;
   line-height: 1.5;
@@ -96,31 +96,31 @@ const hoveredId = ref(null)
 }
 
 .cap-card {
-  --accent: #2467ED;
+  --accent: var(--accent);
   position: relative;
   display: flex;
   flex-direction: column;
   min-height: 180px;
   padding: 20px;
   overflow: hidden;
-  border: 1px solid rgba(45, 75, 127, 0.13);
-  border-radius: 16px;
-  color: #13213A;
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow: 0 8px 20px rgba(40, 69, 118, 0.04);
+  border: 1px solid oklch(0.2 0.01 150 / 0.13);
+  border-radius: var(--radius-lg);
+  color: var(--fg);
+  background: oklch(0.99 0.001 95 / 0.88);
+  box-shadow: var(--shadow-sm);
   cursor: default;
   transform: translateY(0);
   transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), border-color 260ms ease, box-shadow 260ms ease, background 260ms ease;
 }
 
-.cap-card--courses   { --accent: #2467ED; }
-.cap-card--coding    { --accent: #7359ED; }
-.cap-card--notebook  { --accent: #14A886; }
-.cap-card--assignments { --accent: #E4872D; }
-.cap-card--exams     { --accent: #D9467E; }
-.cap-card--judging   { --accent: #F59E0B; }
-.cap-card--aiGrading { --accent: #7359ED; }
-.cap-card--templates { --accent: #2467ED; }
+.cap-card--courses   { --accent: var(--accent); }
+.cap-card--coding    { --accent: var(--info); }
+.cap-card--notebook  { --accent: var(--success); }
+.cap-card--assignments { --accent: var(--warning); }
+.cap-card--exams     { --accent: var(--danger); }
+.cap-card--judging   { --accent: var(--warning); }
+.cap-card--aiGrading { --accent: var(--info); }
+.cap-card--templates { --accent: var(--accent); }
 
 .cap-card::before {
   content: "";
@@ -140,7 +140,7 @@ const hoveredId = ref(null)
   right: 18px;
   bottom: 0;
   height: 2px;
-  border-radius: 99px;
+  border-radius: var(--radius-full);
   z-index: 0;
   opacity: 0;
   background: var(--accent);
@@ -153,8 +153,8 @@ const hoveredId = ref(null)
 .cap-card.hovered {
   transform: translateY(-8px);
   border-color: color-mix(in srgb, var(--accent) 35%, white);
-  background: #fff;
-  box-shadow: 0 20px 38px rgba(39, 70, 122, 0.13);
+  background: var(--surface);
+  box-shadow: 0 20px 38px oklch(0.2 0.01 150 / 0.13);
 }
 
 .cap-card:hover::before,
@@ -180,7 +180,7 @@ const hoveredId = ref(null)
   font-size: 9px;
   font-weight: 750;
   letter-spacing: 0.1em;
-  color: #94A3B8;
+  color: var(--faint);
   margin-bottom: 14px;
   text-transform: uppercase;
 }
@@ -197,7 +197,7 @@ const hoveredId = ref(null)
   z-index: 1;
   font-size: 15px;
   font-weight: 650;
-  color: #13213A;
+  color: var(--fg);
   margin: 0 0 6px;
   letter-spacing: -0.01em;
 }
@@ -207,7 +207,7 @@ const hoveredId = ref(null)
   z-index: 1;
   font-size: 12px;
   line-height: 1.55;
-  color: #6E7B92;
+  color: var(--muted);
   margin: 0 0 12px;
 }
 
@@ -222,9 +222,9 @@ const hoveredId = ref(null)
 .cap-card-tag {
   font-size: 10px;
   padding: 3px 9px;
-  border-radius: 20px;
-  background: #F1F5F9;
-  color: #64748B;
+  border-radius: var(--radius-lg);
+  background: var(--surface-subtle);
+  color: var(--muted);
   font-weight: 500;
 }
 
@@ -265,8 +265,8 @@ const hoveredId = ref(null)
 .vis-bar {
   width: 22px;
   height: calc(var(--h) * 1px);
-  border-radius: 3px;
-  background: rgba(45,75,127,0.1);
+  border-radius: var(--radius-sm);
+  background: oklch(0.2 0.01 150 / 0.1);
   display: flex;
   align-items: flex-end;
   overflow: hidden;
@@ -287,7 +287,7 @@ const hoveredId = ref(null)
 
 .vis-wave {
   width: 16px; height: 2px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   background: var(--accent);
   opacity: 0.4;
 }
@@ -360,7 +360,7 @@ const hoveredId = ref(null)
 
 .vis-cell {
   width: 5px; height: 5px;
-  border-radius: 1px;
+  border-radius: var(--radius-sm);
   background: var(--accent);
   opacity: 0;
 }

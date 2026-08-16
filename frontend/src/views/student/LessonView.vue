@@ -621,22 +621,22 @@ watch([lessonId, courseId], async ([, newCid], [, oldCid]) => {
 .topbar-back {
   display: inline-flex; align-items: center; gap: 4px;
   background: none; border: none; padding: 4px 8px;
-  color: var(--text-secondary); font-size: var(--text-sm); font-weight: 500;
+  color: var(--muted); font-size: var(--text-sm); font-weight: 500;
   cursor: pointer; border-radius: var(--radius-sm);
   transition: color var(--duration-fast) var(--ease-out);
   white-space: nowrap; flex-shrink: 0;
 }
-.topbar-back:hover { color: var(--primary); }
+.topbar-back:hover { color: var(--accent); }
 .topbar-breadcrumb {
   display: flex; align-items: center; gap: 6px;
   min-width: 0; flex: 1;
 }
 .topbar-crumb {
-  font-size: var(--text-sm); color: var(--text-secondary);
+  font-size: var(--text-sm); color: var(--muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.topbar-crumb.current { color: var(--ink); font-weight: 500; }
-.topbar-sep { color: var(--text-tertiary); font-size: var(--text-sm); }
+.topbar-crumb.current { color: var(--fg); font-weight: 500; }
+.topbar-sep { color: var(--faint); font-size: var(--text-sm); }
 
 /* ── Dropdown ──────────────────────────────────────────────────────── */
 .dropdown-wrap { position: relative; flex-shrink: 0; }
@@ -653,17 +653,17 @@ watch([lessonId, courseId], async ([, newCid], [, oldCid]) => {
 }
 .dropdown-group { margin-bottom: var(--space-1); }
 .dropdown-chapter {
-  font-size: var(--text-xs); font-weight: 600; color: var(--text-secondary);
+  font-size: var(--text-xs); font-weight: 600; color: var(--muted);
   padding: 6px 10px 4px; text-transform: uppercase; letter-spacing: 0.04em;
 }
 .dropdown-item {
   display: flex; align-items: center; gap: var(--space-2);
   padding: 7px 10px; border-radius: var(--radius-md);
-  font-size: var(--text-sm); color: var(--text); cursor: pointer;
+  font-size: var(--text-sm); color: var(--fg); cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out);
 }
-.dropdown-item:hover { background: var(--surface-raised); }
-.dropdown-item.active { background: var(--primary-light); color: var(--primary); font-weight: 500; }
+.dropdown-item:hover { background: var(--surface-subtle); }
+.dropdown-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
 .dropdown-item-icon { font-size: 12px; flex-shrink: 0; }
 
 .dropdown-fade-enter-active,
@@ -679,28 +679,28 @@ watch([lessonId, courseId], async ([, newCid], [, oldCid]) => {
 .meta-tag {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: var(--text-xs); font-weight: 500;
-  color: var(--primary); background: var(--primary-light);
+  color: var(--accent); background: var(--accent-soft);
   padding: 4px 10px; border-radius: var(--radius-full);
 }
-.meta-dot { color: var(--text-tertiary); font-size: var(--text-xs); }
+.meta-dot { color: var(--faint); font-size: var(--text-xs); }
 
 /* ── Markdown Content Block ─────────────────────────────────────────── */
 .lesson-content {
   max-width: 780px; margin: 0 auto;
-  font-size: 16px; line-height: 1.85; color: #1E293B;
+  font-size: 16px; line-height: 1.85; color: oklch(0.32 0.02 155);
 }
 
 .lesson-content :deep(h1) {
   font-family: var(--font-display);
   font-size: 32px; font-weight: 700;
-  color: var(--ink); margin: 0 0 20px;
+  color: var(--fg); margin: 0 0 20px;
   letter-spacing: -0.025em; line-height: 1.2;
 }
 
 .lesson-content :deep(h2) {
   font-family: var(--font-display);
   font-size: 24px; font-weight: 600;
-  color: var(--ink); margin: 36px 0 12px;
+  color: var(--fg); margin: 36px 0 12px;
   padding-top: 20px;
   border-top: 1px solid var(--border);
   letter-spacing: -0.02em; line-height: 1.3;
@@ -711,22 +711,22 @@ watch([lessonId, courseId], async ([, newCid], [, oldCid]) => {
 
 .lesson-content :deep(h3) {
   font-size: 19px; font-weight: 600;
-  color: var(--ink); margin: 24px 0 8px;
+  color: var(--fg); margin: 24px 0 8px;
   line-height: 1.4;
 }
 
 .lesson-content :deep(p) {
-  margin: 12px 0; color: #1E293B; font-size: 16px; line-height: 1.85;
+  margin: 12px 0; color: oklch(0.32 0.02 155); font-size: 16px; line-height: 1.85;
 }
 
 .lesson-content :deep(a) {
-  color: var(--primary); text-decoration: none;
+  color: var(--accent); text-decoration: none;
 }
-.lesson-content :deep(a:hover) { color: var(--primary-dark); text-decoration: underline; }
+.lesson-content :deep(a:hover) { color: var(--accent-hover); text-decoration: underline; }
 
 .lesson-content :deep(code:not(pre code)) {
   font-family: var(--font-mono); font-size: 0.88em;
-  background: var(--surface-raised); color: var(--primary);
+  background: var(--surface-subtle); color: var(--accent);
   padding: 2px 6px; border-radius: var(--radius-sm);
   border: 1px solid var(--border);
 }
@@ -738,17 +738,17 @@ watch([lessonId, courseId], async ([, newCid], [, oldCid]) => {
 .lesson-content :deep(th) {
   text-align: left; padding: 10px 14px; border-bottom: 2px solid var(--border);
   font-size: var(--text-xs); font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.04em; color: var(--text-secondary); background: var(--surface-raised);
+  letter-spacing: 0.04em; color: var(--muted); background: var(--surface-subtle);
 }
 .lesson-content :deep(td) {
-  padding: 10px 14px; border-bottom: 1px solid var(--border); color: #1E293B;
+  padding: 10px 14px; border-bottom: 1px solid var(--border); color: oklch(0.32 0.02 155);
 }
 
 .lesson-content :deep(blockquote) {
-  background: var(--warning-light); border-left: 3px solid var(--warning);
+  background: var(--warning-bg); border-left: 3px solid var(--warning);
   padding: var(--space-3) var(--space-4); margin: 16px 0;
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  font-size: 15px; color: #7C5E0A; line-height: 1.75;
+  font-size: 15px; color: var(--warning); line-height: 1.75;
 }
 .lesson-content :deep(blockquote p) { margin: 4px 0; color: inherit; }
 
@@ -758,11 +758,11 @@ watch([lessonId, courseId], async ([, newCid], [, oldCid]) => {
 
 .lesson-content :deep(ul), .lesson-content :deep(ol) {
   margin: 10px 0; padding-left: var(--space-6);
-  font-size: 16px; color: #1E293B; line-height: 1.85;
+  font-size: 16px; color: oklch(0.32 0.02 155); line-height: 1.85;
 }
 .lesson-content :deep(li) { margin: 4px 0; }
 
-.lesson-content :deep(strong) { color: var(--ink); font-weight: 600; }
+.lesson-content :deep(strong) { color: var(--fg); font-weight: 600; }
 
 /* ── Video / Notebook ──────────────────────────────────────────────── */
 .lesson-video { margin: var(--space-6) 0; }
@@ -781,13 +781,13 @@ watch([lessonId, courseId], async ([, newCid], [, oldCid]) => {
   max-width: 780px;
   aspect-ratio: 16 / 9;
   border-radius: var(--radius-lg);
-  background: #000;
+  background: var(--fg);
 }
 .video-state {
   margin: 0;
   padding: var(--space-10) var(--space-4);
   text-align: center;
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: var(--text-sm);
 }
 .video-error {
@@ -814,30 +814,30 @@ watch([lessonId, courseId], async ([, newCid], [, oldCid]) => {
   padding: var(--space-4); border: 1px solid var(--border);
   border-radius: var(--radius-md); background: var(--surface);
   cursor: pointer; transition: all var(--duration-fast) var(--ease-out);
-  flex: 1; max-width: 48%; color: var(--text); text-align: left;
+  flex: 1; max-width: 48%; color: var(--fg); text-align: left;
 }
 .nav-complete {
   flex: 0 0 auto; max-width: none; justify-content: center;
   white-space: nowrap;
 }
 .nav-complete.is-completed {
-  color: #099b61; border-color: #b7ead1; background: #e9f8f1;
+  color: var(--success); border-color: var(--success-bg); background: var(--success-bg);
 }
 .nav-complete:disabled { opacity: .6; cursor: default; }
 .nav-btn:hover {
-  border-color: var(--border-strong); background: var(--surface-raised);
+  border-color: var(--border-strong); background: var(--surface-subtle);
   box-shadow: var(--shadow-md);
 }
 .nav-btn.disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
 .nav-prev { justify-content: flex-start; }
 .nav-next { justify-content: flex-end; }
 .nav-label {
-  font-size: var(--text-xs); color: var(--text-secondary);
+  font-size: var(--text-xs); color: var(--muted);
   font-weight: 500; white-space: nowrap;
 }
 .nav-title {
   font-size: var(--text-sm); font-weight: 500;
-  color: var(--text); white-space: nowrap;
+  color: var(--fg); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }
 
@@ -847,7 +847,7 @@ watch([lessonId, courseId], async ([, newCid], [, oldCid]) => {
 .toc-title {
   display: flex; align-items: center; gap: 6px;
   font-size: 11px; font-weight: 600;
-  color: var(--text-tertiary); text-transform: uppercase;
+  color: var(--faint); text-transform: uppercase;
   letter-spacing: 0.06em; margin: 0 0 12px;
 }
 .toc-nav {
@@ -855,32 +855,32 @@ watch([lessonId, courseId], async ([, newCid], [, oldCid]) => {
   border-left: 1px solid var(--border);
 }
 .toc-empty {
-  font-size: var(--text-xs); color: var(--text-tertiary); margin: 0;
+  font-size: var(--text-xs); color: var(--faint); margin: 0;
 }
 .toc-link {
   display: block; padding: 5px 12px;
-  font-size: 12px; color: var(--text-secondary);
+  font-size: 12px; color: var(--muted);
   text-decoration: none; border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   transition: all var(--duration-fast) var(--ease-out);
   line-height: 1.45; position: relative;
   border-left: 2px solid transparent; margin-left: -1px;
 }
 .toc-link:hover {
-  color: var(--primary); background: var(--primary-light);
+  color: var(--accent); background: var(--accent-soft);
 }
 .toc-link.toc-sub {
   padding-left: 22px; font-size: 11px;
 }
 .toc-link.toc-active {
-  color: var(--primary); font-weight: 500;
-  border-left-color: var(--primary);
-  background: var(--primary-light);
+  color: var(--accent); font-weight: 500;
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* ── Empty state ────────────────────────────────────────────────────── */
 .empty-state {
   text-align: center; padding: var(--space-12) var(--space-6);
-  color: var(--text-secondary);
+  color: var(--muted);
 }
 .empty-state p { font-size: var(--text-sm); margin-bottom: var(--space-3); }
 

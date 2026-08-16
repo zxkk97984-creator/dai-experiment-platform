@@ -1,5 +1,6 @@
 <script setup>
-// 教师工作台：一次聚合请求渲染真实数据；工作队列优先，含课程公告发布
+// 教师工作台（V3）：问候页头 + 指标条 + 聚合待处理工作/公告 + 课程概览 + 最近提交表格。
+// 数据仍由一次 /dashboard/teacher 聚合请求驱动；工作队列按任务聚合，最近提交为跨实体混合表格。
 
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -8,6 +9,7 @@ import AppLayout from '../../components/layout/AppLayout.vue'
 import AnnouncementComposer from '../../components/dashboard/AnnouncementComposer.vue'
 import AnnouncementPanel from '../../components/dashboard/AnnouncementPanel.vue'
 import DashboardAsyncState from '../../components/dashboard/DashboardAsyncState.vue'
+import AppIcon from '../../components/ui/AppIcon.vue'
 import { announcementsAPI } from '../../api/announcements.js'
 import { dashboardAPI } from '../../api/dashboard.js'
 import { useAuthStore } from '../../stores/auth.js'
@@ -20,6 +22,7 @@ const error = ref(false)
 const dashboard = ref(null)
 const showComposer = ref(false)
 const panelRef = ref(null)
+const announcementSection = ref(null)
 
 const teacherName = (auth.user?.real_name || auth.user?.username || '老师').slice(0, 8)
 
@@ -37,6 +40,18 @@ const timeFmt = new Intl.DateTimeFormat('zh-CN', {
   minute: '2-digit',
 })
 
+const workStatusMap = {
+  pending_grading: { label: '待评分', tone: 'badge-warning' },
+  review_required: { label: '待复核', tone: 'badge-info' },
+  pending_release: { label: '待发布', tone: 'badge-neutral' },
+  graded: { label: '已评分', tone: 'badge-success' },
+  failed: { label: '失败', tone: 'badge-danger' },
+}
+
+function workStatus(item) {
+  return workStatusMap[item.status] || { label: item.detail || '待处理', tone: 'badge-neutral' }
+}
+
 async function loadDashboard() {
   loading.value = true
   error.value = false
@@ -51,10 +66,13 @@ async function loadDashboard() {
 }
 
 function go(route) {
-  // 仅允许服务端返回的教师相对路由
   if (route === '/teacher' || route.startsWith('/teacher/')) {
     router.push(route)
   }
+}
+
+function scrollToAnnouncements() {
+  announcementSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function formatTime(value) {
@@ -68,7 +86,43 @@ function primaryWork() {
 }
 
 function primaryActionRoute() {
-  return primaryWork()?.route || '/teacher/courses'
+  const first = primaryWork()
+  if (first) return first.route
+  if (dashboard.value?.summary?.pending_review_count) return '/teacher/submissions'
+  return '/teacher/courses'
+}
+
+const primaryActionLabel = computed(() => {
+  const summary = dashboard.value?.summary
+  if (summary?.pending_grading_count > 0) return `处理待评分 ${summary.pending_grading_count}`
+  if (summary?.pending_review_count > 0) return `处理待复核 ${summary.pending_review_count}`
+  return primaryWork() ? '处理工作' : '管理课程'
+})
+
+const leadText = computed(() => {
+  const s = dashboard.value?.summary
+  if (!s) return '加载工作概况中…'
+  const parts = []
+  if (s.pending_grading_count) parts.push(`${s.pending_grading_count} 份提交待评分`)
+  if (s.pending_review_count) parts.push(`${s.pending_review_count} 份 AI 评分待复核`)
+  if (s.pending_release_count) parts.push(`${s.pending_release_count} 场考试待发布成绩`)
+  if (s.upcoming_deadline_count) parts.push(`${s.upcoming_deadline_count} 项任务临近截止`)
+  return parts.length ? `${parts.join('、')}。优先处理评分工作。` : '暂无待处理工作，可以先查看课程公告。'
+})
+
+function submissionStatus(row) {
+  return workStatusMap[row.status] || { label: row.status || '—', tone: 'badge-neutral' }
+}
+
+function submissionScore(row) {
+  if (row.ai_score != null) return Number(row.ai_score).toFixed(1)
+  if (row.score != null) return Number(row.score).toFixed(1)
+  return '—'
+}
+
+function testsText(row) {
+  if (row.tests_total == null) return '—'
+  return `${row.tests_passed ?? 0} / ${row.tests_total}`
 }
 
 async function markRead(notice) {
@@ -89,23 +143,17 @@ async function markRead(notice) {
 function onPublished() {
   showComposer.value = false
   loadDashboard()
-  // 发布成功后同样把焦点还给发布按钮
   nextTick(() => {
-    panelRef.value?.$el?.querySelector('.publish-btn')?.focus()
+    panelRef.value?.$el?.querySelector('.publish-btn')?.focus() || document.querySelector('.publish-btn')?.focus()
   })
 }
 
 function onCloseComposer() {
   showComposer.value = false
-  // 关闭后把焦点还给发布按钮
   nextTick(() => {
-    panelRef.value?.$el?.querySelector('.publish-btn')?.focus()
+    panelRef.value?.$el?.querySelector('.publish-btn')?.focus() || document.querySelector('.publish-btn')?.focus()
   })
 }
-
-const primaryActionLabel = computed(() =>
-  primaryWork() ? '处理工作' : '管理课程',
-)
 
 onMounted(loadDashboard)
 </script>
@@ -113,147 +161,186 @@ onMounted(loadDashboard)
 <template>
   <AppLayout>
     <div class="dash">
-      <!-- 问候行：角色问候 + 日期 + 一个上下文主操作 -->
-      <header class="greeting">
-        <div class="greeting-text">
-          <h1 class="greeting-title">你好，{{ teacherName }}</h1>
-          <p class="greeting-date">{{ todayText }}</p>
+      <section class="page-head">
+        <div class="ph-title">
+          <p class="eyebrow">{{ todayText }}</p>
+          <h1>你好，{{ teacherName }}</h1>
+          <p class="lead">{{ leadText }}</p>
         </div>
-        <button
-          type="button"
-          class="work-queue-btn"
-          @click="go(primaryActionRoute())"
-        >
-          {{ primaryActionLabel }}
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path d="M3 8h10 M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
-      </header>
-
-      <!-- 摘要条 -->
-      <section class="summary-strip" aria-label="工作概况">
-        <div class="summary-item">
-          <span class="summary-num">{{ dashboard?.summary?.course_count ?? '—' }}</span>
-          <span class="summary-label">课程</span>
-        </div>
-        <div class="summary-item">
-          <span class="summary-num">{{ dashboard?.summary?.student_count ?? '—' }}</span>
-          <span class="summary-label">学生</span>
-        </div>
-        <div class="summary-item">
-          <span class="summary-num">{{ dashboard?.summary?.pending_review_count ?? '—' }}</span>
-          <span class="summary-label">待复核</span>
-        </div>
-        <div class="summary-item">
-          <span class="summary-num">{{ dashboard?.summary?.upcoming_deadline_count ?? '—' }}</span>
-          <span class="summary-label">近 7 天截止</span>
+        <div class="ph-actions">
+          <button type="button" class="btn btn-secondary" @click="scrollToAnnouncements">查看公告</button>
+          <button type="button" class="btn btn-primary btn-lg work-queue-btn" @click="go(primaryActionRoute())">
+            {{ primaryActionLabel }}
+            <AppIcon name="arrow-right" :size="15" />
+          </button>
         </div>
       </section>
 
-      <!-- 主双列：待处理工作 + 通知公告 -->
-      <div class="main-grid">
-        <section class="card panel-card">
-          <h2 class="panel-title">待处理工作</h2>
-          <DashboardAsyncState
-            :loading="loading"
-            :error="error"
-            :empty="!dashboard?.work_items?.length"
-            empty-title="暂无待处理工作"
-            empty-body="当前没有需要复核或即将截止的任务"
-            @retry="loadDashboard"
-          >
-            <ul v-if="dashboard" class="work-list">
-              <li
-                v-for="item in dashboard.work_items"
-                :key="item.kind + '-' + item.id"
-                class="work-item"
-              >
-                <span class="urgency-dot" :class="'urgency-' + item.urgency" aria-hidden="true"></span>
-                <button type="button" class="work-item-link" @click="go(item.route)">
-                  <span class="work-item-title">{{ item.title }}</span>
-                  <span class="work-item-meta">
-                    {{ item.course_title }}
-                    <template v-if="item.time_at">· {{ formatTime(item.time_at) }}</template>
+      <section class="metric-strip" aria-label="工作概况">
+        <div class="metric"><span class="m-value">{{ dashboard?.summary?.active_course_count ?? dashboard?.summary?.course_count ?? '—' }}</span><span class="m-label">进行中课程</span></div>
+        <div class="metric"><span class="m-value">{{ dashboard?.summary?.student_count ?? '—' }}</span><span class="m-label">在册学生</span></div>
+        <div class="metric em"><span class="m-value">{{ dashboard?.summary?.pending_grading_count ?? '—' }}</span><span class="m-label">待评分提交</span></div>
+        <div class="metric warn"><span class="m-value">{{ dashboard?.summary?.upcoming_deadline_count ?? '—' }}</span><span class="m-label">近 7 天截止</span></div>
+      </section>
+
+      <div class="grid-2-1">
+        <section class="panel">
+          <div class="panel-head">
+            <div class="ph-label"><p class="eyebrow">Work queue</p><h3>待处理工作</h3></div>
+            <button type="button" class="btn btn-ghost btn-sm" @click="go('/teacher/submissions/unified')">全部 →</button>
+          </div>
+          <div class="panel-body work-queue-body">
+            <DashboardAsyncState
+              :loading="loading"
+              :error="error"
+              :empty="!dashboard?.work_items?.length"
+              empty-title="暂无待处理工作"
+              empty-body="当前没有需要复核或即将截止的任务"
+              @retry="loadDashboard"
+            >
+              <div v-if="dashboard" class="work-list">
+                <button
+                  v-for="item in dashboard.work_items"
+                  :key="item.kind + '-' + item.id"
+                  type="button"
+                  class="work-row"
+                  @click="go(item.route)"
+                >
+                  <span class="urgency-dot" :class="'urgency-' + item.urgency" aria-hidden="true"></span>
+                  <span class="wr-main">
+                    <span class="wr-title">{{ item.title }}</span>
+                    <span class="wr-meta">
+                      {{ item.course_title }}
+                      <template v-if="item.time_at"> · {{ formatTime(item.time_at) }}</template>
+                    </span>
+                  </span>
+                  <span v-if="workStatus(item).label" class="badge" :class="workStatus(item).tone">
+                    <span class="dot"></span>{{ workStatus(item).label }}
                   </span>
                 </button>
-                <span class="work-item-detail">{{ item.detail }}</span>
-              </li>
-            </ul>
-          </DashboardAsyncState>
+              </div>
+            </DashboardAsyncState>
+          </div>
         </section>
 
-        <section class="card panel-card">
-          <AnnouncementPanel
-            ref="panelRef"
-            :announcements="dashboard?.announcements || []"
-            :loading="loading"
-            :error="error"
-            :can-publish="true"
-            @retry="loadDashboard"
-            @publish="showComposer = true"
-            @mark-read="markRead"
-          />
+        <section ref="announcementSection" class="panel">
+          <div class="panel-head">
+            <div class="ph-label"><p class="eyebrow">Announcements</p><h3>课程公告</h3></div>
+            <button
+              v-if="!showComposer"
+              type="button"
+              class="btn btn-ghost btn-sm btn-icon publish-btn"
+              aria-label="发布公告"
+              @click="showComposer = true"
+            >
+              <AppIcon name="plus" :size="15" />
+            </button>
+          </div>
+          <div class="panel-body">
+            <AnnouncementPanel
+              ref="panelRef"
+              :announcements="dashboard?.announcements || []"
+              :loading="loading"
+              :error="error"
+              :can-publish="false"
+              @retry="loadDashboard"
+              @publish="showComposer = true"
+              @mark-read="markRead"
+            />
+          </div>
         </section>
       </div>
 
-      <!-- 课程概览 -->
-      <section class="card panel-card">
-        <h2 class="panel-title">课程概览</h2>
-        <DashboardAsyncState
-          :loading="loading"
-          :error="error"
-          :empty="!dashboard?.course_health?.length"
-          empty-title="暂无课程"
-          empty-body="创建课程后，健康度会展示在这里"
-          @retry="loadDashboard"
-        >
-          <ul v-if="dashboard" class="health-list">
-            <li v-for="row in dashboard.course_health" :key="row.course_id" class="health-row">
-              <button type="button" class="health-link" @click="go(row.route)">
-                {{ row.title }}
+      <section class="panel">
+        <div class="panel-head">
+          <div class="ph-label"><p class="eyebrow">Course health</p><h3>课程概览</h3></div>
+        </div>
+        <div class="panel-body">
+          <DashboardAsyncState
+            :loading="loading"
+            :error="error"
+            :empty="!dashboard?.course_health?.length"
+            empty-title="暂无课程"
+            empty-body="创建课程后，健康度会展示在这里"
+            @retry="loadDashboard"
+          >
+            <div v-if="dashboard" class="health-list">
+              <button
+                v-for="row in dashboard.course_health"
+                :key="row.course_id"
+                type="button"
+                class="health-row health-link"
+                @click="go(row.route)"
+              >
+                <span class="health-title">{{ row.title }}</span>
+                <span class="health-meta">
+                  {{ row.student_count }} 名学生
+                  <template v-if="row.pending_review_count"> · {{ row.pending_review_count }} 项待复核</template>
+                  <template v-if="row.upcoming_deadline_count"> · {{ row.upcoming_deadline_count }} 项即将截止</template>
+                  ·
+                  <template v-if="row.at_risk_expected_count">
+                    {{ row.at_risk_submitted_count ?? 0 }}/{{ row.at_risk_expected_count }} 已提交
+                  </template>
+                  <template v-else>—</template>
+                </span>
               </button>
-              <span class="health-meta">
-                {{ row.student_count }} 名学生
-                <template v-if="row.pending_review_count">· {{ row.pending_review_count }} 项待复核</template>
-                <template v-if="row.upcoming_deadline_count">· {{ row.upcoming_deadline_count }} 项即将截止</template>
-                ·
-                <template v-if="row.at_risk_expected_count">
-                  {{ row.at_risk_submitted_count ?? 0 }}/{{ row.at_risk_expected_count }} 已提交
-                </template>
-                <template v-else>—</template>
-              </span>
-            </li>
-          </ul>
-        </DashboardAsyncState>
+            </div>
+          </DashboardAsyncState>
+        </div>
       </section>
 
-      <!-- 最近动态 -->
-      <section class="card panel-card">
-        <h2 class="panel-title">最近动态</h2>
-        <DashboardAsyncState
-          :loading="loading"
-          :error="error"
-          :empty="!dashboard?.recent_activity?.length"
-          empty-title="暂无动态"
-          empty-body="学生提交后，动态会出现在这里"
-          @retry="loadDashboard"
-        >
-          <ul v-if="dashboard" class="activity-list">
-            <li
-              v-for="item in dashboard.recent_activity"
-              :key="item.kind + '-' + item.id"
-              class="activity-item"
-            >
-              <button type="button" class="activity-link" @click="go(item.route)">
-                {{ item.title }}
-              </button>
-              <span class="activity-meta">
-                {{ item.course_title }} · {{ formatTime(item.happened_at) }}
-              </span>
-            </li>
-          </ul>
-        </DashboardAsyncState>
+      <section class="panel">
+        <div class="panel-head">
+          <div class="ph-label"><p class="eyebrow">Recent</p><h3>最近提交</h3></div>
+          <button type="button" class="btn btn-ghost btn-sm" @click="go('/teacher/submissions/unified')">查看全部 →</button>
+        </div>
+        <div class="panel-body recent-body">
+          <DashboardAsyncState
+            :loading="loading"
+            :error="error"
+            :empty="!dashboard?.recent_submissions?.length"
+            empty-title="暂无提交"
+            empty-body="学生提交实验或作业后，记录会出现在这里"
+            @retry="loadDashboard"
+          >
+            <div v-if="dashboard" class="table-scroll">
+              <table class="ds-table recent-table">
+                <thead>
+                  <tr>
+                    <th>学生</th>
+                    <th>实验 / 作业</th>
+                    <th>状态</th>
+                    <th class="cell-num">测试</th>
+                    <th class="cell-num">AI 得分</th>
+                    <th>提交时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in dashboard.recent_submissions" :key="row.kind + '-' + row.id">
+                    <td>
+                      <button type="button" class="cell-main recent-link" @click="go(row.route)">
+                        {{ row.student_name || '未命名学生' }}
+                      </button>
+                      <div class="cell-sub">{{ row.student_no || '—' }}</div>
+                    </td>
+                    <td>
+                      <button type="button" class="recent-entry" @click="go(row.route)">{{ row.entry_title || '未命名任务' }}</button>
+                      <div class="cell-sub">{{ row.course_title || '—' }}</div>
+                    </td>
+                    <td>
+                      <span class="badge" :class="submissionStatus(row).tone">
+                        <span class="dot"></span>{{ submissionStatus(row).label }}
+                      </span>
+                    </td>
+                    <td class="cell-num">{{ testsText(row) }}</td>
+                    <td class="cell-num score-cell">{{ submissionScore(row) }}</td>
+                    <td class="meta">{{ formatTime(row.submitted_at) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </DashboardAsyncState>
+        </div>
       </section>
 
       <AnnouncementComposer
@@ -267,146 +354,33 @@ onMounted(loadDashboard)
 </template>
 
 <style scoped>
-.dash { display: flex; flex-direction: column; gap: 24px; }
+.dash { display: flex; flex-direction: column; gap: var(--space-5); }
 
-/* ── 问候行 ─────────────────────────────────────────────────── */
-.greeting {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 4px 0;
-}
-.greeting-title {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--ink);
-  letter-spacing: -0.02em;
-}
-.greeting-date {
-  margin: 4px 0 0;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-.work-queue-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 9px 18px;
-  border: none;
-  border-radius: var(--radius-md);
-  background: var(--primary);
-  color: var(--surface);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  cursor: pointer;
-}
-.work-queue-btn:hover { background: var(--primary-dark); }
-
-/* ── 摘要条 ─────────────────────────────────────────────────── */
-.summary-strip {
-  display: flex;
-  gap: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  overflow: hidden;
-}
-.summary-item {
-  flex: 1;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 14px 20px;
-  border-right: 1px solid var(--border);
-}
-.summary-item:last-child { border-right: none; }
-.summary-num {
-  font-family: var(--font-display);
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--ink);
-  line-height: 1;
-}
-.summary-label {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
-
-/* ── 面板 ───────────────────────────────────────────────────── */
-.panel-card { padding: 20px; }
-.panel-title {
-  margin: 0 0 14px;
-  font-size: var(--text-base);
-  font-weight: 700;
-  color: var(--ink);
-}
-
-.main-grid {
-  display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: 20px;
-  align-items: start;
-}
-
-/* ── 待处理工作 ─────────────────────────────────────────────── */
-.work-list { list-style: none; margin: 0; padding: 0; }
-.work-item {
+.work-queue-body, .recent-body { padding: 4px 0; }
+.work-list { display: flex; flex-direction: column; }
+.work-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 0;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
+  background: transparent;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  border-radius: 0;
+  text-align: left;
 }
-.work-item:first-child { padding-top: 0; }
-.work-item:last-child { border-bottom: none; padding-bottom: 0; }
-
-.urgency-dot {
-  flex-shrink: 0;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-tertiary);
-}
+.work-row:last-child { border-bottom: 0; }
+.work-row:hover { background: var(--surface-sunken); border-color: var(--border); }
+.urgency-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
 .urgency-dot.urgency-urgent { background: var(--danger); }
 .urgency-dot.urgency-soon { background: var(--warning); }
+.wr-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.wr-title { font-size: var(--text-md); font-weight: 500; color: var(--fg); }
+.wr-meta { font-size: var(--text-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.work-item-link {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.work-item-title {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--ink);
-}
-.work-item-link:hover .work-item-title { color: var(--primary); }
-.work-item-meta {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
-
-.work-item-detail {
-  flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: var(--radius-xs);
-  color: var(--warning);
-  background: var(--warning-light);
-}
-
-/* ── 课程概览 ───────────────────────────────────────────────── */
-.health-list { list-style: none; margin: 0; padding: 0; }
+.health-list { display: flex; flex-direction: column; }
 .health-row {
   display: flex;
   align-items: baseline;
@@ -414,62 +388,35 @@ onMounted(loadDashboard)
   gap: 12px;
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
-}
-.health-row:last-child { border-bottom: none; }
-.health-link {
-  background: none;
-  border: none;
-  padding: 0;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--ink);
-  cursor: pointer;
+  background: transparent;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  border-radius: 0;
   text-align: left;
 }
-.health-link:hover { color: var(--primary); }
-.health-meta { font-size: var(--text-xs); color: var(--text-secondary); flex-shrink: 0; }
+.health-row:last-child { border-bottom: 0; }
+.health-title { font-size: var(--text-md); font-weight: 500; color: var(--fg); }
+.health-row:hover .health-title { color: var(--accent); }
+.health-meta { font-size: var(--text-sm); color: var(--muted); flex-shrink: 0; }
 
-/* ── 最近动态 ───────────────────────────────────────────────── */
-.activity-list { list-style: none; margin: 0; padding: 0; }
-.activity-item {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border);
-}
-.activity-item:last-child { border-bottom: none; }
-.activity-link {
-  background: none;
-  border: none;
+.recent-link, .recent-entry {
+  display: block;
+  max-width: 220px;
   padding: 0;
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--ink);
-  cursor: pointer;
+  border: 0;
+  background: transparent;
   text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.activity-link:hover { color: var(--primary); }
-.activity-meta { font-size: var(--text-xs); color: var(--text-tertiary); flex-shrink: 0; }
+.recent-link { font-weight: 600; color: var(--fg); }
+.recent-entry { color: var(--fg); }
+.recent-link:hover, .recent-entry:hover { color: var(--accent); background: transparent; }
+.score-cell { font-weight: 600; }
 
-/* ── 响应式 ─────────────────────────────────────────────────── */
 @media (max-width: 1024px) {
-  .main-grid { grid-template-columns: 1fr; }
-}
-
-@media (max-width: 768px) {
-  /* 摘要条 2x2 网格：flex-basis 固定 50% 且禁止收缩，保证换行成两列 */
-  .summary-strip { flex-wrap: wrap; }
-  .summary-item {
-    flex: 0 0 50%;
-    box-sizing: border-box;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    padding: 12px 16px;
-  }
-  .summary-item:nth-last-child(-n + 2) { border-bottom: none; }
-  .greeting { align-items: flex-start; flex-direction: column; }
-  .panel-card { padding: 16px; }
+  .grid-2-1 { grid-template-columns: 1fr; }
 }
 </style>

@@ -558,7 +558,7 @@ onMounted(fetchAll)
   margin: 0;
   font-size: var(--text-base);
   font-weight: 700;
-  color: var(--ink);
+  color: var(--fg);
 }
 
 .empty-inline {
@@ -566,7 +566,7 @@ onMounted(fetchAll)
   padding: 16px 0;
   text-align: center;
   font-size: var(--text-sm);
-  color: var(--text-tertiary);
+  color: var(--faint);
 }
 
 .detail-loading { display: flex; flex-direction: column; gap: 0; }
@@ -590,7 +590,7 @@ onMounted(fetchAll)
 .chapter-group-title {
   font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--ink);
+  color: var(--fg);
   margin-bottom: 6px;
 }
 .chapter-row {
@@ -602,21 +602,21 @@ onMounted(fetchAll)
   padding: 6px 10px;
   background: transparent;
   border: none;
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-md);
   cursor: pointer;
   text-align: left;
   font-family: var(--font-body);
 }
-.chapter-row:hover { background: var(--paper); }
+.chapter-row:hover { background: var(--bg); }
 .chapter-row-icon {
   flex-shrink: 0;
   display: inline-flex;
-  color: var(--text-tertiary);
+  color: var(--faint);
 }
 .chapter-row-title {
   flex: 1;
   font-size: var(--text-sm);
-  color: var(--ink);
+  color: var(--fg);
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -629,11 +629,11 @@ onMounted(fetchAll)
 }
 
 /* 状态样式：当前为蓝色、锁定为灰、已完成含勾 */
-.chapter-row.is-current .chapter-row-icon { color: var(--primary); }
-.chapter-row.is-current .chapter-row-title { font-weight: 600; color: var(--primary); }
+.chapter-row.is-current .chapter-row-icon { color: var(--accent); }
+.chapter-row.is-current .chapter-row-title { font-weight: 600; color: var(--accent); }
 .chapter-row.is-locked { cursor: default; opacity: 0.6; }
 .chapter-row.is-locked:hover { background: transparent; }
-.chapter-row.is-completed .chapter-row-title { color: var(--text-secondary); }
+.chapter-row.is-completed .chapter-row-title { color: var(--muted); }
 
 /* ── 最近作业考试 / 通用行 ─────────────────────────────────── */
 .recent-list { display: flex; flex-direction: column; }
@@ -656,7 +656,7 @@ onMounted(fetchAll)
 .recent-row-icon {
   flex-shrink: 0;
   display: inline-flex;
-  color: var(--text-tertiary);
+  color: var(--faint);
 }
 .recent-row-text {
   flex: 1;
@@ -668,13 +668,13 @@ onMounted(fetchAll)
 .recent-row-title {
   font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--ink);
+  color: var(--fg);
 }
-.recent-row:hover .recent-row-title { color: var(--primary); }
-.recent-row.static:hover .recent-row-title { color: var(--ink); }
+.recent-row:hover .recent-row-title { color: var(--accent); }
+.recent-row.static:hover .recent-row-title { color: var(--fg); }
 .recent-row-meta {
   font-size: var(--text-xs);
-  color: var(--text-tertiary);
+  color: var(--faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -696,14 +696,14 @@ onMounted(fetchAll)
   flex-shrink: 0;
   width: 8px; height: 8px;
   border-radius: 50%;
-  background: var(--text-tertiary);
+  background: var(--faint);
 }
 .side-row-dot.urgency-urgent { background: var(--danger); }
 .side-row-dot.urgency-soon { background: var(--warning); }
 .side-row-icon {
   flex-shrink: 0;
   display: inline-flex;
-  color: var(--text-tertiary);
+  color: var(--faint);
 }
 .side-score {
   flex-shrink: 0;
@@ -731,12 +731,12 @@ onMounted(fetchAll)
 .side-row-title {
   font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--ink);
+  color: var(--fg);
 }
-.side-row-main:hover .side-row-title { color: var(--primary); }
+.side-row-main:hover .side-row-title { color: var(--accent); }
 .side-row-meta {
   font-size: var(--text-xs);
-  color: var(--text-tertiary);
+  color: var(--faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

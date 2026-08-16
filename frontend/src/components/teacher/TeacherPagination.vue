@@ -98,48 +98,46 @@ function jumpToPage() {
 </template>
 
 <style scoped>
+/* 分页视觉来自全局 .pagination / .pg-btn；仅保留组件扩展（跳页输入）。 */
 .teacher-pagination.pagination-bar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 16px;
-  min-height: 64px;
-  padding: 12px 18px;
-  border-top: 1px solid var(--border);
-  color: var(--text-secondary);
-  font-size: 13px;
+  min-height: 58px;
+  padding: 12px 16px;
+  color: var(--muted);
+  font-size: var(--text-sm);
 }
 
-.teacher-pagination-controls { display: flex; align-items: center; gap: 6px; }
+.teacher-pagination-controls { display: flex; align-items: center; gap: 2px; }
 .teacher-pagination-controls button {
-  display: grid;
-  place-items: center;
-  min-width: 34px;
-  height: 34px;
-  padding: 0 8px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
   border: 1px solid transparent;
-  border-radius: 7px;
-  color: var(--text-secondary);
+  border-radius: var(--radius-md);
+  color: var(--muted);
   background: transparent;
-  font-size: 13px;
+  font-size: var(--text-base);
 }
-.teacher-pagination-controls button:hover:not(:disabled) { border-color: var(--border); color: var(--ink); background: var(--surface-raised); }
-.teacher-pagination-controls button.active { border-color: var(--primary); color: #fff; background: var(--primary); }
+.teacher-pagination-controls button:hover:not(:disabled) { background: var(--surface-sunken); color: var(--fg); }
+.teacher-pagination-controls button.active { background: var(--accent); color: var(--surface); font-weight: 600; }
 .teacher-pagination-controls button:disabled { opacity: .35; }
 .teacher-pagination-jump { display: flex; align-items: center; justify-self: end; gap: 14px; white-space: nowrap; }
 .teacher-pagination-jump-field { display: inline-flex; align-items: center; gap: 5px; }
 .teacher-pagination-jump input {
   width: 52px;
-  height: 32px;
+  height: 30px;
   padding: 0 7px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  color: var(--ink);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--fg);
   background: var(--surface);
   text-align: center;
-  font-size: 13px;
+  font-size: var(--text-base);
 }
-.teacher-pagination-jump input:focus { border-color: var(--primary); outline: 0; box-shadow: var(--shadow-glow-primary); }
+.teacher-pagination-jump input:focus { border-color: var(--accent); outline: 0; box-shadow: 0 0 0 3px var(--accent-soft); }
 
 @media (max-width: 720px) {
   .teacher-pagination { grid-template-columns: 1fr auto; gap: 10px; }

@@ -21,7 +21,7 @@
             :disabled="generating"
             @click="$emit('generate-test-groups')"
           >
-            {{ generating ? '生成中…' : '🤖 AI 生成测试组' }}
+            {{ generating ? '生成中…' : 'AI 生成测试组' }}
           </button>
           <button class="btn-sm btn-outline" @click="addGroup">+ 添加测试组</button>
         </div>
@@ -185,37 +185,37 @@ const validationMsg = computed(() => {
 
 <style scoped>
 .form-group { margin: 12px 0; }
-.form-group label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; color: #475569; }
-.form-group select { width: 100%; padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; }
+.form-group label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; color: var(--muted); }
+.form-group select { width: 100%; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
 .section { margin: 16px 0; }
 .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.section-header h5 { margin: 0; font-size: 13px; font-weight: 600; color: #475569; }
+.section-header h5 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
 .section-header-actions { display: flex; gap: 6px; align-items: center; }
-.btn-ai { border: 1px solid #7c3aed; color: #7c3aed; background: #fff; }
+.btn-ai { border: 1px solid var(--info); color: var(--info); background: var(--surface); }
 .btn-ai:disabled { opacity: 0.5; cursor: not-allowed; }
-.group-card { border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; margin: 8px 0; background: #fff; }
+.group-card { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px; margin: 8px 0; background: var(--surface); }
 .group-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .cap-row { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
-.input-sm { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; }
+.input-sm { padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 12px; }
 .input-num { width: 70px; }
 .code-editor {
-  width: 100%; background: #0F172A; color: #E2E8F0; border: 1px solid #1E293B;
-  border-radius: 4px; padding: 8px; font-family: 'Consolas', 'Monaco', monospace;
+  width: 100%; background: var(--fg); color: var(--border); border: 1px solid oklch(0.32 0.02 155);
+  border-radius: var(--radius-sm); padding: 8px; font-family: 'Consolas', 'Monaco', monospace;
   font-size: 12px; line-height: 1.5; resize: vertical; margin-top: 4px;
 }
-.hint { color: #94a3b8; font-size: 12px; }
-.hint-ok { color: #16a34a; font-size: 12px; margin-top: 4px; }
-.hint-err { color: #dc2626; font-size: 12px; margin-top: 4px; }
-.field-help { margin: 0 0 6px; color: #64748b; font-size: 12px; line-height: 1.5; }
+.hint { color: var(--faint); font-size: 12px; }
+.hint-ok { color: var(--success); font-size: 12px; margin-top: 4px; }
+.hint-err { color: var(--danger); font-size: 12px; margin-top: 4px; }
+.field-help { margin: 0 0 6px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .legacy-constraints {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  margin: 6px 0; padding: 8px 10px; border: 1px solid #f59e0b; border-radius: 6px;
-  background: #fffbeb; color: #b45309; font-size: 12px; line-height: 1.5;
+  margin: 6px 0; padding: 8px 10px; border: 1px solid var(--warning); border-radius: var(--radius-md);
+  background: var(--warning-bg); color: var(--warning); font-size: 12px; line-height: 1.5;
 }
-.character-count { margin-top: 2px; color: #94a3b8; font-size: 11px; text-align: right; }
-.btn-sm { padding: 4px 12px; font-size: 12px; border-radius: 4px; cursor: pointer; border: 1px solid #ddd; background: #fff; }
-.btn-outline { border: 1px solid #3b82f6; color: #3b82f6; background: #fff; }
-.btn-danger-text { border: none; background: none; color: #dc2626; cursor: pointer; }
+.character-count { margin-top: 2px; color: var(--faint); font-size: 11px; text-align: right; }
+.btn-sm { padding: 4px 12px; font-size: 12px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--border-strong); background: var(--surface); }
+.btn-outline { border: 1px solid var(--accent); color: var(--accent); background: var(--surface); }
+.btn-danger-text { border: none; background: none; color: var(--danger); cursor: pointer; }
 .text-sm { font-size: 12px; }
-.text-secondary { color: #94a3b8; }
+.text-secondary { color: var(--faint); }
 </style>

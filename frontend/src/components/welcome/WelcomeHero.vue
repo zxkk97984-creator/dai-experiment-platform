@@ -128,15 +128,15 @@ onMounted(() => {
   position: relative;
   overflow: hidden;
   padding: 80px 56px 60px;
-  background: #F8FAFF;
+  background: var(--surface-subtle);
 }
 
 .hero-bg {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 80% 60% at 80% 20%, rgba(36,103,237,0.04) 0%, transparent 60%),
-    radial-gradient(ellipse 50% 40% at 20% 80%, rgba(115,89,237,0.03) 0%, transparent 60%);
+    radial-gradient(ellipse 80% 60% at 80% 20%, oklch(0.52 0.095 158 / 0.04) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 40% at 20% 80%, oklch(0.52 0.09 235 / 0.03) 0%, transparent 60%);
   pointer-events: none;
 }
 
@@ -159,7 +159,7 @@ onMounted(() => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.18em;
-  color: #7359ED;
+  color: var(--info);
   margin: 0 0 16px;
 }
 
@@ -168,14 +168,14 @@ onMounted(() => {
   font-weight: 700;
   line-height: 1.1;
   letter-spacing: -0.03em;
-  color: #13213A;
+  color: var(--fg);
   margin: 0 0 20px;
 }
 
 .hero-desc {
   font-size: 16px;
   line-height: 1.65;
-  color: #6E7B92;
+  color: var(--muted);
   margin: 0 0 32px;
 }
 
@@ -194,39 +194,39 @@ onMounted(() => {
   font-weight: 600;
   font-family: inherit;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .hero-btn--primary {
-  background: #2467ED;
-  color: #fff;
+  background: var(--accent);
+  color: var(--surface);
 }
 
 .hero-btn--primary:hover {
-  background: #1D4ED8;
+  background: var(--accent-hover);
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(36,103,237,0.3);
+  box-shadow: var(--shadow-md);
 }
 
 .hero-btn--secondary {
   background: transparent;
-  color: #13213A;
-  border: 1px solid #E2E8F0;
+  color: var(--fg);
+  border: 1px solid var(--border);
 }
 
 .hero-btn--secondary:hover {
-  border-color: #2467ED;
-  color: #2467ED;
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* ====== Code Window ====== */
 .code-window {
-  background: #14213B;
-  border-radius: 16px;
+  background: var(--fg);
+  border-radius: var(--radius-lg);
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(20,33,59,0.25);
+  box-shadow: var(--shadow-lg);
 }
 
 .code-header {
@@ -234,7 +234,7 @@ onMounted(() => {
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid oklch(0.99 0.001 95 / 0.06);
 }
 
 .code-dots {
@@ -248,24 +248,24 @@ onMounted(() => {
   border-radius: 50%;
 }
 
-.code-dots i:nth-child(1) { background: #FF5F56; }
-.code-dots i:nth-child(2) { background: #FFBD2E; }
-.code-dots i:nth-child(3) { background: #27C93F; }
+.code-dots i:nth-child(1) { background: var(--danger); }
+.code-dots i:nth-child(2) { background: var(--warning); }
+.code-dots i:nth-child(3) { background: var(--success); }
 
 .code-file {
   font-family: var(--font-mono);
   font-size: 12px;
-  color: rgba(255,255,255,0.4);
+  color: oklch(0.99 0.001 95 / 0.4);
 }
 
 .code-status {
   margin-left: auto;
   font-size: 11px;
   font-family: var(--font-mono);
-  color: #58DDA7;
-  background: rgba(88,221,167,0.12);
+  color: var(--success);
+  background: oklch(0.55 0.13 150 / 0.12);
   padding: 2px 10px;
-  border-radius: 20px;
+  border-radius: var(--radius-lg);
 }
 
 .code-body {
@@ -280,11 +280,11 @@ onMounted(() => {
   align-items: flex-end;
   width: 42px;
   padding-right: 14px;
-  border-right: 1px solid rgba(255,255,255,0.06);
+  border-right: 1px solid oklch(0.99 0.001 95 / 0.06);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.7;
-  color: rgba(255,255,255,0.2);
+  color: oklch(0.99 0.001 95 / 0.2);
   user-select: none;
   flex-shrink: 0;
 }
@@ -296,7 +296,7 @@ onMounted(() => {
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.7;
-  color: #CBD5E1;
+  color: var(--border-strong);
   overflow-x: auto;
 }
 
@@ -306,7 +306,7 @@ onMounted(() => {
   transform: translateX(8px);
   transition: all 0.3s ease;
   background: transparent;
-  color: #CBD5E1;
+  color: var(--border-strong);
   padding: 0;
   border: none;
   border-radius: 0;
@@ -319,9 +319,9 @@ onMounted(() => {
 
 /* ====== Code Footer (output strip inside dark window) ====== */
 .code-footer {
-  border-top: 1px solid rgba(255,255,255,0.06);
+  border-top: 1px solid oklch(0.99 0.001 95 / 0.06);
   padding: 14px 20px;
-  background: rgba(0, 0, 0, 0.18);
+  background: oklch(0 0 0 / 0.18);
   opacity: 0;
   transform: translateY(8px);
   transition: all 0.4s ease;
@@ -347,23 +347,23 @@ onMounted(() => {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: rgba(255,255,255,0.35);
+  color: oklch(0.99 0.001 95 / 0.35);
 }
 
 .code-footer-item strong {
   font-size: 17px;
   font-weight: 700;
-  color: #E2E8F0;
+  color: var(--border);
 }
 
-.txt-accent { color: #60A5FA !important; }
-.txt-success { color: #58DDA7 !important; }
+.txt-accent { color: var(--info) !important; }
+.txt-success { color: var(--success) !important; }
 
 /* ====== Score Strip (below code window, dark themed) ====== */
 .score-strip {
   margin-top: 10px;
-  background: #14213B;
-  border-radius: 12px;
+  background: var(--fg);
+  border-radius: var(--radius-lg);
   padding: 14px 18px;
   display: flex;
   gap: 12px;
@@ -371,7 +371,7 @@ onMounted(() => {
   opacity: 0;
   transform: translateY(8px);
   transition: all 0.4s ease 0.15s;
-  box-shadow: 0 8px 30px rgba(20,33,59,0.18);
+  box-shadow: var(--shadow-md);
 }
 
 .score-strip.visible {
@@ -385,8 +385,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #2467ED, #7359ED);
-  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--info));
+  color: var(--surface);
   font-size: 11px;
   font-weight: 700;
   border-radius: 50%;
@@ -402,12 +402,12 @@ onMounted(() => {
 .score-label {
   font-size: 14px;
   font-weight: 600;
-  color: #E2E8F0;
+  color: var(--border);
 }
 
 .score-comment {
   font-size: 12px;
-  color: rgba(255,255,255,0.45);
+  color: oklch(0.99 0.001 95 / 0.45);
   line-height: 1.4;
 }
 

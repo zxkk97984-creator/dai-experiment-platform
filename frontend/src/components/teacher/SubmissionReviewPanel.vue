@@ -88,23 +88,23 @@ function submit() {
 <style scoped>
 .review-panel { position: sticky; top: 16px; overflow: hidden; }
 .panel-head { min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 18px; border-bottom: 1px solid var(--border); }
-.panel-head h2 { margin: 0 0 3px; color: var(--ink); font-size: 15px; }
-.panel-head p { margin: 0; color: var(--text-secondary); font-size: 11px; }
-.current-status { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; border-bottom: 1px solid var(--border); color: var(--text-secondary); font-size: 12px; }
-.status-pill { display: inline-flex; width: fit-content; padding: 4px 8px; border: 1px solid var(--primary-soft); border-radius: var(--radius-sm); background: var(--primary-light); color: var(--primary); font-size: 11px; font-weight: 500; }
-.status-pill.pending { border-color: var(--warning-soft); background: var(--warning-light); color: var(--warning); }
-.status-pill.graded { border-color: var(--success-soft); background: var(--success-light); color: var(--success); }
+.panel-head h2 { margin: 0 0 3px; color: var(--fg); font-size: 15px; }
+.panel-head p { margin: 0; color: var(--muted); font-size: 11px; }
+.current-status { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.status-pill { display: inline-flex; width: fit-content; padding: 4px 8px; border: 1px solid var(--accent-soft); border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 500; }
+.status-pill.pending { border-color: var(--warning-bg); background: var(--warning-bg); color: var(--warning); }
+.status-pill.graded { border-color: var(--success-bg); background: var(--success-bg); color: var(--success); }
 .score-row { padding: 18px; border-bottom: 1px solid var(--border); }
-.score-row > label, .feedback-field > span { display: block; margin-bottom: 8px; color: var(--ink); font-size: 12px; font-weight: 600; }
+.score-row > label, .feedback-field > span { display: block; margin-bottom: 8px; color: var(--fg); font-size: 12px; font-weight: 600; }
 .score-input { display: flex; align-items: center; gap: 10px; }
-.score-input input { width: 126px; height: 46px; color: var(--primary); font-size: 21px; font-weight: 700; text-align: center; }
-.score-input span { color: var(--text-secondary); font-size: 12px; }
+.score-input input { width: 126px; height: 46px; color: var(--accent); font-size: 21px; font-weight: 700; text-align: center; }
+.score-input span { color: var(--muted); font-size: 12px; }
 .feedback-field { position: relative; display: block; padding: 18px; border-bottom: 1px solid var(--border); }
 .feedback-field textarea { min-height: 166px; resize: vertical; line-height: 1.65; }
-.feedback-field small { position: absolute; right: 28px; bottom: 26px; color: var(--text-tertiary); font-size: 10px; }
-.reviewed-time { display: flex; align-items: center; gap: 6px; padding: 13px 18px 0; color: var(--text-tertiary); font-size: 11px; }
-.save-button { width: calc(100% - 36px); height: 42px; margin: 16px 18px 18px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--primary); border-radius: var(--radius-control); background: var(--primary); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
-.save-button:hover:not(:disabled) { border-color: var(--primary-dark); background: var(--primary-dark); box-shadow: 0 4px 12px rgba(20, 99, 243, .18); }
+.feedback-field small { position: absolute; right: 28px; bottom: 26px; color: var(--faint); font-size: 10px; }
+.reviewed-time { display: flex; align-items: center; gap: 6px; padding: 13px 18px 0; color: var(--faint); font-size: 11px; }
+.save-button { width: calc(100% - 36px); height: 42px; margin: 16px 18px 18px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--accent); border-radius: var(--radius-md); background: var(--accent); color: var(--surface); font-size: 13px; font-weight: 600; cursor: pointer; }
+.save-button:hover:not(:disabled) { border-color: var(--accent-hover); background: var(--accent-hover); box-shadow: var(--shadow-sm); }
 .save-button:disabled { opacity: .55; cursor: not-allowed; }
 @media (max-width: 1199px) {
   .review-panel { position: static; }

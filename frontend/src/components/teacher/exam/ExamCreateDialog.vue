@@ -80,7 +80,7 @@ function save() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(15, 23, 42, .3);
+  background: oklch(0.2 0.01 150 / 0.3);
 }
 .modal-backdrop.create-backdrop {
   align-items: center;
@@ -92,8 +92,8 @@ function save() {
   overflow: auto;
   padding: 24px;
   border: 1px solid var(--border);
-  border-radius: 14px;
-  background: #fff;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
   box-shadow: var(--shadow-xl);
 }
 .create-heading {
@@ -116,15 +116,15 @@ function save() {
   min-height: 42px;
   text-align: left;
 }
-.placeholder { color: var(--text-tertiary); }
+.placeholder { color: var(--faint); }
 .create-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 .manual-row { display: flex; gap: 10px; }
 .manual-confirm { flex: none; }
 .course-list { display: grid; gap: 7px; max-height: 250px; margin-top: 14px; overflow: auto; }
 .course-item { justify-content: flex-start; text-align: left; }
-.course-item.active { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
-.empty-tip { text-align: center; color: var(--text-secondary); }
+.course-item.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.empty-tip { text-align: center; color: var(--muted); }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.form-hint { margin: 6px 0 0; font-size: var(--text-sm); color: var(--text-secondary); }
+.form-hint { margin: 6px 0 0; font-size: var(--text-sm); color: var(--muted); }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
 </style>

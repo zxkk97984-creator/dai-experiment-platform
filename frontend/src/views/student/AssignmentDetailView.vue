@@ -643,10 +643,10 @@ function stopSubmitPolling() {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: var(--text-sm);
 }
-.back-btn:hover { color: var(--text); }
+.back-btn:hover { color: var(--fg); }
 
 .header-info {
   display: flex;
@@ -659,7 +659,7 @@ function stopSubmitPolling() {
   font-family: var(--font-display);
   font-size: var(--text-xl);
   font-weight: 600;
-  color: var(--ink);
+  color: var(--fg);
   letter-spacing: -0.01em;
   margin: 0;
   white-space: nowrap;
@@ -677,7 +677,7 @@ function stopSubmitPolling() {
   background: var(--surface);
   font-size: var(--text-xs);
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--muted);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -685,14 +685,14 @@ function stopSubmitPolling() {
   padding: 0;
   transition: all var(--duration-fast) var(--ease-out);
 }
-.q-dot:hover { border-color: var(--primary); color: var(--primary); }
+.q-dot:hover { border-color: var(--accent); color: var(--accent); }
 .q-dot.active {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--surface);
 }
 .q-dot.done {
-  background: var(--success-light);
+  background: var(--success-bg);
   border-color: var(--success);
   color: var(--success);
 }
@@ -704,16 +704,16 @@ function stopSubmitPolling() {
   gap: var(--space-4);
   margin-bottom: var(--space-4);
   padding: 11px 14px;
-  border: 1px solid #bfdbfe;
+  border: 1px solid var(--info-bg);
   border-radius: var(--radius-md, 8px);
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: var(--accent-soft);
+  color: var(--accent-hover);
 }
 .deadline-banner>div { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .deadline-banner strong { font-size: var(--text-sm); white-space: nowrap; }
 .deadline-banner span,.deadline-banner small { font-size: var(--text-xs, 12px); line-height: 1.5; }
-.deadline-banner.closed { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
-.deadline-banner.closed small { color: #991b1b; text-align: right; }
+.deadline-banner.closed { border-color: var(--danger-bg); background: var(--danger-bg); color: var(--danger); }
+.deadline-banner.closed small { color: var(--danger); text-align: right; }
 
 /* ── Problem Card ────────────────────────────────────────────────────── */
 .problem-card {
@@ -733,7 +733,7 @@ function stopSubmitPolling() {
   cursor: pointer;
   user-select: none;
 }
-.problem-header:hover { background: var(--surface-raised); }
+.problem-header:hover { background: var(--surface-subtle); }
 .problem-header:first-child { border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
 
 .problem-label {
@@ -742,13 +742,13 @@ function stopSubmitPolling() {
   gap: 6px;
   font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--text);
+  color: var(--fg);
   letter-spacing: 0.01em;
 }
-.problem-label svg { color: var(--text-secondary); }
+.problem-label svg { color: var(--muted); }
 
 .collapse-btn {
-  color: var(--text-secondary);
+  color: var(--muted);
   padding: 2px 6px;
   width: auto;
 }
@@ -761,14 +761,14 @@ function stopSubmitPolling() {
 .problem-desc {
   font-size: var(--text-sm);
   line-height: 1.75;
-  color: var(--text);
+  color: var(--fg);
   padding-top: var(--space-4);
 }
-.problem-desc :deep(strong) { color: var(--ink); font-weight: 600; }
+.problem-desc :deep(strong) { color: var(--fg); font-weight: 600; }
 .problem-desc :deep(code) {
-  background: var(--surface-raised);
+  background: var(--surface-subtle);
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: 0.85em;
   color: var(--danger);
@@ -780,17 +780,17 @@ function stopSubmitPolling() {
 .env-banner {
   margin-top: var(--space-4);
   padding: var(--space-3) var(--space-4);
-  background: var(--surface-raised);
+  background: var(--surface-subtle);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--primary);
+  border-left: 3px solid var(--accent);
   border-radius: var(--radius-md);
   display: flex; flex-direction: column; gap: 6px;
   font-size: var(--text-sm);
 }
 .env-line { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
-.env-label { color: var(--text-secondary); font-weight: 500; white-space: nowrap; }
-.env-value { color: var(--ink); font-weight: 600; }
-.env-imports { color: var(--text-secondary); font-weight: 400; font-family: var(--font-mono); font-size: 0.92em; }
+.env-label { color: var(--muted); font-weight: 500; white-space: nowrap; }
+.env-value { color: var(--fg); font-weight: 600; }
+.env-imports { color: var(--muted); font-weight: 400; font-family: var(--font-mono); font-size: 0.92em; }
 
 .meta-item { display: flex; flex-direction: column; gap: 4px; }
 
@@ -799,17 +799,17 @@ function stopSubmitPolling() {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-secondary);
+  color: var(--muted);
 }
 
 .meta-code {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  background: var(--surface-raised);
+  background: var(--surface-subtle);
   padding: 6px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  color: var(--text);
+  color: var(--fg);
   line-height: 1.55;
 }
 .meta-code.pre { white-space: pre; overflow-x: auto; }
@@ -843,8 +843,8 @@ function stopSubmitPolling() {
   box-shadow: var(--shadow-sm);
 }
 .editor-panel:focus-within {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px oklch(0.52 0.095 158 / 0.1);
 }
 
 /* File tabs */
@@ -853,7 +853,7 @@ function stopSubmitPolling() {
   align-items: center;
   gap: 2px;
   padding: 6px var(--space-3) 0;
-  background: var(--surface-raised);
+  background: var(--surface-subtle);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
 }
@@ -865,8 +865,8 @@ function stopSubmitPolling() {
   padding: 6px 12px;
   font-size: var(--text-xs);
   font-weight: 500;
-  color: var(--text-secondary);
-  background: var(--surface-raised);
+  color: var(--muted);
+  background: var(--surface-subtle);
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   border: 1px solid transparent;
   cursor: default;
@@ -875,13 +875,13 @@ function stopSubmitPolling() {
 }
 .file-tab.active {
   background: var(--surface);
-  color: var(--ink);
+  color: var(--fg);
   border-color: var(--border);
   border-bottom-color: var(--surface);
   margin-bottom: -1px;
 }
 
-.file-icon { color: var(--primary); flex-shrink: 0; }
+.file-icon { color: var(--accent); flex-shrink: 0; }
 
 .file-close {
   display: inline-flex;
@@ -889,10 +889,10 @@ function stopSubmitPolling() {
   justify-content: center;
   width: 16px;
   height: 16px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   margin-left: 2px;
-  color: var(--text-secondary);
+  color: var(--muted);
   opacity: 0.5;
   transition: all var(--duration-fast);
 }
@@ -929,7 +929,7 @@ function stopSubmitPolling() {
 .editor-resize-grip {
   width: 48px;
   height: 3px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   opacity: 0;
   transition: opacity var(--duration-fast) var(--ease-out);
@@ -942,8 +942,8 @@ function stopSubmitPolling() {
 .editor-gutter {
   flex-shrink: 0;
   width: 48px;
-  background: #0F172A;
-  border-right: 1px solid #1E293B;
+  background: var(--fg);
+  border-right: 1px solid oklch(0.32 0.02 155);
   padding: var(--space-3) 0;
   overflow: hidden;
   user-select: none;
@@ -953,15 +953,15 @@ function stopSubmitPolling() {
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.7;
-  color: #4A5568;
+  color: var(--muted);
   text-align: right;
   margin: 0;
 }
 
 .editor-textarea {
   flex: 1;
-  background: #0F172A;
-  color: #E2E8F0;
+  background: var(--fg);
+  color: var(--border);
   border: none;
   border-radius: 0;
   padding: var(--space-3) var(--space-4);
@@ -978,16 +978,16 @@ function stopSubmitPolling() {
   outline: none;
   border: none;
   box-shadow: none;
-  background: #0F172A;
+  background: var(--fg);
 }
-.editor-textarea::placeholder { color: #4E5670; }
+.editor-textarea::placeholder { color: var(--muted); }
 .editor-textarea.completed { opacity: 0.6; cursor: not-allowed; }
 .editor-textarea.completed::placeholder { color: var(--success); }
 
 .completed-badge {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 9px 24px; font-size: var(--text-sm); font-weight: 600;
-  color: var(--success); background: var(--success-light);
+  color: var(--success); background: var(--success-bg);
   border: 1px solid var(--success); border-radius: var(--radius-md);
 }
 
@@ -1000,7 +1000,7 @@ function stopSubmitPolling() {
   display: flex;
   gap: 0;
   padding: 0 var(--space-3);
-  background: var(--surface-raised);
+  background: var(--surface-subtle);
   border-bottom: 1px solid var(--border);
 }
 
@@ -1011,7 +1011,7 @@ function stopSubmitPolling() {
   padding: 8px 16px;
   font-size: var(--text-xs);
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--muted);
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
@@ -1020,10 +1020,10 @@ function stopSubmitPolling() {
   transition: all var(--duration-fast) var(--ease-out);
   letter-spacing: 0.02em;
 }
-.bottom-tab:hover { color: var(--text); background: var(--border); }
+.bottom-tab:hover { color: var(--fg); background: var(--border); }
 .bottom-tab.active {
-  color: var(--primary);
-  border-bottom-color: var(--primary);
+  color: var(--accent);
+  border-bottom-color: var(--accent);
   background: transparent;
 }
 
@@ -1045,7 +1045,7 @@ function stopSubmitPolling() {
   display: block;
   font-size: var(--text-xs);
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--muted);
   margin-bottom: 5px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -1053,31 +1053,31 @@ function stopSubmitPolling() {
 
 .custom-input {
   width: 100%;
-  background: var(--surface-raised);
+  background: var(--surface-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--space-3);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  color: var(--text);
+  color: var(--fg);
   resize: vertical;
   line-height: 1.55;
   transition: border-color var(--duration-fast) var(--ease-out);
 }
 .custom-input:focus {
   outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--accent-light);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
-.custom-input::placeholder { color: #b0b8c4; }
+.custom-input::placeholder { color: var(--border-strong); }
 
 /* ── Terminal Panel ──────────────────────────────────────────────────── */
 .terminal-panel {
-  background: #0F172A;
-  border: 1px solid #1E293B;
+  background: var(--fg);
+  border: 1px solid oklch(0.32 0.02 155);
   border-radius: var(--radius-md);
   overflow: hidden;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  box-shadow: inset 0 1px 0 oklch(0.99 0.001 95 / 0.03);
 }
 
 .terminal-header {
@@ -1085,8 +1085,8 @@ function stopSubmitPolling() {
   align-items: center;
   gap: 6px;
   padding: 8px 12px;
-  background: #1E293B;
-  border-bottom: 1px solid #1E293B;
+  background: oklch(0.32 0.02 155);
+  border-bottom: 1px solid oklch(0.32 0.02 155);
   user-select: none;
 }
 
@@ -1095,15 +1095,15 @@ function stopSubmitPolling() {
   height: 10px;
   border-radius: 50%;
 }
-.terminal-dot.red    { background: #E05555; }
-.terminal-dot.yellow { background: #D8A723; }
-.terminal-dot.green  { background: #3DA069; }
+.terminal-dot.red    { background: var(--danger); }
+.terminal-dot.yellow { background: var(--warning); }
+.terminal-dot.green  { background: var(--success); }
 
 .terminal-title {
   margin-left: 8px;
   font-size: var(--text-xs);
   font-weight: 500;
-  color: #6A7086;
+  color: var(--faint);
   letter-spacing: 0.03em;
 }
 
@@ -1123,17 +1123,17 @@ function stopSubmitPolling() {
 }
 .terminal-line + .terminal-line { margin-top: 2px; }
 
-.terminal-line .prompt  { color: #3DA069; margin-right: 6px; }
-.terminal-line .check   { color: #3DA069; margin-right: 4px; }
-.terminal-line .cross   { color: #E05555; margin-right: 4px; }
-.terminal-line .time    { color: #6A7086; margin-left: 8px; font-size: 11px; }
+.terminal-line .prompt  { color: var(--success); margin-right: 6px; }
+.terminal-line .check   { color: var(--success); margin-right: 4px; }
+.terminal-line .cross   { color: var(--danger); margin-right: 4px; }
+.terminal-line .time    { color: var(--faint); margin-left: 8px; font-size: 11px; }
 
-.terminal-line.muted   { color: #6A7086; }
-.terminal-line.success { color: #A3D9B8; }
-.terminal-line.error   { color: #EEA3A3; }
-.terminal-line.warning { color: #E0C56A; }
-.terminal-line.stdout  { color: #C5CDE0; }
-.terminal-line.stderr  { color: #EEA3A3; }
+.terminal-line.muted   { color: var(--faint); }
+.terminal-line.success { color: var(--success-bg); }
+.terminal-line.error   { color: var(--danger); }
+.terminal-line.warning { color: var(--warning); }
+.terminal-line.stdout  { color: var(--border); }
+.terminal-line.stderr  { color: var(--danger); }
 
 /* ── Submit Tab ──────────────────────────────────────────────────────── */
 .submit-tab { padding: var(--space-5) var(--space-4); }
@@ -1143,7 +1143,7 @@ function stopSubmitPolling() {
   align-items: flex-start;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
-  background: var(--warning-light);
+  background: var(--warning-bg);
   border: 1px solid var(--warning);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
@@ -1158,7 +1158,7 @@ function stopSubmitPolling() {
   border: 1px solid var(--border);
   background: var(--surface);
 }
-.submit-result-card.result-pending { background: var(--surface-raised); }
+.submit-result-card.result-pending { background: var(--surface-subtle); }
 
 .result-status {
   font-size: var(--text-md); font-weight: 600; margin-bottom: var(--space-2);
@@ -1168,7 +1168,7 @@ function stopSubmitPolling() {
 .result-fail .result-status { color: var(--danger); }
 
 .result-meta {
-  font-size: var(--text-sm); color: var(--text-secondary);
+  font-size: var(--text-sm); color: var(--muted);
   display: flex; gap: var(--space-4);
 }
 
@@ -1177,9 +1177,9 @@ function stopSubmitPolling() {
   margin: var(--space-2) 0;
   padding: var(--space-2) var(--space-3);
   background: var(--surface);
-  border: 1px dashed var(--warning, #d97706);
+  border: 1px dashed var(--warning, var(--warning));
   border-radius: var(--radius-sm);
-  color: var(--warning, #d97706);
+  color: var(--warning, var(--warning));
   font-size: var(--text-sm);
   display: flex; align-items: center; gap: 6px;
   line-height: 1.5;
@@ -1192,11 +1192,11 @@ function stopSubmitPolling() {
   border-radius: var(--radius-sm);
   background: var(--surface);
   border: 1px dashed var(--border-strong);
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: var(--text-sm);
   line-height: 1.6;
 }
-.shadow-mode-note strong { color: var(--ink); }
+.shadow-mode-note strong { color: var(--fg); }
 
 /* ── Action Bar ──────────────────────────────────────────────────────── */
 .action-bar {
@@ -1215,16 +1215,16 @@ function stopSubmitPolling() {
   padding: 9px 20px;
   font-size: var(--text-sm);
   font-weight: 500;
-  color: var(--primary);
+  color: var(--accent);
   background: var(--surface);
-  border: 1px solid var(--primary);
+  border: 1px solid var(--accent);
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
   letter-spacing: 0.02em;
 }
 .btn-self-test:hover {
-  background: var(--accent-light);
+  background: var(--accent-soft);
   border-color: var(--accent-hover);
   color: var(--accent-hover);
 }
@@ -1237,7 +1237,7 @@ function stopSubmitPolling() {
   padding: 9px 24px;
   font-size: var(--text-sm);
   font-weight: 500;
-  color: #fff;
+  color: var(--surface);
   background: var(--accent);
   border: 1px solid var(--accent);
   border-radius: var(--radius-md);
@@ -1246,8 +1246,8 @@ function stopSubmitPolling() {
   letter-spacing: 0.02em;
 }
 .btn-submit-code:hover {
-  background: var(--accent-dark);
-  border-color: var(--accent-dark);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 .btn-submit-code:disabled { opacity: 0.45; cursor: not-allowed; }
 
@@ -1255,7 +1255,7 @@ function stopSubmitPolling() {
 .spinner-sm {
   width: 14px;
   height: 14px;
-  border: 2px solid rgba(255,255,255,0.25);
+  border: 2px solid oklch(0.99 0.001 95 / 0.25);
   border-top-color: currentColor;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
@@ -1263,8 +1263,8 @@ function stopSubmitPolling() {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .btn-self-test .spinner-sm {
-  border-color: rgba(37, 99, 235, 0.2);
-  border-top-color: var(--primary);
+  border-color: oklch(0.52 0.095 158 / 0.2);
+  border-top-color: var(--accent);
 }
 
 /* ── Responsive ──────────────────────────────────────────────────────── */

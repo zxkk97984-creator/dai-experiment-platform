@@ -233,20 +233,25 @@ onMounted(fetch)
 .panel-bar {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
-.panel-hint { margin: 0; font-size: var(--text-xs); color: var(--text-secondary); }
+.panel-hint { margin: 0; font-size: var(--text-xs); color: var(--muted); }
 .pkg-form { padding: 16px; }
 .form-title { margin: 0 0 8px; font-size: 15px; }
-.immutable-hint { margin: 0 0 12px; font-size: var(--text-sm); color: var(--warning, #b8860b); }
-.immutable-hint.muted { color: var(--text-tertiary); }
+.immutable-hint { margin: 0 0 12px; font-size: var(--text-sm); color: var(--warning, var(--warning)); }
+.immutable-hint.muted { color: var(--faint); }
 .form-grid {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;
 }
 .form-actions { display: flex; gap: 8px; margin-top: 14px; }
 .refer-tag {
   display: inline-block; margin-left: 6px; padding: 1px 6px;
-  font-size: 11px; border-radius: 4px;
-  background: var(--primary-light, #e8f1ff); color: var(--primary, #2b6de8);
+  font-size: 11px; border-radius: var(--radius-sm);
+  background: var(--accent-soft); color: var(--accent);
 }
 .mono { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; }
-.actions-cell { display: flex; gap: 8px; }
+.actions-cell {
+  display: table-cell;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.actions-cell button + button { margin-left: 8px; }
 </style>

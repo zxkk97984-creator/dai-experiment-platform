@@ -87,7 +87,7 @@ function jumpToPage() {
   min-height: 64px;
   padding: 12px 18px;
   border-top: 1px solid var(--border);
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: 13px;
 }
 .pagination-controls { display: flex; align-items: center; justify-content: center; gap: 6px; }
@@ -98,19 +98,19 @@ function jumpToPage() {
   height: 34px;
   padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 7px;
-  color: var(--text-secondary);
+  border-radius: var(--radius-md);
+  color: var(--muted);
   background: transparent;
   cursor: pointer;
   font-size: 13px;
 }
-.student-pagination button:hover:not(:disabled) { border-color: var(--border); color: var(--ink); background: var(--surface-raised); }
-.student-pagination button.active { border-color: var(--primary); color: #fff; background: var(--primary); }
+.student-pagination button:hover:not(:disabled) { border-color: var(--border); color: var(--fg); background: var(--surface-subtle); }
+.student-pagination button.active { border-color: var(--accent); color: var(--surface); background: var(--accent); }
 .student-pagination button:disabled { cursor: not-allowed; opacity: .35; }
 .pagination-jump { display: flex; align-items: center; justify-self: end; gap: 14px; white-space: nowrap; }
 .pagination-jump label { display: inline-flex; align-items: center; gap: 5px; }
-.pagination-jump input { width: 52px; height: 32px; padding: 0 7px; border: 1px solid var(--border); border-radius: 7px; color: var(--ink); background: var(--surface); text-align: center; font-size: 13px; }
-.pagination-jump input:focus { border-color: var(--primary); outline: 0; box-shadow: var(--shadow-glow-primary); }
+.pagination-jump input { width: 52px; height: 32px; padding: 0 7px; border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--fg); background: var(--surface); text-align: center; font-size: 13px; }
+.pagination-jump input:focus { border-color: var(--accent); outline: 0; box-shadow: 0 0 0 3px var(--accent-soft); }
 @media (max-width: 720px) {
   .student-pagination { grid-template-columns: 1fr auto; gap: 10px; }
   .pagination-controls { grid-column: 1 / -1; grid-row: 1; }

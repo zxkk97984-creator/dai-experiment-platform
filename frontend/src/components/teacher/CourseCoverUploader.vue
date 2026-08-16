@@ -250,7 +250,7 @@ async function removeCover() {
   flex-direction: column;
   gap: 12px;
   padding: 16px;
-  background: var(--surface-muted, #f8fafc);
+  background: var(--surface-muted, var(--surface-subtle));
   border: 1px solid var(--border);
   border-radius: var(--radius-card, 12px);
 }
@@ -264,11 +264,11 @@ async function removeCover() {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: var(--ink);
+  color: var(--fg);
 }
 .cover-busy {
   font-size: var(--text-xs, 12px);
-  color: var(--primary);
+  color: var(--accent);
   font-weight: 500;
 }
 
@@ -279,7 +279,7 @@ async function removeCover() {
   margin: 0;
   font-size: var(--text-xs, 12px);
   line-height: 1.6;
-  color: var(--text-secondary);
+  color: var(--muted);
 }
 
 /* ── 预览区 ─────────────────────────────────────────────────────── */
@@ -288,7 +288,7 @@ async function removeCover() {
   aspect-ratio: 16 / 9;
   border-radius: var(--radius-control, 8px);
   overflow: hidden;
-  background: var(--surface-raised, #f1f5f9);
+  background: var(--surface-raised, var(--surface-subtle));
   border: 1px solid var(--border);
 }
 .cover-preview__img {
@@ -305,8 +305,8 @@ async function removeCover() {
   gap: 4px;
   width: 100%;
   height: 100%;
-  color: var(--text-tertiary, #94a3b8);
-  background: var(--surface-raised, #f1f5f9);
+  color: var(--faint);
+  background: var(--surface-raised, var(--surface-subtle));
 }
 .cover-preview__empty-text {
   font-size: var(--text-xs, 12px);
@@ -315,14 +315,14 @@ async function removeCover() {
 /* ── 上传区 ─────────────────────────────────────────────────────── */
 .cover-dropzone {
   position: relative;
-  border: 1.5px dashed var(--border-strong, #cbd5e1);
+  border: 1.5px dashed var(--border-strong, var(--border-strong));
   border-radius: var(--radius-control, 8px);
   background: var(--surface);
   transition: border-color 0.15s, background 0.15s;
 }
 .cover-dropzone.dragging {
-  border-color: var(--primary);
-  background: var(--primary-soft, #eff6ff);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 .cover-dropzone.disabled { opacity: 0.6; }
 .cover-file-input {
@@ -341,13 +341,13 @@ async function removeCover() {
   padding: 20px 16px;
   text-align: center;
   cursor: pointer;
-  color: var(--text-tertiary, #94a3b8);
+  color: var(--faint);
 }
 .cover-dropzone__title {
   margin: 0;
   font-size: var(--text-sm, 13px);
   font-weight: 600;
-  color: var(--text);
+  color: var(--fg);
 }
 .cover-dropzone__hint {
   margin: 0;
@@ -359,26 +359,26 @@ async function removeCover() {
 .cover-file-name {
   margin: 0;
   font-size: var(--text-xs, 12px);
-  color: var(--text-secondary);
+  color: var(--muted);
   overflow-wrap: anywhere;
 }
 .cover-progress-row { display: flex; align-items: center; gap: 10px; }
 .cover-progress-track {
   flex: 1;
   height: 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--border);
   overflow: hidden;
 }
 .cover-progress-fill {
   height: 100%;
-  border-radius: 4px;
-  background: var(--primary);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
   transition: width 0.2s;
 }
 .cover-progress-fill.indeterminate {
   animation: cover-indeterminate 1.2s linear infinite;
-  background: var(--primary);
+  background: var(--accent);
 }
 @keyframes cover-indeterminate {
   0% { width: 20%; margin-left: -20%; }
@@ -386,22 +386,22 @@ async function removeCover() {
 }
 .cover-progress-text {
   font-size: var(--text-xs, 12px);
-  color: var(--text-secondary);
+  color: var(--muted);
   white-space: nowrap;
 }
 .cover-cancel-btn { flex: none; }
 .cover-cancelled {
   margin: 0;
   font-size: var(--text-sm, 13px);
-  color: var(--text-secondary);
+  color: var(--muted);
 }
 .cover-error {
   margin: 0;
   padding: 8px 12px;
-  border: 1px solid var(--danger-soft, #fecaca);
+  border: 1px solid var(--danger-soft, var(--danger-bg));
   border-radius: var(--radius-control, 8px);
-  background: var(--danger-bg, #fef2f2);
-  color: var(--danger, #dc2626);
+  background: var(--danger-bg, var(--danger-bg));
+  color: var(--danger, var(--danger));
   font-size: var(--text-sm, 13px);
 }
 
@@ -409,11 +409,11 @@ async function removeCover() {
   align-self: flex-start;
   padding: 5px 12px;
   background: var(--surface);
-  border: 1px solid var(--danger-soft, #fecaca);
+  border: 1px solid var(--danger-soft, var(--danger-bg));
   border-radius: var(--radius-control, 8px);
   font-size: var(--text-xs, 12px);
-  color: var(--danger, #dc2626);
+  color: var(--danger, var(--danger));
   cursor: pointer;
 }
-.cover-remove-btn:hover { background: var(--danger-light, #fef2f2); }
+.cover-remove-btn:hover { background: var(--danger-light, var(--danger-bg)); }
 </style>

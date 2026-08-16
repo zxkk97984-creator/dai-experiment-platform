@@ -18,6 +18,7 @@ const app = useAppStore()
 const titleInput = ref(null)
 const form = reactive({
   title: '',
+  code: '',
   description: '',
   academic_term_id: null,
   teaching_class_ids: [],
@@ -70,6 +71,7 @@ function revokeCoverPreview() {
 function resetForm() {
   revokeCoverPreview()
   form.title = ''
+  form.code = ''
   form.description = ''
   form.academic_term_id = null
   form.teaching_class_ids = []
@@ -162,6 +164,7 @@ watch(() => form.academic_term_id, loadClasses)
 function buildPayload() {
   return {
     title: form.title.trim(),
+    code: form.code.trim() || null,
     description: form.description.trim() || null,
     academic_term_id: form.academic_term_id || null,
     teaching_class_ids: form.teaching_class_ids.map((id) => Number(id)),
@@ -298,6 +301,11 @@ onBeforeUnmount(() => {
             </label>
 
             <label class="course-create-field course-create-field-full">
+              <span>课程编号 <small>可选</small></span>
+              <input v-model="form.code" placeholder="例如：CS101" :disabled="isBusy" />
+            </label>
+
+            <label class="course-create-field course-create-field-full">
               <span>课程简介 <small>可选</small></span>
               <textarea v-model="form.description" rows="3" placeholder="输入课程简介" :disabled="isBusy"></textarea>
             </label>
@@ -413,181 +421,44 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.course-create-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px 16px;
-}
-
-.course-create-field {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 7px;
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 600;
-}
-
+/* V2 创建课程表单：字段、网格与上传区均映射全局 token，不新增颜色。 */
+.course-create-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.course-create-field { display: flex; min-width: 0; flex-direction: column; gap: 7px; color: var(--fg); font-size: var(--text-base); font-weight: 600; }
 .course-create-field-full { grid-column: 1 / -1; }
-
-.course-create-field > span,
-.course-create-field-label > span {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-}
-
-.course-create-field > span small,
-.course-create-field-label > small,
-.course-create-field-label > span small {
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-.course-create-field em {
-  color: var(--danger, #dc2626);
-  font-style: normal;
-}
-
-.course-create-field input,
-.course-create-field textarea,
-.course-create-field select {
-  width: 100%;
-  min-width: 0;
-  border-color: var(--border);
-  border-radius: 9px;
-  font-size: 14px;
-}
-
-.course-create-hint,
-.course-cover-file {
-  margin: 0;
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-.course-create-error {
-  margin: 0;
-  color: var(--danger, #dc2626);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-.course-create-form-error { margin-top: 18px; }
-.course-create-whitelist { margin-top: 22px; }
-
-.course-cover-create-field {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 22px;
-}
-
-.course-create-field-label {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 600;
-}
-
+.course-create-field > span, .course-create-field-label > span { display: flex; align-items: baseline; gap: 5px; }
+.course-create-field > span small, .course-create-field-label > small, .course-create-field-label > span small { color: var(--faint); font-size: var(--text-sm); font-weight: 400; }
+.course-create-field em { color: var(--danger); font-style: normal; }
+.course-create-field input, .course-create-field textarea, .course-create-field select { width: 100%; min-width: 0; border-color: var(--border-strong); border-radius: var(--radius-md); font-size: var(--text-md); }
+.course-create-hint, .course-cover-file { margin: 0; color: var(--faint); font-size: var(--text-sm); font-weight: 400; }
+.course-create-error { margin: 0; color: var(--danger); font-size: var(--text-sm); font-weight: 400; }
+.course-create-form-error { margin-top: 16px; }
+.course-create-whitelist { margin-top: 20px; }
+.course-cover-create-field { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
+.course-create-field-label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: var(--fg); font-size: var(--text-base); font-weight: 600; }
 .course-cover-dropzone {
-  position: relative;
-  min-height: 148px;
-  overflow: hidden;
-  border: 1px dashed var(--border-strong, #cbd5e1);
-  border-radius: 10px;
-  background: var(--surface-raised, #f8fafc);
+  position: relative; min-height: 148px; overflow: hidden;
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-lg);
+  background: var(--surface-subtle);
 }
-
-.course-cover-dropzone:hover:not(.disabled) { border-color: var(--primary); background: #f5f9ff; }
+.course-cover-dropzone:hover:not(.disabled) { border-color: var(--accent); background: var(--accent-faint); }
 .course-cover-dropzone.disabled { opacity: 0.65; }
 .course-cover-dropzone.has-preview { min-height: 180px; }
-
-.course-cover-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 148px;
-  flex-direction: column;
-  gap: 5px;
-  color: var(--text-tertiary);
-}
-
-.course-cover-placeholder strong { color: var(--text-secondary); font-size: 13px; }
-.course-cover-placeholder span { font-size: 12px; }
-
-.course-cover-preview {
-  display: block;
-  width: 100%;
-  height: 180px;
-  object-fit: cover;
-}
-
+.course-cover-placeholder { display: flex; align-items: center; justify-content: center; min-height: 148px; flex-direction: column; gap: 5px; color: var(--faint); }
+.course-cover-placeholder strong { color: var(--muted); font-size: var(--text-base); }
+.course-cover-placeholder span { font-size: var(--text-sm); }
+.course-cover-preview { display: block; width: 100%; height: 180px; object-fit: cover; }
 .course-cover-select-label {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  display: inline-flex;
-  align-items: center;
-  min-height: 32px;
-  padding: 0 12px;
-  border-radius: 7px;
-  background: rgba(15, 23, 42, 0.78);
-  color: #fff;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
+  position: absolute; right: 12px; bottom: 12px;
+  display: inline-flex; align-items: center; min-height: 32px; padding: 0 12px;
+  border-radius: var(--radius-md); background: oklch(0.225 0.018 155); color: oklch(0.84 0.01 155);
+  cursor: pointer; font-size: var(--text-sm); font-weight: 500;
 }
-
 .course-cover-select-label.disabled { cursor: not-allowed; }
 .course-cover-select-label input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-
 .course-cover-file { overflow-wrap: anywhere; }
-
-.course-cover-progress {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.course-cover-progress-track {
-  height: 7px;
-  flex: 1;
-  overflow: hidden;
-  border-radius: 99px;
-  background: var(--border);
-}
-
-.course-cover-progress-track span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--primary);
-  transition: width 0.2s ease;
-}
-
-.course-create-upload-warning {
-  margin: 18px 0 0;
-  padding: 10px 12px;
-  border: 1px solid #f6d58a;
-  border-radius: 8px;
-  background: #fffaf0;
-  color: #9a6700;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-@media (max-width: 640px) {
-  .course-create-grid { grid-template-columns: 1fr; gap: 16px; }
-  .course-create-field-full { grid-column: auto; }
-  .course-create-field-label { align-items: flex-start; flex-direction: column; gap: 3px; }
-}
+.course-cover-progress { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: var(--text-sm); }
+.course-cover-progress-track { height: 6px; flex: 1; overflow: hidden; border-radius: var(--radius-sm); background: var(--surface-sunken); }
+.course-cover-progress-track span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.course-cover-progress > span { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.course-create-upload-warning { margin: 12px 0 0; color: var(--warning); font-size: var(--text-sm); }
 </style>

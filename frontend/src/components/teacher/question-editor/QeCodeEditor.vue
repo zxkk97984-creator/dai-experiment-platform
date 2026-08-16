@@ -166,10 +166,10 @@ watch(() => props.fullscreen, () => {
 .qe-code {
   position: relative;
   min-width: 0;
-  border: 1px solid #1E293B;
-  border-radius: 8px;
+  border: 1px solid oklch(0.32 0.02 155);
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: #282C34;
+  background: oklch(0.225 0.018 155);
   transition: height 80ms ease-out;
 }
 
@@ -238,8 +238,8 @@ watch(() => props.fullscreen, () => {
   bottom: 4px;
   width: 8px;
   height: 8px;
-  border-right: 2px solid #64748B;
-  border-bottom: 2px solid #64748B;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
   border-radius: 0 0 2px 0;
   opacity: 0.7;
   transition: opacity 120ms ease-out;
@@ -258,8 +258,8 @@ watch(() => props.fullscreen, () => {
   border: none;
   outline: none;
   resize: none;
-  background: #282C34;
-  color: #E2E8F0;
+  background: oklch(0.225 0.018 155);
+  color: var(--border);
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.6;
@@ -267,7 +267,7 @@ watch(() => props.fullscreen, () => {
 }
 
 .qe-code__fallback::placeholder {
-  color: #64748B;
+  color: var(--muted);
   font-style: italic;
 }
 </style>

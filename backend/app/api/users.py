@@ -4,8 +4,9 @@ from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db, require_roles, PaginationParams, pagination
 from app.errors import api_error
-from app.models import User
+from app.models import User, UserPreference
 from app.schemas import PaginatedResponse, PasswordUpdate, StatusUpdate, UserCreate, UserRead, UserUpdate
+from app.schemas.preferences import UserPreferencesRead, UserPreferencesUpdate
 from app.security import hash_password, validate_password_rules, verify_password
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -61,6 +62,7 @@ def create_user(
         username=payload.username,
         student_no=student_no,
         real_name=payload.real_name,
+        department=payload.department,
         role=payload.role,
         status=payload.status,
         password_hash=hash_password(payload.password),
@@ -96,6 +98,34 @@ def list_students(
         items=[UserRead.model_validate(user) for user in users],
         page=page, page_size=page_size, total=total,
     )
+
+
+@router.get("/me/preferences", response_model=UserPreferencesRead)
+def get_my_preferences(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    row = db.get(UserPreference, current_user.id)
+    if row is None:
+        return UserPreferencesRead(user_id=current_user.id, preferences={})
+    return UserPreferencesRead(user_id=row.user_id, preferences=row.preferences or {})
+
+
+@router.patch("/me/preferences", response_model=UserPreferencesRead)
+def update_my_preferences(
+    payload: UserPreferencesUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    row = db.get(UserPreference, current_user.id)
+    if row is None:
+        row = UserPreference(user_id=current_user.id, preferences={})
+        db.add(row)
+    updates = payload.model_dump(exclude_unset=True)
+    row.preferences = {**(row.preferences or {}), **updates}
+    db.commit()
+    db.refresh(row)
+    return UserPreferencesRead(user_id=row.user_id, preferences=row.preferences or {})
 
 
 @router.get("/{user_id}", response_model=UserRead)

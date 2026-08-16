@@ -108,11 +108,11 @@ async function handleSave() {
 }
 .page-title {
   font-size: 28px; font-weight: 700;
-  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
+  color: var(--fg); letter-spacing: -0.02em; line-height: 1.15;
   margin: 0 0 6px;
 }
 .page-sub {
-  font-size: var(--text-sm); color: var(--text-secondary); margin: 0;
+  font-size: var(--text-sm); color: var(--muted); margin: 0;
 }
 
 /* ── Form Card ─────────────────────────────────────────────────────── */

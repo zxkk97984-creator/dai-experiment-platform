@@ -5,8 +5,16 @@ from sqlalchemy.orm import Session
 
 from app.dependencies import get_db, require_roles
 from app.models import User
-from app.schemas.dashboard import StudentDashboardRead, TeacherDashboardRead
-from app.services.dashboard_service import build_student_dashboard, build_teacher_dashboard
+from app.schemas.dashboard import (
+    StudentDashboardRead,
+    TeacherDashboardCounts,
+    TeacherDashboardRead,
+)
+from app.services.dashboard_service import (
+    build_student_dashboard,
+    build_teacher_dashboard,
+    build_teacher_dashboard_counts,
+)
 
 router = APIRouter(prefix="/dashboard", tags=["首页仪表盘"])
 
@@ -25,3 +33,11 @@ def teacher_dashboard(
     current_user: User = Depends(require_roles("teacher")),
 ):
     return build_teacher_dashboard(db, current_user)
+
+
+@router.get("/teacher/counts", response_model=TeacherDashboardCounts)
+def teacher_dashboard_counts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("teacher")),
+):
+    return build_teacher_dashboard_counts(db, current_user)

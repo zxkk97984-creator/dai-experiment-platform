@@ -404,6 +404,18 @@ def _legacy_judge_submission(db, redis_client, settings, submission, question, w
     return submission
 
 
+def _set_test_counts_from_group_results(submission, results: dict) -> None:
+    """把测试组结果归一化写入 tests_passed/tests_total，供工作台最近提交表直读。"""
+    passed = sum(int(counts.get("passed", 0)) for counts in results.values())
+    total = sum(
+        int(counts.get(key, 0))
+        for counts in results.values()
+        for key in ("passed", "failed", "errors", "skipped")
+    )
+    submission.tests_passed = passed
+    submission.tests_total = total
+
+
 def _v1_judge_submission(db, redis_client, settings, submission, question, workdir, host_workdir, timeout_s, mem_mb):
     """V1 评分路径：运行测试组 → 创建 CodeGrade → 入队 AI。
 
@@ -535,6 +547,7 @@ def _v1_judge_submission(db, redis_client, settings, submission, question, workd
 
     submission.result_details = {"groups": details, "system_errors": all_errs,
                                  "f_score": f_score, "r_score": r_score}
+    _set_test_counts_from_group_results(submission, result["results"])
     db.commit()
     # 不传 score：shadow 已设 legacy 分，active 保持 None 等 AI；complete_job 只标记 grading_status=completed
     complete_job(db, job_type="assignment", object_id=submission.id,

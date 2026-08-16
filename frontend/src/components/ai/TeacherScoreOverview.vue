@@ -55,21 +55,22 @@ const metaParts = computed(() => {
 </template>
 
 <style scoped>
+/* V2 评分总览：最终得分用 .score-orb 大数字，维度用 .score-bar。
+   面板 / 徽标视觉来自全局 token，卡片不再投影。 */
 .score-overview {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 20px 24px;
+  padding: 16px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
+  border-radius: var(--radius-lg);
 }
 
 .score-overview__main {
   display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: 24px;
+  grid-template-columns: 190px 1fr;
+  gap: 20px;
   align-items: stretch;
 }
 
@@ -78,88 +79,56 @@ const metaParts = computed(() => {
   flex-direction: column;
   align-items: flex-start;
   gap: 6px;
-  padding-right: 24px;
+  padding-right: 20px;
   border-right: 1px solid var(--border);
 }
 
 .score-overview__value {
-  color: var(--ink);
+  color: var(--fg);
   font-family: var(--font-mono);
-  font-size: 64px;
-  font-weight: 700;
+  font-size: 44px;
+  font-weight: 600;
   line-height: 1;
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }
 
-.score-overview__label {
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  font-weight: 500;
-}
+.score-overview__label { color: var(--muted); font-size: var(--text-sm); font-weight: 500; }
 
 .score-overview__dims {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 20px;
+  gap: 12px 16px;
   align-content: center;
   min-width: 0;
 }
 
 .score-overview__dim {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  background: var(--paper);
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--surface-sunken);
   border: 1px solid var(--border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-md);
   min-width: 0;
 }
 
-.score-overview__dim-label {
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.score-overview__dim-letter {
-  margin-left: 4px;
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-}
-
-.score-overview__dim-score {
-  color: var(--ink);
-  font-size: var(--text-sm);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
+.score-overview__dim-label { color: var(--muted); font-size: var(--text-sm); font-weight: 500; white-space: nowrap; }
+.score-overview__dim-letter { margin-left: 4px; font-size: var(--text-xs); color: var(--faint); }
+.score-overview__dim-score { color: var(--fg); font-size: var(--text-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .score-overview__meta {
   margin: 0;
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
-  color: var(--text-tertiary);
+  color: var(--faint);
   font-variant-numeric: tabular-nums;
 }
 
-@media (max-width: 767.98px) {
-  .score-overview__main {
-    grid-template-columns: 1fr;
-  }
-  .score-overview__score {
-    padding-right: 0;
-    padding-bottom: 16px;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
-  .score-overview__value {
-    font-size: 48px;
-  }
-  .score-overview__dims {
-    grid-template-columns: 1fr;
-  }
+@media (max-width: 820px) {
+  .score-overview__main { grid-template-columns: 1fr; }
+  .score-overview__score { padding-right: 0; padding-bottom: 12px; border-right: none; border-bottom: 1px solid var(--border); }
+  .score-overview__dims { grid-template-columns: 1fr; }
 }
 </style>

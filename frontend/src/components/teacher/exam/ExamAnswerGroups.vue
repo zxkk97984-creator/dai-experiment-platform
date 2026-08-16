@@ -67,15 +67,15 @@ function toggle(id) {
 .question-group {
   margin: 0 14px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 .question-group > header {
   display: flex;
   justify-content: space-between;
   padding: 10px 12px;
-  background: #f4f7fb;
-  color: var(--ink);
+  background: var(--surface-subtle);
+  color: var(--fg);
   font-size: 13px;
 }
 .question-group > header span { font-weight: 600; }
@@ -90,48 +90,48 @@ function toggle(id) {
   padding: 9px 10px;
   border: 0;
   border-radius: 0;
-  background: #fff;
+  background: var(--surface);
   text-align: left;
 }
-.question-row > button:hover { background: #f8fafc; }
+.question-row > button:hover { background: var(--surface-subtle); }
 .question-number {
   display: grid;
   place-items: center;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
-  color: var(--primary);
-  background: var(--primary-light);
+  border-radius: var(--radius-md);
+  color: var(--accent);
+  background: var(--accent-soft);
   font-size: 11px;
 }
 .question-prompt {
   overflow: hidden;
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.question-row > button strong { color: var(--ink); font-size: 12px; text-align: right; }
+.question-row > button strong { color: var(--fg); font-size: 12px; text-align: right; }
 .answer-state { font-size: 11px; text-align: center; }
-.answer-state.correct { color: #07985e; }
-.answer-state.partial { color: #e68309; }
-.answer-state.wrong { color: #dc3e49; }
-.answer-state.pending { color: #64748b; }
+.answer-state.correct { color: var(--success); }
+.answer-state.partial { color: var(--warning); }
+.answer-state.wrong { color: var(--danger); }
+.answer-state.pending { color: var(--muted); }
 .answer-detail {
   padding: 12px 16px;
   border-top: 1px dashed var(--border);
-  background: #f8fafc;
+  background: var(--surface-subtle);
 }
-.answer-detail small { display: block; margin-bottom: 5px; color: var(--text-secondary); }
-.answer-detail p { margin: 0; color: var(--ink); font-size: 13px; }
+.answer-detail small { display: block; margin-bottom: 5px; color: var(--muted); }
+.answer-detail p { margin: 0; color: var(--fg); font-size: 13px; }
 .answer-detail pre {
   max-height: 230px;
   margin: 0;
   overflow: auto;
   padding: 12px;
-  border-radius: 8px;
-  color: #dce7f7;
-  background: #142034;
+  border-radius: var(--radius-md);
+  color: var(--info-bg);
+  background: var(--fg);
   font-family: var(--font-mono);
   font-size: 12px;
   white-space: pre-wrap;

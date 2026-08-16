@@ -673,18 +673,18 @@ const privateImportError = ref('')
   border: none;
   border-bottom: 2px solid transparent;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: var(--text-sm);
   font-weight: 500;
   cursor: pointer;
   margin-bottom: -1px;
 }
 
-.qe-cases__tab:hover { color: var(--ink); }
+.qe-cases__tab:hover { color: var(--fg); }
 
 .qe-cases__tab.active {
-  color: var(--primary);
-  border-bottom-color: var(--primary);
+  color: var(--accent);
+  border-bottom-color: var(--accent);
   font-weight: 600;
 }
 
@@ -692,9 +692,9 @@ const privateImportError = ref('')
   display: inline-block;
   min-width: 18px;
   padding: 0 5px;
-  border-radius: 999px;
-  background: var(--primary-light);
-  color: var(--primary);
+  border-radius: var(--radius-full);
+  background: var(--accent-soft);
+  color: var(--accent);
   font-size: 11px;
   font-weight: 600;
   text-align: center;
@@ -713,12 +713,12 @@ const privateImportError = ref('')
 .qe-cases__tools { display: flex; gap: 8px; align-items: center; }
 
 .qe-cases__run {
-  border-color: var(--primary);
-  color: var(--primary);
+  border-color: var(--accent);
+  color: var(--accent);
   background: var(--surface);
 }
 
-.qe-cases__run:hover:not(:disabled) { background: var(--primary-light); }
+.qe-cases__run:hover:not(:disabled) { background: var(--accent-soft); }
 
 .qe-cases__run:disabled {
   opacity: 0.55;
@@ -727,7 +727,7 @@ const privateImportError = ref('')
 
 .qe-cases__count-hint {
   font-size: var(--text-xs);
-  color: var(--text-tertiary);
+  color: var(--faint);
 }
 
 /* ── 运行结果条 ──────────────────────────────────────────────────── */
@@ -737,15 +737,15 @@ const privateImportError = ref('')
   gap: 6px;
   margin-bottom: 10px;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: var(--text-sm);
   font-weight: 500;
 }
 
-.qe-cases__result--passed { background: var(--success-light); color: var(--success); }
-.qe-cases__result--failed { background: var(--danger-light); color: var(--danger); }
-.qe-cases__result--error { background: var(--warning-light); color: var(--warning); }
-.qe-cases__result--running { background: var(--info-light); color: var(--info); }
+.qe-cases__result--passed { background: var(--success-bg); color: var(--success); }
+.qe-cases__result--failed { background: var(--danger-bg); color: var(--danger); }
+.qe-cases__result--error { background: var(--warning-bg); color: var(--warning); }
+.qe-cases__result--running { background: var(--info-bg); color: var(--info); }
 
 .qe-cases__result-output {
   margin: 0;
@@ -761,22 +761,22 @@ const privateImportError = ref('')
 /* ── 批量导入面板 ────────────────────────────────────────────────── */
 .qe-cases__import {
   border: 1px dashed var(--border-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 10px 12px;
   margin-bottom: 10px;
   background: var(--surface-sunken);
 }
 
-.qe-cases__import-tip { margin: 0 0 6px; font-size: var(--text-xs); color: var(--text-secondary); }
+.qe-cases__import-tip { margin: 0 0 6px; font-size: var(--text-xs); color: var(--muted); }
 
 .qe-cases__import-ta {
   width: 100%;
   height: 84px;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--surface);
-  color: var(--ink);
+  color: var(--fg);
   font-family: var(--font-mono);
   font-size: 12px;
   resize: vertical;
@@ -792,7 +792,7 @@ const privateImportError = ref('')
   max-height: 340px;
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--surface);
 }
 
@@ -806,8 +806,8 @@ const privateImportError = ref('')
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--surface-raised);
-  color: var(--text-secondary);
+  background: var(--surface-subtle);
+  color: var(--muted);
   font-weight: 600;
   font-size: 12px;
   text-align: left;
@@ -824,7 +824,7 @@ const privateImportError = ref('')
 
 .qe-cases__table tr:last-child td { border-bottom: none; }
 
-.qe-cases__table tbody tr:hover { background: var(--primary-light); }
+.qe-cases__table tbody tr:hover { background: var(--accent-soft); }
 .qe-cases__table tbody tr:has(.qe-cases__arg-input) { background: var(--surface); }
 
 .qe-cases__th-no { width: 40px; }
@@ -834,7 +834,7 @@ const privateImportError = ref('')
 .qe-cases__th-ops { min-width: 150px; }
 
 .qe-cases__no {
-  color: var(--text-tertiary);
+  color: var(--faint);
   font-family: var(--font-mono);
   font-size: 12px;
 }
@@ -850,12 +850,12 @@ const privateImportError = ref('')
   max-width: 220px;
 }
 
-.qe-cases__cell--exp { color: var(--primary-dark); font-weight: 500; }
-.qe-cases__cell--desc { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qe-cases__cell--exp { color: var(--accent-hover); font-weight: 500; }
+.qe-cases__cell--desc { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .qe-cases__empty {
   text-align: center;
-  color: var(--text-tertiary);
+  color: var(--faint);
   padding: 26px 12px !important;
 }
 
@@ -867,18 +867,18 @@ const privateImportError = ref('')
   min-width: 80px;
   padding: 5px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-family: inherit;
   font-size: 12.5px;
-  color: var(--ink);
+  color: var(--fg);
   background: var(--surface);
   box-sizing: border-box;
 }
 
 .qe-cases__input:focus {
   outline: none;
-  border-color: var(--primary);
-  box-shadow: var(--shadow-glow-primary);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .qe-cases__input--arg { font-family: var(--font-mono); }
@@ -886,7 +886,7 @@ const privateImportError = ref('')
 .qe-cases__arg-x {
   border: none;
   background: transparent;
-  color: var(--text-tertiary);
+  color: var(--faint);
   cursor: pointer;
   font-size: 14px;
   padding: 0 2px;
@@ -895,27 +895,35 @@ const privateImportError = ref('')
 .qe-cases__arg-x:hover { color: var(--danger); }
 
 .qe-cases__ops {
-  display: flex;
-  gap: 6px;
+  display: table-cell;
+  vertical-align: middle;
   white-space: nowrap;
+}
+.qe-cases__ops .qe-cases__op {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+.qe-cases__ops .qe-cases__op + .qe-cases__op {
+  margin-left: 6px;
 }
 
 .qe-cases__op {
   padding: 3px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--surface);
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: 12px;
   cursor: pointer;
 }
 
-.qe-cases__op:hover { border-color: var(--border-strong); color: var(--ink); }
+.qe-cases__op:hover { border-color: var(--border-strong); color: var(--fg); }
 
-.qe-cases__op--save { border-color: var(--primary); color: var(--primary); }
-.qe-cases__op--save:hover { background: var(--primary-light); }
+.qe-cases__op--save { border-color: var(--accent); color: var(--accent); }
+.qe-cases__op--save:hover { background: var(--accent-soft); }
 
-.qe-cases__op--del:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-light); }
+.qe-cases__op--del:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); }
 
 /* ── 分页条 ──────────────────────────────────────────────────────── */
 .qe-cases__pager {
@@ -926,29 +934,29 @@ const privateImportError = ref('')
   margin-top: 10px;
 }
 
-.qe-cases__pager-info { font-size: var(--text-xs); color: var(--text-tertiary); }
+.qe-cases__pager-info { font-size: var(--text-xs); color: var(--faint); }
 
 .qe-cases__pager-size {
   padding: 3px 6px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 12px;
   background: var(--surface);
-  color: var(--ink);
+  color: var(--fg);
 }
 
 .qe-cases__pager-btn {
   min-width: 26px;
   height: 26px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--surface);
-  color: var(--ink);
+  color: var(--fg);
   font-size: 13px;
   cursor: pointer;
 }
 
-.qe-cases__pager-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.qe-cases__pager-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .qe-cases__pager-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ── 私有测试子 tab ──────────────────────────────────────────────── */
@@ -962,31 +970,31 @@ const privateImportError = ref('')
 .qe-cases__sub-tab {
   padding: 5px 12px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--surface);
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
 }
 
-.qe-cases__sub-tab:hover { color: var(--ink); border-color: var(--border-strong); }
+.qe-cases__sub-tab:hover { color: var(--fg); border-color: var(--border-strong); }
 
 .qe-cases__sub-tab.active {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--surface);
 }
 
 .qe-cases__sub-hint {
   margin-left: auto;
   font-size: var(--text-xs);
-  color: var(--text-tertiary);
+  color: var(--faint);
 }
 
 .qe-cases__code-hint {
   margin: 8px 0 0;
   font-size: var(--text-xs);
-  color: var(--text-tertiary);
+  color: var(--faint);
 }
 </style>

@@ -29,13 +29,30 @@ let toastTimer = null
 // ── CodeMirror 初始化（动态 import，失败降级 pre） ──────────────
 async function initCodeMirror() {
   try {
-    const [{ EditorView, lineNumbers, Decoration }, { EditorState, StateEffect, StateField }, { python }, { oneDark }] =
-      await Promise.all([
-        import('@codemirror/view'),
-        import('@codemirror/state'),
-        import('@codemirror/lang-python'),
-        import('@codemirror/theme-one-dark'),
-      ])
+    const [
+      { EditorView, lineNumbers, Decoration },
+      { EditorState, StateEffect, StateField },
+      { python },
+      { HighlightStyle, syntaxHighlighting },
+      { tags },
+    ] = await Promise.all([
+      import('@codemirror/view'),
+      import('@codemirror/state'),
+      import('@codemirror/lang-python'),
+      import('@codemirror/language'),
+      import('@lezer/highlight'),
+    ])
+
+    // V2 深墨松绿语法主题（与 dai-ds-v2.css 的 .code-panel 色板一致）
+    const daiDarkHighlight = HighlightStyle.define([
+      { tag: tags.comment, color: 'oklch(0.55 0.015 155)', fontStyle: 'italic' },
+      { tag: tags.keyword, color: 'oklch(0.68 0.09 158)' },
+      { tag: [tags.string, tags.special(tags.string)], color: 'oklch(0.72 0.11 80)' },
+      { tag: [tags.number, tags.bool, tags.null], color: 'oklch(0.72 0.09 45)' },
+      { tag: [tags.function(tags.variableName), tags.labelName], color: 'oklch(0.74 0.08 235)' },
+      { tag: [tags.className, tags.typeName], color: 'oklch(0.78 0.015 155)' },
+      { tag: tags.operator, color: 'oklch(0.72 0.015 155)' },
+    ])
 
     CmView = EditorView
     mark = Decoration.mark({ class: 'cm-line-highlight' })
@@ -74,13 +91,20 @@ async function initCodeMirror() {
       extensions: [
         lineNumbers(),
         python(),
-        oneDark,
+        syntaxHighlighting(daiDarkHighlight),
         highlightField,
         EditorView.editable.of(false),
-        EditorView.theme({
-          '&': { height: '100%' },
-          '.cm-scroller': { overflow: 'auto' },
-        }),
+        EditorView.theme(
+          {
+            '&': { height: '100%', backgroundColor: 'oklch(0.225 0.018 155)', color: 'oklch(0.84 0.01 155)' },
+            '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--font-mono)', fontSize: '13px', lineHeight: '1.65' },
+            '.cm-content': { caretColor: 'transparent' },
+            '.cm-gutters': { backgroundColor: 'oklch(0.225 0.018 155)', color: 'oklch(0.48 0.015 155)', border: '0' },
+            '.cm-activeLine': { backgroundColor: 'color-mix(in oklch, var(--accent) 8%, transparent)' },
+            '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--accent)' },
+          },
+          { dark: true },
+        ),
       ],
     })
     cmView = new EditorView({ state, parent: editorEl.value })
@@ -223,10 +247,15 @@ function downloadCode() {
 </template>
 
 <style scoped>
+/* V2 深墨松绿代码面板：视觉来自 dai-ds-v2.css 的 .code-panel 体系。 */
 .code-viewer {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: oklch(0.225 0.018 155);
 }
 
 .code-viewer__toolbar {
@@ -234,90 +263,64 @@ function downloadCode() {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 14px;
-  border: 1px solid var(--border);
-  border-bottom: none;
-  border-radius: var(--radius-card) var(--radius-card) 0 0;
-  background: var(--surface);
+  min-height: 38px;
+  padding: 0 12px;
+  border-bottom: 1px solid oklch(0.32 0.02 155);
+  background: oklch(0.20 0.016 155);
 }
 
 .code-viewer__lang {
-  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--text-secondary);
+  color: oklch(0.78 0.015 155);
 }
 
-.code-viewer__actions {
-  display: flex;
-  gap: 8px;
-}
+.code-viewer__actions { display: flex; gap: 2px; }
 
 .code-viewer__action {
-  padding: 4px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--surface);
-  color: var(--text-secondary);
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: oklch(0.62 0.015 155);
   font-size: var(--text-xs);
   font-weight: 500;
   cursor: pointer;
 }
+.code-viewer__action:hover { background: oklch(0.32 0.02 155); color: oklch(0.86 0.015 155); }
 
-.code-viewer__action:hover {
-  background: var(--primary-light);
-  color: var(--primary);
-}
-
-/* 编辑区：内容自适应高度，超出最大高度内部滚动 */
 .code-viewer__body {
   min-height: 240px;
-  max-height: 520px;
+  max-height: 560px;
   overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 0 0 var(--radius-card) var(--radius-card);
-  background: #282c34;
 }
 
-.code-viewer__editor {
-  height: 100%;
-}
+.code-viewer__editor { height: 100%; min-height: 240px; }
+.code-viewer__editor :deep(.cm-editor) { height: 100%; }
+.code-viewer__editor :deep(.cm-editor.cm-focused) { outline: none; }
 
-.code-viewer__editor :deep(.cm-editor) {
-  height: 100%;
-}
-
-.code-viewer__editor :deep(.cm-editor.cm-focused) {
-  outline: none;
-}
-
-/* 证据行高亮：普通行浅色，当前查看行更强 */
+/* 证据行高亮：普通行浅绿、当前查看行更深 */
 .code-viewer__editor :deep(.cm-line-highlight) {
-  background: rgba(255, 213, 79, 0.14);
+  background: color-mix(in oklch, var(--accent) 13%, transparent);
 }
-
 .code-viewer__editor :deep(.cm-line-active) {
-  background: rgba(255, 213, 79, 0.26);
+  background: color-mix(in oklch, var(--accent) 24%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
-/* 降级展示 */
-.code-viewer__fallback {
-  min-height: 240px;
-}
-
+.code-viewer__fallback { min-height: 240px; }
 .code-viewer__fallback-pre {
   margin: 0;
   padding: 14px;
-  color: #e2e8f0;
+  color: oklch(0.84 0.01 155);
   font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: var(--text-base);
+  line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.code-viewer__toast {
-  margin: 8px 0 0;
-  font-size: var(--text-xs);
-  color: var(--success);
-}
+.code-viewer__toast { margin: 8px 0 0; font-size: var(--text-xs); color: var(--success); }
 </style>

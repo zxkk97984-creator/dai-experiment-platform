@@ -1,5 +1,6 @@
 <script setup>
-// UiProgress：进度条原语。值钳制在 0–100，暴露完整进度条 ARIA 语义。
+// UiProgress：V2 进度条原语（6px / 3px 圆角 / accent 填充）。
+// 值钳制在 0–100，保留完整 progressbar ARIA 语义。
 import { computed } from 'vue'
 
 const props = defineProps({
@@ -16,29 +17,17 @@ const safeValue = computed(() => {
 
 <template>
   <div
-    class="ui-progress"
+    class="score-bar ui-progress"
     role="progressbar"
     aria-valuemin="0"
     aria-valuemax="100"
     :aria-valuenow="safeValue"
   >
-    <span class="ui-progress__bar" :style="{ width: safeValue + '%' }"></span>
+    <i class="ui-progress__bar" :style="{ width: safeValue + '%' }"></i>
   </div>
 </template>
 
 <style scoped>
-.ui-progress {
-  width: 100%;
-  height: 6px;
-  background: var(--surface-raised);
-  border-radius: var(--radius-full);
-  overflow: hidden;
-}
-.ui-progress__bar {
-  display: block;
-  height: 100%;
-  background: var(--primary);
-  border-radius: var(--radius-full);
-  transition: width var(--duration-normal) var(--ease-out);
-}
+/* 视觉来自全局 .score-bar；仅保留 ARIA 组件结构。 */
+.ui-progress { display: block; }
 </style>

@@ -257,7 +257,7 @@ onBeforeUnmount(() => clearTimeout(debounceTimer))
   flex-direction: column;
   gap: 12px;
   padding: 16px;
-  background: var(--surface-muted, #f8fafc);
+  background: var(--surface-muted, var(--surface-subtle));
   border: 1px solid var(--border);
   border-radius: var(--radius-card, 12px);
 }
@@ -271,11 +271,11 @@ onBeforeUnmount(() => clearTimeout(debounceTimer))
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: var(--ink);
+  color: var(--fg);
 }
 .wl-count {
   font-size: var(--text-xs, 12px);
-  color: var(--text-secondary);
+  color: var(--muted);
   font-weight: 500;
 }
 
@@ -285,22 +285,22 @@ onBeforeUnmount(() => clearTimeout(debounceTimer))
   gap: 6px;
   margin: 0;
   font-size: var(--text-xs, 12px);
-  color: var(--text-secondary);
+  color: var(--muted);
 }
 
 .wl-loading {
   margin: 0;
   font-size: var(--text-sm, 13px);
-  color: var(--text-secondary);
+  color: var(--muted);
 }
 
 .wl-empty {
   margin: 0;
   padding: 12px;
   font-size: var(--text-sm, 13px);
-  color: var(--text-secondary);
+  color: var(--muted);
   background: var(--surface);
-  border: 1px dashed var(--border-strong, #cbd5e1);
+  border: 1px dashed var(--border-strong, var(--border-strong));
   border-radius: var(--radius-control, 8px);
 }
 
@@ -336,37 +336,37 @@ onBeforeUnmount(() => clearTimeout(debounceTimer))
 .wl-name {
   font-size: var(--text-sm, 13px);
   font-weight: 600;
-  color: var(--ink);
+  color: var(--fg);
 }
 .wl-username {
   font-size: var(--text-xs, 12px);
-  color: var(--text-secondary);
+  color: var(--muted);
 }
 .wl-status {
   font-size: var(--text-xs, 12px);
-  color: var(--text-tertiary, #94a3b8);
+  color: var(--faint);
 }
 
 .wl-remove {
   padding: 5px 12px;
   background: var(--surface);
-  border: 1px solid var(--border-strong, #cbd5e1);
+  border: 1px solid var(--border-strong, var(--border-strong));
   border-radius: var(--radius-control, 8px);
   font-size: var(--text-xs, 12px);
-  color: var(--danger, #dc2626);
+  color: var(--danger, var(--danger));
   cursor: pointer;
   flex-shrink: 0;
 }
-.wl-remove:hover { background: var(--danger-light, #fef2f2); }
+.wl-remove:hover { background: var(--danger-light, var(--danger-bg)); }
 .wl-remove:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .wl-add {
   padding: 5px 12px;
-  background: var(--primary);
+  background: var(--accent);
   border: none;
   border-radius: var(--radius-control, 8px);
   font-size: var(--text-xs, 12px);
-  color: #fff;
+  color: var(--surface);
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -375,11 +375,11 @@ onBeforeUnmount(() => clearTimeout(debounceTimer))
 
 .wl-added {
   padding: 5px 12px;
-  background: var(--surface-muted, #f1f5f9);
+  background: var(--surface-muted, var(--surface-subtle));
   border: 1px solid var(--border);
   border-radius: var(--radius-control, 8px);
   font-size: var(--text-xs, 12px);
-  color: var(--text-tertiary, #94a3b8);
+  color: var(--faint);
   flex-shrink: 0;
 }
 
@@ -387,10 +387,10 @@ onBeforeUnmount(() => clearTimeout(debounceTimer))
   align-self: flex-start;
   padding: 6px 14px;
   background: var(--surface);
-  border: 1px solid var(--border-strong, #cbd5e1);
+  border: 1px solid var(--border-strong, var(--border-strong));
   border-radius: var(--radius-control, 8px);
   font-size: var(--text-xs, 12px);
-  color: var(--primary);
+  color: var(--accent);
   cursor: pointer;
 }
 .wl-more:disabled { opacity: 0.5; cursor: not-allowed; }

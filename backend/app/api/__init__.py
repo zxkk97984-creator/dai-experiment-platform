@@ -17,6 +17,10 @@ from .lesson_progress import router as lesson_progress_router
 from .lesson_videos import router as lesson_videos_router
 from .notebooks import router as notebooks_router
 from .studio import router as studio_router
+from .statistics import router as statistics_router
+from .search import router as search_router
+from .submissions import router as submissions_router
+from .notifications import router as notifications_router
 from .users import router as users_router
 
 api_router = APIRouter(prefix="/api/v1")
@@ -38,3 +42,7 @@ api_router.include_router(experiments_router)
 api_router.include_router(jupyter_router)
 api_router.include_router(notebooks_router)
 api_router.include_router(studio_router)
+api_router.include_router(statistics_router)
+api_router.include_router(search_router)
+api_router.include_router(submissions_router)
+api_router.include_router(notifications_router)

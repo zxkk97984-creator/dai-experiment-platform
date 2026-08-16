@@ -162,7 +162,7 @@ const historyRows = computed(() => {
 </script>
 
 <template>
-  <section class="review-panel">
+  <section class="review-panel evidence-block teacher">
     <header class="review-panel__head">
       <h3 class="review-panel__title">教师复核</h3>
       <span v-if="!editing" class="review-panel__status">{{ panelTitle }}</span>
@@ -287,132 +287,77 @@ const historyRows = computed(() => {
 </template>
 
 <style scoped>
-.review-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 20px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
-}
+/* V2 教师终审面板：accent 实线证据块 + .field/.input/.textarea + .btn 体系。 */
+.review-panel { display: flex; flex-direction: column; gap: 14px; }
+.review-panel__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.review-panel__title { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--fg); }
+.review-panel__status { font-size: var(--text-xs); font-weight: 600; color: var(--faint); }
 
-.review-panel__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
-.review-panel__title { margin: 0; font-size: 15px; font-weight: 700; color: var(--ink); }
-.review-panel__status { font-size: var(--text-xs); font-weight: 600; color: var(--text-tertiary); }
-
-/* ── 只读模式 ─────────────────────────────────────────────────── */
 .review-readonly { display: flex; flex-direction: column; gap: 10px; }
-.review-readonly__lead { margin: 0; font-size: var(--text-sm); color: var(--text-secondary); }
-.ro-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-.ro-row strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.review-readonly__lead { margin: 0; font-size: var(--text-md); color: var(--muted); }
+.ro-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: var(--text-md); color: var(--muted); }
+.ro-row strong { color: var(--fg); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .review-edit-btn { align-self: flex-start; margin-top: 4px; }
 
-/* ── 编辑表单（纵向全宽，避免标签换行） ───────────────────────── */
 .review-form { display: flex; flex-direction: column; gap: 12px; }
 .field { display: flex; flex-direction: column; gap: 4px; }
-.field__label { font-size: var(--text-sm); font-weight: 600; color: var(--ink); }
+.field__label { font-size: var(--text-sm); font-weight: 500; color: var(--muted); }
 .field input, .field textarea {
   width: 100%;
-  box-sizing: border-box;
-  padding: 8px 12px;
+  padding: 0 11px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-md);
   background: var(--surface);
-  color: var(--ink);
+  color: var(--fg);
   font-family: var(--font-body);
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
 }
-.field input:focus, .field textarea:focus { border-color: var(--primary); outline: none; }
-.field__hint { margin: 0; font-size: var(--text-xs); color: var(--text-tertiary); }
+.field textarea { height: auto; min-height: 72px; padding: 9px 11px; resize: vertical; }
+.field input { height: var(--h-input); }
+.field input:focus, .field textarea:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+.field__hint { margin: 0; font-size: var(--text-xs); color: var(--faint); }
 
 .final-switch {
   display: flex;
   align-items: center;
   align-self: flex-start;
   gap: 8px;
-  min-height: 36px;
-  padding: 7px 12px;
+  min-height: 32px;
+  padding: 0 11px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-md);
   background: var(--surface-sunken);
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
+  font-size: var(--text-base);
+  color: var(--muted);
   cursor: pointer;
 }
-.final-switch:hover {
-  border-color: var(--border-strong);
-  background: var(--primary-light);
-}
-.final-switch input {
-  width: 16px;
-  height: 16px;
-  flex: 0 0 16px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  box-shadow: none;
-  accent-color: var(--primary);
-}
-.final-switch span {
-  line-height: 1.4;
-  white-space: nowrap;
-}
+.final-switch:hover { border-color: var(--border-strong); background: var(--surface-subtle); }
+.final-switch input { width: 16px; height: 16px; flex: 0 0 16px; margin: 0; padding: 0; accent-color: var(--accent); }
+.final-switch span { line-height: 1.4; white-space: nowrap; }
 
 .preview {
   padding: 14px 16px;
-  border: 1px solid var(--primary-soft);
-  border-radius: var(--radius-control);
-  background: var(--primary-light);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
 }
-.preview__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-.preview__head span { font-size: var(--text-sm); font-weight: 600; color: var(--text-secondary); }
-.preview__value { font-size: 28px; line-height: 1; font-weight: 700; color: var(--primary); font-variant-numeric: tabular-nums; }
-.preview__hint { margin: 8px 0 0; font-size: var(--text-xs); color: var(--text-secondary); line-height: 1.55; }
+.preview__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.preview__head span { font-size: var(--text-md); font-weight: 600; color: var(--muted); }
+.preview__value { font-size: 28px; line-height: 1; font-weight: 600; color: var(--accent); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.preview__hint { margin: 8px 0 0; font-size: var(--text-xs); color: var(--muted); line-height: 1.55; }
 
 .form-error { margin: 0; font-size: var(--text-xs); color: var(--danger); line-height: 1.6; }
 .draft-tip { margin: 0; font-size: var(--text-xs); color: var(--warning); }
 .review-submit { width: 100%; justify-content: center; }
 
-/* ── 评分历史 ─────────────────────────────────────────────────── */
-.review-history {
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.review-history__title { margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--ink); }
+.review-history { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.review-history__title { margin: 0; font-size: var(--text-md); font-weight: 600; color: var(--fg); }
 .history-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.history-item {
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--paper);
-}
-.history-item__diff { margin: 0; font-size: var(--text-sm); color: var(--ink); font-variant-numeric: tabular-nums; }
-.history-item__reason { margin: 4px 0 0; font-size: var(--text-xs); color: var(--text-secondary); line-height: 1.6; }
-.history-item__time { margin: 4px 0 0; font-size: var(--text-xs); color: var(--text-tertiary); }
+.history-item { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-sunken); }
+.history-item__diff { margin: 0; font-size: var(--text-md); color: var(--fg); font-variant-numeric: tabular-nums; }
+.history-item__reason { margin: 4px 0 0; font-size: var(--text-xs); color: var(--muted); line-height: 1.6; }
+.history-item__time { margin: 4px 0 0; font-size: var(--text-xs); color: var(--faint); }
 
-/* ── 确认弹窗 ─────────────────────────────────────────────────── */
 .confirm-overlay {
   position: fixed;
   inset: 0;
@@ -420,54 +365,32 @@ const historyRows = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(15, 23, 42, 0.4);
+  padding: var(--space-4);
+  background: oklch(0.2 0.01 150 / 0.35);
 }
 .confirm-dialog {
   width: min(420px, calc(100vw - 32px));
   padding: 20px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: 0 16px 48px rgba(15, 23, 42, 0.2);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
-.confirm-dialog__title { margin: 0; font-size: 16px; font-weight: 700; color: var(--ink); }
+.confirm-dialog__title { margin: 0; font-size: var(--text-xl); font-weight: 600; color: var(--fg); }
 .confirm-dialog__list { margin: 0; display: flex; flex-direction: column; gap: 8px; }
-.confirm-row { display: flex; gap: 12px; font-size: var(--text-sm); }
-.confirm-row dt { color: var(--text-tertiary); min-width: 84px; flex-shrink: 0; }
-.confirm-row dd { margin: 0; color: var(--ink); word-break: break-word; }
-.confirm-dialog__note { margin: 0; font-size: var(--text-xs); color: var(--text-tertiary); }
-.confirm-dialog__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 4px;
-}
+.confirm-row { display: flex; gap: 12px; font-size: var(--text-md); }
+.confirm-row dt { color: var(--faint); min-width: 84px; flex-shrink: 0; }
+.confirm-row dd { margin: 0; color: var(--fg); word-break: break-word; font-variant-numeric: tabular-nums; }
+.confirm-dialog__note { margin: 0; font-size: var(--text-xs); color: var(--faint); }
+.confirm-dialog__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
 
-/* 全局按钮原语缺省时兜底 */
-.btn-outline {
-  padding: 8px 16px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-control);
-  background: var(--surface);
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  cursor: pointer;
-}
-.btn-outline:hover:not(:disabled) { background: var(--primary-light); color: var(--primary); }
-.btn-danger {
-  padding: 8px 16px;
-  border: none;
-  border-radius: var(--radius-control);
-  background: var(--danger);
-  color: #fff;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  cursor: pointer;
-}
-.btn-danger:hover:not(:disabled) { filter: brightness(0.94); }
+/* 兜底按钮名 → V2 语义 */
+.btn-outline { background: var(--surface); border-color: var(--border-strong); color: var(--fg); }
+.btn-outline:hover:not(:disabled) { border-color: var(--fg); }
+.btn-danger { background: var(--danger); border-color: var(--danger); color: var(--surface); }
+.btn-danger:hover:not(:disabled) { background: color-mix(in oklch, var(--danger) 88%, black); border-color: var(--danger); }
 .btn-danger:disabled, .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
 </style>

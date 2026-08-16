@@ -81,7 +81,7 @@ defineProps({
 .learning-loop {
   position: relative;
   overflow: hidden;
-  background: #14213b;
+  background: var(--fg);
   padding: 80px 0 72px;
   isolation: isolate;
 }
@@ -105,12 +105,12 @@ defineProps({
 .loop-glow--left {
   top: -40%;
   left: -10%;
-  background: radial-gradient(circle, rgba(36, 103, 237, 0.5), transparent 70%);
+  background: radial-gradient(circle, oklch(0.52 0.095 158 / 0.5), transparent 70%);
 }
 .loop-glow--right {
   bottom: -30%;
   right: -8%;
-  background: radial-gradient(circle, rgba(115, 89, 237, 0.4), transparent 70%);
+  background: radial-gradient(circle, oklch(0.52 0.09 235 / 0.4), transparent 70%);
   animation-delay: -8s;
 }
 
@@ -123,8 +123,8 @@ defineProps({
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    linear-gradient(oklch(0.99 0.001 95 / 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(0.99 0.001 95 / 0.03) 1px, transparent 1px);
   background-size: 48px 48px;
   mask-image: radial-gradient(ellipse 60% 60% at 50% 50%, black 30%, transparent 70%);
 }
@@ -147,7 +147,7 @@ defineProps({
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.16em;
-  color: rgba(255, 255, 255, 0.45);
+  color: oklch(0.99 0.001 95 / 0.45);
   margin-bottom: 12px;
 }
 
@@ -157,7 +157,7 @@ defineProps({
   font-size: clamp(24px, 3.2vw, 34px);
   font-weight: 750;
   letter-spacing: -0.025em;
-  color: #fff;
+  color: var(--surface);
 }
 
 .loop-title-dot {
@@ -165,7 +165,7 @@ defineProps({
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #58dda7;
+  background: var(--success);
   margin-left: 6px;
   vertical-align: middle;
   animation: dotPulse 2s ease-in-out infinite;
@@ -179,7 +179,7 @@ defineProps({
 .loop-sub {
   margin: 10px 0 0;
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.5);
+  color: oklch(0.99 0.001 95 / 0.5);
   line-height: 1.6;
 }
 
@@ -197,8 +197,8 @@ defineProps({
   left: 44px;
   right: 44px;
   height: 2px;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 2px;
+  background: oklch(0.99 0.001 95 / 0.08);
+  border-radius: var(--radius-sm);
 }
 
 .loop-rail-fill {
@@ -207,9 +207,9 @@ defineProps({
   border-radius: inherit;
   background: linear-gradient(
     90deg,
-    #2467ed,
-    #7359ed 50%,
-    #58dda7
+    var(--accent),
+    var(--info) 50%,
+    var(--success)
   );
   transition: width 1.2s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
@@ -250,8 +250,8 @@ defineProps({
   width: 52px;
   height: 52px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.06);
-  border: 2px solid rgba(255, 255, 255, 0.12);
+  background: oklch(0.99 0.001 95 / 0.06);
+  border: 2px solid oklch(0.99 0.001 95 / 0.12);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -262,9 +262,9 @@ defineProps({
 }
 
 .loop--visible .node-circle {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(36, 103, 237, 0.55);
-  box-shadow: 0 0 24px rgba(36, 103, 237, 0.15);
+  background: oklch(0.99 0.001 95 / 0.1);
+  border-color: oklch(0.52 0.095 158 / 0.55);
+  box-shadow: 0 0 24px oklch(0.52 0.095 158 / 0.15);
 }
 
 .node-num,
@@ -277,7 +277,7 @@ defineProps({
   font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", monospace;
   font-size: 14px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.5);
+  color: oklch(0.99 0.001 95 / 0.5);
 }
 
 .loop--visible .node-num {
@@ -288,7 +288,7 @@ defineProps({
 .node-check {
   opacity: 0;
   transform: scale(0.6);
-  color: #58dda7;
+  color: var(--success);
   transition-delay: 0.5s;
 }
 
@@ -305,7 +305,7 @@ defineProps({
   display: block;
   font-size: 15px;
   font-weight: 650;
-  color: #fff;
+  color: var(--surface);
   letter-spacing: -0.005em;
   margin-bottom: 6px;
 }
@@ -313,7 +313,7 @@ defineProps({
 .node-desc {
   margin: 0;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.45);
+  color: oklch(0.99 0.001 95 / 0.45);
   line-height: 1.55;
   max-width: 180px;
   margin-left: auto;

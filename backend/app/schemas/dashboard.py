@@ -73,9 +73,13 @@ class StudentDashboardRead(BaseModel):
 
 class TeacherSummary(BaseModel):
     course_count: int = 0
+    active_course_count: int = 0
     student_count: int = 0
+    pending_grading_count: int = 0
     pending_review_count: int = 0
     upcoming_deadline_count: int = 0
+    pending_release_count: int = 0
+    unread_announcement_count: int = 0
 
 
 class WorkItem(BaseModel):
@@ -85,6 +89,8 @@ class WorkItem(BaseModel):
     course_id: int | None = None
     course_title: str | None = None
     detail: str | None = None
+    count: int | None = None
+    status: str | None = None
     time_at: datetime | None = None
     urgency: str = "normal"
     route: str
@@ -111,9 +117,35 @@ class TeacherActivity(BaseModel):
     route: str
 
 
+class RecentSubmission(BaseModel):
+    kind: str
+    id: int
+    student_name: str | None = None
+    student_no: str | None = None
+    entry_title: str | None = None
+    course_id: int | None = None
+    course_title: str | None = None
+    status: str | None = None
+    status_tone: str = "neutral"
+    tests_passed: int | None = None
+    tests_total: int | None = None
+    ai_score: float | None = None
+    score: float | None = None
+    submitted_at: datetime | None = None
+    route: str
+
+
 class ManagedCourse(BaseModel):
     id: int
     title: str
+
+
+class TeacherDashboardCounts(BaseModel):
+    pending_grading_count: int = 0
+    pending_review_count: int = 0
+    upcoming_deadline_count: int = 0
+    pending_release_count: int = 0
+    unread_announcement_count: int = 0
 
 
 class TeacherDashboardRead(BaseModel):
@@ -121,5 +153,6 @@ class TeacherDashboardRead(BaseModel):
     work_items: list[WorkItem] = Field(default_factory=list)
     course_health: list[CourseHealth] = Field(default_factory=list)
     recent_activity: list[TeacherActivity] = Field(default_factory=list)
+    recent_submissions: list[RecentSubmission] = Field(default_factory=list)
     managed_courses: list[ManagedCourse] = Field(default_factory=list)
     announcements: list[AnnouncementRead] = Field(default_factory=list)

@@ -141,8 +141,8 @@ onUnmounted(() => {
 <style scoped>
 .welcome-page {
   min-height: 100vh;
-  background: #F8FAFF;
-  color: #13213A;
+  background: var(--surface-subtle);
+  color: var(--fg);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
 }
@@ -151,10 +151,10 @@ onUnmounted(() => {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(255, 255, 255, 0.85);
+  background: oklch(0.99 0.001 95 / 0.85);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(226, 232, 240, 0.7);
+  border-bottom: 1px solid oklch(0.90 0.008 110 / 0.7);
 }
 
 .w-nav-inner {
@@ -173,7 +173,7 @@ onUnmounted(() => {
 }
 
 .w-nav-logo {
-  color: #2467ED;
+  color: var(--accent);
   display: flex;
   flex-shrink: 0;
 }
@@ -181,7 +181,7 @@ onUnmounted(() => {
 .w-nav-name {
   font-size: 15px;
   font-weight: 600;
-  color: #13213A;
+  color: var(--fg);
   letter-spacing: -0.01em;
   white-space: nowrap;
 }
@@ -198,17 +198,17 @@ onUnmounted(() => {
   padding: 8px 16px;
   font-size: 13px;
   font-weight: 500;
-  color: #6E7B92;
+  color: var(--muted);
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   transition: all 0.2s ease;
   font-family: inherit;
 }
 
 .w-nav-link:hover,
 .w-nav-link:focus-visible {
-  color: #2467ED;
-  background: rgba(36, 103, 237, 0.06);
+  color: var(--accent);
+  background: oklch(0.52 0.095 158 / 0.06);
 }
 
 .w-nav-login {
@@ -218,10 +218,10 @@ onUnmounted(() => {
   padding: 8px 20px;
   font-size: 13px;
   font-weight: 600;
-  color: #fff;
-  background: #2467ED;
+  color: var(--surface);
+  background: var(--accent);
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s ease;
   font-family: inherit;
@@ -229,13 +229,13 @@ onUnmounted(() => {
 }
 
 .w-nav-login:hover {
-  background: #1D4ED8;
+  background: var(--accent-hover);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(36, 103, 237, 0.25);
+  box-shadow: var(--shadow-md);
 }
 
 .w-footer {
-  border-top: 1px solid #E2E8F0;
+  border-top: 1px solid var(--border);
   padding: 24px 56px 32px;
 }
 
@@ -246,11 +246,11 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #94A3B8;
+  color: var(--faint);
 }
 
 .w-footer-sep {
-  color: #CBD5E1;
+  color: var(--border-strong);
 }
 
 @media (prefers-reduced-motion: reduce) {

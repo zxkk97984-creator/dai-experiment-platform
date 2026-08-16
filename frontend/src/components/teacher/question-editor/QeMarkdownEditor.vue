@@ -138,7 +138,7 @@ const tools = [
 <style scoped>
 .qe-md {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--surface);
 }
@@ -149,7 +149,7 @@ const tools = [
   justify-content: space-between;
   gap: 8px;
   padding: 6px 8px;
-  background: var(--surface-raised);
+  background: var(--surface-subtle);
   border-bottom: 1px solid var(--border);
 }
 
@@ -165,9 +165,9 @@ const tools = [
   height: 26px;
   padding: 0 6px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 600;
@@ -177,13 +177,13 @@ const tools = [
 
 .qe-md__tool:hover {
   background: var(--surface);
-  color: var(--primary);
+  color: var(--accent);
   border-color: var(--border);
 }
 
 .qe-md__tool:focus-visible {
   outline: none;
-  box-shadow: var(--shadow-glow-primary);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .qe-md__tabs {
@@ -194,22 +194,22 @@ const tools = [
 .qe-md__tab {
   padding: 3px 12px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
 }
 
 .qe-md__tab:hover {
-  color: var(--ink);
+  color: var(--fg);
 }
 
 .qe-md__tab.active {
   background: var(--surface);
   border-color: var(--border);
-  color: var(--primary);
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -226,19 +226,19 @@ const tools = [
   outline: none;
   resize: none;
   background: var(--surface);
-  color: var(--ink);
+  color: var(--fg);
   font-family: inherit;
   font-size: var(--text-sm);
   line-height: 1.7;
 }
 
 .qe-md__textarea::placeholder {
-  color: var(--text-tertiary);
+  color: var(--faint);
   font-style: italic;
 }
 
 .qe-md__textarea:focus {
-  box-shadow: inset 0 0 0 2px var(--primary);
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 .qe-md__preview {
@@ -247,22 +247,22 @@ const tools = [
   font-size: var(--text-sm);
   line-height: 1.7;
   overflow-y: auto;
-  color: var(--ink);
+  color: var(--fg);
 }
 
 /* 预览内嵌 Markdown 基础样式（作用域内，避免污染全局） */
 .qe-md__preview :deep(p) { margin: 0 0 10px; }
 .qe-md__preview :deep(h1), .qe-md__preview :deep(h2), .qe-md__preview :deep(h3) { margin: 14px 0 8px; font-weight: 600; }
 .qe-md__preview :deep(pre) {
-  background: #0F172A; color: #E2E8F0; padding: 10px 12px; border-radius: 8px;
+  background: var(--fg); color: var(--border); padding: 10px 12px; border-radius: var(--radius-md);
   overflow-x: auto; font-family: var(--font-mono); font-size: 12px;
 }
 .qe-md__preview :deep(code) { font-family: var(--font-mono); font-size: 12px; }
 .qe-md__preview :deep(pre code) { background: transparent; padding: 0; }
-.qe-md__preview :deep(code:not(pre code)) { background: var(--surface-raised); padding: 1px 5px; border-radius: 4px; }
+.qe-md__preview :deep(code:not(pre code)) { background: var(--surface-subtle); padding: 1px 5px; border-radius: var(--radius-sm); }
 .qe-md__preview :deep(table) { border-collapse: collapse; margin: 8px 0; }
 .qe-md__preview :deep(th), .qe-md__preview :deep(td) { border: 1px solid var(--border); padding: 5px 10px; }
-.qe-md__preview :deep(blockquote) { border-left: 3px solid var(--border-strong); margin: 8px 0; padding: 2px 12px; color: var(--text-secondary); }
-.qe-md__preview :deep(a) { color: var(--primary); }
+.qe-md__preview :deep(blockquote) { border-left: 3px solid var(--border-strong); margin: 8px 0; padding: 2px 12px; color: var(--muted); }
+.qe-md__preview :deep(a) { color: var(--accent); }
 .qe-md__preview :deep(img) { max-width: 100%; }
 </style>

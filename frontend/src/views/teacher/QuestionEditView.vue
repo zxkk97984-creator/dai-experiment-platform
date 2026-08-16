@@ -595,7 +595,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
               <!-- 收敛：不再行内展开第二个 AIQuestionConfig 实例，统一打开右侧栏 AI tab -->
               <button class="btn-sm btn-outline" @click="openAiConfig(q)">
                 <AppIcon name="settings" :size="14" />
-                <span class="qe-sr-only">🤖 </span>AI 配置
+                <span class="qe-sr-only"></span>AI 配置
               </button>
             </div>
           </div>
@@ -912,26 +912,26 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
  align-items: center;
  gap: 6px;
  font-size: 12px;
- color: var(--text-tertiary);
+ color: var(--faint);
  margin-bottom: 4px;
 }
 
 .qe-crumbs-sep { color: var(--border-strong); }
 
 .qe-crumbs-name {
- color: var(--text-secondary);
+ color: var(--muted);
  max-width: 240px;
  overflow: hidden;
  text-overflow: ellipsis;
  white-space: nowrap;
 }
 
-.qe-crumbs-cur { color: var(--primary); font-weight: 500; }
+.qe-crumbs-cur { color: var(--accent); font-weight: 500; }
 
 .qe-title {
  font-size: 22px;
  font-weight: 700;
- color: var(--ink);
+ color: var(--fg);
  letter-spacing: -0.01em;
  margin: 0;
  line-height: 1.2;
@@ -943,8 +943,8 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
  gap: 5px;
  font-size: 12px;
  color: var(--success);
- background: var(--success-light);
- border-radius: 999px;
+ background: var(--success-bg);
+ border-radius: var(--radius-full);
  padding: 4px 12px;
  white-space: nowrap;
 }
@@ -961,14 +961,14 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 
 /* ── 卡片公共 ───────────────────────────────────────────────────── */
 .qe-card {
- border-radius: 10px;
- box-shadow: var(--shadow-card);
+ border-radius: var(--radius-md);
+ box-shadow: none;
 }
 
 .qe-card-title {
  font-size: 15px;
  font-weight: 600;
- color: var(--ink);
+ color: var(--fg);
  margin: 0;
 }
 
@@ -989,7 +989,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 .qe-hint {
  margin: 8px 0 0;
  font-size: 12px;
- color: var(--text-tertiary);
+ color: var(--faint);
 }
 
 /* ── 题目列表卡 ─────────────────────────────────────────────────── */
@@ -1005,9 +1005,9 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
  display: inline-block;
  min-width: 20px;
  padding: 0 6px;
- border-radius: 999px;
- background: var(--primary-light);
- color: var(--primary);
+ border-radius: var(--radius-full);
+ background: var(--accent-soft);
+ color: var(--accent);
  font-size: 11px;
  font-weight: 600;
  text-align: center;
@@ -1019,7 +1019,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 .qe-empty {
  padding: 22px 0;
  text-align: center;
- color: var(--text-tertiary);
+ color: var(--faint);
  font-size: var(--text-sm);
 }
 
@@ -1037,7 +1037,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 
 .qe-list-row {
  border: 1px solid transparent;
- border-radius: 8px;
+ border-radius: var(--radius-md);
  padding: 10px 12px;
  display: flex;
  align-items: center;
@@ -1048,8 +1048,8 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 .qe-list-row:hover { background: var(--surface-sunken); }
 
 .qe-list-row--active {
- background: var(--primary-light);
- border-color: rgba(20, 99, 243, 0.25);
+ background: var(--accent-soft);
+ border-color: oklch(0.52 0.095 158 / 0.25);
 }
 
 .qe-list-row + .qe-list-row { margin-top: 2px; }
@@ -1068,7 +1068,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 .qe-list-no {
  font-family: var(--font-mono);
  font-size: 12px;
- color: var(--text-tertiary);
+ color: var(--faint);
  flex-shrink: 0;
 }
 
@@ -1077,7 +1077,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 .qe-list-title {
  font-size: var(--text-sm);
  font-weight: 600;
- color: var(--ink);
+ color: var(--fg);
  overflow: hidden;
  text-overflow: ellipsis;
  white-space: nowrap;
@@ -1085,7 +1085,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 
 .qe-list-meta {
  font-size: 12px;
- color: var(--text-tertiary);
+ color: var(--faint);
  margin-top: 2px;
  overflow: hidden;
  text-overflow: ellipsis;
@@ -1099,20 +1099,20 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
  flex-shrink: 0;
 }
 
-.qe-delete-btn { color: var(--danger, #dc2626); }
-.qe-delete-btn:hover { border-color: var(--danger, #dc2626); background: #fef2f2; }
+.qe-delete-btn { color: var(--danger, var(--danger)); }
+.qe-delete-btn:hover { border-color: var(--danger, var(--danger)); background: var(--danger-bg); }
 
 /* TASK-020：AI 治理门提示横幅（未审批/缺 Key） */
 .qe-ai-notice {
-  margin: 10px 0 0; padding: 10px 12px; border-radius: 8px;
+  margin: 10px 0 0; padding: 10px 12px; border-radius: var(--radius-md);
   font-size: 13px; line-height: 1.5;
-  color: #92400e; background: #fffbeb; border: 1px solid #fde68a;
+  color: var(--warning); background: var(--warning-bg); border: 1px solid var(--warning-bg);
 }
 
 .badge-mode {
- display: inline-block; padding: 1px 8px; border-radius: 10px;
+ display: inline-block; padding: 1px 8px; border-radius: var(--radius-md);
  font-size: 11px; font-weight: 500; margin-left: 6px;
- background: #dbeafe; color: #1e40af;
+ background: var(--info-bg); color: var(--accent-hover);
 }
 
 /* ── 主体：主编辑区 + 右侧栏 ───────────────────────────────────── */
@@ -1162,9 +1162,9 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
  gap: 5px;
  padding: 3px 10px;
  border: 1px solid var(--border);
- border-radius: 999px;
- background: var(--surface-raised);
- color: var(--text-secondary);
+ border-radius: var(--radius-full);
+ background: var(--surface-subtle);
+ color: var(--muted);
  font-size: 12px;
  font-weight: 600;
 }
@@ -1172,16 +1172,16 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 /* ── 右侧设置栏 ─────────────────────────────────────────────────── */
 .qe-side-card {
  border: 1px solid var(--border);
- border-radius: 10px;
+ border-radius: var(--radius-md);
  background: var(--surface);
- box-shadow: var(--shadow-card);
+ box-shadow: none;
  overflow: hidden;
 }
 
 .qe-side-tabs {
  display: flex;
  border-bottom: 1px solid var(--border);
- background: var(--surface-raised);
+ background: var(--surface-subtle);
 }
 
 .qe-side-tab {
@@ -1190,7 +1190,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
  border: none;
  border-bottom: 2px solid transparent;
  background: transparent;
- color: var(--text-secondary);
+ color: var(--muted);
  font-size: var(--text-sm);
  font-weight: 500;
  cursor: pointer;
@@ -1198,11 +1198,11 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
  transition: color var(--duration-fast);
 }
 
-.qe-side-tab:hover { color: var(--ink); }
+.qe-side-tab:hover { color: var(--fg); }
 
 .qe-side-tab.active {
- color: var(--primary);
- border-bottom-color: var(--primary);
+ color: var(--accent);
+ border-bottom-color: var(--accent);
  font-weight: 600;
  background: var(--surface);
 }
@@ -1219,14 +1219,14 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 .qe-side-title {
  font-size: var(--text-sm);
  font-weight: 600;
- color: var(--ink);
+ color: var(--fg);
  margin: 0 0 4px;
 }
 
 .qe-side-sub {
  margin: 0 0 12px;
  font-size: 12px;
- color: var(--text-tertiary);
+ color: var(--faint);
  line-height: 1.6;
 }
 
@@ -1250,18 +1250,18 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
  padding: 9px 12px;
  border: 1px solid var(--border);
  border-radius: var(--radius-control, 7px);
- background: var(--surface, #fff);
- color: var(--ink, #223);
+ background: var(--surface, var(--surface));
+ color: var(--fg);
  font-family: inherit;
  font-size: var(--text-sm, 13px);
 }
 
 .import-policy-select:disabled {
- background: var(--surface-raised, #f4f6f8);
- color: var(--text-tertiary, #9aa);
+ background: var(--surface-raised, var(--surface-subtle));
+ color: var(--faint);
 }
 
-.env-warn { color: var(--warning, #b7791f); }
+.env-warn { color: var(--warning, var(--warning)); }
 
 .import-candidates {
  display: flex;
@@ -1275,8 +1275,8 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
  gap: 6px;
  padding: 5px 10px;
  border: 1px solid var(--border);
- border-radius: 999px;
- background: var(--surface-raised, #f4f6f8);
+ border-radius: var(--radius-full);
+ background: var(--surface-raised, var(--surface-subtle));
  font-size: var(--text-sm, 13px);
  cursor: pointer;
 }
@@ -1287,46 +1287,46 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 .qe-warn-card {
  margin: 4px 0 12px;
  padding: 10px 12px;
- border: 1px solid rgba(245, 138, 7, 0.35);
- border-radius: 8px;
- background: var(--warning-light);
+ border: 1px solid oklch(0.66 0.14 75 / 0.35);
+ border-radius: var(--radius-md);
+ background: var(--warning-bg);
 }
 
 .qe-warn-text {
  margin: 0 0 4px;
  font-size: 12.5px;
  font-weight: 600;
- color: #b45309;
+ color: var(--warning);
  line-height: 1.5;
 }
 
 .qe-warn-sub {
  margin: 0 0 8px;
  font-size: 12px;
- color: #d97706;
+ color: var(--warning);
 }
 
 .qe-warn-btn {
  padding: 5px 12px;
- border: 1px solid #f59e0b;
- border-radius: 6px;
- background: #fff;
- color: #b45309;
+ border: 1px solid var(--warning);
+ border-radius: var(--radius-md);
+ background: var(--surface);
+ color: var(--warning);
  font-size: 12px;
  font-weight: 500;
  cursor: pointer;
  transition: background var(--duration-fast);
 }
 
-.qe-warn-btn:hover { background: #fffbeb; }
+.qe-warn-btn:hover { background: var(--warning-bg); }
 
 /* ── 有效环境 info（浅蓝） ──────────────────────────────────────── */
 .qe-info {
  margin: 0 0 8px;
  padding: 8px 10px;
- border-radius: 8px;
- background: var(--info-light);
- color: #0e7490;
+ border-radius: var(--radius-md);
+ background: var(--info-bg);
+ color: oklch(0.52 0.09 235);
  font-size: 12px;
  line-height: 1.6;
 }
@@ -1335,13 +1335,13 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 .qe-ai-qid {
  font-family: var(--font-mono);
  font-size: 12px;
- color: var(--text-tertiary);
+ color: var(--faint);
 }
 
 .qe-ai-empty {
  padding: 20px 4px;
  text-align: center;
- color: var(--text-tertiary);
+ color: var(--faint);
  font-size: var(--text-sm);
  line-height: 1.6;
 }
@@ -1367,7 +1367,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
  z-index: 100;
  background: var(--surface);
  border-top: 1px solid var(--border);
- box-shadow: 0 -2px 8px rgba(31, 58, 94, 0.04);
+ box-shadow: 0 -2px 8px oklch(0.2 0.01 150 / 0.04);
 }
 
 .qe-bottom-inner {
@@ -1385,7 +1385,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 .qe-bottom-id {
  font-family: var(--font-mono);
  font-size: 12px;
- color: var(--text-tertiary);
+ color: var(--faint);
 }
 
 .qe-bottom-actions {
@@ -1427,7 +1427,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 .qe-page input:focus-visible,
 .qe-page select:focus-visible,
 .qe-page textarea:focus-visible {
-  outline: 2px solid rgba(20, 99, 243, 0.45);
+  outline: 2px solid oklch(0.52 0.095 158 / 0.45);
   outline-offset: 2px;
 }
 
@@ -1451,18 +1451,18 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 
 .qe-topbar-publish,
 .btn-outline {
-  border: 1px solid var(--border-strong, #c7d3e3);
+  border: 1px solid var(--border-strong, var(--border-strong));
   border-radius: var(--radius-control, 7px);
-  background: var(--surface, #fff);
-  color: var(--ink, #10213d);
+  background: var(--surface, var(--surface));
+  color: var(--fg);
   font-weight: 600;
 }
 
 .qe-topbar-publish:hover:not(:disabled),
 .btn-outline:hover:not(:disabled) {
-  border-color: var(--primary);
-  color: var(--primary);
-  background: var(--primary-light);
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .qe-topbar-publish:disabled,
@@ -1471,8 +1471,8 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 }
 
 .qe-saved {
-  background: var(--success-light);
-  border: 1px solid rgba(22, 163, 74, 0.16);
+  background: var(--success-bg);
+  border: 1px solid oklch(0.55 0.13 150 / 0.16);
   padding: 5px 10px;
 }
 
@@ -1512,7 +1512,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 .qe-count-badge {
   min-width: 21px;
   padding: 2px 7px;
-  background: var(--primary-light);
+  background: var(--accent-soft);
 }
 
 .qe-empty {
@@ -1524,10 +1524,10 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
   align-items: center;
   justify-content: center;
   gap: 8px;
-  color: var(--text-tertiary);
+  color: var(--faint);
 }
 
-.qe-empty .app-icon { color: var(--text-tertiary); }
+.qe-empty .app-icon { color: var(--faint); }
 
 .qe-empty p {
   max-width: 100%;
@@ -1546,12 +1546,12 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 
 .qe-list-row {
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .qe-list-row--active {
-  background: rgba(20, 99, 243, 0.07);
-  border-color: rgba(20, 99, 243, 0.24);
+  background: oklch(0.52 0.095 158 / 0.07);
+  border-color: oklch(0.52 0.095 158 / 0.24);
 }
 
 .qe-list-actions { gap: 6px; }
@@ -1800,7 +1800,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
   line-height: 1.5;
 }
 
-.qe-hint .app-icon { flex: 0 0 auto; color: var(--text-tertiary); }
+.qe-hint .app-icon { flex: 0 0 auto; color: var(--faint); }
 
 .qe-sr-only {
   position: absolute;
@@ -1818,7 +1818,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
   left: var(--modal-left, var(--sidebar-width, 264px));
   right: 0;
   z-index: 50;
-  box-shadow: 0 -4px 14px rgba(31, 58, 94, 0.06);
+  box-shadow: 0 -4px 14px oklch(0.2 0.01 150 / 0.06);
 }
 
 .qe-bottom-inner {
@@ -1956,14 +1956,14 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
   box-shadow: none;
 }
 .qe-schedule-copy .qe-side-sec-head { justify-content: flex-start; margin-bottom: 4px; }
-.qe-schedule-copy p { margin: 0; color: var(--text-tertiary); font-size: 12px; line-height: 1.55; }
-.qe-schedule-card .status-pill { display: inline-flex; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-.qe-schedule-card .status-pill.published { color: #099b61; background: #e9f8f1; }
-.qe-schedule-card .status-pill.draft { color: #ef8b10; background: #fff4e7; }
+.qe-schedule-copy p { margin: 0; color: var(--faint); font-size: 12px; line-height: 1.55; }
+.qe-schedule-card .status-pill { display: inline-flex; padding: 3px 9px; border-radius: var(--radius-full); font-size: 11px; font-weight: 600; }
+.qe-schedule-card .status-pill.published { color: var(--success); background: var(--success-bg); }
+.qe-schedule-card .status-pill.draft { color: var(--warning); background: var(--warning-bg); }
 .qe-schedule-meta { display: grid; grid-template-columns: minmax(170px,.8fr) minmax(220px,1fr); gap: 12px; margin: 0; }
 .qe-schedule-meta>div { min-width: 0; }
-.qe-schedule-meta dt { margin-bottom: 5px; color: var(--text-tertiary); font-size: 11px; }
-.qe-schedule-meta dd { margin: 0; color: var(--ink); font-size: 13px; font-weight: 600; }
+.qe-schedule-meta dt { margin-bottom: 5px; color: var(--faint); font-size: 11px; }
+.qe-schedule-meta dd { margin: 0; color: var(--fg); font-size: 13px; font-weight: 600; }
 .qe-schedule-due input { width: 100%; height: 36px; min-width: 0; padding: 6px 9px; }
 .qe-schedule-save { min-width: 112px; justify-content: center; white-space: nowrap; }
 @media (max-width: 1050px) {

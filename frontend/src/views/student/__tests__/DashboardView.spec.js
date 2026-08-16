@@ -231,7 +231,7 @@ describe('学生首页 DashboardView（参考图 04 构成）', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('特征选择解释清晰。')
     expect(wrapper.text()).toContain('92')
-    const allBtn = wrapper.findAll('.view-all-btn').find((b) => b.text().includes('查看全部反馈'))
+    const allBtn = wrapper.find('.feedback-panel .view-all-btn')
     await allBtn.trigger('click')
     expect(routerState.push).toHaveBeenCalledWith('/student/feedback')
   })

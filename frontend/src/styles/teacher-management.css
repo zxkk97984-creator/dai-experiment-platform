@@ -1,31 +1,32 @@
-/* Shared visual contract for teacher management list pages. */
+/* Shared visual contract for teacher management list pages（V2 迁移桥）。
+   未迁移页面继续使用 .teacher-management-page 时，自动获得 V2 token 与密度，
+   不再携带旧蓝 / 旧阴影 / 大圆角。随页面逐批迁移到 .table-wrap/.toolbar 后，
+   本文件中的对应桥接规则应逐步删除。 */
+
 .teacher-management-page {
   min-width: 0;
-  color: var(--ink);
+  color: var(--fg);
   font-family: var(--font-body);
 }
 
 body .teacher-management-page.ai-grading-review { padding: 0; }
-
-.teacher-management-page .teacher-page-action {
-  min-height: 46px;
-  padding: 0 18px;
-  font-size: 14px;
-}
 
 body .teacher-management-page .data-panel,
 body .teacher-management-page .records-panel {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: var(--radius-card);
+  border-radius: var(--radius-lg);
   background: var(--surface);
-  box-shadow: var(--shadow-card);
+  box-shadow: none;
 }
 
 body .teacher-management-page .filter-bar {
-  gap: 14px;
-  padding: 18px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
@@ -34,183 +35,106 @@ body .teacher-management-page .filter-bar input,
 body .teacher-management-page .filter-bar select,
 body .teacher-management-page .search-field,
 body .teacher-management-page .query-button {
-  height: 44px;
+  height: var(--h-input);
   border-radius: var(--radius-md);
   font-family: var(--font-body);
-  font-size: 14px;
+  font-size: var(--text-md);
+  border-color: var(--border-strong);
+  background: var(--surface);
+  color: var(--fg);
 }
 
 body .teacher-management-page .search-control,
-body .teacher-management-page .search-field {
-  color: var(--text-tertiary);
-  background: var(--surface);
-}
+body .teacher-management-page .search-field { color: var(--faint); }
 
 body .teacher-management-page .search-control:focus-within,
 body .teacher-management-page .search-field:focus-within {
-  border-color: var(--primary);
-  box-shadow: var(--shadow-glow-primary);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 body .teacher-management-page .filter-field,
-body .teacher-management-page .select-field {
-  gap: 5px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-}
+body .teacher-management-page .select-field { gap: 5px; color: var(--muted); font-size: var(--text-sm); font-weight: 500; }
 
-body .teacher-management-page .table-wrap { border-top: 0; }
-
-body .teacher-management-page table { font-family: var(--font-body); }
+body .teacher-management-page .table-wrap { border-top: 1px solid var(--border); }
+body .teacher-management-page table { width: 100%; border-collapse: collapse; font-size: var(--text-base); }
 body .teacher-management-page th {
-  height: 44px;
-  color: var(--text-secondary);
-  background: var(--surface-sunken);
-  font-size: 12px;
+  height: 40px;
+  padding: 0 14px;
+  color: var(--muted);
+  background: var(--surface-subtle);
+  font-size: var(--text-sm);
   font-weight: 600;
   letter-spacing: 0;
   line-height: 1.35;
   text-transform: none;
+  border-bottom: 1px solid var(--border-strong);
 }
-
-body .teacher-management-page .grade-table th { font-size: 12px; }
 
 body .teacher-management-page td {
-  height: 68px;
-  color: var(--ink);
-  font-size: 14px;
+  height: 44px;
+  padding: 0 14px;
+  color: var(--fg);
+  font-size: var(--text-base);
   font-weight: 400;
   line-height: 1.45;
+  border-bottom: 1px solid var(--border);
 }
 
-/* One type hierarchy across every management table.  Entity names are the
-   only blue body text; supporting metadata stays quiet and regular. */
-body .teacher-management-page .table-scroll td:first-child,
-body .teacher-management-page .records-panel td:first-child {
-  font-weight: 400;
-}
+body .teacher-management-page tbody tr:last-child td { border-bottom: 0; }
+body .teacher-management-page tbody tr { transition: background var(--duration-fast, 120ms) ease; }
+body .teacher-management-page tbody tr:hover { background: var(--surface-sunken); }
 
+/* 实体名不再使用蓝色正文，改为 V2 主文字；元信息保持 muted/faint。 */
 body .teacher-management-page table td small,
 body .teacher-management-page .student-cell small,
 body .teacher-management-page .record-cell small,
-body .teacher-management-page .score-cap {
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.35;
-}
+body .teacher-management-page .score-cap { color: var(--faint); font-size: var(--text-sm); font-weight: 400; }
 
 body .teacher-management-page table td.muted-cell,
-body .teacher-management-page table td.time-cell {
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 400;
-}
+body .teacher-management-page table td.time-cell { color: var(--muted); font-size: var(--text-base); font-weight: 400; }
 
 body .teacher-management-page .course-link,
 body .teacher-management-page .title-cell,
 body .teacher-management-page .exam-table td:first-child strong,
 body .teacher-management-page .student-cell strong,
 body .teacher-management-page .record-cell strong,
-body .teacher-management-page .course-name {
-  color: var(--primary);
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.45;
-}
+body .teacher-management-page .course-name { color: var(--fg); font-size: var(--text-md); font-weight: 600; }
 
-body .teacher-management-page .cell-stack strong.experiment-name {
-  color: var(--ink);
-  font-weight: 400;
-}
+body .teacher-management-page .entry-code { color: var(--fg); font-family: var(--font-mono); font-size: var(--text-sm); }
 
-/* The first table cell is regular body copy by default, but a named entity
-   inside it keeps the shared blue/600 treatment. */
-body .teacher-management-page td.title-cell:first-child {
-  color: var(--primary);
-  font-size: 14px;
-  font-weight: 600;
-}
-
-body .teacher-management-page .entry-code {
-  color: var(--ink);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-/* KPI numbers have one weight and ink color; semantic color belongs to the
-   icon and status treatment, not to the number itself. */
 body .teacher-management-page .teacher-metric-value strong,
-body .teacher-management-page .teacher-metric-value strong.emphasized {
-  color: var(--ink);
-  font-weight: 700;
-}
-
-body .teacher-management-page .teacher-metric-grid .teacher-metric-card
-  .teacher-metric-copy .teacher-metric-value strong.emphasized {
-  color: var(--ink);
-}
+body .teacher-management-page .teacher-metric-value strong.emphasized { color: var(--fg); font-weight: 600; }
 
 body .teacher-management-page .text-action,
-body .teacher-management-page .row-action {
-  color: var(--primary);
-  font-size: 13px;
-  font-weight: 500;
-}
+body .teacher-management-page .row-action { color: var(--accent); font-size: var(--text-base); font-weight: 500; }
 
-body .teacher-management-page a.row-action,
-body .teacher-management-page button.row-action,
-body .teacher-management-page button.text-action {
-  font-size: 13px;
-}
-
-body .teacher-management-page .publish-action,
-body .teacher-management-page .delete-action {
-  font-size: 13px;
-  color: var(--warning);
-  font-weight: 500;
-}
-
-body .teacher-management-page .delete-action {
-  color: var(--danger);
-}
+body .teacher-management-page .publish-action { color: var(--warning); }
+body .teacher-management-page .delete-action { color: var(--danger); }
 
 body .teacher-management-page .score-value,
 body .teacher-management-page .final-score,
-body .teacher-management-page .raw-score {
-  color: var(--ink);
-  font-weight: 700;
-}
+body .teacher-management-page .raw-score { color: var(--fg); font-weight: 600; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
-body .teacher-management-page tbody tr { transition: background var(--duration-fast) var(--ease-out); }
-body .teacher-management-page tbody tr:hover { background: #fafcff; }
-
+/* 旧 status-pill → V2 badge：3px 圆角 + dot */
 body .teacher-management-page .status-pill,
 body .teacher-management-page .status-badge,
 body .teacher-management-page .review-badge,
 body .teacher-management-page .attempt-pill {
-  min-height: 26px;
-  padding: 4px 10px;
-  border-radius: var(--radius-full);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
-body .teacher-management-page .row-action {
-  min-height: 36px;
-  border-radius: var(--radius-md);
-  font-size: 12px;
-}
-
-body .teacher-management-page .icon-value {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  color: var(--text-secondary);
+  gap: 6px;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.2;
+  border: 0;
 }
+
+body .teacher-management-page .row-action { min-height: 32px; border-radius: var(--radius-md); font-size: var(--text-sm); }
+body .teacher-management-page .icon-value { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
 
 body .teacher-management-page .empty-state {
   display: flex;
@@ -219,47 +143,19 @@ body .teacher-management-page .empty-state {
   justify-content: center;
   flex-direction: column;
   gap: 8px;
-  color: var(--primary);
+  color: var(--muted);
+  text-align: center;
+  padding: 40px 20px;
 }
+body .teacher-management-page .empty-state strong { margin: 4px 0 0; color: var(--fg); font-size: var(--text-md); }
+body .teacher-management-page .empty-state p { margin: 0; color: var(--muted); font-size: var(--text-base); }
 
-body .teacher-management-page .empty-state strong {
-  margin: 4px 0 0;
-  color: var(--ink);
-  font-size: 16px;
-}
-
-body .teacher-management-page .empty-state p {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-body .submissions-page .search-control {
-  align-items: flex-end;
-  padding: 0;
-  border: 0;
-}
-
-body .submissions-page .search-control input {
-  height: 44px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
-
+body .submissions-page .search-control { align-items: flex-end; padding: 0; border: 0; }
+body .submissions-page .search-control input { height: var(--h-input); border: 1px solid var(--border-strong); border-radius: var(--radius-md); }
 body .submissions-page .search-control:focus-within { box-shadow: none; }
-body .submissions-page .search-control:focus-within input {
-  border-color: var(--primary);
-  box-shadow: var(--shadow-glow-primary);
-}
-
-@media (max-width: 1390px) {
-  body .submissions-page .filter-bar {
-    grid-template-columns: minmax(250px, 1.4fr) repeat(2, minmax(180px, 1fr));
-  }
-}
+body .submissions-page .search-control:focus-within input { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 @media (max-width: 720px) {
-  .teacher-management-page .teacher-page-action { width: 100%; }
-  body .teacher-management-page .filter-bar { grid-template-columns: 1fr; padding: 14px; }
+  body .teacher-management-page .filter-bar { padding: 12px; }
   body .teacher-management-page .empty-state { min-height: 220px; }
 }

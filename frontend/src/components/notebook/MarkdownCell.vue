@@ -39,7 +39,7 @@ const rendered = computed(() => {
 .markdown-cell {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--primary);
+  border-left: 3px solid var(--accent);
   border-radius: var(--radius-md);
   padding: var(--space-5);
   margin-bottom: var(--space-4);
@@ -50,7 +50,7 @@ const rendered = computed(() => {
   align-items: center;
   gap: 6px;
   margin-bottom: var(--space-3);
-  color: var(--primary);
+  color: var(--accent);
   font-size: var(--text-xs);
   font-weight: 600;
   text-transform: uppercase;
@@ -59,7 +59,7 @@ const rendered = computed(() => {
 
 .cell-body {
   line-height: 1.8;
-  color: var(--text);
+  color: var(--fg);
   font-size: var(--text-sm);
 }
 
@@ -67,7 +67,7 @@ const rendered = computed(() => {
   font-family: var(--font-display);
   font-size: var(--text-2xl);
   font-weight: 600;
-  color: var(--ink);
+  color: var(--fg);
   margin: 24px 0 12px;
   letter-spacing: -0.01em;
 }
@@ -76,7 +76,7 @@ const rendered = computed(() => {
   font-family: var(--font-display);
   font-size: var(--text-xl);
   font-weight: 600;
-  color: var(--ink);
+  color: var(--fg);
   margin: 20px 0 10px;
   padding-top: var(--space-4);
   border-top: 1px solid var(--border);
@@ -86,14 +86,14 @@ const rendered = computed(() => {
 .cell-body :deep(h3) {
   font-size: var(--text-md);
   font-weight: 600;
-  color: var(--ink);
+  color: var(--fg);
   margin: 16px 0 8px;
 }
 
 .cell-body :deep(p) { margin: 8px 0; }
 
 .cell-body :deep(a) {
-  color: var(--primary);
+  color: var(--accent);
   text-decoration: none;
 }
 
@@ -104,20 +104,20 @@ const rendered = computed(() => {
 .cell-body :deep(code:not(pre code)) {
   font-family: var(--font-mono);
   font-size: 0.85em;
-  background: var(--surface-raised);
-  color: var(--primary);
+  background: var(--surface-subtle);
+  color: var(--accent);
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 .cell-body :deep(pre) {
   background: var(--surface);
-  color: var(--ink);
+  color: var(--fg);
   padding: var(--space-4);
   border-radius: var(--radius-md);
   overflow-x: auto;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--primary);
+  border-left: 3px solid var(--accent);
   box-shadow: var(--shadow-xs);
   margin: 12px 0;
   line-height: 1.7;
@@ -146,8 +146,8 @@ const rendered = computed(() => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--text-secondary);
-  background: var(--surface-raised);
+  color: var(--muted);
+  background: var(--surface-subtle);
 }
 
 .cell-body :deep(td) {
@@ -156,13 +156,13 @@ const rendered = computed(() => {
 }
 
 .cell-body :deep(blockquote) {
-  background: var(--warning-light);
+  background: var(--warning-bg);
   border-left: 3px solid var(--warning);
   padding: var(--space-3) var(--space-4);
   margin: 12px 0;
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   font-size: var(--text-sm);
-  color: #7C5E0A;
+  color: var(--warning);
 }
 
 .cell-body :deep(img) {

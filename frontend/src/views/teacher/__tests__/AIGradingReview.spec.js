@@ -159,7 +159,8 @@ describe('AI 评分复核列表', () => {
     })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('全部评分7')
+    expect(wrapper.find('.review-strip .metric:first-child').text()).toContain('7')
+    expect(wrapper.find('.review-strip .metric:first-child').text()).toContain('全部评分')
   })
 
   it('按学生姓名查询并显示学生信息', async () => {
@@ -181,7 +182,7 @@ describe('AI 评分复核列表', () => {
     })
     await flushPromises()
 
-    await wrapper.find('input').setValue('张三')
+    await wrapper.find('.filter-bar input').setValue('张三')
     await wrapper.find('.filter-bar').trigger('submit')
     await flushPromises()
 

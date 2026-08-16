@@ -103,17 +103,17 @@ onBeforeUnmount(() => { clearTimeout(searchTimer); requestGuard.invalidate() })
         </div>
       </header>
 
-      <section class="summary-panel" aria-label="实验状态汇总">
+      <section class="metric-strip summary-panel" aria-label="实验状态汇总">
         <div
           v-for="stat in summaryItems"
           :key="stat.key"
-          class="summary-item"
+          class="metric summary-item"
           :class="`summary-item--${stat.key}`"
         >
           <span class="summary-marker" aria-hidden="true"></span>
           <span class="summary-copy">
-            <span class="summary-label">{{ stat.label }}</span>
-            <strong>{{ stat.value }} <small>个模块</small></strong>
+            <span class="m-label summary-label">{{ stat.label }}</span>
+            <span class="m-value"><strong>{{ stat.value }}</strong> <small>个模块</small></span>
           </span>
         </div>
       </section>
@@ -141,115 +141,26 @@ onBeforeUnmount(() => { clearTimeout(searchTimer); requestGuard.invalidate() })
 </template>
 
 <style scoped>
-.experiment-page {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  color: var(--ink);
+.experiment-page { display: flex; flex-direction: column; gap: var(--space-5); color: var(--fg); }
+.page-head h1 { margin: 0 0 6px; font-family: var(--font-display); font-size: var(--text-3xl); font-weight: 600; line-height: var(--lh-tight); letter-spacing: -0.01em; }
+.page-head p { margin: 0; color: var(--muted); font-size: var(--text-md); }
+.summary-panel { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.summary-item { display: flex; align-items: center; justify-content: flex-start; gap: 12px; min-width: 0; padding: 14px 16px; }
+.summary-marker { width: 10px; height: 30px; flex: 0 0 10px; border-radius: var(--radius-sm); background: var(--accent); }
+.summary-item--not_started .summary-marker { background: var(--warning); }
+.summary-item--submitted .summary-marker { background: var(--info); }
+.summary-item--graded .summary-marker { background: var(--success); }
+.summary-item--total .summary-marker { background: var(--accent); }
+.summary-copy { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.summary-label { color: var(--muted); font-size: var(--text-sm); white-space: nowrap; }
+.summary-copy .m-value { font-size: 22px; line-height: 1; }
+.summary-copy small { color: var(--faint); font-size: var(--text-sm); font-weight: 400; }
+
+@media (max-width: 1024px) {
+  .summary-panel { grid-template-columns: repeat(2, 1fr); }
 }
-
-.page-head h1 {
-  margin: 0 0 6px;
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: -0.025em;
-}
-
-.page-head p {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-}
-
-.summary-panel {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  min-height: 116px;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-}
-
-.summary-item {
-  --marker: var(--primary);
-  --marker-bg: var(--primary-light);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  min-width: 0;
-  padding: 24px 18px;
-  position: relative;
-}
-
-.summary-item + .summary-item::before {
-  content: '';
-  position: absolute;
-  inset: 28px auto 28px 0;
-  width: 1px;
-  background: var(--border);
-}
-
-.summary-item--not_started { --marker: #f59e0b; --marker-bg: #fff7e7; }
-.summary-item--submitted { --marker: #8b5cf6; --marker-bg: #f4efff; }
-.summary-item--graded { --marker: var(--success); --marker-bg: var(--success-light); }
-.summary-item--total { --marker: var(--primary); --marker-bg: var(--primary-light); }
-
-.summary-marker {
-  width: 42px;
-  height: 42px;
-  flex: 0 0 42px;
-  border-radius: 50%;
-  background: var(--marker-bg);
-  border: 8px solid color-mix(in srgb, var(--marker) 24%, transparent);
-  box-shadow: inset 0 0 0 4px #fff;
-}
-
-.summary-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.summary-label {
-  color: var(--text-secondary);
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.summary-copy strong {
-  font-size: 22px;
-  line-height: 1;
-  font-weight: 700;
-}
-
-.summary-copy small {
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-@media (max-width: 1100px) {
-  .summary-panel { grid-template-columns: repeat(5, minmax(120px, 1fr)); overflow-x: auto; }
-  .summary-item { padding-inline: 14px; }
-  .summary-marker { width: 34px; height: 34px; flex-basis: 34px; border-width: 6px; }
-}
-
-@media (max-width: 767.98px) {
-  .experiment-page { gap: 16px; }
-  .page-head h1 { font-size: 24px; }
-  .summary-panel {
-    grid-template-columns: repeat(2, 1fr);
-    overflow: visible;
-  }
-  .summary-item { justify-content: flex-start; min-height: 82px; padding: 16px; }
-  .summary-item + .summary-item::before { display: none; }
-  .summary-item:nth-child(odd) { border-right: 1px solid var(--border); }
-  .summary-item:nth-child(n + 3) { border-top: 1px solid var(--border); }
-  .summary-item:last-child { grid-column: 1 / -1; justify-content: center; border-right: 0; }
-  .summary-copy strong { font-size: 19px; }
+@media (max-width: 560px) {
+  .experiment-page { gap: var(--space-4); }
+  .summary-panel { grid-template-columns: 1fr; }
 }
 </style>

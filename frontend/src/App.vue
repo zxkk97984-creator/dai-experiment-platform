@@ -31,17 +31,23 @@ const toastIcon = {
 </template>
 
 <style scoped>
+/* Toast 为 V2 扩展组件：token-only，左 3px 语义栏；无类型时使用 accent。 */
 .toast {
-  position: fixed; top: 20px; right: 24px; z-index: 9999;
-  display: flex; align-items: center; gap: 12px;
-  padding: 14px 18px;
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left: 4px solid var(--primary);
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-md);
   font-family: var(--font-body);
-  color: var(--ink);
+  color: var(--fg);
   font-weight: 500;
   box-shadow: var(--shadow-lg);
   max-width: 380px;
@@ -52,26 +58,23 @@ const toastIcon = {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
-  color: var(--primary);
+  color: var(--accent);
 }
 
-/* 类型图标着色 */
 .toast-success .toast-icon { color: var(--success); }
 .toast-error   .toast-icon { color: var(--danger); }
 .toast-info    .toast-icon { color: var(--info); }
 .toast-warning .toast-icon { color: var(--warning); }
 
-.toast-text { line-height: 1.45; flex: 1; min-width: 0; }
-
-/* Type variants */
 .toast-success { border-left-color: var(--success); }
 .toast-error   { border-left-color: var(--danger); }
 .toast-info    { border-left-color: var(--info); }
 .toast-warning { border-left-color: var(--warning); }
 
-/* Transition */
-.toast-enter-active { transition: all var(--duration-normal) var(--ease-out); }
-.toast-leave-active { transition: all var(--duration-fast) var(--ease-out); }
+.toast-text { line-height: 1.45; flex: 1; min-width: 0; }
+
+.toast-enter-active { transition: all var(--duration-normal, 220ms) var(--ease-out, ease); }
+.toast-leave-active { transition: all var(--duration-fast, 120ms) var(--ease-out, ease); }
 .toast-enter-from { opacity: 0; transform: translateX(24px); }
 .toast-leave-to { opacity: 0; transform: translateX(24px); }
 </style>

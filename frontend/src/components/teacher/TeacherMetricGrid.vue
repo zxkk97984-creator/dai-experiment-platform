@@ -1,4 +1,6 @@
 <script setup>
+// TeacherMetricGrid：V2 指标条（映射 .metric-strip / .metric）。
+// 单条边框分隔，不再渲染独立 KPI 卡片与图标大色块。
 import AppIcon from '../ui/AppIcon.vue'
 
 defineProps({
@@ -8,79 +10,54 @@ defineProps({
 </script>
 
 <template>
-  <section class="teacher-metric-grid" :class="`columns-${items.length}`" :aria-label="ariaLabel">
-    <article v-for="item in items" :key="item.key" class="teacher-metric-card">
-      <span class="teacher-metric-icon" :class="item.tone || 'blue'">
-        <AppIcon :name="item.icon" :size="24" />
-      </span>
+  <section class="metric-strip teacher-metric-grid" :class="`columns-${items.length}`" :aria-label="ariaLabel">
+    <article
+      v-for="item in items"
+      :key="item.key"
+      class="metric teacher-metric-card"
+      :class="{ em: item.emphasis && item.tone === 'blue', warn: item.tone === 'orange' && item.emphasis }"
+    >
       <span class="teacher-metric-copy">
-        <small>{{ item.label }}</small>
-        <span class="teacher-metric-value">
+        <span class="m-value teacher-metric-value">
           <strong :class="{ emphasized: item.emphasis }">{{ item.value }}</strong>
           <em v-if="item.unit">{{ item.unit }}</em>
         </span>
+        <span class="m-label">{{ item.label }}</span>
+      </span>
+      <span class="teacher-metric-icon" :class="item.tone || 'blue'" aria-hidden="true">
+        <AppIcon :name="item.icon" :size="14" />
       </span>
     </article>
   </section>
 </template>
 
 <style scoped>
-.teacher-metric-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 18px;
-}
-
-.teacher-metric-grid.columns-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-
-.teacher-metric-card {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  min-width: 0;
-  min-height: 106px;
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
-}
-
+/* 指标条视觉来自全局 .metric-strip/.metric；图标仅作弱化辅助标记。 */
+.teacher-metric-grid.columns-3 { grid-template-columns: repeat(3, 1fr); }
+.teacher-metric-card { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.teacher-metric-copy { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .teacher-metric-icon {
-  display: grid;
-  place-items: center;
-  width: 54px;
-  height: 54px;
-  flex: 0 0 auto;
-  border-radius: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  color: var(--faint);
+  background: var(--surface-subtle);
 }
+.teacher-metric-icon.blue { color: var(--accent); background: var(--accent-soft); }
+.teacher-metric-icon.green { color: var(--success); background: var(--success-bg); }
+.teacher-metric-icon.orange { color: var(--warning); background: var(--warning-bg); }
+.teacher-metric-icon.purple { color: var(--info); background: var(--info-bg); }
+.teacher-metric-value strong { font-size: inherit; font-weight: 600; }
+.teacher-metric-value em { margin-left: 6px; color: var(--faint); font-size: var(--text-sm); font-style: normal; }
 
-.teacher-metric-icon.blue { color: var(--primary); background: var(--primary-light); }
-.teacher-metric-icon.green { color: var(--success); background: var(--success-light); }
-.teacher-metric-icon.orange { color: var(--warning); background: var(--warning-light); }
-.teacher-metric-icon.purple { color: var(--purple); background: var(--purple-light); }
-
-.teacher-metric-copy { display: grid; min-width: 0; gap: 4px; }
-.teacher-metric-copy small { color: var(--text-secondary); font-size: 14px; line-height: 1.35; }
-.teacher-metric-value { display: flex; align-items: baseline; gap: 7px; }
-.teacher-metric-value strong { color: var(--ink); font-size: 27px; font-weight: 700; line-height: 1; }
-.teacher-metric-icon.green + .teacher-metric-copy strong.emphasized { color: var(--success); }
-.teacher-metric-icon.orange + .teacher-metric-copy strong.emphasized { color: var(--warning); }
-.teacher-metric-icon.purple + .teacher-metric-copy strong.emphasized { color: var(--purple); }
-.teacher-metric-value em { color: var(--text-tertiary); font-size: 12px; font-style: normal; }
-
-@media (max-width: 1100px) {
-  .teacher-metric-grid,
-  .teacher-metric-grid.columns-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .teacher-metric-grid.columns-3 .teacher-metric-card:last-child { grid-column: 1 / -1; }
-}
-
-@media (max-width: 720px) {
-  .teacher-metric-grid,
-  .teacher-metric-grid.columns-3 { grid-template-columns: 1fr; gap: 10px; }
+@media (max-width: 1024px) {
+  .teacher-metric-grid.columns-3 { grid-template-columns: repeat(3, 1fr); }
   .teacher-metric-grid.columns-3 .teacher-metric-card:last-child { grid-column: auto; }
-  .teacher-metric-card { min-height: 88px; padding: 15px 17px; gap: 14px; }
-  .teacher-metric-icon { width: 46px; height: 46px; border-radius: 13px; }
-  .teacher-metric-value strong { font-size: 24px; }
+}
+@media (max-width: 560px) {
+  .teacher-metric-grid, .teacher-metric-grid.columns-3 { grid-template-columns: 1fr; }
 }
 </style>

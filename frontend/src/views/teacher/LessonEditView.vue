@@ -266,11 +266,11 @@ onMounted(loadLesson)
   padding: 48px 24px;
   text-align: center;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
 }
-.error-card h2 { margin: 0 0 8px; font-size: 18px; color: var(--text); }
-.error-card p { margin: 0 0 20px; color: var(--text-secondary); font-size: 14px; }
+.error-card h2 { margin: 0 0 8px; font-size: 18px; color: var(--fg); }
+.error-card p { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
 .fallback-actions { display: flex; justify-content: center; gap: 8px; }
 /* ── Phase 4：兜底创建环境选择 ─────────────────────────────────── */
 .fallback-env {
@@ -281,13 +281,13 @@ onMounted(loadLesson)
   gap: 12px;
   text-align: left;
 }
-.fallback-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.fallback-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
 .fallback-select {
   padding: 9px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control, 7px);
   background: var(--surface);
-  color: var(--ink);
+  color: var(--fg);
   font-family: inherit;
   font-size: var(--text-sm, 13px);
 }
@@ -298,12 +298,12 @@ onMounted(loadLesson)
   gap: 6px;
   padding: 5px 10px;
   border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-raised, #f4f6f8);
+  border-radius: var(--radius-full);
+  background: var(--surface-raised, var(--surface-subtle));
   font-size: var(--text-sm, 13px);
   cursor: pointer;
 }
 .fallback-chip input { margin: 0; }
-.fallback-hint { margin: 0; font-size: var(--text-xs, 12px); color: var(--text-tertiary, #9aa); }
-.env-warn { color: var(--warning, #b7791f); }
+.fallback-hint { margin: 0; font-size: var(--text-xs, 12px); color: var(--faint); }
+.env-warn { color: var(--warning, var(--warning)); }
 </style>

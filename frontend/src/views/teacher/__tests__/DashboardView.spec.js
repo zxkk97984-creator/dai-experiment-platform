@@ -26,18 +26,23 @@ import DashboardView from '../DashboardView.vue'
 const dashboardData = (overrides = {}) => ({
   summary: {
     course_count: 2,
+    active_course_count: 2,
     student_count: 46,
-    pending_review_count: 7,
+    pending_grading_count: 7,
+    pending_review_count: 3,
     upcoming_deadline_count: 3,
+    pending_release_count: 0,
   },
   work_items: [
     {
       kind: 'experiment_review',
       id: 21,
-      title: '张同学提交了决策树实验',
+      title: '决策树实验 · 1 份提交待评分',
       course_id: 2,
       course_title: '机器学习导论',
       detail: '等待教师反馈',
+      count: 1,
+      status: 'pending_grading',
       time_at: '2026-08-01T05:40:00Z',
       urgency: 'soon',
       route: '/teacher/submissions/21',
@@ -63,6 +68,25 @@ const dashboardData = (overrides = {}) => ({
       course_title: '机器学习导论',
       actor_name: '张同学',
       happened_at: '2026-08-01T05:40:00Z',
+      route: '/teacher/submissions/21',
+    },
+  ],
+  recent_submissions: [
+    {
+      kind: 'experiment',
+      id: 21,
+      student_name: '张同学',
+      student_no: '2026011201',
+      entry_title: '决策树实验',
+      course_id: 2,
+      course_title: '机器学习导论',
+      status: 'pending_grading',
+      status_tone: 'warning',
+      tests_passed: null,
+      tests_total: null,
+      ai_score: null,
+      score: null,
+      submitted_at: '2026-08-01T05:40:00Z',
       route: '/teacher/submissions/21',
     },
   ],
@@ -105,10 +129,10 @@ describe('教师首页 DashboardView', () => {
     teacherMock.teacher.mockResolvedValue({ data: dashboardData() })
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.text()).toContain('待复核')
+    expect(wrapper.text()).toContain('待评分')
     expect(wrapper.text()).toContain('近 7 天截止')
-    expect(wrapper.text()).toContain('张同学提交了决策树实验')
-    expect(wrapper.text()).toContain('等待教师反馈')
+    expect(wrapper.text()).toContain('决策树实验 · 1 份提交待评分')
+    expect(wrapper.text()).toContain('待评分')
     expect(wrapper.text()).not.toContain('12 份待批改')
     expect(wrapper.text()).not.toContain('平均用时')
   })
@@ -130,12 +154,13 @@ describe('教师首页 DashboardView', () => {
     expect(routerState.push).toHaveBeenCalledWith('/teacher/courses/2/manage')
   })
 
-  it('最近动态来自真实提交', async () => {
+  it('最近提交表格来自真实提交', async () => {
     teacherMock.teacher.mockResolvedValue({ data: dashboardData() })
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.text()).toContain('最近动态')
+    expect(wrapper.text()).toContain('最近提交')
     expect(wrapper.text()).toContain('张同学')
+    expect(wrapper.text()).toContain('2026011201')
   })
 
   it('发布公告：提交精确 payload 后视图刷新并展示新公告', async () => {
@@ -228,7 +253,7 @@ describe('教师首页 DashboardView', () => {
     await wrapper.get('.retry-btn').trigger('click')
     await flushPromises()
     expect(teacherMock.teacher).toHaveBeenCalledTimes(2)
-    expect(wrapper.text()).toContain('张同学提交了决策树实验')
+    expect(wrapper.text()).toContain('决策树实验 · 1 份提交待评分')
   })
 
   it('空数据展示如实空态', async () => {
@@ -251,7 +276,7 @@ describe('教师首页 DashboardView', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('暂无待处理工作')
     expect(wrapper.text()).toContain('暂无课程')
-    expect(wrapper.text()).toContain('暂无动态')
+    expect(wrapper.text()).toContain('暂无提交')
     expect(wrapper.text()).toContain('暂无公告')
   })
 })

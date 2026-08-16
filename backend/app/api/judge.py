@@ -12,6 +12,7 @@ from app.dependencies import PaginationParams, get_current_user, get_db, get_red
 from app.errors import api_error
 from app.models import Assignment, CodeGrade, Course, CourseEnrollment, JudgeQuestion, Submission, User
 from app.schemas import ImportDiagnosticRead, PaginatedResponse, SampleRunResponse, SubmissionCreate, SubmissionRead
+from app.schemas.unified_submissions import TeacherJudgeSubmissionRead
 from app.services.environment_service import (
     installed_imports_for_version,
     public_environment_summary,
@@ -157,6 +158,56 @@ def get_submission(
     if not can_view_submission(submission, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限查看该提交")
     return _with_diagnostic(submission)
+
+
+@router.get("/submissions/{submission_id}/teacher", response_model=TeacherJudgeSubmissionRead)
+def get_teacher_submission_detail(
+    submission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """教师作业提交详情：在 SubmissionRead 之上补充学生 / 题目 / 作业 / AI 评分上下文。"""
+    if current_user.role not in ("teacher", "admin"):
+        raise api_error(403, "FORBIDDEN", "仅教师和管理员可访问")
+    submission = require_submission(submission_id, db)
+    if not can_view_submission(submission, current_user, db):
+        raise api_error(403, "FORBIDDEN", "没有权限查看该提交")
+
+    question = db.get(JudgeQuestion, submission.question_id)
+    assignment = db.get(Assignment, question.assignment_id) if question else None
+    course = db.get(Course, assignment.course_id) if assignment else None
+    student = db.get(User, submission.student_id)
+    code_grade = db.scalar(
+        select(CodeGrade).where(CodeGrade.submission_id == submission.id)
+    )
+    return TeacherJudgeSubmissionRead(
+        id=submission.id,
+        question_id=submission.question_id,
+        student_id=submission.student_id,
+        student_name=student.real_name if student else None,
+        student_no=student.student_no if student else None,
+        code=submission.code,
+        status=submission.status,
+        grading_status=submission.grading_status,
+        score=submission.score,
+        created_at=submission.created_at,
+        finished_at=submission.finished_at,
+        tests_passed=submission.tests_passed,
+        tests_total=submission.tests_total,
+        result_details=submission.result_details,
+        execution_time_ms=submission.execution_time_ms,
+        stdout=submission.stdout,
+        stderr=submission.stderr,
+        question_title=question.title if question else None,
+        assignment_id=assignment.id if assignment else None,
+        assignment_title=assignment.title if assignment else None,
+        course_id=course.id if course else None,
+        course_title=course.title if course else None,
+        ai_grade_id=code_grade.id if code_grade else None,
+        ai_score=code_grade.final_score_100 if code_grade else None,
+        ai_needs_review=code_grade.needs_teacher_review if code_grade else False,
+        ai_review_reason=code_grade.review_reason if code_grade else None,
+    )
 
 
 @router.get("/submissions/{submission_id}/result", response_model=SubmissionRead)

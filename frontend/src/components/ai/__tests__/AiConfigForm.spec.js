@@ -29,7 +29,7 @@ describe('AiConfigForm 测试组生成按钮', () => {
 
     const btn = genButton(wrapper)
     expect(btn).toBeTruthy()
-    expect(btn.text()).toContain('🤖 AI 生成测试组')
+    expect(btn.text()).toContain('AI 生成测试组')
     // 同一标题栏内还提供「+ 添加测试组」
     const addBtn = wrapper.findAll('button').find((b) => b.text().includes('添加测试组'))
     expect(addBtn).toBeTruthy()

@@ -83,28 +83,28 @@ defineExpose({ fetchOptions })
   margin-bottom: 0;
   font-size: var(--text-sm, 13px);
   font-weight: 600;
-  color: var(--text-secondary, #566);
+  color: var(--muted);
 }
 .env-picker-select {
   width: 100%;
   padding: 9px 12px;
-  border: 1px solid var(--border, #dfe3e8);
+  border: 1px solid var(--border, var(--border));
   border-radius: var(--radius-control, 7px);
-  background: var(--surface, #fff);
-  color: var(--ink, #223);
+  background: var(--surface, var(--surface));
+  color: var(--fg);
   font-family: inherit;
   font-size: var(--text-sm, 13px);
 }
 .env-picker-select:disabled {
-  background: var(--surface-raised, #f4f6f8);
-  color: var(--text-tertiary, #9aa);
+  background: var(--surface-raised, var(--surface-subtle));
+  color: var(--faint);
 }
 .env-picker-hint {
   margin: 0;
   font-size: var(--text-xs, 12px);
-  color: var(--text-tertiary, #9aa);
+  color: var(--faint);
 }
 .env-picker-error {
-  color: var(--danger, #d64545);
+  color: var(--danger, var(--danger));
 }
 </style>

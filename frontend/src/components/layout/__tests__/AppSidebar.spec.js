@@ -69,7 +69,7 @@ describe('AppSidebar 角色首页导航', () => {
   it('教师侧栏首个导航项为首页并指向 /teacher', async () => {
     const { wrapper } = mountAs('teacher', '/teacher')
     const navItems = wrapper.findAll('.nav-item')
-    expect(navItems[0].text()).toContain('首页')
+    expect(navItems[0].text()).toContain('工作台')
     expect(navItems[0].classes()).toContain('active')
     await navItems[0].trigger('click')
     expect(routerState.push).toHaveBeenCalledWith('/teacher')
@@ -106,8 +106,8 @@ describe('AppSidebar 角色首页导航', () => {
     for (const item of navItems) {
       expect(item.attributes('aria-label')).toBeTruthy()
     }
-    expect(navItems[0].attributes('aria-label')).toBe('首页')
-    expect(navItems[1].attributes('aria-label')).toBe('课程')
+    expect(navItems[0].attributes('aria-label')).toBe('工作台')
+    expect(navItems[1].attributes('aria-label')).toBe('课程管理')
   })
 
   it('/student/feedback 镜像参考图 01，高亮首页', () => {

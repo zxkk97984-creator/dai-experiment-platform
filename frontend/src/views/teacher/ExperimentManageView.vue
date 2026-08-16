@@ -147,7 +147,7 @@ onMounted(fetch)
       </div>
 
       <TeacherMetricGrid aria-label="实验统计" :items="[{ key: 'total', label: '全部实验', icon: 'experiment', tone: 'blue', value: summary.total, unit: '个' }, { key: 'published', label: '已发布', icon: 'send', tone: 'green', value: summary.published, unit: '个' }, { key: 'draft', label: '草稿', icon: 'draft', tone: 'orange', value: summary.draft, unit: '个' }, { key: 'offline', label: '已下架', icon: 'clock', tone: 'purple', value: summary.offline, unit: '个' }]" />
-      <section class="data-panel"><div class="filter-bar"><label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索实验名称" @input="resetPage" /></label><select v-model="statusFilter" @change="resetPage"><option value="all">状态：全部</option><option value="published">已发布</option><option value="draft">草稿</option><option value="offline">已下架</option></select><select v-model="sortOrder" @change="resetPage"><option value="updated">排序：最近更新</option><option value="name">排序：实验名称</option></select></div><div v-if="loading" class="loading-list"><span v-for="i in 6" :key="i" class="skeleton"></span></div><div v-else-if="filteredModules.length === 0" class="empty-state"><AppIcon name="experiment" :size="32" /><strong>暂无符合条件的实验</strong><p>调整筛选条件，或创建一个新实验。</p></div><div v-else class="table-scroll"><table><thead><tr><th>实验名称</th><th>描述</th><th>状态</th><th>最近更新</th><th>操作</th></tr></thead><tbody><tr v-for="module in pagedItems" :key="module.id"><td class="title-cell">{{ module.name }}</td><td>{{ module.description || '暂无实验描述' }}</td><td><span class="status-pill" :class="moduleStatus(module)">{{ moduleStatus(module) === 'published' ? '已发布' : moduleStatus(module) === 'draft' ? '草稿' : '已下架' }}</span></td><td class="muted-cell">{{ formatDateTime(moduleUpdated(module)) }}</td><td class="actions-cell"><button class="text-action" data-action="edit-module" @click="openEditModal(module)">编辑模块</button><button class="text-action" @click="goToSubmissions">查看提交</button><button class="publish-action" @click="toggleStatus(module)">{{ module.status === 'published' ? '下架' : '发布' }}</button></td></tr></tbody></table></div><TeacherPagination v-if="!loading" :current-page="page" :page-count="pageCount" :total="filteredModules.length" :page-size="pageSize" aria-label="实验列表分页" @change="goToPage" /></section>
+      <section class="table-wrap data-panel"><div class="toolbar filter-bar"><label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索实验名称" @input="resetPage" /></label><select v-model="statusFilter" @change="resetPage"><option value="all">状态：全部</option><option value="published">已发布</option><option value="draft">草稿</option><option value="offline">已下架</option></select><select v-model="sortOrder" @change="resetPage"><option value="updated">排序：最近更新</option><option value="name">排序：实验名称</option></select></div><div v-if="loading" class="loading-list"><span v-for="i in 6" :key="i" class="skeleton"></span></div><div v-else-if="filteredModules.length === 0" class="empty-state"><AppIcon name="experiment" :size="32" /><strong>暂无符合条件的实验</strong><p>调整筛选条件，或创建一个新实验。</p></div><div v-else class="table-scroll"><table class="ds-table"><thead><tr><th>实验名称</th><th>描述</th><th>状态</th><th>最近更新</th><th>操作</th></tr></thead><tbody><tr v-for="module in pagedItems" :key="module.id"><td class="title-cell">{{ module.name }}</td><td>{{ module.description || '暂无实验描述' }}</td><td><span class="status-pill" :class="moduleStatus(module)">{{ moduleStatus(module) === 'published' ? '已发布' : moduleStatus(module) === 'draft' ? '草稿' : '已下架' }}</span></td><td class="muted-cell">{{ formatDateTime(moduleUpdated(module)) }}</td><td class="actions-cell"><button class="text-action" data-action="edit-module" @click="openEditModal(module)">编辑模块</button><button class="text-action" @click="goToSubmissions">查看提交</button><button class="publish-action" @click="toggleStatus(module)">{{ module.status === 'published' ? '下架' : '发布' }}</button></td></tr></tbody></table></div><TeacherPagination v-if="!loading" :current-page="page" :page-count="pageCount" :total="filteredModules.length" :page-size="pageSize" aria-label="实验列表分页" @change="goToPage" /></section>
     </div>
   </AppLayout>
 </template>
@@ -158,7 +158,7 @@ onMounted(fetch)
    page-head + create modal + skeleton table + data table
    ═══════════════════════════════════════════════════════════════════════ */
 .page { display: flex; flex-direction: column; gap: 22px; }
-.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px}.metric-card{display:flex;align-items:center;gap:18px;min-height:106px;padding:20px;border:1px solid var(--border);border-radius:12px;background:var(--surface);box-shadow:var(--shadow-card)}.metric-icon{display:grid;place-items:center;width:54px;height:54px;border-radius:15px}.metric-icon.blue{color:var(--primary);background:#edf4ff}.metric-icon.green{color:#10a66a;background:#eaf9f2}.metric-icon.orange{color:#ef8b10;background:#fff4e7}.metric-icon.purple{color:#7c4ce0;background:#f1ebfd}.metric-card span:last-child{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}.metric-card small{width:100%;color:var(--text-secondary);font-size:14px}.metric-card strong{color:var(--ink);font-size:27px;line-height:1}.metric-card em{color:var(--text-secondary);font-size:13px;font-style:normal}.data-panel{overflow:hidden;border:1px solid var(--border);border-radius:12px;background:var(--surface);box-shadow:var(--shadow-card)}.filter-bar{display:grid;grid-template-columns:minmax(220px,1.4fr) repeat(3,minmax(150px,.8fr));gap:14px;padding:18px;border-bottom:1px solid var(--border)}.search-control{display:flex;align-items:center;gap:9px;padding:0 13px;border:1px solid var(--border);border-radius:8px;color:var(--text-tertiary)}.search-control input{min-width:0;padding:0;border:0;box-shadow:none!important}.filter-bar select{height:44px;min-width:0}.table-scroll{overflow-x:auto}.table-scroll table{width:100%;min-width:900px;margin:0}.table-scroll th{height:44px;background:#f8fafc}.table-scroll td{height:68px;padding:10px 16px}.table-scroll td small{display:block;color:var(--text-tertiary);font-size:12px}.status-pill{display:inline-flex;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:600}.status-pill.published{color:#099b61;background:#e9f8f1}.status-pill.draft{color:#ef8b10;background:#fff4e7}.status-pill.offline{color:#7443d5;background:#f1ebfd}.muted-cell{color:var(--text-secondary);font-size:13px}.actions-cell{display:flex;gap:2px;white-space:nowrap}.text-action,.publish-action{padding:5px 7px;border:0;background:transparent;color:var(--primary);font-size:13px}.publish-action{color:var(--warning)}.pagination-bar{display:flex;justify-content:space-between;padding:14px 18px;border-top:1px solid var(--border);color:var(--text-secondary);font-size:13px}.active-page{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:7px;color:#fff;background:var(--primary)}.loading-list{display:grid;gap:1px;background:var(--border)}.loading-list .skeleton{height:68px}@media(max-width:1100px){.metric-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{grid-template-columns:1fr 1fr}}@media(max-width:700px){.page-head{flex-direction:column}.metric-grid{grid-template-columns:1fr 1fr;gap:10px}.filter-bar{grid-template-columns:1fr}.table-scroll table{min-width:820px}}
+.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px}.metric-card{display:flex;align-items:center;gap:18px;min-height:106px;padding:20px;border:1px solid var(--border);border-radius: var(--radius-lg);background:var(--surface);box-shadow:none}.metric-icon{display:grid;place-items:center;width:54px;height:54px;border-radius:15px}.metric-icon.blue{color:var(--accent);background:var(--accent-soft)}.metric-icon.green{color:var(--success);background:var(--success-bg)}.metric-icon.orange{color:var(--warning);background:var(--warning-bg)}.metric-icon.purple{color:var(--info);background:var(--info-bg)}.metric-card span:last-child{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}.metric-card small{width:100%;color:var(--muted);font-size:14px}.metric-card strong{color:var(--fg);font-size:27px;line-height:1}.metric-card em{color:var(--muted);font-size:13px;font-style:normal}.data-panel{overflow:hidden;border:1px solid var(--border);border-radius: var(--radius-lg);background:var(--surface);box-shadow:none}.filter-bar{display:grid;grid-template-columns:minmax(220px,1.4fr) repeat(3,minmax(150px,.8fr));gap:14px;padding:18px;border-bottom:1px solid var(--border)}.search-control{display:flex;align-items:center;gap:9px;padding:0 13px;border:1px solid var(--border);border-radius: var(--radius-md);color:var(--faint)}.search-control input{min-width:0;padding:0;border:0;box-shadow:none!important}.filter-bar select{height:44px;min-width:0}.table-scroll{overflow-x:auto}.table-scroll table{width:100%;min-width:900px;margin:0}.table-scroll th{height:44px;background:var(--surface-subtle)}.table-scroll td{height:68px;padding:10px 16px}.table-scroll td small{display:block;color:var(--faint);font-size:12px}.status-pill{display:inline-flex;padding:4px 11px;border-radius: var(--radius-full);font-size:12px;font-weight:600}.status-pill.published{color:var(--success);background:var(--success-bg)}.status-pill.draft{color:var(--warning);background:var(--warning-bg)}.status-pill.offline{color:var(--info);background:var(--info-bg)}.muted-cell{color:var(--muted);font-size:13px}.actions-cell{display:table-cell;vertical-align:middle;white-space:nowrap}.actions-cell button{display:inline-flex;align-items:center}.actions-cell button+button{margin-left:2px}.text-action,.publish-action{padding:5px 7px;border:0;background:transparent;color:var(--accent);font-size:13px}.publish-action{color:var(--warning)}.pagination-bar{display:flex;justify-content:space-between;padding:14px 18px;border-top:1px solid var(--border);color:var(--muted);font-size:13px}.active-page{display:inline-grid;place-items:center;width:30px;height:30px;border-radius: var(--radius-md);color:var(--surface);background:var(--accent)}.loading-list{display:grid;gap:1px;background:var(--border)}.loading-list .skeleton{height:68px}@media(max-width:1100px){.metric-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{grid-template-columns:1fr 1fr}}@media(max-width:700px){.page-head{flex-direction:column}.metric-grid{grid-template-columns:1fr 1fr;gap:10px}.filter-bar{grid-template-columns:1fr}.table-scroll table{min-width:820px}}
 
 /* ── Page Head ─────────────────────────────────────────────────────── */
 .page-head {
@@ -167,11 +167,11 @@ onMounted(fetch)
 }
 .page-title {
   font-size: 28px; font-weight: 700;
-  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
+  color: var(--fg); letter-spacing: -0.02em; line-height: 1.15;
   margin: 0 0 6px;
 }
 .page-sub {
-  font-size: var(--text-sm); color: var(--text-secondary); margin: 0;
+  font-size: var(--text-sm); color: var(--muted); margin: 0;
 }
 
 /* ── Create Form ───────────────────────────────────────────────────── */
@@ -192,7 +192,7 @@ onMounted(fetch)
 .form-hint {
   margin: 6px 0 0;
   font-size: var(--text-sm);
-  color: var(--text-secondary);
+  color: var(--muted);
 }
 .modal-hint { margin-top: 2px; }
 
@@ -204,7 +204,7 @@ onMounted(fetch)
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  background: rgba(15, 23, 42, 0.28);
+  background: oklch(0.2 0.01 150 / 0.28);
   backdrop-filter: blur(2px);
 }
 .modal-backdrop.create-backdrop {
@@ -215,7 +215,7 @@ onMounted(fetch)
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.18);
+  box-shadow: var(--shadow-lg);
 }
 .create-heading {
   display: flex;
@@ -223,7 +223,7 @@ onMounted(fetch)
   justify-content: space-between;
   margin-bottom: 20px;
 }
-.create-heading strong { font-size: 17px; color: var(--ink); }
+.create-heading strong { font-size: 17px; color: var(--fg); }
 .create-close {
   display: inline-flex;
   align-items: center;
@@ -233,10 +233,10 @@ onMounted(fetch)
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--muted);
   cursor: pointer;
 }
-.create-close:hover { background: var(--hover-bg, #f1f5f9); color: var(--ink); }
+.create-close:hover { background: var(--hover-bg, var(--surface-subtle)); color: var(--fg); }
 .create-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 
 /* ── Table card ────────────────────────────────────────────────────── */
@@ -258,7 +258,7 @@ onMounted(fetch)
 .w-35 { width: 35%; }
 
 /* ── Cells ─────────────────────────────────────────────────────────── */
-.title-cell { font-weight: 500; color: var(--ink); }
+.title-cell { font-weight: 500; color: var(--fg); }
 .entry-code {
   font-family: var(--font-mono); font-size: 11px;
   background: var(--surface-sunken);

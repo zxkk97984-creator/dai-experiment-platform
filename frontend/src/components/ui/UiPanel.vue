@@ -1,6 +1,6 @@
 <script setup>
-// UiPanel：单层白卡容器。header / 默认 / footer 三个插槽；
-// compact 模式用于密集行列表，避免卡中卡。
+// UiPanel：V2 面板原语（映射 dai-ds-v2.css 的 .panel）。
+// header / 默认 / footer 三个插槽；compact 模式减小内边距，避免卡中卡。
 
 defineProps({
   compact: { type: Boolean, default: false },
@@ -8,45 +8,26 @@ defineProps({
 </script>
 
 <template>
-  <section class="ui-panel" :class="{ 'ui-panel--compact': compact }">
-    <header v-if="$slots.header" class="ui-panel__header">
-      <slot name="header" />
+  <section class="panel ui-panel" :class="{ 'ui-panel--compact': compact }">
+    <header v-if="$slots.header" class="panel-head">
+      <div class="ph-label">
+        <slot name="header" />
+      </div>
     </header>
-    <div class="ui-panel__body">
+    <div class="panel-body">
       <slot />
     </div>
-    <footer v-if="$slots.footer" class="ui-panel__footer">
+    <footer v-if="$slots.footer" class="panel-foot ui-panel__footer">
       <slot name="footer" />
     </footer>
   </section>
 </template>
 
 <style scoped>
-.ui-panel {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
-  display: flex;
-  flex-direction: column;
-}
-
-.ui-panel__header {
-  padding: 16px 20px 0;
-}
-
-.ui-panel__body {
-  padding: 16px 20px 20px;
-  min-width: 0;
-}
-
-.ui-panel__footer {
-  padding: 0 20px 16px;
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
-}
-
-.ui-panel--compact .ui-panel__header { padding-top: 14px; }
-.ui-panel--compact .ui-panel__body { padding: 12px 16px 14px; }
-.ui-panel--compact .ui-panel__footer { padding: 0 16px 12px; }
+/* 视觉全部来自全局 .panel / .panel-head / .panel-body；
+   仅保留插槽组合差异，不新增颜色、圆角或阴影。 */
+.ui-panel { display: flex; flex-direction: column; }
+.ui-panel--compact .panel-body { padding: 12px 16px; }
+.ui-panel--compact .panel-head { padding-block: 10px; }
+.ui-panel__footer { padding: 12px 16px; border-top: 1px solid var(--border); }
 </style>

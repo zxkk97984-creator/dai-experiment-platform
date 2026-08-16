@@ -11,6 +11,11 @@ export const coursesAPI = {
   getChapters(courseId) { return client.get(`/courses/${courseId}/chapters`) },
   listStudents(courseId, params) { return client.get(`/courses/${courseId}/students`, { params }) },
   addStudent(courseId, studentId) { return client.post(`/courses/${courseId}/students`, { student_id: studentId }) },
+  importStudents(courseId, file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    return client.post(`/courses/${courseId}/students/import`, formData)
+  },
   removeStudent(courseId, studentId) { return client.delete(`/courses/${courseId}/students/${studentId}`) },
   createChapter(courseId, data) { return client.post(`/courses/${courseId}/chapters`, data) },
   updateChapter(chapterId, data) { return client.patch(`/chapters/${chapterId}`, data) },

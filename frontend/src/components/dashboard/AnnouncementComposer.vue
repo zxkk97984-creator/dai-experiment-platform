@@ -106,19 +106,19 @@ async function submit() {
 </script>
 
 <template>
-  <div class="composer-backdrop" @click.self="close">
+  <div class="modal-backdrop composer-backdrop" @click.self="close">
     <div
       ref="modalEl"
-      class="composer-modal"
+      class="modal composer-modal"
       role="dialog"
       aria-modal="true"
       aria-label="发布课程公告"
       @keydown.esc="close"
       @keydown="onTabKeydown"
     >
-      <div class="composer-head">
+      <div class="modal-head composer-head">
         <h2 class="composer-title">发布公告</h2>
-        <button type="button" class="close-btn" aria-label="关闭" @click="close">×</button>
+        <button type="button" class="btn btn-ghost btn-sm btn-icon" aria-label="关闭" @click="close">×</button>
       </div>
       <form class="composer-form" @submit.prevent="submit">
         <label class="field">
@@ -165,9 +165,9 @@ async function submit() {
           </label>
         </div>
         <p v-if="error" class="composer-error" role="alert">{{ error }}</p>
-        <div class="composer-actions">
-          <button type="button" class="cancel-btn" @click="close">取消</button>
-          <button type="submit" class="submit-btn" :disabled="!canSubmit">发布</button>
+        <div class="modal-foot composer-actions">
+          <button type="button" class="btn btn-ghost" @click="close">取消</button>
+          <button type="submit" class="btn btn-primary" :disabled="!canSubmit">发布</button>
         </div>
       </form>
     </div>
@@ -175,118 +175,23 @@ async function submit() {
 </template>
 
 <style scoped>
-.composer-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  background: rgba(15, 23, 42, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-}
-
-.composer-modal {
-  width: min(520px, 100%);
-  max-height: 90vh;
-  overflow-y: auto;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  padding: 20px;
-}
-
-.composer-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.composer-title {
-  margin: 0;
-  font-size: var(--text-lg);
-  font-weight: 700;
-  color: var(--ink);
-}
-
-.close-btn {
-  border: none;
-  background: transparent;
-  font-size: 22px;
-  line-height: 1;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
-}
-.close-btn:hover { color: var(--ink); background: var(--surface-raised); }
-
-.composer-form { display: flex; flex-direction: column; gap: 14px; }
-
+/* V2 Modal：全局 .modal-* 提供面板视觉；此处只保留公告表单组合。 */
+.composer-backdrop { z-index: 200; }
+.composer-modal { max-width: 520px; padding: 0; overflow-y: auto; }
+.composer-form { display: flex; flex-direction: column; gap: 14px; padding: 20px; }
 .field { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
 .field-row { display: flex; gap: 12px; }
-
-.field-label {
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.field input,
-.field select,
-.field textarea {
-  padding: 8px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--ink);
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
+.field-label { font-size: var(--text-sm); font-weight: 500; color: var(--muted); }
+.field input, .field select, .field textarea {
   width: 100%;
-  box-sizing: border-box;
-}
-.field input:focus-visible,
-.field select:focus-visible,
-.field textarea:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 1px;
-}
-
-.composer-error {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--danger);
-}
-
-.composer-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-.cancel-btn,
-.submit-btn {
-  padding: 8px 20px;
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.cancel-btn {
   border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
   background: var(--surface);
-  color: var(--text-secondary);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: var(--text-md);
 }
-.cancel-btn:hover { background: var(--surface-raised); }
-
-.submit-btn {
-  border: none;
-  background: var(--primary);
-  color: var(--surface);
-}
-.submit-btn:hover:not(:disabled) { background: var(--primary-dark); }
-.submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.field input, .field select { height: var(--h-input); padding: 0 11px; }
+.field textarea { min-height: 88px; padding: 9px 11px; resize: vertical; }
+.composer-error { margin: 0; font-size: var(--text-sm); color: var(--danger); }
 </style>

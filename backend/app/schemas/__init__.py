@@ -92,6 +92,7 @@ class UserRead(BaseModel):
     username: str
     student_no: str | None = None
     real_name: str
+    department: str | None = None
     role: str
     status: str
 
@@ -108,6 +109,7 @@ class UserCreate(BaseModel):
     username: str
     password: str
     real_name: str
+    department: str | None = None
     student_no: str | None = None
     role: str
     status: Literal["active", "disabled"] = "active"
@@ -121,6 +123,7 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     real_name: str | None = None
+    department: str | None = None
     student_no: str | None = None
     role: str | None = None
     status: Literal["active", "disabled"] | None = None
@@ -207,6 +210,7 @@ class TeachingClassStudentBatch(BaseModel):
 
 class CourseCreate(BaseModel):
     title: str
+    code: str | None = None
     description: str | None = None
     # 创建只允许草稿；发布必须走 PATCH 且经过完整性门禁（COURSE_INCOMPLETE）
     status: Literal["draft"] = "draft"
@@ -221,6 +225,7 @@ class CourseCreate(BaseModel):
 class CourseUpdate(BaseModel):
     """更新课程：全部字段可选，仅更新传入字段"""
     title: str | None = None
+    code: str | None = None
     description: str | None = None
     status: Literal["draft", "published", "archived"] | None = None
     cover: str | None = None
@@ -246,6 +251,7 @@ class CourseRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    code: str | None = None
     title: str
     description: str | None = None
     status: str
@@ -291,6 +297,21 @@ class CourseStudentRead(BaseModel):
 
 class CourseStudentCreate(BaseModel):
     student_id: int
+
+
+class CourseStudentImportRow(BaseModel):
+    row: int
+    student_no: str | None = None
+    username: str | None = None
+    status: Literal["created", "updated", "skipped"] = "skipped"
+    message: str = ""
+
+
+class CourseStudentImportResult(BaseModel):
+    created: int = 0
+    updated: int = 0
+    skipped: int = 0
+    errors: list[CourseStudentImportRow] = Field(default_factory=list)
 
 
 # ── 课程白名单 ─────────────────────────────────────────────────
@@ -346,6 +367,7 @@ class LessonCreate(BaseModel):
     content: str | None = None
     notebook_path: str | None = None
     video_url: str | None = None
+    due_at: datetime | None = None
     order_index: int = 0
     status: Literal["draft", "published", "pending"] = "draft"
 
@@ -363,6 +385,7 @@ class LessonUpdate(BaseModel):
     content: str | None = None
     notebook_path: str | None = None
     video_url: str | None = None
+    due_at: datetime | None = None
     order_index: int | None = None
     chapter_id: int | None = None
     status: Literal["draft", "published", "pending"] | None = None
@@ -389,6 +412,7 @@ class LessonRead(BaseModel):
     video_filename: str | None = None
     video_content_type: str | None = None
     video_size: int | None = None
+    due_at: datetime | None = None
     order_index: int
     status: str = "published"
 
@@ -636,6 +660,8 @@ class SubmissionRead(BaseModel):
     stderr: str | None = None
     score: float | None = None
     result_details: dict | None = None
+    tests_passed: int | None = None
+    tests_total: int | None = None
     execution_time_ms: int | None = None
     grading_breakdown: dict | None = None  # 仅 active 模式学生可见
     # Phase 5：结构化 import/环境诊断——学生 API 只返回安全中文信息，不含裸 traceback
@@ -900,6 +926,7 @@ class ExperimentModuleCreate(BaseModel):
     name: str
     description: str | None = None
     template_id: int | None = None
+    due_at: datetime | None = None
     # 创建只允许草稿；发布必须走 POST /experiments/modules/{id}/publish
     status: Literal["draft"] = "draft"
 
@@ -910,6 +937,7 @@ class ExperimentModuleUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     template_id: int | None = None
+    due_at: datetime | None = None
 
 
 class ExperimentModuleRead(BaseModel):
@@ -921,6 +949,7 @@ class ExperimentModuleRead(BaseModel):
     template_id: int | None = None
     owner_id: int | None = None
     status: str
+    due_at: datetime | None = None
     origin: str = "manual"
 
 

@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DAI Design System V2 · 组件样板</title>
+  <link rel="stylesheet" href="dai-ds-v2.css" />
+</head>
+<body>
+  <header class="header" data-od-id="showcase-header">
+    <div class="wordmark"><span class="mark">DAI</span><small>实验平台 · 设计系统 V2</small></div>
+    <div class="grow"></div>
+    <a class="btn btn-ghost btn-sm" href="index.html">← 返回概览</a>
+  </header>
+
+  <div class="content" style="max-width: 1280px; margin-inline: auto;">
+    <div class="page-head" data-od-id="showcase-intro">
+      <div class="ph-title">
+        <p class="eyebrow" style="color: var(--accent);">Design System V2 · Component Specimen</p>
+        <h1>DAI Design System V2</h1>
+        <p class="lead" style="margin-top: 8px;">墨松绿 × 岩灰 · 数据优先、高密度、面向长期使用。以下 22 个区块为全部基础组件与状态。</p>
+      </div>
+    </div>
+
+    <div class="specimen">
+      <nav class="specimen-nav" data-od-id="specimen-nav">
+        <a href="#color">01 色彩</a>
+        <a href="#type">02 字体</a>
+        <a href="#buttons">03 按钮</a>
+        <a href="#inputs">04 输入框</a>
+        <a href="#select">05 下拉选择</a>
+        <a href="#search">06 搜索</a>
+        <a href="#tabs">07 Tabs</a>
+        <a href="#filter">08 筛选</a>
+        <a href="#badge">09 状态徽标</a>
+        <a href="#card">10 卡片 / 表面</a>
+        <a href="#table">11 表格</a>
+        <a href="#modal">12 弹窗</a>
+        <a href="#drawer">13 抽屉</a>
+        <a href="#nav">14 导航</a>
+        <a href="#pagehead">15 页头</a>
+        <a href="#toolbar">16 工具栏</a>
+        <a href="#code">17 代码区</a>
+        <a href="#aiscore">18 AI 评分</a>
+        <a href="#empty">19 空状态</a>
+        <a href="#loading">20 加载</a>
+        <a href="#error">21 错误</a>
+        <a href="#viz">22 数据可视化</a>
+      </nav>
+
+      <div class="stack">
+        <!-- 01 色彩 -->
+        <section class="specimen-block" id="color" data-od-id="specimen-color">
+          <div class="specimen-head">
+            <p class="eyebrow">01 · Color System</p>
+            <h2>色彩体系</h2>
+            <p>暖岩灰中性层承载长期工作，墨松绿作为唯一品牌强调（对应「判题通过 / 正确 / 已验证」语义）；语义色与数据可视化色板彼此独立。</p>
+          </div>
+          <div class="stack">
+            <h3 class="muted" style="font-size: var(--text-sm); font-weight: 600;">品牌 Brand</h3>
+            <div class="swatch-grid">
+              <div class="swatch"><div class="sw-color" style="background: var(--accent);"></div><div class="sw-info"><span class="sw-name">accent · 墨松绿</span><span class="sw-val">oklch(0.52 0.095 158)</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--accent-hover);"></div><div class="sw-info"><span class="sw-name">accent-hover</span><span class="sw-val">oklch(0.46 0.095 158)</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--accent-soft);"></div><div class="sw-info"><span class="sw-name">accent-soft</span><span class="sw-val">13% mix</span></div></div>
+            </div>
+            <h3 class="muted" style="font-size: var(--text-sm); font-weight: 600;">中性 Neutral</h3>
+            <div class="swatch-grid">
+              <div class="swatch"><div class="sw-color" style="background: var(--bg);"></div><div class="sw-info"><span class="sw-name">bg · 岩灰背景</span><span class="sw-val">oklch(0.974 0.004 95)</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--surface);"></div><div class="sw-info"><span class="sw-name">surface</span><span class="sw-val">oklch(0.995 0.001 95)</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--surface-subtle);"></div><div class="sw-info"><span class="sw-name">surface-subtle</span><span class="sw-val">oklch(0.955 0.006 100)</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--surface-sunken);"></div><div class="sw-info"><span class="sw-name">surface-sunken</span><span class="sw-val">oklch(0.978 0.004 95)</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--fg);"></div><div class="sw-info"><span class="sw-name">fg · 墨色文字</span><span class="sw-val">oklch(0.235 0.018 155)</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--muted);"></div><div class="sw-info"><span class="sw-name">muted</span><span class="sw-val">oklch(0.455 0.014 155)</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--faint);"></div><div class="sw-info"><span class="sw-name">faint</span><span class="sw-val">oklch(0.62 0.012 155)</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--border);"></div><div class="sw-info"><span class="sw-name">border</span><span class="sw-val">oklch(0.90 0.008 110)</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--border-strong);"></div><div class="sw-info"><span class="sw-name">border-strong</span><span class="sw-val">oklch(0.79 0.012 110)</span></div></div>
+            </div>
+            <h3 class="muted" style="font-size: var(--text-sm); font-weight: 600;">语义 Semantic</h3>
+            <div class="swatch-grid">
+              <div class="swatch"><div class="sw-color" style="background: var(--success);"></div><div class="sw-info"><span class="sw-name">success</span><span class="sw-val">通过 / 已评分</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--warning);"></div><div class="sw-info"><span class="sw-name">warning</span><span class="sw-val">待处理 / 逾期</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--danger);"></div><div class="sw-info"><span class="sw-name">danger</span><span class="sw-val">失败 / 删除</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--info);"></div><div class="sw-info"><span class="sw-name">info</span><span class="sw-val">提示 / 中性 AI</span></div></div>
+            </div>
+            <h3 class="muted" style="font-size: var(--text-sm); font-weight: 600;">数据可视化 Data Viz</h3>
+            <div class="swatch-grid">
+              <div class="swatch"><div class="sw-color" style="background: var(--viz-1);"></div><div class="sw-info"><span class="sw-name">viz-1</span><span class="sw-val">pine</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--viz-2);"></div><div class="sw-info"><span class="sw-name">viz-2</span><span class="sw-val">amber</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--viz-3);"></div><div class="sw-info"><span class="sw-name">viz-3</span><span class="sw-val">slate</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--viz-4);"></div><div class="sw-info"><span class="sw-name">viz-4</span><span class="sw-val">clay</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--viz-5);"></div><div class="sw-info"><span class="sw-name">viz-5</span><span class="sw-val">teal</span></div></div>
+              <div class="swatch"><div class="sw-color" style="background: var(--viz-6);"></div><div class="sw-info"><span class="sw-name">viz-6</span><span class="sw-val">sage</span></div></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 02 字体 -->
+        <section class="specimen-block" id="type" data-od-id="specimen-typography">
+          <div class="specimen-head">
+            <p class="eyebrow">02 · Typography System</p>
+            <h2>字体体系</h2>
+            <p>结构标题用衬线（思源宋体 / Source Serif）建立学术工作台性格；正文用黑体（思源黑体 / 苹方）；数字、代码、标签用等宽。层级清晰且适合长时间阅读。</p>
+          </div>
+          <div class="demo-stage">
+            <div class="row-between"><span class="eyebrow">Page Title · 24px / 600 / serif</span><span class="meta">中英文混排</span></div>
+            <h1>人工智能导论课程实验</h1>
+            <div class="row-between" style="margin-top: var(--space-4);"><span class="eyebrow">Section Title · 20px / 600 / serif</span></div>
+            <h2>提交与评分概览</h2>
+            <div class="row-between" style="margin-top: var(--space-4);"><span class="eyebrow">Component Title · 15px / 600 / sans</span></div>
+            <h3>待复核提交</h3>
+            <div class="row-between" style="margin-top: var(--space-4);"><span class="eyebrow">Body · 14px / 400 / sans</span></div>
+            <p style="margin: 0; max-width: 58ch;">查看学生实验提交情况，完成评分与反馈。系统将自动运行测试并生成 AI 评分依据，教师负责最终确认与发布。</p>
+            <div class="row-between" style="margin-top: var(--space-4);"><span class="eyebrow">Secondary · 13px / 400</span></div>
+            <p class="muted" style="margin: 0;">提交时间 2026-08-14 18:32 · 运行环境 Python 3.12 · 数据规模 1,024 条</p>
+            <div class="row-between" style="margin-top: var(--space-4);"><span class="eyebrow">Label · 12px / 500</span></div>
+            <span style="font-size: var(--text-sm); font-weight: 500; color: var(--muted);">课程名称</span>
+            <div class="row-between" style="margin-top: var(--space-4);"><span class="eyebrow">Metric · 22px / mono</span></div>
+            <div class="num" style="font-size: 22px; font-weight: 600;">84.5 <span class="muted" style="font-size: var(--text-md); font-weight: 400;">/ 100</span></div>
+            <div class="row-between" style="margin-top: var(--space-4);"><span class="eyebrow">Code · 13px / mono</span></div>
+            <code style="font-family: var(--font-mono); font-size: var(--text-base);">def grade(submission) -> Score:</code>
+          </div>
+        </section>
+
+        <!-- 03 按钮 -->
+        <section class="specimen-block" id="buttons" data-od-id="specimen-buttons">
+          <div class="specimen-head">
+            <p class="eyebrow">03 · Button System</p>
+            <h2>按钮</h2>
+            <p>每屏只保留一个品牌色主按钮；其余用次要 / 幽灵 / 危险。高度 32–36px，圆角 5px，主按钮悬停加深绿色而非变灰。</p>
+          </div>
+          <div class="demo-stage">
+            <div class="row-wrap">
+              <button class="btn btn-primary">创建作业</button>
+              <button class="btn btn-secondary">导出成绩</button>
+              <button class="btn btn-ghost">取消</button>
+              <button class="btn btn-danger">删除提交</button>
+              <button class="btn btn-primary" disabled>已禁用</button>
+            </div>
+            <div class="row-wrap">
+              <button class="btn btn-primary btn-lg">发布实验</button>
+              <button class="btn btn-secondary btn-lg">保存草稿</button>
+              <button class="btn btn-sm btn-secondary">紧凑按钮</button>
+              <button class="btn btn-icon btn-secondary" aria-label="复制">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+              </button>
+              <button class="btn btn-icon btn-ghost" aria-label="更多">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/><circle cx="5" cy="12" r="1.2"/></svg>
+              </button>
+            </div>
+            <p class="muted" style="font-size: var(--text-sm);">聚焦状态统一为 2px 墨松绿描边 + 2px 偏移；悬停态均加深或移位，不用「变灰文字」。</p>
+          </div>
+        </section>
+
+        <!-- 04 输入框 -->
+        <section class="specimen-block" id="inputs" data-od-id="specimen-inputs">
+          <div class="specimen-head">
+            <p class="eyebrow">04 · Input System</p>
+            <h2>输入框</h2>
+            <p>32px 高度、5px 圆角、发丝线边框；聚焦为墨松绿描边 + 浅绿光环。校验态通过边框与辅助文字表达。</p>
+          </div>
+          <div class="spec-grid">
+            <div class="field">
+              <label for="i1">课程名称</label>
+              <input class="input" id="i1" placeholder="例如：机器学习基础" />
+              <span class="field-hint">用于课程列表展示</span>
+            </div>
+            <div class="field">
+              <label for="i2">运行环境</label>
+              <input class="input" id="i2" value="Python 3.12 + PyTorch 2.4" />
+            </div>
+            <div class="field">
+              <label for="i3">错误状态</label>
+              <input class="input" id="i3" value="123" aria-invalid="true" />
+              <span class="field-error">请输入有效名称</span>
+            </div>
+            <div class="field">
+              <label for="i4">禁用状态</label>
+              <input class="input" id="i4" value="不可编辑" disabled />
+            </div>
+            <div class="field" style="grid-column: 1 / -1;">
+              <label for="i5">实验说明</label>
+              <textarea class="textarea" id="i5" placeholder="描述实验目标、数据集与提交要求…"></textarea>
+            </div>
+          </div>
+        </section>
+
+        <!-- 05 下拉选择 -->
+        <section class="specimen-block" id="select" data-od-id="specimen-select">
+          <div class="specimen-head">
+            <p class="eyebrow">05 · Select System</p>
+            <h2>下拉选择</h2>
+            <p>矩形边框控件，非 Pill；紧凑用于工具栏，标准用于表单。多选下拉用「复选 + 计数」表达。</p>
+          </div>
+          <div class="demo-stage">
+            <div class="row-wrap">
+              <label class="select" style="width: 180px;">
+                <select><option>全部学期</option><option>2026 春季</option><option>2025 秋季</option></select>
+              </label>
+              <label class="select" style="width: 180px;">
+                <select><option>全部班级</option><option>计科 2201</option><option>计科 2202</option></select>
+              </label>
+              <label class="select" style="width: 200px;">
+                <select><option>按提交时间排序</option><option>按得分排序</option></select>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <!-- 06 搜索 -->
+        <section class="specimen-block" id="search" data-od-id="specimen-search">
+          <div class="specimen-head">
+            <p class="eyebrow">06 · Search System</p>
+            <h2>搜索</h2>
+            <p>矩形搜索框，含图标、清空按钮与键盘快捷键提示；列表页复用同一组件。</p>
+          </div>
+          <div class="demo-stage">
+            <div class="row-wrap">
+              <label class="searchbox has-value" style="width: 320px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                <input class="input" type="search" placeholder="搜索学生、实验或提交编号" value="卷积神经网络" />
+                <button class="clear" aria-label="清空"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+              </label>
+              <label class="searchbox" style="width: 320px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                <input class="input" type="search" placeholder="搜索课程名称或编号" />
+              </label>
+            </div>
+            <div class="header-search" style="width: 360px; max-width: none;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              <input placeholder="全局搜索：课程 / 作业 / 学生 / 提交" />
+              <kbd>⌘K</kbd>
+            </div>
+          </div>
+        </section>
+
+        <!-- 07 Tabs -->
+        <section class="specimen-block" id="tabs" data-od-id="specimen-tabs">
+          <div class="specimen-head">
+            <p class="eyebrow">07 · Tabs System</p>
+            <h2>Tabs</h2>
+            <p>文字 + 短墨松绿下划线；选中态用文字加粗 + 2px 强调线，非整排胶囊。计数用等宽小标签。</p>
+          </div>
+          <div class="demo-stage">
+            <div class="tabs" role="tablist">
+              <button class="tab active" role="tab" aria-selected="true">全部提交 <span class="count">128</span></button>
+              <button class="tab" role="tab" aria-selected="false">待评分 <span class="count">12</span></button>
+              <button class="tab" role="tab" aria-selected="false">已评分 <span class="count">96</span></button>
+              <button class="tab" role="tab" aria-selected="false">已发布 <span class="count">20</span></button>
+            </div>
+            <p class="muted" style="font-size: var(--text-sm);">Tab 之间可横向滚动，不换行；移动端保持可读。</p>
+          </div>
+        </section>
+
+        <!-- 08 筛选 -->
+        <section class="specimen-block" id="filter" data-od-id="specimen-filter">
+          <div class="specimen-head">
+            <p class="eyebrow">08 · Filter System</p>
+            <h2>筛选</h2>
+            <p>筛选使用矩形 Filter Chip 或分段控件，激活态为墨松绿描边 + 浅绿底；避免整排 Pill。</p>
+          </div>
+          <div class="demo-stage">
+            <div class="row-wrap">
+              <button class="filter-chip active">全部</button>
+              <button class="filter-chip">待评分</button>
+              <button class="filter-chip">已评分</button>
+              <button class="filter-chip">已发布</button>
+              <button class="filter-chip">逾期</button>
+            </div>
+            <div class="row-wrap">
+              <div class="segmented">
+                <button class="active">列表</button>
+                <button>网格</button>
+                <button>紧凑</button>
+              </div>
+              <span class="muted" style="font-size: var(--text-sm);">分段控件用于视图切换与短期状态，不与筛选 Chip 混用。</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 09 状态徽标 -->
+        <section class="specimen-block" id="badge" data-od-id="specimen-badge">
+          <div class="specimen-head">
+            <p class="eyebrow">09 · Badge / Status System</p>
+            <h2>状态徽标</h2>
+            <p>浅底 + 圆点 + 语义色文字，3px 小圆角；密集表格中可用无底色的「圆点 + 文字」降噪。</p>
+          </div>
+          <div class="demo-stage">
+            <div class="row-wrap">
+              <span class="badge badge-success"><span class="dot"></span>已发布</span>
+              <span class="badge badge-warning"><span class="dot"></span>待评分</span>
+              <span class="badge badge-danger"><span class="dot"></span>失败</span>
+              <span class="badge badge-info"><span class="dot"></span>AI 已评分</span>
+              <span class="badge badge-neutral"><span class="dot"></span>草稿</span>
+              <span class="badge badge-accent"><span class="dot"></span>教师已确认</span>
+            </div>
+            <div class="row-wrap">
+              <span class="status-dot"><span class="dot" style="background: var(--success);"></span>运行成功</span>
+              <span class="status-dot"><span class="dot" style="background: var(--warning);"></span>排队中</span>
+              <span class="status-dot"><span class="dot" style="background: var(--danger);"></span>系统错误</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 10 卡片 / 表面 -->
+        <section class="specimen-block" id="card" data-od-id="specimen-card">
+          <div class="specimen-head">
+            <p class="eyebrow">10 · Card / Surface System</p>
+            <h2>卡片与表面</h2>
+            <p>减少「每块内容一个圆角矩形」：结构化数据用表格，分组用区块标题 + 发丝线 + 浅底，仅关键面板使用 7px 圆角卡片。</p>
+          </div>
+          <div class="spec-grid">
+            <div class="panel">
+              <div class="panel-head"><div class="ph-label"><p class="eyebrow">Panel</p><h3>标准面板</h3></div></div>
+              <div class="panel-body">
+                <p class="muted" style="margin: 0; font-size: var(--text-base);">带标题栏的面板，用于需要独立语义边界的内容块，如评分依据、课程信息。</p>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><div class="ph-label"><p class="eyebrow">Flat region</p><h3>扁平区域</h3></div></div>
+              <div class="panel-body" style="border-top: 0;">
+                <p class="muted" style="margin: 0; font-size: var(--text-base);">无边框、靠留白与标题分隔的内容，用于统计条与长表单分组。</p>
+              </div>
+            </div>
+            <div class="surface-subtle" style="padding: 16px;">
+              <p class="eyebrow">Subtle surface</p>
+              <p class="muted" style="margin: 4px 0 0; font-size: var(--text-base);">浅色表面用于代码块、表头、斑马纹与次级工作区。</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 11 表格 -->
+        <section class="specimen-block" id="table" data-od-id="specimen-table">
+          <div class="specimen-head">
+            <p class="eyebrow">11 · Table System</p>
+            <h2>表格</h2>
+            <p>一等公民：贴齐发丝线、粘性表头、42px 行高、悬停 / 选中 / 批量态、数字右对齐、长文本省略。适用于课程 / 学生 / 提交 / 成绩 / 实验。</p>
+          </div>
+          <div class="table-wrap">
+            <div class="table-scroll">
+              <table class="ds-table">
+                <thead>
+                  <tr>
+                    <th class="col-check"><input type="checkbox" class="check" style="margin: 0;" aria-label="全选" /></th>
+                    <th class="sortable sorted">学生 <span class="sort-icon">↑</span></th>
+                    <th class="sortable">实验 / 作业</th>
+                    <th>状态</th>
+                    <th class="cell-num sortable">测试 <span class="sort-icon">↕</span></th>
+                    <th class="cell-num">AI 得分</th>
+                    <th>提交时间</th>
+                    <th class="col-actions"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="col-check"><input type="checkbox" class="check" style="margin: 0;" /></td>
+                    <td><span class="cell-main">陈雨桐</span><div class="cell-sub">2026011203</div></td>
+                    <td class="cell-ellipsis">卷积神经网络 · 图像分类实验</td>
+                    <td><span class="badge badge-warning"><span class="dot"></span>待评分</span></td>
+                    <td class="cell-num">12 / 12</td>
+                    <td class="cell-num" style="font-weight: 600;">84.5</td>
+                    <td class="meta">08-14 18:32</td>
+                    <td class="col-actions"><button class="btn btn-ghost btn-sm">查看</button></td>
+                  </tr>
+                  <tr class="selected">
+                    <td class="col-check"><input type="checkbox" class="check" checked style="margin: 0;" /></td>
+                    <td><span class="cell-main">李昊</span><div class="cell-sub">2026011407</div></td>
+                    <td class="cell-ellipsis">线性回归 · 房价预测</td>
+                    <td><span class="badge badge-success"><span class="dot"></span>已评分</span></td>
+                    <td class="cell-num">10 / 12</td>
+                    <td class="cell-num" style="font-weight: 600;">71.0</td>
+                    <td class="meta">08-14 16:05</td>
+                    <td class="col-actions"><button class="btn btn-ghost btn-sm">查看</button></td>
+                  </tr>
+                  <tr>
+                    <td class="col-check"><input type="checkbox" class="check" style="margin: 0;" /></td>
+                    <td><span class="cell-main">王子航</span><div class="cell-sub">2026011511</div></td>
+                    <td class="cell-ellipsis">决策树 · 泰坦尼克生存预测</td>
+                    <td><span class="badge badge-danger"><span class="dot"></span>失败</span></td>
+                    <td class="cell-num">—</td>
+                    <td class="cell-num">—</td>
+                    <td class="meta">08-14 11:47</td>
+                    <td class="col-actions"><button class="btn btn-ghost btn-sm">查看</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="pagination">
+              <span class="pg-info">共 128 条 · 第 1 / 13 页</span>
+              <div class="pg-btns">
+                <button class="pg-btn">‹</button><button class="pg-btn active">1</button><button class="pg-btn">2</button><button class="pg-btn">3</button><span class="meta">…</span><button class="pg-btn">13</button><button class="pg-btn">›</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 12 弹窗 -->
+        <section class="specimen-block" id="modal" data-od-id="specimen-modal">
+          <div class="specimen-head">
+            <p class="eyebrow">12 · Modal System</p>
+            <h2>弹窗</h2>
+            <p>用于确认、创建等聚焦任务；7px 圆角、标题 + 关闭 + 底部动作区，主操作在右。</p>
+          </div>
+          <div class="demo-stage">
+            <button class="btn btn-secondary" data-open-modal>打开示例弹窗</button>
+          </div>
+        </section>
+
+        <!-- 13 抽屉 -->
+        <section class="specimen-block" id="drawer" data-od-id="specimen-drawer">
+          <div class="specimen-head">
+            <p class="eyebrow">13 · Drawer System</p>
+            <h2>抽屉</h2>
+            <p>右侧抽屉用于详情辅助、批量筛选与教师复核面板，宽度 420px，内容可滚动。</p>
+          </div>
+          <div class="demo-stage">
+            <button class="btn btn-secondary" data-open-drawer>打开示例抽屉</button>
+          </div>
+        </section>
+
+        <!-- 14 导航 -->
+        <section class="specimen-block" id="nav" data-od-id="specimen-navigation">
+          <div class="specimen-head">
+            <p class="eyebrow">14 · Navigation System</p>
+            <h2>导航</h2>
+            <p>浅色侧栏（232px，可收起为 56px 图标栏），按「教学 / 评分 / 系统」分组；激活态为 2px 墨松绿左栏 + 浅绿底，不用大面积色块。</p>
+          </div>
+          <div class="demo-stage" style="padding: 0;">
+            <div class="sidebar" style="position: static; height: 420px; border: 1px solid var(--border); border-radius: var(--radius-lg);">
+              <div class="sidebar-head">
+                <span class="wordmark"><span class="mark">DAI</span><small>实验平台</small></span>
+              </div>
+              <nav class="sidebar-nav">
+                <div class="nav-group">
+                  <div class="nav-label">教学</div>
+                  <a class="nav-item active" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>工作台</a>
+                  <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>课程管理</a>
+                  <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>作业管理</a>
+                  <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v4l-2 1v4l-4 2v2l4 1v4l2 1 2-1v-4l4-1v-2l-4-2V7l-2-1z"/></svg>实验管理</a>
+                  <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>考试管理</a>
+                </div>
+                <div class="nav-group">
+                  <div class="nav-label">评分</div>
+                  <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15V5a2 2 0 0 0-2-2H9"/><path d="M15 21v-8a2 2 0 0 1 2-2h4"/><rect x="3" y="7" width="12" height="14" rx="2"/></svg>提交与评分 <span class="nav-badge">12</span></a>
+                  <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>AI 评分复核</a>
+                  <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m6 16 4-5 3 3 5-7"/></svg>成绩统计</a>
+                </div>
+              </nav>
+              <div class="sidebar-foot">
+                <div class="user-card">
+                  <span class="avatar">张</span>
+                  <div class="grow"><div class="u-name">张老师</div><div class="u-role">教师 · 计算机学院</div></div>
+                  <button class="btn btn-ghost btn-sm btn-icon" aria-label="角色切换"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 15 页头 -->
+        <section class="specimen-block" id="pagehead" data-od-id="specimen-pagehead">
+          <div class="specimen-head">
+            <p class="eyebrow">15 · Page Header</p>
+            <h2>页头</h2>
+            <p>衬线标题 + 单行说明 + 右侧上下文主操作；面包屑与页头分离，保持标题区干净。</p>
+          </div>
+          <div class="demo-stage">
+            <div class="page-head" style="margin: 0;">
+              <div class="ph-title">
+                <p class="eyebrow" style="color: var(--accent);">课程 / CS101 · 机器学习</p>
+                <h1>课程管理</h1>
+                <p class="lead" style="margin-top: 6px;">管理课程、班级、学员与开课状态。</p>
+              </div>
+              <div class="ph-actions">
+                <button class="btn btn-secondary">导入名单</button>
+                <button class="btn btn-primary btn-lg">创建课程</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 16 工具栏 -->
+        <section class="specimen-block" id="toolbar" data-od-id="specimen-toolbar">
+          <div class="specimen-head">
+            <p class="eyebrow">16 · Toolbar</p>
+            <h2>工具栏</h2>
+            <p>列表页工具栏 = 搜索 + 筛选 + 排序 + 视图切换，8px 间距，可换行。</p>
+          </div>
+          <div class="demo-stage" style="padding: 0;">
+            <div class="table-wrap">
+              <div class="toolbar">
+                <label class="searchbox" style="width: 260px;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                  <input class="input" type="search" placeholder="搜索课程或编号" />
+                </label>
+                <label class="select" style="width: 140px;"><select><option>全部学期</option><option>2026 春季</option></select></label>
+                <label class="select" style="width: 140px;"><select><option>全部状态</option><option>已发布</option></select></label>
+                <div class="grow"></div>
+                <div class="segmented"><button class="active">列表</button><button>网格</button></div>
+                <button class="btn btn-secondary btn-sm">导出</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 17 代码区 -->
+        <section class="specimen-block" id="code" data-od-id="specimen-code">
+          <div class="specimen-head">
+            <p class="eyebrow">17 · Code / Notebook</p>
+            <h2>代码区</h2>
+            <p>深墨松色代码面板（与浅色主 UI 形成开发者工具对比）：行号、轻量语法高亮、复制 / 展开 / 全屏，横向滚动不裁切。</p>
+          </div>
+          <div class="stack">
+            <div class="code-panel">
+              <div class="code-panel-head">
+                <span class="fname">submission.py</span>
+                <span class="lang">Python · 128 行</span>
+                <div class="cp-actions">
+                  <button class="cp-btn" aria-label="复制"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>
+                  <button class="cp-btn" aria-label="展开"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+                  <button class="cp-btn" aria-label="全屏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
+                </div>
+              </div>
+              <pre><code><span class="ln">1</span><span class="c-comment"># 房价预测 · 线性回归实现</span>
+<span class="ln">2</span><span class="c-keyword">import</span> numpy <span class="c-keyword">as</span> np
+<span class="ln hl">3</span>
+<span class="ln hl">4</span><span class="c-keyword">def</span> <span class="c-func">predict</span>(X, w):
+<span class="ln">5</span>    <span class="c-keyword">return</span> X @ w
+<span class="ln">6</span>
+<span class="ln">7</span><span class="c-keyword">def</span> <span class="c-func">loss</span>(y_true, y_pred):
+<span class="ln">8</span>    <span class="c-keyword">return</span> np.mean((y_true - y_pred) ** <span class="c-number">2</span>)</code></pre>
+            </div>
+            <div class="term">
+              <div class="term-head"><span class="term-dot"></span><span class="term-dot"></span><span class="term-dot"></span><span class="t-title">终端输出 · pytest</span></div>
+              <pre><span class="ok">PASSED</span>  test_data_shape
+<span class="ok">PASSED</span>  test_loss_value
+<span class="fail">FAILED</span>  test_edge_case_zeros
+<span class="muted" style="font-family: inherit;">3 passed, 1 failed in 0.42s</span></pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- 18 AI 评分 -->
+        <section class="specimen-block" id="aiscore" data-od-id="specimen-aiscore">
+          <div class="specimen-head">
+            <p class="eyebrow">18 · AI Scoring Workspace</p>
+            <h2>AI 评分</h2>
+            <p>AI 是功能，不是视觉主题。用「证据来源标签」区分：确定性测试（实线）、AI 判断（虚线）、教师决策（墨松绿实线）。不紫、不发光。</p>
+          </div>
+          <div class="stack">
+            <div class="row-wrap" style="gap: var(--space-2);">
+              <span class="evidence-tag deterministic">▣ 确定性证据</span>
+              <span class="evidence-tag ai">◈ AI 判断</span>
+              <span class="evidence-tag teacher">● 教师决策</span>
+            </div>
+            <div class="grid-2-1">
+              <div class="evidence-block deterministic">
+                <div class="row-between" style="margin-bottom: 12px;"><span class="eyebrow">测试结果 · 确定性</span><span class="status-dot"><span class="dot" style="background: var(--success);"></span>通过 12 / 14</span></div>
+                <div class="stack" style="gap: 8px;">
+                  <div class="row-between" style="font-size: var(--text-base);"><span>功能正确性</span><span class="num">8 / 8</span></div>
+                  <div class="score-bar"><i class="ok" style="width: 100%;"></i></div>
+                  <div class="row-between" style="font-size: var(--text-base);"><span>鲁棒性与性能</span><span class="num">4 / 6</span></div>
+                  <div class="score-bar"><i class="warn" style="width: 66%;"></i></div>
+                </div>
+              </div>
+              <div class="evidence-block ai">
+                <div class="row-between" style="margin-bottom: 12px;"><span class="eyebrow">AI 评分依据 · 模型判断</span><span class="status-dot"><span class="dot" style="background: var(--info);"></span>rubric v2</span></div>
+                <div class="stack" style="gap: 8px;">
+                  <div class="row-between" style="font-size: var(--text-base);"><span>算法关键步骤</span><span class="num">24 / 30</span></div>
+                  <div class="score-bar"><i style="width: 80%;"></i></div>
+                  <div class="row-between" style="font-size: var(--text-base);"><span>代码质量</span><span class="num">14 / 20</span></div>
+                  <div class="score-bar"><i style="width: 70%;"></i></div>
+                  <div class="row-between" style="font-size: var(--text-base);"><span>规范性</span><span class="num">10 / 10</span></div>
+                  <div class="score-bar"><i class="ok" style="width: 100%;"></i></div>
+                </div>
+              </div>
+              <div class="evidence-block teacher">
+                <div class="row-between" style="margin-bottom: 12px;"><span class="eyebrow">教师最终决策</span><span class="badge badge-accent"><span class="dot"></span>待确认</span></div>
+                <div class="score-orb"><span class="big">84</span><span class="of">/ 100</span></div>
+                <p class="muted" style="margin: 8px 0 0; font-size: var(--text-base);">在 AI 建议基础上复核代码与测试，可上调 / 下调并填写理由。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 19 空状态 -->
+        <section class="specimen-block" id="empty" data-od-id="specimen-empty">
+          <div class="specimen-head"><p class="eyebrow">19 · Empty State</p><h2>空状态</h2><p>描线图标 + 标题 + 说明 + 单一动作；不用 emoji。</p></div>
+          <div class="demo-stage">
+            <div class="empty">
+              <div class="empty-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h4"/></svg></div>
+              <h3>暂无提交记录</h3>
+              <p>该实验下还没有学生提交。发布实验后，提交将出现在这里。</p>
+              <div class="empty-actions"><button class="btn btn-secondary btn-sm">返回实验管理</button></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 20 加载 -->
+        <section class="specimen-block" id="loading" data-od-id="specimen-loading">
+          <div class="specimen-head"><p class="eyebrow">20 · Loading State</p><h2>加载</h2><p>骨架屏 + 微光，保持布局稳定；长任务用进度条 + 状态文案。</p></div>
+          <div class="demo-stage">
+            <div class="row-wrap" style="gap: var(--space-3);">
+              <div class="skeleton" style="width: 32px; height: 32px; border-radius: 50%;"></div>
+              <div class="stack" style="gap: 8px; flex: 1;">
+                <div class="skeleton" style="width: 40%; height: 14px;"></div>
+                <div class="skeleton" style="width: 70%; height: 12px;"></div>
+              </div>
+            </div>
+            <div class="row" style="gap: var(--space-3);">
+              <div class="score-bar grow"><i style="width: 68%;"></i></div>
+              <span class="meta">判题中 68%</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 21 错误 -->
+        <section class="specimen-block" id="error" data-od-id="specimen-error">
+          <div class="specimen-head"><p class="eyebrow">21 · Error State</p><h2>错误</h2><p>左侧 3px 危险色栏 + 标题 + 说明 + 重试；不遮挡内容。</p></div>
+          <div class="demo-stage">
+            <div class="error-panel">
+              <div style="color: var(--danger);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg></div>
+              <div class="grow"><div class="e-title">提交列表加载失败</div><div class="e-body">网络请求超时，请稍后重试。</div></div>
+              <button class="btn btn-secondary btn-sm">重试</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 22 数据可视化 -->
+        <section class="specimen-block" id="viz" data-od-id="specimen-viz">
+          <div class="specimen-head">
+            <p class="eyebrow">22 · Data Visualization</p>
+            <h2>数据可视化</h2>
+            <p>独立分类色板、填充编码（非空描边）、发丝线网格；品牌色不混入图表，避免与状态色冲突。</p>
+          </div>
+          <div class="grid-2">
+            <div class="demo-stage">
+              <div class="row-between"><span class="eyebrow">各实验提交量</span><span class="meta">本学期</span></div>
+              <div class="chart-legend"><span class="legend-item"><span class="swatch" style="background: var(--viz-1);"></span>已提交</span><span class="legend-item"><span class="swatch" style="background: var(--viz-2);"></span>已评分</span></div>
+              <div class="bar-chart">
+                <div class="bar-col"><div class="bar" style="height: 46%;"></div><span class="bar-label">实验1</span></div>
+                <div class="bar-col"><div class="bar" style="height: 72%;"></div><span class="bar-label">实验2</span></div>
+                <div class="bar-col"><div class="bar" style="height: 58%;"></div><span class="bar-label">实验3</span></div>
+                <div class="bar-col"><div class="bar" style="height: 84%;"></div><span class="bar-label">实验4</span></div>
+                <div class="bar-col"><div class="bar" style="height: 66%;"></div><span class="bar-label">实验5</span></div>
+              </div>
+            </div>
+            <div class="demo-stage">
+              <div class="row-between"><span class="eyebrow">成绩分布</span><span class="meta">n = 128</span></div>
+              <div class="chart-legend"><span class="legend-item"><span class="swatch" style="background: var(--viz-5);"></span>已评分</span><span class="legend-item"><span class="swatch" style="background: var(--viz-6);"></span>待评分</span></div>
+              <div class="row" style="gap: var(--space-6); align-items: center;">
+                <div class="donut" style="background: conic-gradient(var(--viz-5) 0 78%, var(--viz-6) 78% 100%);"></div>
+                <div class="stack" style="gap: 10px;">
+                  <div><div class="num" style="font-size: 24px; font-weight: 600;">78%</div><div class="muted" style="font-size: var(--text-sm);">已评分</div></div>
+                  <div><div class="num" style="font-size: 24px; font-weight: 600;">22%</div><div class="muted" style="font-size: var(--text-sm);">待评分</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- 示例弹窗 -->
+  <div class="modal-backdrop" id="sample-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-head">
+        <div><p class="eyebrow">课程</p><h2 id="modal-title">创建课程</h2></div>
+        <button class="btn btn-ghost btn-sm btn-icon" data-close-modal aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+      <div class="modal-body stack" style="gap: var(--space-4);">
+        <div class="field"><label for="m-name">课程名称</label><input class="input" id="m-name" placeholder="例如：机器学习基础" /></div>
+        <div class="field"><label for="m-sem">开课学期</label><label class="select"><select id="m-sem"><option>2026 春季</option><option>2026 秋季</option></select></label></div>
+        <div class="field"><label for="m-desc">课程说明</label><textarea class="textarea" id="m-desc" placeholder="选填"></textarea></div>
+      </div>
+      <div class="modal-foot"><button class="btn btn-ghost" data-close-modal>取消</button><button class="btn btn-primary">创建课程</button></div>
+    </div>
+  </div>
+
+  <!-- 示例抽屉 -->
+  <div class="drawer-backdrop" id="sample-drawer" hidden></div>
+  <aside class="drawer" id="sample-drawer-panel" hidden role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+    <div class="drawer-head">
+      <div><p class="eyebrow">提交 #S12894</p><h2 id="drawer-title">教师复核</h2></div>
+      <button class="btn btn-ghost btn-sm btn-icon" data-close-drawer aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="drawer-body stack" style="gap: var(--space-4);">
+      <div class="evidence-block ai">
+        <span class="eyebrow">AI 建议</span>
+        <div class="score-orb" style="margin-top: 8px;"><span class="big" style="font-size: 32px;">84</span><span class="of">/ 100</span></div>
+      </div>
+      <div class="field"><label>调整后得分</label><input class="input" value="84" /></div>
+      <div class="field"><label>复核理由</label><textarea class="textarea" placeholder="记录扣分或加分依据…"></textarea></div>
+    </div>
+    <div class="drawer-foot"><button class="btn btn-ghost" data-close-drawer>取消</button><button class="btn btn-primary">确认并生效</button></div>
+  </aside>
+
+  <script>
+    const modal = document.getElementById('sample-modal');
+    const drawerBackdrop = document.getElementById('sample-drawer');
+    const drawerPanel = document.getElementById('sample-drawer-panel');
+    const openModal = (show) => { modal.hidden = !show; if (show) modal.querySelector('input').focus(); };
+    const openDrawer = (show) => { drawerBackdrop.hidden = !show; drawerPanel.hidden = !show; };
+    document.querySelector('[data-open-modal]')?.addEventListener('click', () => openModal(true));
+    document.querySelector('[data-open-drawer]')?.addEventListener('click', () => openDrawer(true));
+    document.querySelectorAll('[data-close-modal]').forEach((el) => el.addEventListener('click', () => openModal(false)));
+    document.querySelectorAll('[data-close-drawer]').forEach((el) => el.addEventListener('click', () => openDrawer(false)));
+    modal.addEventListener('click', (e) => { if (e.target === modal) openModal(false); });
+    drawerBackdrop.addEventListener('click', () => openDrawer(false));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { openModal(false); openDrawer(false); }
+    });
+    document.querySelectorAll('.tabs .tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        tab.parentElement.querySelectorAll('.tab').forEach((t) => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+        tab.classList.add('active'); tab.setAttribute('aria-selected', 'true');
+      });
+    });
+    document.querySelectorAll('.segmented').forEach((seg) => {
+      seg.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+        seg.querySelectorAll('button').forEach((x) => x.classList.remove('active'));
+        b.classList.add('active');
+      }));
+    });
+    document.querySelectorAll('.filter-chip').forEach((chip) => chip.addEventListener('click', () => {
+      chip.parentElement.querySelectorAll('.filter-chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+    }));
+    document.querySelectorAll('.searchbox').forEach((box) => {
+      const input = box.querySelector('input');
+      const clear = box.querySelector('.clear');
+      input?.addEventListener('input', () => box.classList.toggle('has-value', !!input.value));
+      clear?.addEventListener('click', () => { input.value = ''; input.focus(); box.classList.remove('has-value'); });
+    });
+  </script>
+</body>
+</html>

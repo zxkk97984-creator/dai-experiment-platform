@@ -158,12 +158,12 @@ function goWelcome() { router.push('/welcome') }
 <style scoped>
 /* ═══════════════════════════════════════════════════════════════════════
    Login — 与首页一致的明亮轻量教育科技风
-   复用全局 tokens：--paper #F8FAFC / --primary #2563EB / --ink #0F172A
-   / --text-secondary #64748B / --border #E2E8F0 / --radius-xl 16px
+   复用全局 tokens：--paper var(--surface-subtle) / --primary var(--accent) / --ink var(--fg)
+   / --text-secondary var(--muted) / --border var(--border) / --radius-xl 16px
    ═══════════════════════════════════════════════════════════════════════ */
 .login-page {
   min-height: 100vh;
-  background: var(--paper);
+  background: var(--bg);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -171,19 +171,19 @@ function goWelcome() { router.push('/welcome') }
   position: relative;
   overflow: hidden;
   padding: 40px 24px;
-  color: var(--ink);
+  color: var(--fg);
   font-family: var(--font-body);
 }
 
-/* ── 背景装饰：极浅蓝紫渐变 + 极淡网格（同首页） ─────────────────── */
+/* ── 背景装饰：墨松绿 × 岩灰渐变 + 极淡网格 ─────────────────── */
 .bg-grid {
   position: absolute; inset: 0;
   background-image:
-    linear-gradient(rgba(15, 23, 42, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(15, 23, 42, 0.035) 1px, transparent 1px);
+    linear-gradient(oklch(0.2 0.01 150 / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(0.2 0.01 150 / 0.04) 1px, transparent 1px);
   background-size: 32px 32px;
   pointer-events: none;
-  mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 25%, transparent 80%);
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, var(--fg) 25%, transparent 80%);
 }
 .bg-glow {
   position: absolute;
@@ -194,12 +194,12 @@ function goWelcome() { router.push('/welcome') }
 .bg-glow-a {
   width: 560px; height: 560px;
   top: -140px; left: -80px;
-  background: radial-gradient(circle, rgba(124, 58, 237, 0.10) 0%, transparent 70%);
+  background: radial-gradient(circle, color-mix(in oklch, var(--info) 12%, transparent) 0%, transparent 70%);
 }
 .bg-glow-b {
   width: 500px; height: 500px;
   bottom: -120px; right: -60px;
-  background: radial-gradient(circle, rgba(37, 99, 235, 0.12) 0%, transparent 70%);
+  background: radial-gradient(circle, color-mix(in oklch, var(--accent) 14%, transparent) 0%, transparent 70%);
 }
 
 /* ── 返回首页按钮（浅色描边） ─────────────────────────────────────── */
@@ -211,7 +211,7 @@ function goWelcome() { router.push('/welcome') }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  color: var(--ink);
+  color: var(--fg);
   font-family: var(--font-body);
   font-size: 13px;
   font-weight: 500;
@@ -220,8 +220,8 @@ function goWelcome() { router.push('/welcome') }
               box-shadow var(--duration-fast) var(--ease-out);
 }
 .back-btn:hover {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* ── 卡片（纯白 + 细边框 + 柔和阴影，无玻璃拟态） ─────────────────── */
@@ -231,10 +231,9 @@ function goWelcome() { router.push('/welcome') }
   max-width: 410px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-2xl);
+  border-radius: var(--radius-lg);
   padding: 40px 36px 32px;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08),
-              0 2px 6px rgba(15, 23, 42, 0.04);
+  box-shadow: var(--shadow-lg);
   animation: fade-up 480ms var(--ease-out) both;
 }
 @keyframes fade-up {
@@ -250,15 +249,15 @@ function goWelcome() { router.push('/welcome') }
 .brand-mark {
   width: 40px; height: 40px;
   border-radius: var(--radius-md);
-  background: var(--primary);
+  background: var(--accent);
   display: flex; align-items: center; justify-content: center;
-  color: #FFFFFF;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.22);
+  color: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
 .brand-name {
   font-size: 16px;
   font-weight: 600;
-  color: var(--ink);
+  color: var(--fg);
   letter-spacing: -0.01em;
 }
 
@@ -267,14 +266,14 @@ function goWelcome() { router.push('/welcome') }
 .card-title {
   font-size: 26px;
   font-weight: 700;
-  color: var(--ink);
+  color: var(--fg);
   letter-spacing: -0.025em;
   line-height: 1.15;
   margin: 0 0 8px;
 }
 .card-sub {
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--muted);
   line-height: 1.5;
   margin: 0;
 }
@@ -290,7 +289,7 @@ function goWelcome() { router.push('/welcome') }
 .field label {
   font-size: var(--text-sm);
   font-weight: 500;
-  color: var(--ink);
+  color: var(--fg);
   margin-bottom: 7px;
 }
 .input-wrap {
@@ -301,11 +300,11 @@ function goWelcome() { router.push('/welcome') }
 .input-icon {
   position: absolute;
   left: 13px;
-  color: var(--text-tertiary);
+  color: var(--faint);
   pointer-events: none;
   transition: color var(--duration-fast) var(--ease-out);
 }
-.input-wrap:focus-within .input-icon { color: var(--primary); }
+.input-wrap:focus-within .input-icon { color: var(--accent); }
 
 .field input {
   width: 100%;
@@ -313,18 +312,18 @@ function goWelcome() { router.push('/welcome') }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  color: var(--ink);
+  color: var(--fg);
   font-family: var(--font-body);
   font-size: 14px;
   line-height: 1.5;
   transition: border-color var(--duration-fast) var(--ease-out),
               box-shadow var(--duration-fast) var(--ease-out);
 }
-.field input::placeholder { color: var(--text-tertiary); }
+.field input::placeholder { color: var(--faint); }
 .field input:focus {
   outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* Password toggle */
@@ -334,26 +333,26 @@ function goWelcome() { router.push('/welcome') }
   background: none;
   border: none;
   padding: 4px;
-  color: var(--text-tertiary);
+  color: var(--faint);
   cursor: pointer;
   display: flex; align-items: center;
   border-radius: var(--radius-sm);
   transition: color var(--duration-fast) var(--ease-out);
 }
-.pwd-toggle:hover { color: var(--text-secondary); }
+.pwd-toggle:hover { color: var(--muted); }
 
 /* Error */
 .login-error {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: var(--danger-light);
+  background: var(--danger-bg);
   color: var(--danger);
   padding: 10px 14px;
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
   font-weight: 500;
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  border: 1px solid var(--danger-bg);
 }
 .error-slide-enter-active { transition: all var(--duration-normal) var(--ease-out); }
 .error-slide-leave-active { transition: all var(--duration-fast) var(--ease-out); }
@@ -365,10 +364,10 @@ function goWelcome() { router.push('/welcome') }
   width: 100%;
   height: 48px;
   padding: 0 16px;
-  background: var(--primary);
+  background: var(--accent);
   border: none;
   border-radius: var(--radius-lg);
-  color: #FFFFFF;
+  color: var(--surface);
   font-family: var(--font-body);
   font-size: 15px;
   font-weight: 600;
@@ -376,19 +375,19 @@ function goWelcome() { router.push('/welcome') }
   cursor: pointer;
   margin-top: 6px;
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.22);
+  box-shadow: 0 4px 12px color-mix(in oklch, var(--accent) 22%, transparent);
   transition: background var(--duration-normal) var(--ease-out),
               box-shadow var(--duration-normal) var(--ease-out),
               transform var(--duration-normal) var(--ease-out);
 }
 .login-btn:hover:not(:disabled) {
-  background: var(--primary-dark);
-  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.30);
+  background: var(--accent-hover);
+  box-shadow: var(--shadow-lg);
   transform: translateY(-2px);
 }
 .login-btn:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.20);
+  box-shadow: var(--shadow-sm);
 }
 .login-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
 
@@ -397,10 +396,10 @@ function goWelcome() { router.push('/welcome') }
   margin: 24px 0 0;
   text-align: center;
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--muted);
 }
 .card-foot a {
-  color: var(--primary);
+  color: var(--accent);
   font-weight: 500;
   text-decoration: none;
 }
@@ -411,7 +410,7 @@ function goWelcome() { router.push('/welcome') }
   position: relative; z-index: 2;
   margin-top: 28px;
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--faint);
 }
 
 /* ── 响应式 ─────────────────────────────────────────────────────────── */

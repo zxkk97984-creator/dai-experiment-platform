@@ -1,43 +1,39 @@
 <script setup>
-// UiStatusPill：状态胶囊原语。语义色调映射，未知色调回退 neutral。
+// UiStatusPill：V2 状态徽标原语（映射 .badge + dot）。
+// 语义色调收敛为 V2：success / warning / danger / info / neutral / accent；
+// 旧 purple/submitted 一律并入 info，禁止紫色。
+
 import { computed } from 'vue'
 
-const TONES = ['pending', 'progress', 'submitted', 'success', 'warning', 'danger', 'neutral']
+const TONES = ['success', 'warning', 'danger', 'info', 'neutral', 'accent']
+
+const LEGACY_TONES = {
+  pending: 'warning',
+  progress: 'info',
+  submitted: 'info',
+}
 
 const props = defineProps({
-  /** 语义色调：pending / progress / submitted / success / warning / danger / neutral */
+  /** 语义色调：支持 success/warning/danger/info/neutral/accent 及旧兼容键 */
   tone: { type: String, default: 'neutral' },
   /** 展示文本 */
   label: { type: String, required: true },
 })
 
-const toneClass = computed(() => (TONES.includes(props.tone) ? props.tone : 'neutral'))
+const toneClass = computed(() => {
+  const tone = LEGACY_TONES[props.tone] || props.tone
+  return TONES.includes(tone) ? tone : 'neutral'
+})
 </script>
 
 <template>
-  <span class="ui-status" :class="`ui-status-${toneClass}`">{{ label }}</span>
+  <span class="badge ui-status" :class="[`badge-${toneClass}`, `ui-status-${props.tone}`, `ui-status-${toneClass}`]">
+    <span class="dot" aria-hidden="true"></span>
+    {{ label }}
+  </span>
 </template>
 
 <style scoped>
-.ui-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  border-radius: var(--radius-full);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  line-height: 1.5;
-  white-space: nowrap;
-  border: 1px solid transparent;
-}
-
-/* 语义色调 */
-.ui-status-pending   { background: var(--surface-raised); color: var(--text-secondary); border-color: var(--border); }
-.ui-status-progress  { background: var(--primary-light);   color: var(--primary);        border-color: var(--primary-soft); }
-.ui-status-submitted { background: var(--purple-light);    color: var(--purple);         border-color: rgba(119, 88, 232, 0.22); }
-.ui-status-success   { background: var(--success-light);   color: var(--success);        border-color: rgba(18, 168, 100, 0.22); }
-.ui-status-warning   { background: var(--warning-light);   color: var(--warning);        border-color: rgba(245, 138, 7, 0.22); }
-.ui-status-danger    { background: var(--danger-light);    color: var(--danger);         border-color: rgba(240, 68, 56, 0.22); }
-.ui-status-neutral   { background: var(--surface-raised);  color: var(--text-secondary); border-color: var(--border); }
+/* 视觉来自全局 .badge 系列；不新增颜色。 */
+.ui-status { gap: 6px; }
 </style>

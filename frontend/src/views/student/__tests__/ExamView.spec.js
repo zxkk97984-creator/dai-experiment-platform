@@ -167,7 +167,7 @@ describe('ExamView 安全状态与结果展示', () => {
     const wrapper = await mountExam('started')
     await wrapper.get('.submit-button').trigger('click')
     expect(wrapper.text()).toContain('当前尚有未完成的题目，确定交卷吗')
-    expect(wrapper.get('.confirm-actions .btn-primary').text()).toBe('确定')
+    expect(wrapper.get('.confirm-actions .btn-danger-solid').text()).toBe('确定')
     expect(wrapper.get('.confirm-actions .btn-ghost').text()).toBe('取消')
     wrapper.unmount()
   })

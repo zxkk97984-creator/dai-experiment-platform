@@ -20,12 +20,12 @@ const TABS = [
 </script>
 
 <template>
-  <nav class="course-tabs" role="tablist" aria-label="课程栏目">
+  <nav class="tabs course-tabs" role="tablist" aria-label="课程栏目">
     <button
       v-for="t in TABS"
       :key="t.key"
       type="button"
-      class="course-tab"
+      class="tab course-tab"
       :class="{ active: active === t.key }"
       role="tab"
       :aria-selected="active === t.key"
@@ -38,43 +38,12 @@ const TABS = [
 
 <style scoped>
 .course-tabs {
-  display: flex;
-  align-items: stretch;
-  height: 52px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
+  height: 42px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   overflow-x: auto;
 }
-
-.course-tab {
-  position: relative;
-  flex-shrink: 0;
-  padding: 0 22px;
-  background: transparent;
-  border: none;
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: color var(--duration-fast) var(--ease-out);
-}
-
-.course-tab:hover { color: var(--primary); }
-
-.course-tab.active {
-  color: var(--primary);
-  font-weight: 600;
-}
-.course-tab.active::after {
-  content: '';
-  position: absolute;
-  left: 18px;
-  right: 18px;
-  bottom: 0;
-  height: 2px;
-  background: var(--primary);
-  border-radius: 2px 2px 0 0;
-}
+.course-tab { flex-shrink: 0; }
 </style>

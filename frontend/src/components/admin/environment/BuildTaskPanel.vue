@@ -167,34 +167,39 @@ onBeforeUnmount(stopPolling)
 .panel-bar {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
-.panel-hint { margin: 0; font-size: var(--text-xs); color: var(--text-secondary); }
+.panel-hint { margin: 0; font-size: var(--text-xs); color: var(--muted); }
 .mono { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; }
 .vnum {
   display: inline-block; margin-left: 6px; padding: 1px 6px;
-  font-size: 11px; border-radius: 4px;
-  background: var(--primary-light, #e8f1ff); color: var(--primary, #2b6de8);
+  font-size: 11px; border-radius: var(--radius-sm);
+  background: var(--accent-soft); color: var(--accent);
 }
-.digest-short { color: var(--text-secondary); }
-.actions-cell { display: flex; gap: 8px; }
+.digest-short { color: var(--muted); }
+.actions-cell {
+  display: table-cell;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.actions-cell button + button { margin-left: 8px; }
 
 .log-overlay {
   position: fixed; inset: 0; z-index: 200;
-  background: rgba(15, 23, 42, 0.45);
+  background: oklch(0.2 0.01 150 / 0.45);
   display: flex; align-items: center; justify-content: center;
   padding: 24px;
 }
 .log-dialog {
   width: min(880px, 92vw); max-height: 80vh;
   display: flex; flex-direction: column;
-  background: var(--surface, #fff);
+  background: var(--surface, var(--surface));
   border-radius: var(--radius-card, 12px);
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.25);
+  box-shadow: var(--shadow-lg);
 }
 .log-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 18px;
-  border-bottom: 1px solid var(--border, #dfe3e8);
+  border-bottom: 1px solid var(--border, var(--border));
 }
 .log-head h3 { margin: 0; font-size: 15px; }
 .log-text {
@@ -202,6 +207,6 @@ onBeforeUnmount(stopPolling)
   overflow: auto; white-space: pre-wrap; word-break: break-all;
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 12px; line-height: 1.6;
-  background: #0f172a; color: #dbe4f0;
+  background: var(--fg); color: var(--border-strong);
 }
 </style>

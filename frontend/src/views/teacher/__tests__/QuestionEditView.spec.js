@@ -670,7 +670,7 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     expect(wrapper.find('.qe-ai-draft select').element.value).toBe('legacy')
   })
 
-  it('列表行「🤖 AI 配置」收敛：选中该题并打开右侧 AI tab（无双实例）', async () => {
+  it('列表行「AI 配置」收敛：选中该题并打开右侧 AI tab（无双实例）', async () => {
     assignmentsAPI.getQuestions.mockResolvedValue({
       data: {
         items: [{
@@ -682,7 +682,7 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     })
     const wrapper = await mountPage()
     await flushPromises()
-    await clickBtn(wrapper, '🤖 AI 配置')
+    await clickBtn(wrapper, 'AI 配置')
     await flushPromises()
     // 该题被选中（编辑态）且右侧栏切到 AI tab
     expect(wrapper.find('.qe-list-row--active').exists()).toBe(true)

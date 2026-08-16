@@ -11,6 +11,8 @@ const students = ref([])
 const candidates = ref([])
 const query = ref('')
 const loading = ref(false)
+const importing = ref(false)
+const fileInput = ref(null)
 
 async function load() {
   if (typeof coursesAPI.listStudents !== 'function') return
@@ -41,12 +43,31 @@ async function remove(student) {
 }
 
 const originLabel = (origin) => ({ class: '班级同步', manual: '手工加入', self: '自主选课' })[origin] || origin
+
+async function handleImport(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  importing.value = true
+  try {
+    const res = await coursesAPI.importStudents(props.courseId, file)
+    const result = res.data || {}
+    const message = `导入完成：新增 ${result.created || 0} 人，更新 ${result.updated || 0} 人，跳过 ${result.skipped || 0} 人`
+    app.showToast(message, 'success')
+    await load()
+    emit('changed')
+  } catch (error) {
+    app.showToast(error.response?.data?.detail?.message || 'CSV 导入失败', 'error')
+  } finally {
+    importing.value = false
+  }
+}
 onMounted(load)
 </script>
 
 <template>
   <section class="roster-panel">
-    <div class="roster-head"><div><strong>课程学生名单</strong><p>班级成员自动同步，也可手工添加例外学生。</p></div><span>{{ students.length }} 人</span></div>
+    <div class="roster-head"><div><strong>课程学生名单</strong><p>班级成员自动同步，也可手工添加例外学生或 CSV 导入名单。</p></div><div class="roster-head-actions"><span>{{ students.length }} 人</span><button type="button" class="button button-secondary" :disabled="importing" @click="fileInput.click()">{{ importing ? '导入中…' : '导入 CSV' }}</button><input ref="fileInput" type="file" accept=".csv,text/csv" hidden @change="handleImport" /></div></div>
     <div class="roster-search"><input v-model="query" placeholder="按姓名、学号或账号搜索" @keyup.enter="search" /><button type="button" class="button button-secondary" @click="search">搜索学生</button></div>
     <div v-if="candidates.length" class="candidate-list">
       <button v-for="student in candidates" :key="student.id" type="button" @click="add(student)">
@@ -62,5 +83,5 @@ onMounted(load)
 </template>
 
 <style scoped>
-.roster-panel{display:grid;gap:12px;padding-top:18px;border-top:1px solid var(--border)}.roster-head,.roster-search{display:flex;align-items:center;justify-content:space-between;gap:12px}.roster-head p{margin:4px 0 0;color:var(--text-secondary);font-size:12px}.roster-head>span{padding:4px 10px;border-radius:999px;background:var(--primary-light);color:var(--primary);font-size:12px}.roster-search input{flex:1}.candidate-list{display:grid;gap:6px;padding:8px;border-radius:8px;background:#f8fafc}.candidate-list button{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;padding:8px;border:0;background:transparent;text-align:left}.candidate-list small{color:var(--text-secondary)}.candidate-list b{color:var(--primary)}table{width:100%;font-size:12px}th,td{padding:8px;border-bottom:1px solid var(--border);text-align:left}.remove{border:0;background:transparent;color:var(--danger)}.roster-empty{padding:16px;border-radius:8px;background:#f8fafc;color:var(--text-secondary);text-align:center}
+.roster-panel{display:grid;gap:12px;padding-top:18px;border-top:1px solid var(--border)}.roster-head,.roster-search{display:flex;align-items:center;justify-content:space-between;gap:12px}.roster-head-actions{display:flex;align-items:center;gap:8px}.roster-head p{margin:4px 0 0;color:var(--muted);font-size:12px}.roster-head>span{padding:4px 10px;border-radius: var(--radius-full);background:var(--accent-soft);color:var(--accent);font-size:12px}.roster-search input{flex:1}.candidate-list{display:grid;gap:6px;padding:8px;border-radius: var(--radius-md);background:var(--surface-subtle)}.candidate-list button{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;padding:8px;border:0;background:transparent;text-align:left}.candidate-list small{color:var(--muted)}.candidate-list b{color:var(--accent)}table{width:100%;font-size:12px}th,td{padding:8px;border-bottom:1px solid var(--border);text-align:left}.remove{border:0;background:transparent;color:var(--danger)}.roster-empty{padding:16px;border-radius: var(--radius-md);background:var(--surface-subtle);color:var(--muted);text-align:center}
 </style>

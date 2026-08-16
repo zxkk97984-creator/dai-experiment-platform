@@ -95,13 +95,11 @@ watch(() => props.course?.cover, () => { coverFailed.value = false })
   display: flex;
   flex-direction: column;
   gap: 12px;
-  /* 最小高度容纳课程信息，正方形封面可自然撑开卡片 */
-  min-height: 166px;
-  padding: 18px 24px;
+  min-height: 150px;
+  padding: 18px 20px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
+  border-radius: var(--radius-lg);
 }
 
 /* ── 面包屑 ─────────────────────────────────────────────────────── */
@@ -110,19 +108,19 @@ watch(() => props.course?.cover, () => { coverFailed.value = false })
   align-items: center;
   gap: 6px;
   font-size: var(--text-xs);
-  color: var(--text-tertiary);
+  color: var(--faint);
 }
 .breadcrumb-link {
   background: none;
   border: none;
   padding: 0;
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: var(--text-xs);
   cursor: pointer;
 }
-.breadcrumb-link:hover { color: var(--primary); }
+.breadcrumb-link:hover { color: var(--accent); }
 .breadcrumb-current {
-  color: var(--text-secondary);
+  color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -140,16 +138,16 @@ watch(() => props.course?.cover, () => { coverFailed.value = false })
 /* 与课程列表统一为正方形；flex-shrink: 0 保证不挤压进度与 CTA */
 .hero-cover {
   flex-shrink: 0;
-  width: 168px;
+  width: 120px;
   aspect-ratio: 1 / 1;
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: var(--surface-raised, #f1f5f9);
+  background: var(--surface-raised, var(--surface-subtle));
   border: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-tertiary, #94a3b8);
+  color: var(--faint);
 }
 .hero-cover__img {
   display: block;
@@ -164,11 +162,12 @@ watch(() => props.course?.cover, () => { coverFailed.value = false })
 }
 .hero-title {
   margin: 0 0 4px;
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--ink);
-  letter-spacing: -0.015em;
-  line-height: 1.25;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+  line-height: var(--lh-tight);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -176,7 +175,7 @@ watch(() => props.course?.cover, () => { coverFailed.value = false })
 .hero-desc {
   margin: 0;
   font-size: var(--text-sm);
-  color: var(--text-secondary);
+  color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -194,9 +193,9 @@ watch(() => props.course?.cover, () => { coverFailed.value = false })
 .hero-chip {
   padding: 4px 10px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-md);
   background: var(--surface);
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: var(--text-xs);
   font-weight: 500;
   white-space: nowrap;
@@ -211,7 +210,7 @@ watch(() => props.course?.cover, () => { coverFailed.value = false })
 .hero-progress-text {
   font-size: var(--text-xs);
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--muted);
 }
 
 .hero-cta {
@@ -220,7 +219,7 @@ watch(() => props.course?.cover, () => { coverFailed.value = false })
 .hero-cta .btn-primary {
   height: 44px;
   padding: 0 26px;
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-md);
   font-weight: 600;
 }
 

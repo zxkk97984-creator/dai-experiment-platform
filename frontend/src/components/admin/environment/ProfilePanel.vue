@@ -285,7 +285,7 @@ onMounted(fetch)
 .panel-bar {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
-.panel-hint { margin: 0; font-size: var(--text-xs); color: var(--text-secondary); }
+.panel-hint { margin: 0; font-size: var(--text-xs); color: var(--muted); }
 .profile-form { padding: 16px; }
 .form-grid {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;
@@ -296,11 +296,16 @@ onMounted(fetch)
 .strong { font-weight: 600; }
 .vnum {
   display: inline-block; padding: 1px 6px;
-  font-size: 12px; border-radius: 4px;
-  background: var(--primary-light, #e8f1ff); color: var(--primary, #2b6de8);
+  font-size: 12px; border-radius: var(--radius-sm);
+  background: var(--accent-soft); color: var(--accent);
 }
-.digest-short { color: var(--text-secondary); }
-.actions-cell { display: flex; gap: 8px; }
+.digest-short { color: var(--muted); }
+.actions-cell {
+  display: table-cell;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.actions-cell button + button { margin-left: 8px; }
 
 .versions-card { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .versions-head {
@@ -310,9 +315,9 @@ onMounted(fetch)
 .versions-table { margin: 0; }
 .new-version-form {
   margin-top: 8px; padding-top: 14px;
-  border-top: 1px solid var(--border, #dfe3e8);
+  border-top: 1px solid var(--border, var(--border));
 }
-.source-hint { margin: 6px 0 12px; font-size: var(--text-sm); color: var(--primary, #2b6de8); font-weight: 500; }
+.source-hint { margin: 6px 0 12px; font-size: var(--text-sm); color: var(--accent); font-weight: 500; }
 .pkg-checklist {
   display: flex; flex-wrap: wrap; gap: 6px 14px;
   max-height: 160px; overflow-y: auto;

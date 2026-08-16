@@ -1,6 +1,11 @@
 import axios from 'axios'
 import { useAuthStore } from '../stores/auth.js'
-import router from '../router/index.js'
+let routerPromise = null
+
+async function getRouter() {
+  if (!routerPromise) routerPromise = import('../router/index.js').then((m) => m.default)
+  return routerPromise
+}
 import { beginAuthRefresh } from './authRefreshCoordinator.js'
 
 const client = axios.create({
@@ -48,6 +53,7 @@ client.interceptors.response.use(
 
     const auth = useAuthStore()
     if (!auth.isAuthenticated) {
+      const router = await getRouter()
       router.push('/login')
       return Promise.reject(error)
     }
@@ -110,6 +116,7 @@ client.interceptors.response.use(
         ) {
           auth.logout()
         }
+        const router = await getRouter()
         router.push('/login')
       } else {
         rejectQueue(refreshError)

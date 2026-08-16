@@ -1,7 +1,6 @@
 <script setup>
-// ConfirmDialog：共享自定义确认弹窗（视觉对齐 ChapterManageView 的 .confirm-panel）
-// 用法：title 必填；确认按钮默认"离开"（danger 时红色），取消默认"取消"。
-// 遮罩点击（@click.self）与 Escape 均触发 cancel。
+// ConfirmDialog：V2 共享确认弹窗（映射 dai-ds-v2.css 的 .modal）。
+// 交互契约不变：遮罩点击（@click.self）与 Escape 均触发 cancel。
 
 import { onBeforeUnmount, onMounted } from 'vue'
 
@@ -20,7 +19,6 @@ defineProps({
 
 const emit = defineEmits(['confirm', 'cancel'])
 
-// 挂载时监听 Escape → cancel；卸载时移除（避免多弹窗叠加时互相干扰）
 function onKeydown(e) {
   if (e.key === 'Escape') emit('cancel')
 }
@@ -30,65 +28,37 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 <template>
   <div class="modal-backdrop confirm-backdrop" @click.self="emit('cancel')">
-    <div class="confirm-panel" role="dialog" aria-modal="true" :aria-label="title">
-      <h2>{{ title }}</h2>
-      <p v-if="message">{{ message }}</p>
-      <div class="confirm-actions">
-        <button type="button" class="btn-ghost" :disabled="busy" @click="emit('cancel')">{{ cancelText }}</button>
+    <section class="modal confirm-modal confirm-panel" role="dialog" aria-modal="true" :aria-label="title">
+      <header class="modal-head">
+        <h2>{{ title }}</h2>
+      </header>
+      <div class="modal-body">
+        <p v-if="message">{{ message }}</p>
+      </div>
+      <footer class="modal-foot confirm-actions">
+        <button type="button" class="btn btn-ghost" :disabled="busy" @click="emit('cancel')">
+          {{ cancelText }}
+        </button>
         <button
           type="button"
-          class="btn-primary"
-          :class="{ 'btn-danger': danger }"
+          class="btn"
+          :class="danger ? 'btn-danger-solid' : 'btn-primary'"
           :disabled="busy"
           @click="emit('confirm')"
         >
           {{ busy ? '处理中…' : confirmText }}
         </button>
-      </div>
-    </div>
+      </footer>
+    </section>
   </div>
 </template>
 
 <style scoped>
-/* 遮罩与面板对齐全局 .modal-backdrop / .confirm-panel 视觉；
-   按钮依赖全局 button.btn-primary / .btn-danger / .btn-ghost，此处不复用任何视图 scoped 类 */
-/* 双类 confirm-backdrop 提特异性（0-3-0）：压过各页面 scoped 的
-   .modal-backdrop[data-v-x]（0-2-0，如 AssignmentManageView/ChapterManageView
-   的 justify-content: flex-end 基础样式），保证 ConfirmDialog 恒居中——
-   2026-08-09 修复「删除/取消发布确认弹窗贴右」 */
-.modal-backdrop.confirm-backdrop {
-  position: fixed;
+/* 遮罩与面板视觉完全来自全局 .modal-* / .btn-*。
+   保留 confirm-backdrop 类以维持跨视图的 z-index 与居中契约。 */
+.confirm-backdrop {
   z-index: 60; /* 高于页面级弹窗，确保编辑页守卫弹窗在最上层 */
-  /* left 随侧栏宽度（--modal-left 由 AppLayout 提供），相对内容区居中 */
-  inset: 0 0 0 var(--modal-left, 0);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background: rgba(15, 23, 42, 0.25);
 }
-
-.confirm-panel {
-  width: min(420px, calc(100% - 32px));
-  padding: 24px;
-  border-radius: 14px;
-  border: 1px solid #e2e8f0;
-  background: #fff;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
-}
-.confirm-panel h2 {
-  margin: 0 0 10px;
-  font-size: 17px;
-  color: #0f172a;
-}
-.confirm-panel p {
-  margin: 0 0 20px;
-  color: #64748b;
-  font-size: 13px;
-  line-height: 1.6;
-}
-.confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
+.confirm-modal { max-width: 440px; }
+.modal-body p { margin: 0; color: var(--muted); font-size: var(--text-base); line-height: var(--lh-body); }
 </style>

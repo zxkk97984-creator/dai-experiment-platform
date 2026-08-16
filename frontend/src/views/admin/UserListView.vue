@@ -82,12 +82,12 @@ onMounted(fetch)
 
       <!-- ── Empty ──────────────────────────────────────────────────────── -->
       <div v-else-if="users.length === 0" class="empty-state">
-        <p>👥 暂无匹配用户</p>
+        <p>暂无匹配用户</p>
       </div>
 
       <!-- ── Table ──────────────────────────────────────────────────────── -->
       <div v-else class="card table-card">
-        <table>
+        <table class="ds-table">
           <thead>
             <tr><th>ID</th><th>用户名</th><th>学号</th><th>姓名</th><th>角色</th><th>状态</th><th>操作</th></tr>
           </thead>
@@ -154,11 +154,11 @@ onMounted(fetch)
 }
 .page-title {
   font-size: 28px; font-weight: 700;
-  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
+  color: var(--fg); letter-spacing: -0.02em; line-height: 1.15;
   margin: 0 0 6px;
 }
 .page-sub {
-  font-size: var(--text-sm); color: var(--text-secondary); margin: 0;
+  font-size: var(--text-sm); color: var(--muted); margin: 0;
 }
 
 /* ── Filter bar ────────────────────────────────────────────────────── */
@@ -169,7 +169,7 @@ onMounted(fetch)
   min-width: 120px;
 }
 .filter-count {
-  font-size: var(--text-xs); color: var(--text-secondary);
+  font-size: var(--text-xs); color: var(--muted);
   margin-left: auto;
 }
 
@@ -193,13 +193,18 @@ onMounted(fetch)
 
 /* ── User link ─────────────────────────────────────────────────────── */
 .user-link {
-  color: var(--primary); cursor: pointer; font-weight: 500;
+  color: var(--accent); cursor: pointer; font-weight: 500;
   transition: color var(--duration-fast) var(--ease-out);
 }
-.user-link:hover { color: var(--primary-dark); }
+.user-link:hover { color: var(--accent-hover); }
 
 /* ── Actions ───────────────────────────────────────────────────────── */
-.actions-cell { display: flex; gap: 8px; }
+.actions-cell {
+  display: table-cell;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.actions-cell button + button { margin-left: 8px; }
 .btn-danger-outline {
   color: var(--danger);
   border-color: var(--danger);
@@ -222,13 +227,13 @@ onMounted(fetch)
   border-radius: var(--radius-md);
   padding: 8px 14px;
   font-size: var(--text-sm); font-weight: 500;
-  color: var(--ink); cursor: pointer;
+  color: var(--fg); cursor: pointer;
   display: inline-flex; align-items: center; gap: 6px;
   transition: background var(--duration-fast) var(--ease-out),
               border-color var(--duration-fast) var(--ease-out);
 }
 .pg-btn:hover:not(:disabled) {
-  background: var(--surface-raised);
+  background: var(--surface-subtle);
   border-color: var(--border-strong);
 }
 .pg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -237,9 +242,9 @@ onMounted(fetch)
   font-size: var(--text-sm); font-family: var(--font-mono);
   padding: 0 8px;
 }
-.pg-current { color: var(--primary); font-weight: 700; font-size: 15px; }
-.pg-sep { color: var(--text-tertiary); }
-.pg-total { color: var(--text-secondary); }
+.pg-current { color: var(--accent); font-weight: 700; font-size: 15px; }
+.pg-sep { color: var(--faint); }
+.pg-total { color: var(--muted); }
 
 @media (max-width: 768px) {
   .page-head { flex-direction: column; }

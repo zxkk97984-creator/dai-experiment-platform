@@ -7,4 +7,7 @@ export const dashboardAPI = {
   teacher() {
     return client.get('/dashboard/teacher')
   },
+  teacherCounts() {
+    return client.get('/dashboard/teacher/counts')
+  },
 }

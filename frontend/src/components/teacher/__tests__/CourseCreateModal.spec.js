@@ -76,6 +76,7 @@ describe('CourseCreateModal', () => {
     const selects = wrapper.findAll('select')
 
     await wrapper.get('input[placeholder="输入课程名称"]').setValue(' 数据结构 ')
+    await wrapper.get('input[placeholder="例如：CS101"]').setValue(' CS101 ')
     await wrapper.get('textarea[placeholder="输入课程简介"]').setValue('数据结构与算法')
     await selects[0].setValue('1')
     await flushPromises()
@@ -89,6 +90,7 @@ describe('CourseCreateModal', () => {
     expect(academicsAPI.listClasses).toHaveBeenCalledWith({ academic_term_id: 1, page_size: 100 })
     expect(coursesAPI.create).toHaveBeenCalledWith({
       title: '数据结构',
+      code: 'CS101',
       description: '数据结构与算法',
       academic_term_id: 1,
       teaching_class_ids: [10],

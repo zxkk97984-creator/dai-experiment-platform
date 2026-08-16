@@ -79,7 +79,7 @@ async function handleCopy() {
 <style scoped>
 .code-block {
   border: 1px solid var(--border);
-  border-left: 3px solid var(--primary);
+  border-left: 3px solid var(--accent);
   border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--surface);
@@ -101,13 +101,13 @@ async function handleCopy() {
 
 .cb-filename {
   font-size: 11px; font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--muted);
   font-family: var(--font-mono);
 }
 
 .cb-lang {
   font-size: 11px; font-weight: 600;
-  color: var(--primary);
+  color: var(--accent);
   text-transform: uppercase; letter-spacing: 0.05em;
   font-family: var(--font-mono);
 }
@@ -118,21 +118,21 @@ async function handleCopy() {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: 11px; font-weight: 500;
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
   flex-shrink: 0;
 }
 .cb-copy:hover {
-  background: var(--primary-light);
-  border-color: var(--primary-soft);
-  color: var(--primary);
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+  color: var(--accent);
 }
 .cb-copy.copied {
   color: var(--success);
-  border-color: rgba(18, 168, 100, 0.3);
-  background: var(--success-light);
+  border-color: oklch(0.55 0.13 150 / 0.3);
+  background: var(--success-bg);
 }
 
 .cb-body {
@@ -145,7 +145,7 @@ async function handleCopy() {
   width: 44px; flex-shrink: 0;
   padding: 16px 12px;
   text-align: right;
-  color: var(--text-tertiary);
+  color: var(--faint);
   user-select: none;
   border-right: 1px solid var(--border);
   background: var(--surface-sunken);
@@ -159,7 +159,7 @@ async function handleCopy() {
   padding: 16px 20px;
   font-family: 'JetBrains Mono', var(--font-mono);
   font-size: 13px; line-height: 1.7;
-  color: var(--ink);
+  color: var(--fg);
   white-space: pre;
   overflow-x: auto;
   tab-size: 4;

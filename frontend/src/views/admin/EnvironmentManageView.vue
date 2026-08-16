@@ -53,35 +53,35 @@ const activeTab = ref('profiles')
 .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .page-title {
   font-size: 28px; font-weight: 700;
-  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
+  color: var(--fg); letter-spacing: -0.02em; line-height: 1.15;
   margin: 0 0 6px;
 }
-.page-sub { font-size: var(--text-sm); color: var(--text-secondary); margin: 0; }
+.page-sub { font-size: var(--text-sm); color: var(--muted); margin: 0; }
 
 /* ── Tab bar ───────────────────────────────────────────────────────── */
 .tab-bar {
   display: inline-flex; gap: 4px; padding: 4px;
-  background: var(--surface-raised, #f4f6f8);
+  background: var(--surface-raised, var(--surface-subtle));
   border-radius: var(--radius-card, 12px);
   width: fit-content;
-  border: 1px solid var(--border, #dfe3e8);
+  border: 1px solid var(--border, var(--border));
 }
 .tab-btn {
   border: none; background: transparent;
   padding: 8px 18px;
   font-family: inherit; font-size: var(--text-sm, 13px); font-weight: 500;
-  color: var(--text-secondary, #566);
+  color: var(--muted);
   border-radius: var(--radius-control, 7px);
   cursor: pointer;
   transition: background var(--duration-fast, 0.15s) var(--ease-out, ease),
               color var(--duration-fast, 0.15s) var(--ease-out, ease);
 }
-.tab-btn:hover { color: var(--ink, #223); }
+.tab-btn:hover { color: var(--fg); }
 .tab-btn.active {
-  background: var(--surface, #fff);
-  color: var(--primary, #2b6de8);
+  background: var(--surface, var(--surface));
+  color: var(--accent);
   font-weight: 600;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
+  box-shadow: 0 1px 3px oklch(0.2 0.01 150 / 0.1);
 }
 
 @media (max-width: 768px) {

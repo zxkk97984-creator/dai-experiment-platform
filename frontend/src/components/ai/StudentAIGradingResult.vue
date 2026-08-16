@@ -62,7 +62,7 @@ function diffClass(line) {
 </script>
 
 <template>
-  <section class="ai-result">
+  <section class="ai-result evidence-block ai">
     <div class="ai-result-head">
       <h3 class="ai-result-title">{{ heading }}</h3>
       <div v-if="breakdown.raw_total != null" class="ai-result-meta">
@@ -159,36 +159,12 @@ function diffClass(line) {
 </template>
 
 <style scoped>
-.ai-result {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  margin-top: 16px;
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
+/* V2 学生端 AI 评分结果：AI 证据块（虚线 + info）语义，不紫、不发光。 */
+.ai-result { display: flex; flex-direction: column; gap: 16px; }
 
-.ai-result-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.ai-result-title {
-  margin: 0;
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.ai-result-meta {
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
+.ai-result-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.ai-result-title { margin: 0; color: var(--fg); font-size: var(--text-lg); font-weight: 600; }
+.ai-result-meta { color: var(--muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 
 .ai-result-overview {
   display: grid;
@@ -196,295 +172,57 @@ function diffClass(line) {
   gap: 24px;
   align-items: stretch;
   padding: 16px 0;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border-top: 1px dashed var(--border-strong);
+  border-bottom: 1px dashed var(--border-strong);
 }
+.ai-score { display: flex; flex-direction: column; justify-content: center; align-items: flex-start; padding-right: 24px; border-right: 1px solid var(--border); }
+.ai-score-value { color: var(--fg); font-family: var(--font-mono); font-size: 44px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; }
+.ai-score-label { margin-top: 6px; color: var(--muted); font-size: var(--text-sm); font-weight: 500; }
+.ai-score-scaled { margin-top: 6px; color: var(--info); font-size: var(--text-xs); }
+.ai-dimensions { display: flex; flex-direction: column; justify-content: center; gap: 12px; min-width: 0; }
+.ai-dimension { display: flex; flex-direction: column; gap: 6px; }
+.ai-dimension-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.ai-dimension-label { color: var(--muted); font-size: var(--text-sm); }
+.ai-dimension-score { color: var(--fg); font-size: var(--text-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ai-dimension-track { height: 6px; overflow: hidden; border-radius: var(--radius-sm); background: var(--surface-sunken); }
+.ai-dimension-fill { display: block; height: 100%; border-radius: var(--radius-sm); background: var(--accent); }
 
-.ai-score {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: flex-start;
-  padding-right: 24px;
-  border-right: 1px solid var(--border);
-}
+.ai-card { padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.ai-card-issue { border-color: var(--danger); }
+.ai-card-title { margin: 0 0 8px; color: var(--fg); font-size: var(--text-base); font-weight: 600; }
+.ai-card-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; color: var(--muted); font-size: var(--text-base); line-height: 1.6; }
+.ai-card-issue .ai-card-list { color: var(--danger); }
 
-.ai-score-value {
-  color: var(--ink);
-  font-family: var(--font-mono);
-  font-size: 56px;
-  font-weight: 700;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
+.ai-diff { margin-top: 12px; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: oklch(0.225 0.018 155); }
+.ai-diff-title { padding: 8px 12px; border-bottom: 1px solid oklch(0.32 0.02 155); background: oklch(0.20 0.016 155); color: oklch(0.78 0.015 155); font-size: var(--text-sm); font-weight: 600; }
+.ai-diff-body { margin: 0; padding: 12px 14px; overflow-x: auto; font-family: var(--font-mono); font-size: var(--text-base); line-height: 1.65; color: oklch(0.84 0.01 155); }
+.ai-diff-body code { display: block; min-width: max-content; }
+.ai-diff-body span { display: block; white-space: pre; }
+.diff-header { color: oklch(0.62 0.015 155); }
+.diff-add { color: var(--success); background: color-mix(in oklch, var(--success) 10%, transparent); }
+.diff-del { color: var(--danger); background: color-mix(in oklch, var(--danger) 10%, transparent); }
+.diff-context { color: oklch(0.62 0.015 155); }
 
-.ai-score-label {
-  margin-top: 6px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-}
+.ai-collapse { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.ai-collapse summary { cursor: pointer; padding: 11px 14px; color: var(--fg); font-size: var(--text-base); font-weight: 600; list-style: none; }
+.ai-collapse summary::after { content: '+'; float: right; color: var(--muted); font-weight: 500; }
+.ai-collapse[open] summary::after { content: '−'; }
+.ai-collapse-body { display: flex; flex-direction: column; gap: 10px; padding: 0 14px 14px; }
+.ai-deduction, .ai-test-group { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.ai-deduction-head, .ai-test-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.ai-deduction-name, .ai-test-group-name { color: var(--fg); font-size: var(--text-base); font-weight: 600; }
+.ai-deduction-score, .ai-test-group-score { color: var(--muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.ai-deduction-meta { display: flex; gap: 10px; margin-top: 4px; color: var(--faint); font-size: var(--text-xs); }
+.ai-deduction-evidence, .ai-deduction-reason { margin: 6px 0 0; color: var(--muted); font-size: var(--text-sm); line-height: 1.6; }
+.ai-deduction-reason { color: var(--danger); }
+.ai-test-counts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.test-pass { color: var(--success); }
+.test-fail { color: var(--danger); }
+.test-muted { color: var(--faint); }
 
-.ai-score-scaled {
-  margin-top: 6px;
-  color: var(--primary);
-  font-size: 12px;
-}
-
-.ai-dimensions {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.ai-dimension {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.ai-dimension-top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.ai-dimension-label {
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.ai-dimension-score {
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.ai-dimension-track {
-  height: 4px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--surface-raised);
-}
-
-.ai-dimension-fill {
-  display: block;
-  height: 100%;
-  border-radius: 999px;
-  background: var(--primary);
-}
-
-.ai-card {
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-
-.ai-card-issue {
-  border-color: var(--danger-soft);
-}
-
-.ai-card-title {
-  margin: 0 0 8px;
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.ai-card-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.ai-card-issue .ai-card-list {
-  color: var(--danger);
-}
-
-.ai-diff {
-  margin-top: 12px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.ai-diff-title {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-raised);
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.ai-diff-body {
-  margin: 0;
-  padding: 10px 12px;
-  overflow-x: auto;
-  background: var(--surface-sunken);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.7;
-}
-
-.ai-diff-body code {
-  display: block;
-  min-width: max-content;
-}
-
-.ai-diff-body span {
-  display: block;
-  white-space: pre;
-}
-
-.diff-header {
-  color: var(--primary);
-}
-
-.diff-add {
-  color: var(--primary);
-  background: var(--primary-light);
-}
-
-.diff-del {
-  color: var(--text-secondary);
-  background: var(--surface-raised);
-}
-
-.diff-context {
-  color: var(--text-secondary);
-}
-
-.ai-collapse {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-
-.ai-collapse summary {
-  cursor: pointer;
-  padding: 11px 14px;
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 600;
-  list-style: none;
-}
-
-.ai-collapse summary::after {
-  content: '+';
-  float: right;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.ai-collapse[open] summary::after {
-  content: '-';
-}
-
-.ai-collapse-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 0 14px 14px;
-}
-
-.ai-deduction,
-.ai-test-group {
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-}
-
-.ai-deduction-head,
-.ai-test-group-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.ai-deduction-name,
-.ai-test-group-name {
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.ai-deduction-score,
-.ai-test-group-score {
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.ai-deduction-meta {
-  display: flex;
-  gap: 10px;
-  margin-top: 4px;
-  color: var(--text-tertiary);
-  font-size: 11px;
-}
-
-.ai-deduction-evidence,
-.ai-deduction-reason {
-  margin: 6px 0 0;
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.ai-deduction-reason {
-  color: var(--danger);
-}
-
-.ai-test-counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 6px;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.test-pass {
-  color: var(--success);
-}
-
-.test-fail {
-  color: var(--danger);
-}
-
-.test-muted {
-  color: var(--text-tertiary);
-}
-
-@media (max-width: 720px) {
-  .ai-result-overview {
-    grid-template-columns: 1fr;
-    gap: 16px;
-  }
-
-  .ai-score {
-    padding-right: 0;
-    padding-bottom: 16px;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .ai-score-value {
-    font-size: 44px;
-  }
+@media (max-width: 820px) {
+  .ai-result-overview { grid-template-columns: 1fr; gap: 16px; }
+  .ai-score { padding-right: 0; padding-bottom: 16px; border-right: 0; border-bottom: 1px dashed var(--border-strong); }
+  .ai-score-value { font-size: 36px; }
 }
 </style>

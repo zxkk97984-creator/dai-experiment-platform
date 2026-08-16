@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -5,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.dependencies import PaginationParams, get_current_user, get_db, pagination, require_roles
 from app.errors import api_error
-from app.models import AcademicTerm, TeachingClass, TeachingClassStudent, User
+from app.models import AcademicTerm, Course, CourseTeachingClass, TeachingClass, TeachingClassStudent, User
 from app.schemas import (
     AcademicTermCreate, AcademicTermRead, AcademicTermUpdate, PaginatedResponse,
     TeachingClassCreate, TeachingClassStudentBatch, TeachingClassSummary,
@@ -86,12 +88,31 @@ def close_term(term_id: int, db: Session = Depends(get_db), _: User = Depends(re
     return term
 
 
+def _teacher_class_scope(current_user: User):
+    """教师只能查看与自己课程绑定的教学班；admin 返回 None 表示不限。"""
+    if current_user.role == "admin":
+        return None
+    if current_user.role == "teacher":
+        return (
+            select(TeachingClass.id)
+            .join(CourseTeachingClass, CourseTeachingClass.teaching_class_id == TeachingClass.id)
+            .join(Course, Course.id == CourseTeachingClass.course_id)
+            .where(Course.teacher_id == current_user.id)
+        )
+    return select(TeachingClass.id).where(TeachingClass.id == -1)
+
+
 @router.get("/teaching-classes", response_model=PaginatedResponse)
 def list_classes(academic_term_id: int | None = None, q: str | None = None,
+                 scope: Literal["selectable", "linked"] = "selectable",
                  pagination: PaginationParams = Depends(pagination),
-                 db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+                 db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     page, page_size = pagination.page, pagination.page_size
     filters = []
+    if scope == "linked":
+        scope_ids = _teacher_class_scope(current_user)
+        if scope_ids is not None:
+            filters.append(TeachingClass.id.in_(scope_ids))
     if academic_term_id is not None:
         filters.append(TeachingClass.academic_term_id == academic_term_id)
     if q:
@@ -160,9 +181,28 @@ def _query_class_students(class_id: int, db: Session, page: int, page_size: int)
     return PaginatedResponse(items=[UserRead.model_validate(x) for x in students], page=page, page_size=page_size, total=total)
 
 
+def _ensure_class_visible_to_teacher(db: Session, class_id: int, current_user: User) -> None:
+    if current_user.role == "admin":
+        return
+    if current_user.role == "teacher":
+        linked = db.scalar(
+            select(Course.id)
+            .join(CourseTeachingClass, CourseTeachingClass.course_id == Course.id)
+            .where(
+                CourseTeachingClass.teaching_class_id == class_id,
+                Course.teacher_id == current_user.id,
+            )
+            .limit(1)
+        )
+        if linked is not None:
+            return
+    raise api_error(403, "FORBIDDEN", "没有权限查看该教学班名单")
+
+
 @router.get("/teaching-classes/{class_id}/students", response_model=PaginatedResponse)
-def list_class_students(class_id: int, pagination: PaginationParams = Depends(pagination), db: Session = Depends(get_db), _: User = Depends(require_roles("admin"))):
+def list_class_students(class_id: int, pagination: PaginationParams = Depends(pagination), db: Session = Depends(get_db), current_user: User = Depends(require_roles("admin", "teacher"))):
     page, page_size = pagination.page, pagination.page_size
+    _ensure_class_visible_to_teacher(db, class_id, current_user)
     return _query_class_students(class_id, db, page, page_size)
 
 

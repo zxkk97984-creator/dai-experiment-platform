@@ -180,417 +180,126 @@ onMounted(loadAll)
 <template>
   <AppLayout>
     <div class="page">
-      <!-- 页头 -->
-      <header class="page-head">
-        <div>
-          <h1 class="page-title">任务中心</h1>
-          <p class="page-sub">
-            <span class="task-count">{{ statusCounts.all }} 项开放任务</span>
-            <template v-if="nearestDeadline">
-              · 最近截止 <span class="nearest-deadline">{{ formatTime(nearestDeadline) }}</span>
-            </template>
+      <section class="page-head">
+        <div class="ph-title">
+          <p class="eyebrow">学习 / 任务</p>
+          <h1>任务中心</h1>
+          <p class="lead">
+            <span class="task-count">{{ statusCounts.all }}</span> 项开放任务
+            <template v-if="nearestDeadline"> · 最近截止 <span class="nearest-deadline">{{ formatTime(nearestDeadline) }}</span></template>
           </p>
         </div>
-      </header>
+      </section>
 
-      <!-- 状态标签卡（58px） -->
-      <div class="status-tabs" role="tablist" aria-label="任务状态">
+      <div class="tabs" role="tablist" aria-label="任务状态">
         <button
           v-for="tab in [
-            { key: 'all', label: '全部' },
+            { key: 'all', label: '全部任务' },
             { key: 'pending', label: '待办' },
             { key: 'overdue', label: '逾期' },
             { key: 'submitted', label: '已完成' },
           ]"
           :key="tab.key"
           type="button"
-          class="status-tab"
+          class="tab status-tab"
           :class="{ active: filters.status === tab.key }"
           role="tab"
           :aria-selected="filters.status === tab.key"
           @click="filters.status = tab.key"
         >
           {{ tab.label }}
-          <span class="tab-count">{{ statusCounts[tab.key] }}</span>
+          <span class="count">{{ statusCounts[tab.key] }}</span>
         </button>
       </div>
 
-      <!-- 筛选卡（72–76px） -->
-      <div class="filter-card">
-        <label class="filter-field">
-          <span class="filter-label">课程</span>
-          <select v-model="filters.courseId" class="filter-course" aria-label="按课程筛选">
-            <option value="">全部课程</option>
-            <option v-for="c in courseOptions" :key="c.id" :value="c.id">{{ c.title }}</option>
-          </select>
-        </label>
-        <label class="filter-field">
-          <span class="filter-label">类型</span>
-          <select v-model="filters.kind" class="filter-kind" aria-label="按类型筛选">
-            <option value="">全部类型</option>
-            <option value="assignment">作业</option>
-            <option value="exam">考试</option>
-            <option value="experiment">实验</option>
-          </select>
-        </label>
-        <label class="filter-field">
-          <span class="filter-label">时间</span>
-          <select v-model="filters.time" class="filter-time" aria-label="按时间筛选">
-            <option value="all">全部时间</option>
-            <option value="today">今天截止</option>
-            <option value="week">未来 7 天</option>
-          </select>
-        </label>
-        <label class="filter-field">
-          <span class="filter-label">排序</span>
-          <select v-model="filters.sort" class="filter-sort" aria-label="排序方式">
-            <option value="due">截止时间</option>
-            <option value="course">课程</option>
-            <option value="title">标题</option>
-          </select>
-        </label>
-        <button type="button" class="btn-outline reset-btn" @click="resetFilters">重置</button>
-      </div>
-
-      <!-- 任务区 -->
-      <div class="task-catalog-heading">
-        <h2>全部任务</h2>
-        <span>共 {{ filteredTasks.length }} 个</span>
-      </div>
-
-      <DashboardAsyncState
-        :loading="loading"
-        :error="error"
-        :empty="filteredTasks.length === 0"
-        empty-title="暂无任务"
-        empty-body="没有符合条件的任务"
-        @retry="loadAll"
-      >
-        <div class="table-shell">
-          <table class="task-table">
-            <thead>
-              <tr>
-                <th>任务名称</th>
-                <th>所属课程</th>
-                <th>类型</th>
-                <th>状态</th>
-                <th>截止时间</th>
-                <th class="action-column">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="task in paginatedTasks" :key="task.kind + '-' + task.id">
-                <td data-label="任务名称">
-                  <strong class="task-name" :title="task.title">{{ task.title }}</strong>
-                </td>
-                <td data-label="所属课程" class="task-course">{{ task.courseTitle || '—' }}</td>
-                <td data-label="类型" class="task-kind">{{ kindLabel[task.kind] || task.kind }}</td>
-                <td data-label="状态">
-                  <UiStatusPill :tone="statusTone(task)" :label="statusText(task)" />
-                </td>
-                <td data-label="截止时间" class="task-deadline">
-                  {{ task.dueAt ? formatTime(task.dueAt) : '—' }}
-                </td>
-                <td data-label="操作" class="action-column">
-                  <button type="button" class="task-action" @click="go(task.route)">进入</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+      <section class="table-wrap">
+        <div class="toolbar">
+          <label class="select" style="width: 150px;">
+            <select v-model="filters.courseId" class="filter-course" aria-label="按课程筛选">
+              <option value="">全部课程</option>
+              <option v-for="c in courseOptions" :key="c.id" :value="c.id">{{ c.title }}</option>
+            </select>
+          </label>
+          <label class="select" style="width: 130px;">
+            <select v-model="filters.kind" class="filter-kind" aria-label="按类型筛选">
+              <option value="">全部类型</option>
+              <option value="assignment">作业</option>
+              <option value="exam">考试</option>
+              <option value="experiment">实验</option>
+            </select>
+          </label>
+          <label class="select" style="width: 140px;">
+            <select v-model="filters.time" class="filter-time" aria-label="按时间筛选">
+              <option value="all">全部时间</option>
+              <option value="today">今天截止</option>
+              <option value="week">未来 7 天</option>
+            </select>
+          </label>
+          <label class="select" style="width: 140px;">
+            <select v-model="filters.sort" class="filter-sort" aria-label="排序方式">
+              <option value="due">按截止时间</option>
+              <option value="course">按课程</option>
+              <option value="title">按标题</option>
+            </select>
+          </label>
+          <div class="grow"></div>
+          <button type="button" class="btn btn-ghost btn-sm reset-btn" @click="resetFilters">重置</button>
         </div>
 
-        <StudentPagination :current-page="page" :page-count="pageCount" :total="filteredTasks.length" :page-size="pageSize" aria-label="任务分页" @change="goToPage" />
-      </DashboardAsyncState>
+        <div class="task-catalog-heading">
+          <h2>全部任务</h2>
+          <span>共 {{ filteredTasks.length }} 个</span>
+        </div>
+
+        <DashboardAsyncState
+          :loading="loading"
+          :error="error"
+          :empty="filteredTasks.length === 0"
+          empty-title="暂无任务"
+          empty-body="没有符合条件的任务"
+          @retry="loadAll"
+        >
+          <div class="table-scroll">
+            <table class="ds-table task-table">
+              <thead>
+                <tr>
+                  <th>任务名称</th>
+                  <th>所属课程</th>
+                  <th>类型</th>
+                  <th>状态</th>
+                  <th>截止时间</th>
+                  <th class="col-actions">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="task in paginatedTasks" :key="task.kind + '-' + task.id">
+                  <td data-label="任务名称"><span class="cell-main task-name" :title="task.title">{{ task.title }}</span></td>
+                  <td data-label="所属课程" class="cell-ellipsis">{{ task.courseTitle || '—' }}</td>
+                  <td data-label="类型">{{ kindLabel[task.kind] || task.kind }}</td>
+                  <td data-label="状态"><UiStatusPill :tone="statusTone(task)" :label="statusText(task)" /></td>
+                  <td data-label="截止时间" class="meta">{{ task.dueAt ? formatTime(task.dueAt) : '—' }}</td>
+                  <td data-label="操作" class="col-actions"><button type="button" class="btn btn-ghost btn-sm task-action" @click="go(task.route)">进入</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="task-pagination">
+            <StudentPagination :current-page="page" :page-count="pageCount" :total="filteredTasks.length" :page-size="pageSize" aria-label="任务分页" @change="goToPage" />
+          </div>
+        </DashboardAsyncState>
+      </section>
     </div>
   </AppLayout>
 </template>
 
 <style scoped>
-.page { display: flex; flex-direction: column; gap: 20px; }
-
-/* ── 页头 ─────────────────────────────────────────────────────── */
-.page-head { display: flex; justify-content: space-between; align-items: flex-start; }
-.page-title {
-  margin: 0 0 6px;
-  font-size: 30px;
-  font-weight: 700;
-  color: var(--ink);
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-}
-.page-sub { margin: 0; font-size: var(--text-sm); color: var(--text-secondary); }
-
-/* ── 状态标签卡（58px） ──────────────────────────────────────── */
-.status-tabs {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 58px;
-  padding: 0 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
-  overflow-x: auto;
-}
-.status-tab {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 18px;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-control);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-.status-tab.active {
-  background: var(--primary-light);
-  color: var(--primary);
-  font-weight: 600;
-}
-.tab-count {
-  padding: 1px 8px;
-  border-radius: var(--radius-full);
-  background: var(--surface-raised);
-  font-size: var(--text-xs);
-  font-weight: 600;
-}
-.status-tab.active .tab-count { background: var(--primary-soft); }
-
-/* ── 筛选卡（72–76px） ───────────────────────────────────────── */
-.filter-card {
-  display: flex;
-  align-items: flex-end;
-  gap: 16px;
-  flex-wrap: wrap;
-  min-height: 72px;
-  padding: 14px 20px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
-}
-.filter-field { display: flex; flex-direction: column; gap: 4px; }
-.filter-label {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-  font-weight: 500;
-}
-.filter-field select {
-  width: auto;
-  min-width: 120px;
-  padding: 7px 10px;
-  font-size: var(--text-sm);
-  border-radius: var(--radius-control);
-}
-.reset-btn {
-  padding: 8px 16px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-control);
-  background: var(--surface);
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-.reset-btn:hover { background: var(--primary-light); color: var(--primary); }
-
-/* ── 任务表格 ────────────────────────────────────────────────── */
-.task-catalog-heading {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: -6px;
-}
-.task-catalog-heading h2 {
-  margin: 0;
-  color: var(--ink);
-  font-size: 18px;
-  font-weight: 650;
-}
-.task-catalog-heading span {
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.table-shell {
-  overflow: hidden;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xs);
-}
-.task-table {
-  width: 100%;
-  margin: 0;
-  border-collapse: collapse;
-  table-layout: fixed;
-}
-.task-table th {
-  height: 46px;
-  padding: 0 18px;
-  background: #f8fafc;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  text-align: left;
-}
-.task-table th:first-child { width: 25%; }
-.task-table th:nth-child(2) { width: 23%; }
-.task-table th:nth-child(3) { width: 10%; }
-.task-table th:nth-child(4) { width: 12%; }
-.task-table th:nth-child(5) { width: 18%; }
-.task-table th:last-child { width: 12%; }
-.task-table td {
-  height: 60px;
-  padding: 0 18px;
-  border-top: 1px solid var(--border);
-  color: var(--text-secondary);
-  font-size: 13px;
-  vertical-align: middle;
-}
-.task-table tbody tr { transition: background var(--duration-fast); }
-.task-table tbody tr:hover { background: #f8fbff; }
-.task-name {
-  display: block;
-  overflow: hidden;
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.task-course {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.task-kind { color: var(--text-secondary); }
-.task-deadline {
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-}
-.action-column { text-align: right !important; }
-.task-action {
-  min-height: 32px;
-  padding: 6px 16px;
-  border: 1px solid var(--primary-soft);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--primary);
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.task-action:hover {
-  border-color: var(--primary);
-  background: var(--primary-light);
-}
-
-/* ── 分页 ────────────────────────────────────────────────────── */
-.pagination {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  min-height: 40px;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-.pagination-controls { display: flex; gap: 8px; }
-.pagination button {
-  width: 34px;
-  height: 34px;
-  min-width: 34px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-.pagination button:hover:not(:disabled) {
-  border-color: var(--primary-soft);
-  color: var(--primary);
-}
-.pagination button.active {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: #fff;
-}
-.pagination button:disabled { cursor: not-allowed; opacity: .45; }
-.pagination svg {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.page-size { justify-self: end; }
-
-.btn-outline {
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  color: var(--primary);
-  cursor: pointer;
-}
-.btn-outline:hover { background: var(--primary-light); border-color: var(--primary-soft); }
-
-@media (max-width: 767.98px) {
-  .page { gap: 16px; }
-  .page-title { font-size: 24px; }
-  .filter-card { align-items: stretch; gap: 12px; padding: 14px; }
-  .filter-field, .filter-field select { width: 100%; }
-  .reset-btn { width: 100%; }
-  .table-shell { overflow: visible; border: 0; background: transparent; box-shadow: none; }
-  .task-table, .task-table tbody { display: block; }
-  .task-table thead { display: none; }
-  .task-table tr {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px 18px;
-    margin-bottom: 10px;
-    padding: 18px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-xs);
-  }
-  .task-table td {
-    display: flex;
-    width: auto;
-    height: auto;
-    min-width: 0;
-    align-items: center;
-    gap: 8px;
-    padding: 0;
-    border: 0;
-    text-align: left !important;
-  }
-  .task-table td::before {
-    flex: 0 0 auto;
-    content: attr(data-label);
-    color: var(--text-tertiary);
-    font-size: 12px;
-  }
-  .task-table td:first-child,
-  .task-table td:nth-child(2),
-  .task-table td:nth-child(5) { grid-column: 1 / -1; }
-  .task-table td:first-child::before { display: none; }
-  .task-table .action-column { justify-self: end; }
-  .task-name { white-space: normal; }
-  .task-course { white-space: normal; }
-  .pagination { grid-template-columns: 1fr auto; }
-  .pagination-total { display: none; }
-  .pagination-controls { justify-self: start; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .task-table tbody tr { transition: none; }
-}
+.page { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.task-catalog-heading { display: flex; align-items: baseline; gap: 10px; margin: 12px 0 -8px; }
+.task-catalog-heading h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--fg); }
+.task-catalog-heading span { color: var(--muted); font-size: var(--text-base); }
+.task-name { max-width: 320px; }
+.task-action { color: var(--accent); }
+.task-action:hover { color: var(--accent); background: var(--accent-soft); }
+.task-pagination { border-top: 1px solid var(--border); }
 </style>

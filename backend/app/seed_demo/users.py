@@ -103,7 +103,7 @@ def create_users(db: Session, clock: DemoClock) -> dict:
         if user is None:
             user = User(
                 username=username, real_name=real_name, role="teacher",
-                status="active", password_hash=teacher_hash,
+                department="计算机学院", status="active", password_hash=teacher_hash,
             )
             db.add(user)
             db.flush()
@@ -111,6 +111,7 @@ def create_users(db: Session, clock: DemoClock) -> dict:
         else:
             user.real_name = real_name
             user.role = "teacher"
+            user.department = "计算机学院"
             user.status = "active"
             db.flush()
             logger.info("[更新] 教师 %s（同步角色/状态）", username)

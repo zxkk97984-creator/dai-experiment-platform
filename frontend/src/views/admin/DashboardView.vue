@@ -1,6 +1,7 @@
 <script setup>
 import { useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
+import AppIcon from '../../components/ui/AppIcon.vue'
 import { useAuthStore } from '../../stores/auth.js'
 
 const router = useRouter()
@@ -9,25 +10,25 @@ const auth = useAuthStore()
 const adminName = (auth.user?.real_name || auth.user?.username || '管理员').slice(0, 8)
 
 const stats = [
-  { label: '系统用户',   value: 248, unit: '人', color: 'blue',   icon: '👥', trend: '2 学生 · 1 教师 · 本周新增' },
-  { label: '课程总数',   value: 36,  unit: '门', color: 'green',  icon: '📚', trend: '已发布 28 门' },
-  { label: '实验模块',   value: 14,  unit: '个', color: 'orange', icon: '🧪', trend: '含 Jupyter / 沙箱环境' },
-  { label: '系统健康',   value: 100, unit: '%',  color: 'purple', icon: '💚', trend: '所有服务正常 · 0 告警' },
+  { label: '系统用户',   value: 248, unit: '人', color: 'blue',   icon: 'user', trend: '2 学生 · 1 教师 · 本周新增' },
+  { label: '课程总数',   value: 36,  unit: '门', color: 'green',  icon: 'book', trend: '已发布 28 门' },
+  { label: '实验模块',   value: 14,  unit: '个', color: 'orange', icon: 'experiment', trend: '含 Jupyter / 沙箱环境' },
+  { label: '系统健康',   value: 100, unit: '%',  color: 'purple', icon: 'check', trend: '所有服务正常 · 0 告警' },
 ]
 
 const ledger = [
-  { date: '今日', time: '15:42', title: '新建用户账号 3 个',           meta: '2 学生 · 1 教师',           status: 'info',    icon: '👤' },
-  { date: '今日', time: '09:30', title: '《机器学习导论》课程已归档',   meta: 'CRS-014 · 已转归档状态',   status: 'neutral', icon: '🗄️' },
-  { date: '昨日', time: '17:50', title: 'Jupyter 镜像更新至 v1.4',     meta: 'EXP-IMG · 含 PyTorch 2.3',  status: 'success', icon: '🐳' },
-  { date: '11.12', time: '11:08', title: '系统例行巡检完成',           meta: '所有服务正常 · 0 告警',     status: 'success', icon: '🛡️' },
+  { date: '今日', time: '15:42', title: '新建用户账号 3 个',           meta: '2 学生 · 1 教师',           status: 'info',    icon: 'user' },
+  { date: '今日', time: '09:30', title: '《机器学习导论》课程已归档',   meta: 'CRS-014 · 已转归档状态',   status: 'neutral', icon: 'clock' },
+  { date: '昨日', time: '17:50', title: 'Jupyter 镜像更新至 v1.4',     meta: 'EXP-IMG · 含 PyTorch 2.3',  status: 'success', icon: 'settings' },
+  { date: '11.12', time: '11:08', title: '系统例行巡检完成',           meta: '所有服务正常 · 0 告警',     status: 'success', icon: 'check' },
 ]
 
 const sections = [
-  { num: '01', label: '用户管理',   sub: 'Users',        desc: '创建、编辑、管理用户账号与角色权限',  path: '/admin/users',        icon: '👥', color: 'blue' },
-  { num: '02', label: '教务管理',   sub: 'Academics',    desc: '维护学期、教学班与学生名单',          path: '/admin/academics',    icon: '🏫', color: 'purple' },
-  { num: '03', label: '课程维护',   sub: 'Courses',      desc: '审视与维护全部课程资源',              path: '/admin/courses',      icon: '📚', color: 'green' },
-  { num: '04', label: '实验配置',   sub: 'Experiments',  desc: '配置与维护实验模块、镜像与数据集',    path: '/admin/experiments',  icon: '🧪', color: 'orange' },
-  { num: '05', label: '环境档位',   sub: 'Environments', desc: '维护受控包目录与不可变判题/实验环境',  path: '/admin/environments', icon: '🐳', color: 'purple' },
+  { num: '01', label: '用户管理',   sub: 'Users',        desc: '创建、编辑、管理用户账号与角色权限',  path: '/admin/users',        icon: 'user', color: 'blue' },
+  { num: '02', label: '教务管理',   sub: 'Academics',    desc: '维护学期、教学班与学生名单',          path: '/admin/academics',    icon: 'course', color: 'purple' },
+  { num: '03', label: '课程维护',   sub: 'Courses',      desc: '审视与维护全部课程资源',              path: '/admin/courses',      icon: 'book', color: 'green' },
+  { num: '04', label: '实验配置',   sub: 'Experiments',  desc: '配置与维护实验模块、镜像与数据集',    path: '/admin/experiments',  icon: 'experiment', color: 'orange' },
+  { num: '05', label: '环境档位',   sub: 'Environments', desc: '维护受控包目录与不可变判题/实验环境',  path: '/admin/environments', icon: 'settings', color: 'purple' },
 ]
 
 function go(p) { router.push(p) }
@@ -47,7 +48,7 @@ function statusText(s) {
             <span>系统管理 · 运行中</span>
           </div>
           <h1 class="hero-title">
-            管理控制台，{{ adminName }} 🛠️
+            管理控制台，{{ adminName }}
           </h1>
           <p class="hero-sub">
             全部服务运行正常，最近 24 小时 <strong>0 告警</strong>，已处理 <strong>4 项</strong>变更。
@@ -66,7 +67,7 @@ function statusText(s) {
         </div>
         <div class="hero-visual" aria-hidden="true">
           <div class="health-card">
-            <div class="health-emoji">💚</div>
+            <div class="health-emoji"><AppIcon name="check" :size="22" /></div>
             <div class="health-body">
               <div class="health-num">100<span class="health-unit">%</span></div>
               <div class="health-label">系统健康度</div>
@@ -78,7 +79,7 @@ function statusText(s) {
       <!-- ── Stats ──────────────────────────────────────────────────────── -->
       <section class="stats">
         <article v-for="s in stats" :key="s.label" class="card stat-card" :class="'stat-' + s.color">
-          <div class="stat-icon">{{ s.icon }}</div>
+          <div class="stat-icon"><AppIcon :name="s.icon" :size="18" /></div>
           <div class="stat-body">
             <div class="stat-value">
               <span class="stat-num">{{ s.value }}</span>
@@ -103,7 +104,7 @@ function statusText(s) {
           </div>
           <ul v-if="ledger.length" class="timeline">
             <li v-for="(a, i) in ledger" :key="i" class="tl-item">
-              <div class="tl-icon" :class="'tl-' + a.status">{{ a.icon }}</div>
+              <div class="tl-icon" :class="'tl-' + a.status"><AppIcon :name="a.icon" :size="15" /></div>
               <div class="tl-body">
                 <div class="tl-title">{{ a.title }}</div>
                 <div class="tl-meta">
@@ -116,7 +117,7 @@ function statusText(s) {
             </li>
           </ul>
           <div v-else class="empty-state">
-            <p>📋 暂无变更记录</p>
+            <p>暂无变更记录</p>
           </div>
         </section>
 
@@ -135,7 +136,7 @@ function statusText(s) {
               :class="'sec-' + s.color"
               @click="go(s.path)"
             >
-              <div class="sec-icon">{{ s.icon }}</div>
+              <div class="sec-icon"><AppIcon :name="s.icon" :size="17" /></div>
               <div class="sec-body">
                 <div class="sec-label">
                   <span class="sec-zh">{{ s.label }}</span>
@@ -164,10 +165,10 @@ function statusText(s) {
 
 /* ── Hero ─────────────────────────────────────────────────────────── */
 .hero {
-  background: linear-gradient(135deg, #0F172A 0%, #1E3A8A 70%, var(--primary) 100%);
-  border-radius: var(--radius-2xl);
+  background: linear-gradient(135deg, var(--fg) 0%, var(--accent-hover) 70%, var(--accent) 100%);
+  border-radius: var(--radius-lg);
   padding: 36px 36px;
-  color: #FFFFFF;
+  color: var(--surface);
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 24px;
@@ -180,16 +181,16 @@ function statusText(s) {
   content: '';
   position: absolute; inset: 0;
   background-image:
-    radial-gradient(circle at 85% 20%, rgba(249, 115, 22, 0.3) 0%, transparent 45%),
-    radial-gradient(circle at 20% 80%, rgba(139, 92, 246, 0.18) 0%, transparent 50%);
+    radial-gradient(circle at 85% 20%, oklch(0.66 0.14 75 / 0.3) 0%, transparent 45%),
+    radial-gradient(circle at 20% 80%, oklch(0.52 0.09 235 / 0.18) 0%, transparent 50%);
   pointer-events: none;
 }
 .hero::after {
   content: '';
   position: absolute; inset: 0;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    linear-gradient(oklch(0.99 0.001 95 / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(0.99 0.001 95 / 0.04) 1px, transparent 1px);
   background-size: 28px 28px;
   pointer-events: none;
 }
@@ -198,11 +199,11 @@ function statusText(s) {
 .hero-eyebrow {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 5px 11px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: oklch(0.99 0.001 95 / 0.1);
+  border: 1px solid oklch(0.99 0.001 95 / 0.15);
   border-radius: var(--radius-full);
   font-size: var(--text-xs);
-  color: rgba(255, 255, 255, 0.85);
+  color: oklch(0.99 0.001 95 / 0.85);
   font-weight: 500;
   margin-bottom: 14px;
 }
@@ -210,59 +211,59 @@ function statusText(s) {
   width: 6px; height: 6px;
   background: var(--success);
   border-radius: 50%;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
+  box-shadow: 0 0 0 3px oklch(0.55 0.13 150 / 0.3);
   animation: pulse 2s infinite;
 }
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3); }
-  50%      { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+  0%, 100% { box-shadow: 0 0 0 3px oklch(0.55 0.13 150 / 0.3); }
+  50%      { box-shadow: 0 0 0 6px oklch(0.55 0.13 150 / 0); }
 }
 .hero-title {
   font-size: 30px;
   font-weight: 700;
-  color: #FFFFFF;
+  color: var(--surface);
   letter-spacing: -0.02em;
   line-height: 1.15;
   margin: 0 0 10px;
 }
 .hero-sub {
   font-size: 15px;
-  color: rgba(255, 255, 255, 0.8);
+  color: oklch(0.99 0.001 95 / 0.8);
   line-height: 1.55;
   margin: 0 0 18px;
 }
-.hero-sub strong { color: var(--warning-soft); font-weight: 600; }
+.hero-sub strong { color: var(--warning-bg); font-weight: 600; }
 .hero-actions {
   display: flex; gap: 10px; flex-wrap: wrap;
 }
 .hero-actions .btn-primary {
-  background: #FFFFFF;
-  color: #1E3A8A;
-  border-color: #FFFFFF;
+  background: var(--surface);
+  color: var(--accent-hover);
+  border-color: var(--surface);
   font-weight: 600;
 }
 .hero-actions .btn-primary:hover {
-  background: rgba(255, 255, 255, 0.92);
-  color: var(--primary-dark);
-  box-shadow: 0 8px 20px rgba(255, 255, 255, 0.2);
+  background: oklch(0.99 0.001 95 / 0.92);
+  color: var(--accent-hover);
+  box-shadow: var(--shadow-md);
 }
 .hero-actions .btn-ghost {
-  background: rgba(255, 255, 255, 0.08);
-  color: #FFFFFF;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: oklch(0.99 0.001 95 / 0.08);
+  color: var(--surface);
+  border: 1px solid oklch(0.99 0.001 95 / 0.2);
 }
 .hero-actions .btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.15);
-  color: #FFFFFF;
-  border-color: rgba(255, 255, 255, 0.3);
+  background: oklch(0.99 0.001 95 / 0.15);
+  color: var(--surface);
+  border-color: oklch(0.99 0.001 95 / 0.3);
 }
 
 .hero-visual { position: relative; z-index: 1; }
 .health-card {
   display: flex; align-items: center; gap: 14px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: var(--radius-xl);
+  background: oklch(0.99 0.001 95 / 0.08);
+  border: 1px solid oklch(0.99 0.001 95 / 0.15);
+  border-radius: var(--radius-lg);
   padding: 18px 22px;
   backdrop-filter: blur(10px);
 }
@@ -270,18 +271,18 @@ function statusText(s) {
 .health-num {
   font-size: 28px;
   font-weight: 700;
-  color: var(--warning-soft);
+  color: var(--warning-bg);
   letter-spacing: -0.02em;
   line-height: 1;
 }
 .health-unit {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
+  color: oklch(0.99 0.001 95 / 0.7);
   font-weight: 500; margin-left: 4px;
 }
 .health-label {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.7);
+  color: oklch(0.99 0.001 95 / 0.7);
   font-weight: 500; letter-spacing: 0.04em; margin-top: 4px;
 }
 
@@ -304,12 +305,12 @@ function statusText(s) {
   border-radius: var(--radius-md);
   display: flex; align-items: center; justify-content: center;
   font-size: 18px; flex-shrink: 0;
-  background: var(--primary-light);
+  background: var(--accent-soft);
 }
-.stat-blue .stat-icon   { background: var(--primary-light); }
-.stat-orange .stat-icon { background: var(--accent-light); }
-.stat-purple .stat-icon { background: var(--purple-light); }
-.stat-green .stat-icon  { background: var(--success-light); }
+.stat-blue .stat-icon   { background: var(--accent-soft); }
+.stat-orange .stat-icon { background: var(--accent-soft); }
+.stat-purple .stat-icon { background: var(--info-bg); }
+.stat-green .stat-icon  { background: var(--success-bg); }
 
 .stat-body { flex: 1; min-width: 0; }
 .stat-value {
@@ -319,20 +320,20 @@ function statusText(s) {
 }
 .stat-num {
   font-size: 24px;
-  color: var(--ink);
+  color: var(--fg);
   letter-spacing: -0.02em; line-height: 1;
 }
 .stat-unit {
   font-size: var(--text-xs);
-  color: var(--text-secondary); font-weight: 500;
+  color: var(--muted); font-weight: 500;
 }
 .stat-label {
   font-size: var(--text-sm);
-  color: var(--ink); font-weight: 500; margin-bottom: 4px;
+  color: var(--fg); font-weight: 500; margin-bottom: 4px;
 }
 .stat-trend {
   font-size: 11px;
-  color: var(--text-tertiary);
+  color: var(--faint);
   font-family: var(--font-mono);
 }
 
@@ -352,10 +353,10 @@ function statusText(s) {
 }
 .panel-title {
   font-size: 17px; font-weight: 600;
-  color: var(--ink); letter-spacing: -0.01em; margin: 0;
+  color: var(--fg); letter-spacing: -0.01em; margin: 0;
 }
 .panel-sub {
-  font-size: var(--text-xs); color: var(--text-secondary); margin: 3px 0 0;
+  font-size: var(--text-xs); color: var(--muted); margin: 3px 0 0;
 }
 
 /* 时间线 */
@@ -372,25 +373,25 @@ function statusText(s) {
   border-radius: var(--radius-md);
   display: flex; align-items: center; justify-content: center;
   font-size: 16px; flex-shrink: 0;
-  background: var(--primary-light);
+  background: var(--accent-soft);
 }
-.tl-warning .tl-icon { background: var(--accent-light); }
-.tl-info .tl-icon    { background: var(--primary-light); }
-.tl-success .tl-icon { background: var(--success-light); }
+.tl-warning .tl-icon { background: var(--accent-soft); }
+.tl-info .tl-icon    { background: var(--accent-soft); }
+.tl-success .tl-icon { background: var(--success-bg); }
 .tl-neutral .tl-icon { background: var(--surface-sunken); }
 
 .tl-body { flex: 1; min-width: 0; }
 .tl-title {
   font-size: var(--text-sm); font-weight: 500;
-  color: var(--ink); line-height: 1.4; margin-bottom: 4px;
+  color: var(--fg); line-height: 1.4; margin-bottom: 4px;
 }
 .tl-meta {
   display: flex; gap: 6px;
-  font-size: 11px; color: var(--text-secondary); flex-wrap: wrap;
+  font-size: 11px; color: var(--muted); flex-wrap: wrap;
 }
-.tl-meta-code { font-family: var(--font-mono); color: var(--text-tertiary); }
-.tl-sep { color: var(--text-tertiary); }
-.tl-time { color: var(--text-tertiary); }
+.tl-meta-code { font-family: var(--font-mono); color: var(--faint); }
+.tl-sep { color: var(--faint); }
+.tl-time { color: var(--faint); }
 
 /* 管理入口列表 */
 .section-list {
@@ -419,12 +420,12 @@ function statusText(s) {
   border-radius: var(--radius-md);
   display: flex; align-items: center; justify-content: center;
   font-size: 17px; flex-shrink: 0;
-  background: var(--primary-light);
+  background: var(--accent-soft);
 }
-.sec-blue .sec-icon   { background: var(--primary-light); }
-.sec-orange .sec-icon { background: var(--accent-light); }
-.sec-purple .sec-icon { background: var(--purple-light); }
-.sec-green .sec-icon  { background: var(--success-light); }
+.sec-blue .sec-icon   { background: var(--accent-soft); }
+.sec-orange .sec-icon { background: var(--accent-soft); }
+.sec-purple .sec-icon { background: var(--info-bg); }
+.sec-green .sec-icon  { background: var(--success-bg); }
 
 .sec-body { flex: 1; min-width: 0; }
 .sec-label {
@@ -433,23 +434,23 @@ function statusText(s) {
 }
 .sec-zh {
   font-size: var(--text-sm); font-weight: 600;
-  color: var(--ink); letter-spacing: -0.005em; line-height: 1.2;
+  color: var(--fg); letter-spacing: -0.005em; line-height: 1.2;
 }
 .sec-num {
   font-size: 11px;
-  font-family: var(--font-mono); color: var(--text-tertiary);
+  font-family: var(--font-mono); color: var(--faint);
   font-weight: 500; letter-spacing: 0.04em;
 }
 .sec-desc {
-  font-size: var(--text-xs); color: var(--text-secondary);
+  font-size: var(--text-xs); color: var(--muted);
   line-height: 1.4; margin: 0;
 }
 .sec-arrow {
-  color: var(--text-tertiary); flex-shrink: 0;
+  color: var(--faint); flex-shrink: 0;
   transition: transform var(--duration-fast) var(--ease-out),
               color var(--duration-fast) var(--ease-out);
 }
-.section-row:hover .sec-arrow { color: var(--primary); transform: translateX(2px); }
+.section-row:hover .sec-arrow { color: var(--accent); transform: translateX(2px); }
 
 /* ── Responsive ─────────────────────────────────────────────────────── */
 @media (max-width: 1024px) {

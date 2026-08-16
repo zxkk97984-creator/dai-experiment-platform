@@ -137,7 +137,7 @@ async function handlePublish() {
   max-width: 960px;
   margin: 0 auto;
   padding: 32px 24px 48px;
-  color: var(--text);
+  color: var(--fg);
 }
 
 /* ── 页头 ─────────────────────────────────────────────────────────── */
@@ -158,17 +158,17 @@ async function handlePublish() {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: 13px;
   font-weight: 500;
 }
-.back-btn:hover { border-color: var(--border-strong); color: var(--text); }
+.back-btn:hover { border-color: var(--border-strong); color: var(--fg); }
 .type-badge {
   flex: none;
   padding: 3px 8px;
-  border-radius: 6px;
-  background: #eff6ff;
-  color: var(--primary);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent);
   font-size: 12px;
   font-weight: 500;
   font-style: normal;
@@ -180,19 +180,19 @@ async function handlePublish() {
   font-size: 16px;
   font-weight: 600;
 }
-.save-state { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.save-state { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .save-state.dirty { color: var(--warning); }
 .save-btn { flex: none; }
 .publish-btn {
   flex: none;
-  border: 1px solid var(--primary);
-  color: var(--primary);
+  border: 1px solid var(--accent);
+  color: var(--accent);
   background: var(--surface);
   font-weight: 500;
 }
 .publish-btn:hover:not(:disabled) {
-  background: var(--primary-light);
-  border-color: var(--primary);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 /* ── 正文区 ───────────────────────────────────────────────────────── */
@@ -205,18 +205,18 @@ async function handlePublish() {
   margin-bottom: 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--surface-raised);
+  background: var(--surface-subtle);
 }
 .mode-tabs button {
   padding: 5px 16px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: 13px;
   font-weight: 500;
 }
-.mode-tabs button.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08); }
+.mode-tabs button.active { background: var(--surface); color: var(--fg); box-shadow: var(--shadow-sm); }
 .content-textarea {
   width: 100%;
   min-height: 360px;
@@ -225,29 +225,29 @@ async function handlePublish() {
   font-size: 13px;
   line-height: 1.7;
 }
-.char-count { margin: 8px 0 0; color: var(--text-tertiary); font-size: 12px; text-align: right; }
+.char-count { margin: 8px 0 0; color: var(--faint); font-size: 12px; text-align: right; }
 
 /* ── 预览渲染（与学生端同款排版） ─────────────────────────────────── */
-.preview-body { color: #334155; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.preview-body { color: var(--muted); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
 .lesson-content :deep(p) { margin: 0 0 12px; }
 .lesson-content :deep(h1),
 .lesson-content :deep(h2),
-.lesson-content :deep(h3) { margin: 20px 0 10px; color: var(--text); }
-.lesson-content :deep(pre) { padding: 12px 14px; overflow-x: auto; background: #f1f5f9; border-radius: 8px; }
-.lesson-content :deep(code) { background: #f1f5f9; border: 0; color: #0f172a; }
-.lesson-content :deep(a) { color: var(--primary); }
+.lesson-content :deep(h3) { margin: 20px 0 10px; color: var(--fg); }
+.lesson-content :deep(pre) { padding: 12px 14px; overflow-x: auto; background: var(--surface-subtle); border-radius: var(--radius-md); }
+.lesson-content :deep(code) { background: var(--surface-subtle); border: 0; color: var(--fg); }
+.lesson-content :deep(a) { color: var(--accent); }
 .lesson-content :deep(ul),
 .lesson-content :deep(ol) { margin: 0 0 12px; padding-left: 22px; }
-.lesson-content :deep(blockquote) { margin: 0 0 12px; padding-left: 12px; border-left: 3px solid var(--border); color: var(--text-muted); }
+.lesson-content :deep(blockquote) { margin: 0 0 12px; padding-left: 12px; border-left: 3px solid var(--border); color: var(--muted); }
 
 /* ── 错误态 ───────────────────────────────────────────────────────── */
 .error-card {
   padding: 48px 24px;
   text-align: center;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
 }
-.error-card h2 { margin: 0 0 8px; font-size: 18px; color: var(--text); }
-.error-card p { margin: 0 0 20px; color: var(--text-secondary); font-size: 14px; }
+.error-card h2 { margin: 0 0 8px; font-size: 18px; color: var(--fg); }
+.error-card p { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
 </style>

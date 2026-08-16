@@ -87,140 +87,27 @@ const hasItems = computed(() => props.announcements.length > 0)
 </template>
 
 <style scoped>
-.announcement-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.panel-title {
-  margin: 0;
-  font-size: var(--text-base);
-  font-weight: 700;
-  color: var(--ink);
-}
-
-.publish-btn {
-  padding: 6px 14px;
-  border: none;
-  border-radius: var(--radius-md);
-  background: var(--primary);
-  color: var(--surface);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  cursor: pointer;
-}
-.publish-btn:hover { background: var(--primary-dark); }
-
-.panel-state {
-  padding: 20px 12px;
-  text-align: center;
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-}
+/* 公告面板（V2）：无卡片阴影，优先级用 V2 badge 语义。 */
+.announcement-panel { display: flex; flex-direction: column; gap: 10px; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.panel-title { margin: 0; font-size: var(--text-md); font-weight: 600; color: var(--fg); }
+.publish-btn { height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--surface); color: var(--fg); font-size: var(--text-base); font-weight: 500; cursor: pointer; }
+.publish-btn:hover { border-color: var(--fg); }
+.panel-state { padding: 20px 12px; text-align: center; color: var(--muted); font-size: var(--text-base); }
 .state-text { margin: 0 0 8px; }
-
-.retry-btn {
-  padding: 5px 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--primary);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.retry-btn:hover { background: var(--primary-light); }
-
-.notice-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.notice-item {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-
-.notice-item.unread {
-  border-color: var(--primary-light);
-  background: var(--surface);
-}
-
-.unread-dot {
-  flex-shrink: 0;
-  width: 8px;
-  height: 8px;
-  margin-top: 6px;
-  border-radius: 50%;
-  background: var(--primary);
-}
-
+.retry-btn { height: 28px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--surface); color: var(--fg); font-size: var(--text-base); cursor: pointer; }
+.retry-btn:hover { border-color: var(--fg); }
+.notice-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.notice-item { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.notice-item.unread { border-color: var(--accent-soft); }
+.unread-dot { flex-shrink: 0; width: 7px; height: 7px; margin-top: 6px; border-radius: 50%; background: var(--accent); }
 .notice-main { flex: 1; min-width: 0; }
-
-.notice-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--ink);
-  flex-wrap: wrap;
-}
-
-.priority-tag {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: var(--radius-xs);
-  color: var(--text-secondary);
-  background: var(--surface-raised);
-}
-.priority-important { color: var(--warning); background: var(--warning-light); }
-.priority-urgent { color: var(--danger); background: var(--danger-light); }
-
-.notice-content {
-  margin: 4px 0 6px;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-  /* 按设计限制两行摘要 */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.notice-meta {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-}
-
-.mark-read-btn {
-  flex-shrink: 0;
-  padding: 4px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--primary);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.mark-read-btn:hover { background: var(--primary-light); }
+.notice-title { display: flex; align-items: center; gap: 6px; font-size: var(--text-md); font-weight: 500; color: var(--fg); flex-wrap: wrap; }
+.priority-tag { display: inline-flex; height: 20px; align-items: center; padding: 0 7px; border-radius: var(--radius-sm); font-size: 11px; font-weight: 500; color: var(--muted); background: var(--surface-sunken); }
+.priority-important { color: var(--warning); background: var(--warning-bg); }
+.priority-urgent { color: var(--danger); background: var(--danger-bg); }
+.notice-content { margin: 4px 0 6px; font-size: var(--text-base); color: var(--muted); line-height: 1.55; overflow-wrap: anywhere; }
+.notice-meta { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--faint); }
+.mark-read-btn { flex-shrink: 0; height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--surface); color: var(--muted); font-size: var(--text-xs); cursor: pointer; }
+.mark-read-btn:hover { border-color: var(--fg); color: var(--fg); }
 </style>

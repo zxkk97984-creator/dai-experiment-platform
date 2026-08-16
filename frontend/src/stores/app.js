@@ -2,11 +2,19 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 export const useAppStore = defineStore('app', () => {
-  const sidebarCollapsed = ref(false)
+  const sidebarCollapsed = ref(localStorage.getItem('dai.sidebarCollapsed') === '1')
+  const mobileNavOpen = ref(false)
   const toastMessage = ref('')
   const toastType = ref('info')
 
-  function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value }
+  function toggleSidebar() {
+    sidebarCollapsed.value = !sidebarCollapsed.value
+    try { localStorage.setItem('dai.sidebarCollapsed', sidebarCollapsed.value ? '1' : '0') } catch { /* ignore */ }
+  }
+
+  function openMobileNav() { mobileNavOpen.value = true }
+  function closeMobileNav() { mobileNavOpen.value = false }
+  function toggleMobileNav() { mobileNavOpen.value = !mobileNavOpen.value }
 
   function showToast(msg, type = 'info') {
     toastMessage.value = msg
@@ -14,5 +22,10 @@ export const useAppStore = defineStore('app', () => {
     setTimeout(() => { toastMessage.value = '' }, 3000)
   }
 
-  return { sidebarCollapsed, toastMessage, toastType, toggleSidebar, showToast }
+  return {
+    sidebarCollapsed, mobileNavOpen,
+    toastMessage, toastType,
+    toggleSidebar, openMobileNav, closeMobileNav, toggleMobileNav,
+    showToast,
+  }
 })

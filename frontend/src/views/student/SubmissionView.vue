@@ -1,4 +1,7 @@
 <script setup>
+// 学生提交结果（V2）：页头 + 提交面板 + 轮询状态 + AI 评分 + 终端输出。
+// 业务与轮询逻辑不变，输出区使用 V2 深色 code/term 视觉。
+
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
@@ -16,7 +19,6 @@ const TERMINAL_STATUSES = ['accepted', 'wrong_answer', 'runtime_error', 'time_li
 
 function isResultComplete(result) {
   if (TERMINAL_STATUSES.includes(result.status)) return true
-  // graded 可能先于 CodeGrade 明细提交；等明细可见后再停止轮询。
   return result.status === 'graded' && Boolean(result.grading_breakdown)
 }
 
@@ -41,127 +43,66 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 <template>
   <AppLayout>
     <div class="page">
-      <!-- ── Page Head ─────────────────────────────────────────────────── -->
-      <header class="page-head">
-        <h1 class="page-title">判题结果</h1>
-      </header>
+      <section class="page-head">
+        <div class="ph-title">
+          <p class="eyebrow">学习 / 提交结果</p>
+          <h1>判题结果</h1>
+        </div>
+      </section>
 
-      <!-- ── Loading ────────────────────────────────────────────────────── -->
-      <div v-if="!submission" class="card" style="padding:48px;text-align:center">
-        <div class="skeleton" style="height:22px;width:200px;margin:0 auto 12px"></div>
-        <div class="skeleton" style="height:14px;width:300px;margin:0 auto"></div>
+      <div v-if="!submission" class="empty">
+        <div class="empty-mark"><span class="skeleton" style="width: 20px; height: 20px;"></span></div>
+        <h3>正在读取提交结果</h3>
       </div>
 
       <template v-else>
-        <!-- ── Submission Card ──────────────────────────────────────────── -->
-        <div class="card submission-card">
-          <div class="flex-between mb-4">
-            <h3 class="submission-title">提交 #{{ submission.id }}</h3>
+        <section class="panel submission-panel">
+          <div class="panel-head">
+            <div class="ph-label"><p class="eyebrow">Submission</p><h3>提交 #{{ submission.id }}</h3></div>
             <span class="badge" :class="'badge-' + statusBadge(JUDGE_STATUS_MAP, submission.status).color">
-              {{ statusBadge(JUDGE_STATUS_MAP, submission.status).label }}
+              <span class="dot"></span>{{ statusBadge(JUDGE_STATUS_MAP, submission.status).label }}
             </span>
           </div>
-          <div class="submission-meta grid-2">
-            <div>状态: <strong>{{ submission.status }}</strong></div>
-            <div v-if="submission.score != null">得分: <strong>{{ submission.score }}</strong></div>
-            <div v-if="submission.execution_time_ms != null">执行时间: <strong>{{ submission.execution_time_ms }}ms</strong></div>
-            <div>提交时间: <strong>{{ formatDateTime(submission.created_at) }}</strong></div>
+          <div class="panel-body">
+            <div class="row-wrap">
+              <span class="meta">状态：{{ submission.status }}</span>
+              <span v-if="submission.score != null" class="meta">得分：<strong>{{ submission.score }}</strong></span>
+              <span v-if="submission.execution_time_ms != null" class="meta">执行时间：<strong>{{ submission.execution_time_ms }}ms</strong></span>
+              <span class="meta">提交时间：{{ formatDateTime(submission.created_at) }}</span>
+            </div>
           </div>
+        </section>
+
+        <div v-if="submission.diagnostic" class="error-panel diagnostic-card">
+          <div class="grow"><div class="e-title">运行诊断</div><div class="e-body">{{ submission.diagnostic.message }}</div></div>
         </div>
 
-        <!-- ── Phase 5：结构化 import 诊断（安全中文文案，不展示裸 traceback） ── -->
-        <div v-if="submission.diagnostic" class="card diagnostic-card">
-          <span class="diag-icon">⚠</span>
-          {{ submission.diagnostic.message }}
+        <div v-if="polling" class="row polling-hint" role="status">
+          <span class="score-bar grow"><i style="width: 70%;"></i></span>
+          <span class="meta">判题进行中，自动刷新中…</span>
         </div>
 
-        <!-- ── Polling ──────────────────────────────────────────────────── -->
-        <div v-if="polling" class="polling-hint">
-          <span class="spinner-sm"></span>
-          <span>判题进行中，自动刷新中...</span>
-        </div>
-
-        <!-- ── AI 评分分解（仅 active 模式学生可见） ─────────────────────── -->
         <StudentAIGradingResult
           v-if="submission.grading_breakdown"
           :breakdown="submission.grading_breakdown"
         />
 
-        <!-- ── stdout / stderr ──────────────────────────────────────────── -->
-        <div v-if="submission.stdout" class="card output-card">
-          <div class="output-label">标准输出</div>
-          <pre class="output-block">{{ submission.stdout }}</pre>
+        <div v-if="submission.stdout" class="term">
+          <div class="term-head"><span class="term-dot"></span><span class="term-dot"></span><span class="term-dot"></span><span class="t-title">标准输出</span></div>
+          <pre>{{ submission.stdout }}</pre>
         </div>
-        <div v-if="submission.stderr" class="card output-card">
-          <div class="output-label">标准错误</div>
-          <pre class="output-block output-error">{{ submission.stderr }}</pre>
+        <div v-if="submission.stderr" class="term">
+          <div class="term-head"><span class="term-dot"></span><span class="term-dot"></span><span class="term-dot"></span><span class="t-title">标准错误</span></div>
+          <pre class="fail">{{ submission.stderr }}</pre>
         </div>
-
       </template>
     </div>
   </AppLayout>
 </template>
 
 <style scoped>
-/* ═══════════════════════════════════════════════════════════════════════
-   Submission View — Code Studio
-   page-head + submission card + polling + output blocks
-   ═══════════════════════════════════════════════════════════════════════ */
-.page { display: flex; flex-direction: column; gap: 24px; }
-
-/* ── Page Head ─────────────────────────────────────────────────────── */
-.page-title {
-  font-size: 28px; font-weight: 700;
-  color: var(--ink); letter-spacing: -0.02em; line-height: 1.15;
-  margin: 0;
-}
-
-/* ── Submission Card ────────────────────────────────────────────────── */
-.submission-card { padding: 24px; }
-.submission-title { margin: 0; color: var(--ink); font-weight: 600; font-size: 17px; }
-.submission-meta { font-size: var(--text-sm); color: var(--text-secondary); }
-.submission-meta strong { color: var(--ink); font-weight: 600; }
-
-/* ── Output card ───────────────────────────────────────────────────── */
-.output-card { padding: 20px; }
-.output-label {
-  font-size: var(--text-xs); font-weight: 600;
-  color: var(--text-secondary); text-transform: uppercase;
-  letter-spacing: 0.05em; margin-bottom: 10px;
-}
-.output-block {
-  background: #0F172A; color: #E2E8F0;
-  padding: var(--space-4); border-radius: var(--radius-md);
-  overflow-x: auto; font-family: var(--font-mono);
-  font-size: var(--text-sm); line-height: 1.7;
-  white-space: pre-wrap; border: 1px solid #1E293B;
-  margin: 0;
-}
-.output-error { color: #F5A3AB; }
-
-/* ── Phase 5：结构化诊断（无裸 traceback） ──────────────────────────── */
-.diagnostic-card {
-  padding: 16px 20px;
-  display: flex; align-items: center; gap: 8px;
-  background: var(--surface-raised);
-  border: 1px dashed var(--warning, #d97706);
-  border-radius: var(--radius-md);
-  color: var(--warning, #d97706);
-  font-size: var(--text-sm); line-height: 1.5;
-}
-.diag-icon { font-size: 14px; flex-shrink: 0; }
-
-/* ── Polling ────────────────────────────────────────────────────────── */
-.polling-hint {
-  display: flex; align-items: center; gap: 8px;
-  font-size: var(--text-sm); color: var(--text-secondary);
-}
-.spinner-sm {
-  width: 14px; height: 14px;
-  border: 2px solid var(--border);
-  border-top-color: var(--primary);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
+.page { display: flex; flex-direction: column; gap: var(--space-4); }
+.submission-panel .panel-body { padding: 14px 16px; }
+.polling-hint { padding: 8px 0; }
+.polling-hint .score-bar { max-width: 220px; }
 </style>

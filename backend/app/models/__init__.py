@@ -51,6 +51,7 @@ class User(TimestampMixin, Base):
     student_no: Mapped[str | None] = mapped_column(String(80), unique=True, nullable=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     real_name: Mapped[str] = mapped_column(String(120))
+    department: Mapped[str | None] = mapped_column(String(120), nullable=True)
     role: Mapped[str] = mapped_column(String(30), index=True)
     status: Mapped[str] = mapped_column(String(30), default="active", index=True)
     # ── 会话撤销（TASK-012） ───────────────────────────────────
@@ -143,6 +144,7 @@ class Course(TimestampMixin, Base):
     __tablename__ = "courses"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(200), index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
@@ -206,6 +208,7 @@ class Lesson(TimestampMixin, Base):
     video_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)  # 安全化后的原文件名
     video_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     video_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, default=0)
     # 发布状态：draft（草稿）/ published（已发布）/ pending（待发布）
     status: Mapped[str] = mapped_column(String(20), default="draft", server_default="published", nullable=False)
@@ -353,6 +356,7 @@ class Submission(TimestampMixin, Base):
     __tablename__ = "submissions"
     __table_args__ = (
         Index("ix_submissions_gs_updated", "grading_status", "updated_at"),
+        Index("ix_submissions_gs_finished", "grading_status", "finished_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -373,6 +377,8 @@ class Submission(TimestampMixin, Base):
     stderr: Mapped[str | None] = mapped_column(Text, nullable=True)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     result_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    tests_passed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tests_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
     execution_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # ── 环境档位快照（Phase 3：迁移 B） ────────────────────────
     # 入队前冻结实际使用的环境版本与 import 策略，历史重判不受作业重新发布影响
@@ -530,6 +536,8 @@ class ExamAnswer(TimestampMixin, Base):
     text_answers: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # 填空题答案：blank id -> text
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tests_passed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tests_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # ── 判题队列状态机（Task 1） ──────────────────────────────
     grading_status: Mapped[str] = mapped_column(String(20), default="pending")
     # pending / queued / running / completed / system_error
@@ -646,6 +654,7 @@ class ExperimentModule(TimestampMixin, Base):
     template_id: Mapped[int | None] = mapped_column(ForeignKey("notebook_templates.id"), nullable=True)
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     notebook_template: Mapped[NotebookTemplate | None] = relationship(foreign_keys=[template_id])
     owner: Mapped[User | None] = relationship(foreign_keys=[owner_id])
@@ -765,6 +774,7 @@ class CodeGrade(TimestampMixin, Base):
             "(submission_id IS NULL) != (exam_answer_id IS NULL)",
             name="ck_code_grade_xor_target",
         ),
+        Index("ix_code_grades_review_status", "needs_teacher_review", "status"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -855,6 +865,60 @@ class AnnouncementRead(Base):
     read_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class Notification(TimestampMixin, Base):
+    """站内通知——当前由工作台待办与公告派生，已读状态持久化。"""
+
+    __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint("recipient_id", "dedupe_key", name="uq_notification_recipient_dedupe"),
+        Index("ix_notifications_recipient_visible", "recipient_id", "visible"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
+    recipient_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    type: Mapped[str] = mapped_column(String(30), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    content: Mapped[str] = mapped_column(String(500), default="")
+    entity_kind: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    entity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    route: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    priority: Mapped[str] = mapped_column(String(20), default="normal", index=True)
+    dedupe_key: Mapped[str] = mapped_column(String(180))
+    visible: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
+
+
+class NotificationRead(Base):
+    """通知已读回执——(notification_id, user_id) 唯一。"""
+
+    __tablename__ = "notification_reads"
+    __table_args__ = (
+        UniqueConstraint("notification_id", "user_id", name="uq_notification_read_user"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    notification_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("notifications.id", ondelete="CASCADE"), index=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    read_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class UserPreference(TimestampMixin, Base):
+    """用户偏好——JSON 保存，当前支持侧栏折叠等前端展示偏好。"""
+
+    __tablename__ = "user_preferences"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    preferences: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 # ── 环境档位控制面（Phase 1：迁移 A） ─────────────────────────

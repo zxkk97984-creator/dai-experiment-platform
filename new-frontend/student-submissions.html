@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>学生提交列表 · DAI 实验平台</title>
+  <link rel="stylesheet" href="dai-ds-v2.css" />
+</head>
+<body>
+  <div class="shell" id="shell">
+    <aside class="sidebar" data-od-id="sidebar">
+      <div class="sidebar-head"><span class="wordmark"><span class="mark">DAI</span><small>实验平台</small></span></div>
+      <nav class="sidebar-nav">
+        <div class="nav-group">
+          <div class="nav-label">教学</div>
+          <a class="nav-item" href="teacher-home.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span class="nav-text">工作台</span></a>
+          <a class="nav-item" href="course-management.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span class="nav-text">课程管理</span></a>
+          <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h4"/></svg><span class="nav-text">作业管理</span></a>
+          <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v4L5 14a4 4 0 0 0 14 0L14 6V2"/><path d="M8 2h8"/></svg><span class="nav-text">实验管理</span></a>
+          <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg><span class="nav-text">考试管理</span></a>
+          <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="nav-text">班级与学员</span></a>
+        </div>
+        <div class="nav-group">
+          <div class="nav-label">评分</div>
+          <a class="nav-item active" href="student-submissions.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg><span class="nav-text">提交与评分</span><span class="nav-badge">12</span></a>
+          <a class="nav-item" href="ai-scoring-detail.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg><span class="nav-text">AI 评分复核</span></a>
+          <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m6 16 4-5 3 3 5-7"/></svg><span class="nav-text">成绩统计</span></a>
+        </div>
+        <div class="nav-group">
+          <div class="nav-label">系统</div>
+          <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/></svg><span class="nav-text">运行环境</span></a>
+          <a class="nav-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/></svg><span class="nav-text">设置</span></a>
+        </div>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="user-card">
+          <span class="avatar">张</span>
+          <div class="grow"><div class="u-name">张老师</div><div class="u-role">教师 · 计算机学院</div></div>
+          <button class="btn btn-ghost btn-sm btn-icon" aria-label="切换角色"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="header" data-od-id="header">
+        <button class="btn btn-ghost btn-icon menu-btn" id="mobile-menu-btn" aria-label="打开菜单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+        <button class="btn btn-ghost btn-icon" id="collapse-btn" aria-label="收起侧栏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9 5v14"/></svg></button>
+        <div class="crumb"><a href="teacher-home.html">评分</a><span class="sep">/</span><span class="current">提交与评分</span></div>
+        <div class="grow"></div>
+        <label class="header-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input placeholder="全局搜索：课程 / 作业 / 学生 / 提交" /><kbd>⌘K</kbd>
+        </label>
+        <button class="btn btn-ghost btn-icon" aria-label="通知"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></button>
+        <button class="btn btn-ghost btn-icon" aria-label="账户"><span class="avatar" style="width: 28px; height: 28px;">张</span></button>
+      </header>
+
+      <div class="content">
+        <div class="content-inner">
+          <section class="page-head" data-od-id="page-header">
+            <div class="ph-title">
+              <p class="eyebrow" style="color: var(--accent);">评分 / 实验提交</p>
+              <h1>提交与评分</h1>
+              <p class="lead" style="margin-top: 6px;">查看学生实验提交情况，完成评分与反馈。</p>
+            </div>
+            <div class="ph-actions">
+              <button class="btn btn-secondary">批量导出</button>
+              <button class="btn btn-primary btn-lg" data-open-review>开始复核</button>
+            </div>
+          </section>
+
+          <section class="metric-strip" data-od-id="summary" aria-label="提交统计" style="grid-template-columns: repeat(3, 1fr);">
+            <div class="metric"><span class="m-value">128</span><span class="m-label">全部提交</span></div>
+            <div class="metric em"><span class="m-value">12</span><span class="m-label">待评分</span></div>
+            <div class="metric"><span class="m-value">96</span><span class="m-label">已评分</span></div>
+          </section>
+
+          <section class="table-wrap" style="margin-top: var(--space-4);" data-od-id="submission-table">
+            <div class="toolbar">
+              <label class="searchbox" style="width: 280px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                <input class="input" type="search" placeholder="搜索学生、实验或提交编号" />
+              </label>
+              <label class="select" style="width: 150px;"><select><option>全部课程</option><option>机器学习基础</option><option>深度学习</option></select></label>
+              <label class="select" style="width: 170px;"><select><option>全部实验 / 作业</option><option>实验 1 · 线性回归</option><option>实验 2 · CNN</option></select></label>
+              <label class="select" style="width: 140px;"><select><option>全部状态</option><option>待评分</option><option>已评分</option><option>已发布</option></select></label>
+              <div class="grow"></div>
+              <label class="select" style="width: 150px;"><select><option>按提交时间排序</option><option>按得分排序</option></select></label>
+            </div>
+            <div class="batch-bar" id="batch-bar" hidden>
+              <span id="batch-count">已选 0 项</span>
+              <div class="row" style="gap: var(--space-2);">
+                <button class="btn btn-ghost btn-sm">批量评分</button>
+                <button class="btn btn-secondary btn-sm">导出选中</button>
+                <button class="btn btn-danger btn-sm">删除</button>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table class="ds-table">
+                <thead>
+                  <tr>
+                    <th class="col-check"><input type="checkbox" class="check" id="check-all" aria-label="全选" /></th>
+                    <th class="sortable sorted">学生 <span class="sort-icon">↑</span></th>
+                    <th>实验 / 作业</th>
+                    <th>课程</th>
+                    <th>状态</th>
+                    <th class="cell-num sortable">测试 <span class="sort-icon">↕</span></th>
+                    <th class="cell-num sortable">AI 得分 <span class="sort-icon">↕</span></th>
+                    <th>提交时间</th>
+                    <th class="col-actions"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="col-check"><input type="checkbox" class="check row-check" /></td>
+                    <td><span class="cell-main">陈雨桐</span><div class="cell-sub">2026011203</div></td>
+                    <td class="cell-ellipsis">实验 2 · 卷积神经网络图像分类</td>
+                    <td>机器学习基础</td>
+                    <td><span class="badge badge-warning"><span class="dot"></span>待评分</span></td>
+                    <td class="cell-num">12 / 12</td>
+                    <td class="cell-num" style="font-weight: 600;">84.5</td>
+                    <td class="meta">08-14 18:32</td>
+                    <td class="col-actions"><a class="btn btn-ghost btn-sm" href="ai-scoring-detail.html">复核</a></td>
+                  </tr>
+                  <tr>
+                    <td class="col-check"><input type="checkbox" class="check row-check" /></td>
+                    <td><span class="cell-main">李昊</span><div class="cell-sub">2026011407</div></td>
+                    <td class="cell-ellipsis">实验 1 · 线性回归房价预测</td>
+                    <td>机器学习基础</td>
+                    <td><span class="badge badge-success"><span class="dot"></span>已评分</span></td>
+                    <td class="cell-num">10 / 12</td>
+                    <td class="cell-num" style="font-weight: 600;">71.0</td>
+                    <td class="meta">08-14 16:05</td>
+                    <td class="col-actions"><a class="btn btn-ghost btn-sm" href="ai-scoring-detail.html">复核</a></td>
+                  </tr>
+                  <tr>
+                    <td class="col-check"><input type="checkbox" class="check row-check" /></td>
+                    <td><span class="cell-main">王子航</span><div class="cell-sub">2026011511</div></td>
+                    <td class="cell-ellipsis">实验 2 · 决策树生存预测</td>
+                    <td>深度学习</td>
+                    <td><span class="badge badge-danger"><span class="dot"></span>失败</span></td>
+                    <td class="cell-num">—</td>
+                    <td class="cell-num">—</td>
+                    <td class="meta">08-14 11:47</td>
+                    <td class="col-actions"><a class="btn btn-ghost btn-sm" href="ai-scoring-detail.html">查看</a></td>
+                  </tr>
+                  <tr>
+                    <td class="col-check"><input type="checkbox" class="check row-check" /></td>
+                    <td><span class="cell-main">林若曦</span><div class="cell-sub">2026011309</div></td>
+                    <td class="cell-ellipsis">实验 3 · 随机森林分类</td>
+                    <td>机器学习基础</td>
+                    <td><span class="badge badge-info"><span class="dot"></span>AI 已评分</span></td>
+                    <td class="cell-num">11 / 12</td>
+                    <td class="cell-num" style="font-weight: 600;">79.0</td>
+                    <td class="meta">08-14 09:28</td>
+                    <td class="col-actions"><a class="btn btn-ghost btn-sm" href="ai-scoring-detail.html">复核</a></td>
+                  </tr>
+                  <tr>
+                    <td class="col-check"><input type="checkbox" class="check row-check" /></td>
+                    <td><span class="cell-main">周子墨</span><div class="cell-sub">2026011412</div></td>
+                    <td class="cell-ellipsis">实验 1 · 线性回归房价预测</td>
+                    <td>机器学习基础</td>
+                    <td><span class="badge badge-warning"><span class="dot"></span>待评分</span></td>
+                    <td class="cell-num">9 / 12</td>
+                    <td class="cell-num" style="font-weight: 600;">68.5</td>
+                    <td class="meta">08-13 22:10</td>
+                    <td class="col-actions"><a class="btn btn-ghost btn-sm" href="ai-scoring-detail.html">复核</a></td>
+                  </tr>
+                  <tr>
+                    <td class="col-check"><input type="checkbox" class="check row-check" /></td>
+                    <td><span class="cell-main">赵可欣</span><div class="cell-sub">2026011206</div></td>
+                    <td class="cell-ellipsis">实验 2 · 卷积神经网络图像分类</td>
+                    <td>深度学习</td>
+                    <td><span class="badge badge-success"><span class="dot"></span>已发布</span></td>
+                    <td class="cell-num">12 / 12</td>
+                    <td class="cell-num" style="font-weight: 600;">92.0</td>
+                    <td class="meta">08-13 15:41</td>
+                    <td class="col-actions"><a class="btn btn-ghost btn-sm" href="ai-scoring-detail.html">查看</a></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="pagination">
+              <span class="pg-info">共 128 条 · 第 1 / 13 页</span>
+              <div class="pg-btns"><button class="pg-btn">‹</button><button class="pg-btn active">1</button><button class="pg-btn">2</button><button class="pg-btn">3</button><span class="meta">…</span><button class="pg-btn">13</button><button class="pg-btn">›</button></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 复核抽屉 -->
+  <div class="drawer-backdrop" id="review-drawer" hidden></div>
+  <aside class="drawer" id="review-drawer-panel" hidden role="dialog" aria-modal="true" aria-labelledby="review-title">
+    <div class="drawer-head">
+      <div><p class="eyebrow">提交 #S12894 · 陈雨桐</p><h2 id="review-title">教师复核</h2></div>
+      <button class="btn btn-ghost btn-sm btn-icon" data-close aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="drawer-body stack" style="gap: var(--space-4);">
+      <div class="evidence-block ai">
+        <span class="eyebrow">AI 建议</span>
+        <div class="score-orb" style="margin-top: 8px;"><span class="big" style="font-size: 32px;">84</span><span class="of">/ 100</span></div>
+      </div>
+      <div class="field"><label>调整后得分</label><input class="input" value="84" /></div>
+      <div class="field"><label>复核理由</label><textarea class="textarea" placeholder="记录扣分或加分依据…"></textarea></div>
+    </div>
+    <div class="drawer-foot"><button class="btn btn-ghost" data-close>取消</button><button class="btn btn-primary">确认并生效</button></div>
+  </aside>
+
+  <style>
+    .batch-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: 10px 16px; background: var(--accent-faint); border-bottom: 1px solid var(--border); }
+    .batch-bar[hidden] { display: none; }
+  </style>
+
+  <script>
+    const shell = document.getElementById('shell');
+    document.getElementById('collapse-btn')?.addEventListener('click', () => shell.classList.toggle('is-collapsed'));
+    document.getElementById('mobile-menu-btn')?.addEventListener('click', () => shell.classList.toggle('mobile-nav-open'));
+
+    const backdrop = document.getElementById('review-drawer');
+    const panel = document.getElementById('review-drawer-panel');
+    const openDrawer = (show) => { backdrop.hidden = !show; panel.hidden = !show; };
+    document.querySelector('[data-open-review]')?.addEventListener('click', () => openDrawer(true));
+    document.querySelectorAll('[data-close]').forEach((el) => el.addEventListener('click', () => openDrawer(false)));
+    backdrop.addEventListener('click', () => openDrawer(false));
+
+    const batchBar = document.getElementById('batch-bar');
+    const batchCount = document.getElementById('batch-count');
+    const checks = [...document.querySelectorAll('.row-check')];
+    const checkAll = document.getElementById('check-all');
+    function syncBatch() {
+      const n = checks.filter((c) => c.checked).length;
+      batchBar.hidden = n === 0;
+      batchCount.textContent = '已选 ' + n + ' 项';
+      checks.forEach((c) => c.closest('tr')?.classList.toggle('selected', c.checked));
+    }
+    checks.forEach((c) => c.addEventListener('change', () => { checkAll.checked = checks.every((x) => x.checked); syncBatch(); }));
+    checkAll?.addEventListener('change', () => { checks.forEach((c) => c.checked = checkAll.checked); syncBatch(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') openDrawer(false); });
+  </script>
+</body>
+</html>
