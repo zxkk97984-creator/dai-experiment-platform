@@ -210,7 +210,7 @@ onMounted(fetchDetail)
         </section>
 
         <div class="workbench">
-          <div class="wb-col stack wb-col--sticky">
+          <div class="wb-col stack">
             <div class="code-panel">
               <div class="code-panel-head">
                 <span class="fname">submission.py</span>
@@ -244,6 +244,33 @@ onMounted(fetchDetail)
                 <li v-for="(e, ei) in detail.deterministic_details.system_errors" :key="ei">{{ e }}</li>
               </ul>
             </div>
+
+            <div v-if="detail.ai_result?.student_feedback" class="panel">
+              <div class="panel-head"><div class="ph-label"><p class="eyebrow">Student feedback</p><h3>给学生的反馈</h3></div></div>
+              <div class="panel-body stack feedback-blocks">
+                <div v-for="block in blocks" :key="block.key" class="feedback-block">
+                  <h4 class="feedback-block__title">{{ block.title }}</h4>
+                  <ul v-if="block.items.length" class="feedback-block__list">
+                    <li v-for="(item, i) in block.items" :key="i">{{ item }}</li>
+                  </ul>
+                  <p v-else class="feedback-block__empty">{{ block.emptyText }}</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head"><div class="ph-label"><p class="eyebrow">Rubric</p><h3>评分标准 · 过程分</h3></div></div>
+              <div class="panel-body stack rubric-body">
+                <div v-for="dim in aiDimensions" :key="'rubric-' + dim.key" class="rubric-row">
+                  <div class="row-between"><span>{{ dim.title }}</span><span class="num">{{ dim.items.reduce((sum, item) => sum + (Number(item.score) || 0), 0) }} / {{ dim.items.reduce((sum, item) => sum + (Number(item.max_score) || 0), 0) }}</span></div>
+                  <div class="score-bar"><i :style="{ width: (dim.items.reduce((sum, item) => sum + (Number(item.max_score) || 0), 0) > 0 ? (dim.items.reduce((sum, item) => sum + (Number(item.score) || 0), 0) / dim.items.reduce((sum, item) => sum + (Number(item.max_score) || 0), 0)) * 100 : 0) + '%' }"></i></div>
+                </div>
+                <div v-if="detail.ai_result?.rubric" class="rubric-row">
+                  <div class="row-between"><span>总分</span><span class="num">{{ safeNumber(detail.ai_result.final_score_100) }} / 100</span></div>
+                  <div class="score-bar"><i :style="{ width: safeNumber(detail.ai_result.final_score_100) + '%' }"></i></div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="wb-col stack">
@@ -276,34 +303,6 @@ onMounted(fetchDetail)
                 <p v-else class="muted evidence-empty">该维度无评分项</p>
               </div>
             </div>
-
-            <div v-if="detail.ai_result?.student_feedback" class="panel">
-              <div class="panel-head"><div class="ph-label"><p class="eyebrow">Student feedback</p><h3>给学生的反馈</h3></div></div>
-              <div class="panel-body stack feedback-blocks">
-                <div v-for="block in blocks" :key="block.key" class="feedback-block">
-                  <h4 class="feedback-block__title">{{ block.title }}</h4>
-                  <ul v-if="block.items.length" class="feedback-block__list">
-                    <li v-for="(item, i) in block.items" :key="i">{{ item }}</li>
-                  </ul>
-                  <p v-else class="feedback-block__empty">{{ block.emptyText }}</p>
-                </div>
-              </div>
-            </div>
-
-            <div class="panel">
-              <div class="panel-head"><div class="ph-label"><p class="eyebrow">Rubric</p><h3>评分标准 · 过程分</h3></div></div>
-              <div class="panel-body stack rubric-body">
-                <div v-for="dim in aiDimensions" :key="'rubric-' + dim.key" class="rubric-row">
-                  <div class="row-between"><span>{{ dim.title }}</span><span class="num">{{ dim.items.reduce((sum, item) => sum + (Number(item.score) || 0), 0) }} / {{ dim.items.reduce((sum, item) => sum + (Number(item.max_score) || 0), 0) }}</span></div>
-                  <div class="score-bar"><i :style="{ width: (dim.items.reduce((sum, item) => sum + (Number(item.max_score) || 0), 0) > 0 ? (dim.items.reduce((sum, item) => sum + (Number(item.score) || 0), 0) / dim.items.reduce((sum, item) => sum + (Number(item.max_score) || 0), 0)) * 100 : 0) + '%' }"></i></div>
-                </div>
-                <div v-if="detail.ai_result?.rubric" class="rubric-row">
-                  <div class="row-between"><span>总分</span><span class="num">{{ safeNumber(detail.ai_result.final_score_100) }} / 100</span></div>
-                  <div class="score-bar"><i :style="{ width: safeNumber(detail.ai_result.final_score_100) + '%' }"></i></div>
-                </div>
-              </div>
-            </div>
-
           </div>
         </div>
 
@@ -360,7 +359,8 @@ onMounted(fetchDetail)
 .legend-text { font-size: var(--text-sm); }
 .score-strip { grid-template-columns: repeat(3, 1fr); }
 
-/* 双栏工作台：与 ai-scoring-detail.html 的 .workbench 同构 */
+/* 双栏工作台：左列 = 代码/测试/反馈/评分标准，右列 = AI 评分依据。
+   两列高度接近，避免教师下拉复核时单侧出现大段留白。 */
 .workbench {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
@@ -369,16 +369,6 @@ onMounted(fetchDetail)
   min-width: 0;
 }
 .wb-col.stack { min-width: 0; }
-
-/* 左列（代码 + 确定性测试）在滚动复核右列时保持可见，避免页面下半部大段留白。 */
-.wb-col--sticky {
-  position: sticky;
-  top: calc(var(--header-height) + var(--page-pad));
-  align-self: start;
-  max-height: calc(100vh - var(--header-height) - 2 * var(--page-pad));
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
 
 .test-groups { gap: 12px; }
 .test-groups > * { margin-top: 0; }
@@ -442,12 +432,6 @@ onMounted(fetchDetail)
 @media (max-width: 1024px) {
   .workbench { grid-template-columns: 1fr; }
   .score-strip { grid-template-columns: 1fr; }
-  .wb-col--sticky {
-    position: static;
-    max-height: none;
-    overflow-y: visible;
-    overscroll-behavior: auto;
-  }
 }
 @media (max-width: 820px) {
   .advanced-info__grid { grid-template-columns: 1fr; }
