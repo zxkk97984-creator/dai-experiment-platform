@@ -19,7 +19,7 @@
         <form class="toolbar filter-bar" @submit.prevent="applyFilters">
           <label class="searchbox" style="width: 260px;">
             <AppIcon name="search" :size="15" />
-            <input v-model="filterStudent" type="search" placeholder="搜索学生 ID 或姓名" @keydown.enter.prevent="applyFilters" />
+            <input v-model="filterStudent" type="search" class="input" placeholder="搜索学生 ID 或姓名" @keydown.enter.prevent="applyFilters" />
             <button v-if="filterStudent" type="button" class="clear" aria-label="清空搜索" @click="clearSearch">
               <AppIcon name="close" :size="13" />
             </button>
