@@ -95,6 +95,7 @@ function goWelcome() { router.push('/welcome') }
             <input
               id="login-username"
               v-model="username"
+              class="login-input"
               type="text"
               placeholder="请输入用户名"
               autocomplete="username"
@@ -112,6 +113,7 @@ function goWelcome() { router.push('/welcome') }
             <input
               id="login-password"
               v-model="password"
+              class="login-input login-password"
               :type="showPwd ? 'text' : 'password'"
               placeholder="请输入密码"
               autocomplete="current-password"
@@ -308,7 +310,8 @@ function goWelcome() { router.push('/welcome') }
 
 .field input {
   width: 100%;
-  padding: 12px 14px 12px 42px;
+  height: 44px;
+  padding: 0 14px 0 42px !important;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -319,6 +322,7 @@ function goWelcome() { router.push('/welcome') }
   transition: border-color var(--duration-fast) var(--ease-out),
               box-shadow var(--duration-fast) var(--ease-out);
 }
+.field input.login-password { padding-right: 42px !important; }
 .field input::placeholder { color: var(--faint); }
 .field input:focus {
   outline: none;
