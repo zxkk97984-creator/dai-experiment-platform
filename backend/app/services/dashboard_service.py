@@ -98,65 +98,65 @@ def build_student_dashboard(db: Session, user: User, now: datetime | None = None
     )
     summary.course_count = len(enrolled_ids)
 
+    # ── 待交作业：任务发布范围优先于选课关系（白名单学生无需选课）──
+    pending_rows = db.execute(
+        select(Assignment, Course.title)
+        .join(Course, Course.id == Assignment.course_id)
+        .where(
+            Course.status == "published",
+            assignment_visible_condition(user.id),
+            exists().where(
+                and_(
+                    JudgeQuestion.assignment_id == Assignment.id,
+                    ~exists().where(
+                        Submission.question_id == JudgeQuestion.id,
+                        Submission.student_id == user.id,
+                    ),
+                )
+            ),
+        )
+        .order_by(Assignment.due_at)
+    ).all()
+    summary.pending_assignment_count = len(pending_rows)
+    for assignment, course_title in pending_rows:
+        priority_items.append(
+            PriorityItem(
+                kind="assignment", id=assignment.id, title=assignment.title,
+                course_title=course_title, time_at=assignment.due_at,
+                urgency=_urgency(_hours_until(now, assignment.due_at)),
+                route=f"/student/assignments/{assignment.id}",
+            )
+        )
+
+    # ── 即将考试：任务发布范围优先于选课关系 ──
+    exam_rows = db.execute(
+        select(Exam, Course.title)
+        .join(Course, Course.id == Exam.course_id)
+        .where(
+            Course.status == "published",
+            exam_visible_condition(user.id),
+            or_(Exam.start_at > now, Exam.end_at > now),
+            ~exists().where(
+                ExamSubmission.exam_id == Exam.id,
+                ExamSubmission.student_id == user.id,
+                ExamSubmission.status.in_(("submitted", "grading", "graded")),
+            ),
+        )
+        .order_by(Exam.start_at)
+    ).all()
+    summary.upcoming_exam_count = len(exam_rows)
+    for exam, course_title in exam_rows:
+        time_at = exam.start_at or exam.end_at
+        priority_items.append(
+            PriorityItem(
+                kind="exam", id=exam.id, title=exam.title,
+                course_title=course_title, time_at=time_at,
+                urgency=_urgency(_hours_until(now, time_at)),
+                route=f"/student/exams/{exam.id}",
+            )
+        )
+
     if enrolled_ids:
-        # ── 待交作业：至少一题无当前学生提交 ──
-        pending_rows = db.execute(
-            select(Assignment, Course.title)
-            .join(Course, Course.id == Assignment.course_id)
-            .where(
-                Assignment.course_id.in_(enrolled_ids),
-                assignment_visible_condition(user.id),
-                exists().where(
-                    and_(
-                        JudgeQuestion.assignment_id == Assignment.id,
-                        ~exists().where(
-                            Submission.question_id == JudgeQuestion.id,
-                            Submission.student_id == user.id,
-                        ),
-                    )
-                ),
-            )
-            .order_by(Assignment.due_at)
-        ).all()
-        summary.pending_assignment_count = len(pending_rows)
-        for assignment, course_title in pending_rows:
-            priority_items.append(
-                PriorityItem(
-                    kind="assignment", id=assignment.id, title=assignment.title,
-                    course_title=course_title, time_at=assignment.due_at,
-                    urgency=_urgency(_hours_until(now, assignment.due_at)),
-                    route=f"/student/assignments/{assignment.id}",
-                )
-            )
-
-        # ── 即将考试：已发布、有效时间未过、未提交/未评分 ──
-        exam_rows = db.execute(
-            select(Exam, Course.title)
-            .join(Course, Course.id == Exam.course_id)
-            .where(
-                Exam.course_id.in_(enrolled_ids),
-                exam_visible_condition(user.id),
-                or_(Exam.start_at > now, Exam.end_at > now),
-                ~exists().where(
-                    ExamSubmission.exam_id == Exam.id,
-                    ExamSubmission.student_id == user.id,
-                    ExamSubmission.status.in_(("submitted", "grading", "graded")),
-                ),
-            )
-            .order_by(Exam.start_at)
-        ).all()
-        summary.upcoming_exam_count = len(exam_rows)
-        for exam, course_title in exam_rows:
-            time_at = exam.start_at or exam.end_at
-            priority_items.append(
-                PriorityItem(
-                    kind="exam", id=exam.id, title=exam.title,
-                    course_title=course_title, time_at=time_at,
-                    urgency=_urgency(_hours_until(now, time_at)),
-                    route=f"/student/exams/{exam.id}",
-                )
-            )
-
         # ── 进行中实验：课程课时记录（需课程可达）与模块记录 ──
         lesson_rows = db.execute(
             select(ExperimentRecord, Lesson.title, Course.id, Course.title)

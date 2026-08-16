@@ -7,6 +7,7 @@ import AIQuestionConfig from '../../components/ai/AIQuestionConfig.vue'
 import ChoiceOptionsEditor from '../../components/teacher/exam/ChoiceOptionsEditor.vue'
 import FillBlankEditor from '../../components/teacher/exam/FillBlankEditor.vue'
 import QeTestCases from '../../components/teacher/question-editor/QeTestCases.vue'
+import TaskAudiencePicker from '../../components/teacher/TaskAudiencePicker.vue'
 import { examsAPI } from '../../api/exams.js'
 import { useAppStore } from '../../stores/app.js'
 const route = useRoute(); const router = useRouter(); const app = useAppStore()

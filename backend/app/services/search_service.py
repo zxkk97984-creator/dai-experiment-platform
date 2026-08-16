@@ -11,6 +11,7 @@ from app.models import (
 )
 from app.schemas.search import SearchResultItem, SearchResponse
 from app.services.course_access_service import student_visible_course_predicate
+from app.services.audience_service import assignment_visible_condition, exam_visible_condition
 
 SEARCH_LIMIT = 6
 
@@ -95,8 +96,8 @@ def search_all(db: Session, user: User, q: str) -> SearchResponse:
             select(Assignment, Course.title)
             .join(Course, Course.id == Assignment.course_id)
             .where(
-                Assignment.status == "published",
-                Assignment.course_id.in_(enrolled),
+                Course.status == "published",
+                assignment_visible_condition(user.id),
                 Assignment.title.ilike(like),
             )
             .order_by(Assignment.published_at.desc())
@@ -111,8 +112,8 @@ def search_all(db: Session, user: User, q: str) -> SearchResponse:
             select(Exam, Course.title)
             .join(Course, Course.id == Exam.course_id)
             .where(
-                Exam.status == "published",
-                Exam.course_id.in_(enrolled),
+                Course.status == "published",
+                exam_visible_condition(user.id),
                 Exam.title.ilike(like),
             )
             .order_by(Exam.start_at.desc())
