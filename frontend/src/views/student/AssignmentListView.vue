@@ -295,7 +295,7 @@ onMounted(loadAll)
 
 <style scoped>
 .page { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
-.task-catalog-heading { display: flex; align-items: baseline; gap: 10px; margin: 12px 0 -8px; }
+.task-catalog-heading { display: flex; align-items: baseline; gap: 10px; margin: 12px 0 4px; }
 .task-catalog-heading h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--fg); }
 .task-catalog-heading span { color: var(--muted); font-size: var(--text-base); }
 .task-name { max-width: 320px; }
