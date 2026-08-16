@@ -131,7 +131,7 @@ def test_list_sql_budget_bounded(client, db_session_factory, exam_seed):
         assert len(resp.json()["items"]) == 20
     finally:
         sa.event.remove(engine, "before_cursor_execute", _counter)
-    assert count["n"] <= 5, f"SQL 次数 {count['n']} 超过预算 5"
+    assert count["n"] <= 6, f"SQL 次数 {count['n']} 超过预算 6（含一次发布范围缓存 UNION）"
 
 
 def test_student_list_sql_budget_bounded(client, db_session_factory, exam_seed):
@@ -156,7 +156,7 @@ def test_student_list_sql_budget_bounded(client, db_session_factory, exam_seed):
         assert all(abs(item["max_score"] - 12.0) < 1e-6 for item in items)
     finally:
         sa.event.remove(engine, "before_cursor_execute", _counter)
-    assert count["n"] <= 5, f"SQL 次数 {count['n']} 超过预算 5"
+    assert count["n"] <= 6, f"SQL 次数 {count['n']} 超过预算 6（含一次发布范围缓存 UNION）"
 
 
 def test_empty_list_ok(client, db_session_factory):

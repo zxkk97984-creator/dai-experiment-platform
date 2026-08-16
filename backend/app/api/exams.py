@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 import tempfile
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
@@ -14,9 +14,14 @@ from app.config import Settings, get_settings
 from app.dependencies import get_current_user, get_db, require_roles, PaginationParams, pagination
 from app.errors import api_error
 from app.models import Course, CourseEnrollment, Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission, QuestionRubric, User
-from app.schemas import ExamAnswerBatchRequest, ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionTeacherRead, ExamQuestionUpdate, ExamRead, ExamRetryRequest, ExamSampleRunRequest, ExamSessionRead, ExamSubmitRequest, ExamSubmissionRead, ExamTimeExtensionRequest, ExamUpdate, PaginatedResponse, SampleRunResponse
+from app.schemas import CourseStudentImportResult, CourseStudentImportRow, ExamAnswerBatchRequest, ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionTeacherRead, ExamQuestionUpdate, ExamRead, ExamRetryRequest, ExamSampleRunRequest, ExamSessionRead, ExamSubmitRequest, ExamSubmissionRead, ExamTimeExtensionRequest, ExamUpdate, PaginatedResponse, SampleRunResponse
 from app.services.exam_service import build_student_exam_session, build_student_exam_summary, create_question, delete_question, exam_max_score, extend_exam_submission, force_submit_exam_submission, get_my_grade, get_question, list_questions, release_exam_review, require_exam_editable, retry_exam_submission as retry_exam_submission_service, save_answer, start_exam as svc_start_exam, student_exam_status, submit_exam as svc_submit_exam, update_question, validate_publish
 from app.services.time_utils import as_utc, utc_now
+from app.services.audience_service import (
+    effective_student_ids, exam_visible_condition, import_audience_students,
+    parse_student_csv, populate_audience_cache, require_effective_audience,
+    save_audience, student_in_exam_audience,
+)
 from app.worker.judge_worker import _run_docker_pytest, _status_from_pytest
 
 router = APIRouter(prefix="/exams", tags=["exams"])
@@ -27,6 +32,13 @@ def require_exam(exam_id: int, db: Session) -> Exam:
     if not exam:
         raise api_error(404, "EXAM_NOT_FOUND", "考试不存在")
     return exam
+
+
+def _student_exam_allowed(exam: Exam, student: User, db: Session) -> bool:
+    """任务白名单学生可以不选课；其他学生仍需课程访问权限。"""
+    if student_in_exam_audience(db, exam, student.id):
+        return True
+    return bool(exam.course and can_access_course_content(exam.course, student, db))
 
 
 def _with_submission_aliases(session: dict) -> dict:
@@ -72,11 +84,9 @@ def list_exams(
     if current_user.role == "student":
         query = (
             query.join(Course, Exam.course_id == Course.id)
-            .join(CourseEnrollment, Course.id == CourseEnrollment.course_id)
             .where(Exam.status == "published")
             .where(Course.status == "published")
-            .where(CourseEnrollment.student_id == current_user.id)
-            .where(CourseEnrollment.status == "enrolled")
+            .where(exam_visible_condition(current_user.id))
         )
     elif current_user.role == "teacher":
         query = query.join(Course, Exam.course_id == Course.id).where(Course.teacher_id == current_user.id)
@@ -94,6 +104,7 @@ def list_exams(
     ).all()
     total = rows[0]._total if rows else 0
     exams = [row.Exam for row in rows]
+    populate_audience_cache(db, task_type="exam", tasks=exams)
     student_submissions = {}
     from app.services.time_utils import utc_now
     server_now = utc_now()
@@ -139,7 +150,20 @@ def list_exams(
             )
             .group_by(CourseEnrollment.course_id)
         ).all()
-        agg_maps["expected"] = dict(expected_rows)
+        course_expected = dict(expected_rows)
+        agg_maps["expected_by_exam"] = {}
+        for exam in exams:
+            has_custom_audience = (
+                exam.audience_mode != "all_enrolled"
+                or bool(exam.whitelist_student_ids)
+                or bool(exam.excluded_student_ids)
+            )
+            if not has_custom_audience:
+                agg_maps["expected_by_exam"][exam.id] = course_expected.get(exam.course_id, 0)
+            else:
+                agg_maps["expected_by_exam"][exam.id] = len(effective_student_ids(
+                    db, task_type="exam", task_id=exam.id, course=exam.course,
+                ))
 
     items = []
     for exam in exams:
@@ -154,7 +178,7 @@ def list_exams(
                 "course_title": exam.course.title if exam.course else "",
                 "question_count": agg_maps.get("question", {}).get(exam.id, 0),
                 "participant_count": agg_maps.get("participant", {}).get(exam.id, 0),
-                "expected_count": agg_maps.get("expected", {}).get(exam.course_id, 0),
+                "expected_count": agg_maps.get("expected_by_exam", {}).get(exam.id, 0),
                 "created_at": exam.created_at,
                 "updated_at": exam.updated_at,
                 "max_score": agg_maps.get("max_score", {}).get(exam.id, 0.0),
@@ -177,10 +201,21 @@ def create_exam(
     # 创建考试时强制 draft，发布需通过 update 接口触发 validate_publish()
     exam_data = payload.model_dump()
     exam_data["status"] = "draft"
+    audience_mode = exam_data.pop("audience_mode")
+    audience_class_ids = exam_data.pop("audience_class_ids")
+    whitelist_student_ids = exam_data.pop("whitelist_student_ids")
+    excluded_student_ids = exam_data.pop("excluded_student_ids")
     if exam_data.get("show_answers_after_review"):
         exam_data["show_questions_after_review"] = True
     exam = Exam(**exam_data, created_by_id=current_user.id)
     db.add(exam)
+    db.flush()
+    save_audience(
+        db, task_type="exam", task_id=exam.id, course=course,
+        audience_mode=audience_mode, audience_class_ids=audience_class_ids,
+        whitelist_student_ids=whitelist_student_ids, excluded_student_ids=excluded_student_ids,
+        actor_id=current_user.id,
+    )
     db.commit()
     db.refresh(exam)
     return exam
@@ -194,6 +229,10 @@ def get_exam(exam_id: int, db: Session = Depends(get_db), current_user: User = D
     if current_user.role == "student" and exam.status != "published":
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
     if current_user.role == "student":
+        if not _student_exam_allowed(exam, current_user, db):
+            raise api_error(403, "FORBIDDEN", "没有权限查看该考试")
+        if not student_in_exam_audience(db, exam, current_user.id):
+            raise api_error(403, "NOT_IN_EXAM_AUDIENCE", "你不在本次考试范围内")
         submission = db.scalar(select(ExamSubmission).where(
             ExamSubmission.exam_id == exam.id,
             ExamSubmission.student_id == current_user.id,
@@ -216,7 +255,11 @@ def update_exam(
     ensure_course_manager(exam.course, current_user)
     previous_status = exam.status
     changes = payload.model_dump(exclude_unset=True)
+    audience_updates = {key: changes.pop(key) for key in (
+        "audience_mode", "audience_class_ids", "whitelist_student_ids", "excluded_student_ids",
+    ) if key in changes}
     has_attempts = db.scalar(select(ExamSubmission.id).where(ExamSubmission.exam_id == exam_id).limit(1)) is not None
+    previous_mode = exam.audience_mode
     if has_attempts:
         from app.services.time_utils import as_utc
         duration_changed = "duration_minutes" in changes and changes["duration_minutes"] != exam.duration_minutes
@@ -232,9 +275,39 @@ def update_exam(
         changes["show_questions_after_review"] = True
     for key, value in changes.items():
         setattr(exam, key, value)
+    if audience_updates:
+        # 已发布且有学生开始后：禁止切换基础模式，且不能移除已开始的学生
+        if previous_status == "published" and has_attempts:
+            if audience_updates.get("audience_mode", previous_mode) != previous_mode:
+                raise api_error(409, "EXAM_AUDIENCE_MODE_LOCKED", "已有学生开始考试，不能切换考生基础范围")
+            current_ids = set()
+            from app.services.audience_service import effective_student_ids
+            current_ids = effective_student_ids(db, task_type="exam", task_id=exam_id, course=exam.course)
+        current = {
+            "audience_mode": previous_mode,
+            "audience_class_ids": exam.audience_class_ids,
+            "whitelist_student_ids": exam.whitelist_student_ids,
+            "excluded_student_ids": exam.excluded_student_ids,
+        }
+        current.update(audience_updates)
+        save_audience(
+            db, task_type="exam", task_id=exam_id, course=exam.course,
+            actor_id=current_user.id, **current,
+        )
+        if previous_status == "published" and has_attempts:
+            started_ids = set(db.scalars(
+                select(ExamSubmission.student_id).where(ExamSubmission.exam_id == exam_id)
+            ).all())
+            new_ids = set()
+            from app.services.audience_service import effective_student_ids as _effective_ids
+            new_ids = _effective_ids(db, task_type="exam", task_id=exam_id, course=exam.course)
+            removed_started = (current_ids - new_ids) & started_ids
+            if removed_started:
+                raise api_error(409, "EXAM_AUDIENCE_STUDENT_STARTED", "不能移除已经开始考试的学生")
     # 发布时强制校验
     if exam.status == "published":
         validate_publish(exam, db)
+        require_effective_audience(db, task_type="exam", task_id=exam.id, course=exam.course)
         # AI 评分门禁只在草稿首次发布时执行；之后调整公开策略或延后
         # 最晚进入时间不应因为运行期配置变化而被无关门禁阻塞。
         code_questions = db.scalars(
@@ -262,6 +335,32 @@ def update_exam(
     return exam
 
 
+@router.post("/{exam_id}/audience/import", response_model=CourseStudentImportResult)
+async def import_exam_audience(
+    exam_id: int,
+    kind: str = "include",
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """CSV 导入考试范围白名单（include）或排除名单（exclude）。"""
+    if kind not in ("include", "exclude"):
+        raise api_error(422, "INVALID_AUDIENCE_KIND", "kind 必须为 include 或 exclude")
+    exam = require_exam(exam_id, db)
+    ensure_course_manager(exam.course, current_user)
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise api_error(422, "CSV_TOO_LARGE", "CSV 文件不能超过 2 MB")
+    rows, error = parse_student_csv(content)
+    if error:
+        raise api_error(422, "CSV_INVALID", error)
+    result = import_audience_students(db, task_type="exam", task_id=exam.id, kind=kind, rows=rows)
+    return CourseStudentImportResult(
+        created=result["created"], updated=result["updated"], skipped=result["skipped"],
+        errors=[CourseStudentImportRow(**row) for row in result["errors"]],
+    )
+
+
 @router.get("/{exam_id}/session", response_model=ExamSessionRead)
 def get_exam_session(
     exam_id: int,
@@ -269,8 +368,10 @@ def get_exam_session(
     current_user: User = Depends(require_roles("student")),
 ):
     exam = require_exam(exam_id, db)
-    if exam.status != "published" or not can_access_course_content(exam.course, current_user, db):
+    if exam.status != "published" or not _student_exam_allowed(exam, current_user, db):
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布或无权参加")
+    if not student_in_exam_audience(db, exam, current_user.id):
+        raise api_error(403, "NOT_IN_EXAM_AUDIENCE", "你不在本次考试范围内")
     return _with_submission_aliases(build_student_exam_session(exam, current_user, db))
 
 
@@ -288,8 +389,10 @@ def run_exam_public_cases(
 ):
     """运行考试编程题的公开样例，不读取隐藏测试、不产生正式评分。"""
     exam = require_exam(exam_id, db)
-    if exam.status != "published" or not can_access_course_content(exam.course, current_user, db):
+    if exam.status != "published" or not _student_exam_allowed(exam, current_user, db):
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布或无权参加")
+    if not student_in_exam_audience(db, exam, current_user.id):
+        raise api_error(403, "NOT_IN_EXAM_AUDIENCE", "你不在本次考试范围内")
 
     submission = db.scalar(select(ExamSubmission).where(
         ExamSubmission.exam_id == exam_id,
@@ -362,10 +465,12 @@ def start_exam(
 ):
     exam = require_exam(exam_id, db)
     course = db.get(Course, exam.course_id)
-    if not course or not can_access_course_content(course, current_user, db):
+    if not course or not _student_exam_allowed(exam, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限参加该考试")
     if exam.status != "published":
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
+    if not student_in_exam_audience(db, exam, current_user.id):
+        raise api_error(403, "NOT_IN_EXAM_AUDIENCE", "你不在本次考试范围内")
 
     existing = db.scalar(select(ExamSubmission).where(
         ExamSubmission.exam_id == exam_id,
@@ -393,10 +498,12 @@ def submit_exam(
 ):
     exam = require_exam(exam_id, db)
     course = db.get(Course, exam.course_id)
-    if not course or not can_access_course_content(course, current_user, db):
+    if not course or not _student_exam_allowed(exam, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限提交该考试")
     if exam.status != "published":
         raise api_error(403, "EXAM_NOT_AVAILABLE", "考试未发布")
+    if not student_in_exam_audience(db, exam, current_user.id):
+        raise api_error(403, "NOT_IN_EXAM_AUDIENCE", "你不在本次考试范围内")
     # 必须有提交记录（至少 started），已 grading/graded/submitted 由 service 层幂等处理
     sub = db.scalar(
         select(ExamSubmission).where(
@@ -488,15 +595,12 @@ def exam_grades(
     ).all()
     submission_by_student = {submission.student_id: submission for submission in submissions}
 
+    audience_ids = effective_student_ids(
+        db, task_type="exam", task_id=exam.id, course=exam.course,
+    )
     enrolled_students = db.scalars(
-        select(User)
-        .join(CourseEnrollment, CourseEnrollment.student_id == User.id)
-        .where(
-            CourseEnrollment.course_id == exam.course_id,
-            CourseEnrollment.status == "enrolled",
-        )
-        .order_by(User.id)
-    ).all()
+        select(User).where(User.id.in_(audience_ids)).order_by(User.id)
+    ).all() if audience_ids else []
     students_by_id = {student.id: student for student in enrolled_students}
     for submission in submissions:
         students_by_id.setdefault(submission.student_id, submission.student)

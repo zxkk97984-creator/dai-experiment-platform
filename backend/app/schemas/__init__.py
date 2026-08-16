@@ -461,6 +461,10 @@ class AssignmentCreate(BaseModel):
     environment_version_id: int | None = None
     import_policy_mode: Literal["unrestricted", "restricted"] = "unrestricted"
     allowed_imports: list[str] = Field(default_factory=list)
+    audience_mode: Literal["all_enrolled", "selected_classes", "whitelist_only"] = "all_enrolled"
+    audience_class_ids: list[int] = Field(default_factory=list)
+    whitelist_student_ids: list[int] = Field(default_factory=list)
+    excluded_student_ids: list[int] = Field(default_factory=list)
 
     @field_validator("allowed_imports")
     @classmethod
@@ -479,6 +483,10 @@ class AssignmentUpdate(BaseModel):
     environment_version_id: int | None = None
     import_policy_mode: Literal["unrestricted", "restricted"] | None = None
     allowed_imports: list[str] | None = None
+    audience_mode: Literal["all_enrolled", "selected_classes", "whitelist_only"] | None = None
+    audience_class_ids: list[int] | None = None
+    whitelist_student_ids: list[int] | None = None
+    excluded_student_ids: list[int] | None = None
 
     @field_validator("allowed_imports")
     @classmethod
@@ -511,6 +519,10 @@ class AssignmentRead(BaseModel):
     # 当前学生对作业的提交状态：全部题目都有提交记录才算已交（与 dashboard 待办语义互补）。
     # 仅学生作业列表接口计算该值；教师/管理员视图与详情接口保持默认 False。
     is_submitted: bool = False
+    audience_mode: str = "all_enrolled"
+    audience_class_ids: list[int] = Field(default_factory=list)
+    whitelist_student_ids: list[int] = Field(default_factory=list)
+    excluded_student_ids: list[int] = Field(default_factory=list)
 
 
 class PublicCase(BaseModel):
@@ -697,6 +709,10 @@ class ExamCreate(BaseModel):
     show_score_after_grading: bool = False
     show_questions_after_review: bool = False
     show_answers_after_review: bool = False
+    audience_mode: Literal["all_enrolled", "selected_classes", "whitelist_only"] = "all_enrolled"
+    audience_class_ids: list[int] = Field(default_factory=list)
+    whitelist_student_ids: list[int] = Field(default_factory=list)
+    excluded_student_ids: list[int] = Field(default_factory=list)
 
 
 class ExamUpdate(BaseModel):
@@ -708,6 +724,10 @@ class ExamUpdate(BaseModel):
     show_score_after_grading: bool | None = None
     show_questions_after_review: bool | None = None
     show_answers_after_review: bool | None = None
+    audience_mode: Literal["all_enrolled", "selected_classes", "whitelist_only"] | None = None
+    audience_class_ids: list[int] | None = None
+    whitelist_student_ids: list[int] | None = None
+    excluded_student_ids: list[int] | None = None
 
 
 class ExamRead(BaseModel):
@@ -732,6 +752,10 @@ class ExamRead(BaseModel):
     # 当前学生对考试的已交状态：存在 submitted/grading/graded 任一状态的提交记录即视为已考
     # （与 dashboard 待办语义一致）。仅学生考试列表接口计算该值；教师/管理员视图与详情接口保持默认 False。
     is_submitted: bool = False
+    audience_mode: str = "all_enrolled"
+    audience_class_ids: list[int] = Field(default_factory=list)
+    whitelist_student_ids: list[int] = Field(default_factory=list)
+    excluded_student_ids: list[int] = Field(default_factory=list)
 
 
 class ExamSubmitRequest(BaseModel):

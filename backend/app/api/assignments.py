@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,8 @@ from app.models import (
 )
 from app.schemas import (
     AssignmentCreate,
+    CourseStudentImportResult,
+    CourseStudentImportRow,
     AssignmentRead,
     AssignmentUpdate,
     JudgeQuestionCreate,
@@ -26,6 +28,11 @@ from app.schemas import (
     PaginatedResponse,
 )
 from app.services.time_utils import utc_now
+from app.services.audience_service import (
+    assignment_visible_condition, import_audience_students, parse_student_csv,
+    populate_audience_cache, require_effective_audience, save_audience,
+    student_in_assignment_audience,
+)
 
 router = APIRouter(prefix="/assignments", tags=["assignments"])
 
@@ -146,22 +153,18 @@ def list_assignments(
         query = query.where(Assignment.course_id == course_id)
         count_query = count_query.where(Assignment.course_id == course_id)
     if current_user.role == "student":
-        # 学生只看到 published assignment + published course + enrolled
+        # 学生只看到 published course + 自己属于发布范围的作业
         query = (
             query.join(Course, Assignment.course_id == Course.id)
-            .join(CourseEnrollment, Course.id == CourseEnrollment.course_id)
             .where(Assignment.status == "published")
             .where(Course.status == "published")
-            .where(CourseEnrollment.student_id == current_user.id)
-            .where(CourseEnrollment.status == "enrolled")
+            .where(assignment_visible_condition(current_user.id))
         )
         count_query = (
             count_query.join(Course, Assignment.course_id == Course.id)
-            .join(CourseEnrollment, Course.id == CourseEnrollment.course_id)
             .where(Assignment.status == "published")
             .where(Course.status == "published")
-            .where(CourseEnrollment.student_id == current_user.id)
-            .where(CourseEnrollment.status == "enrolled")
+            .where(assignment_visible_condition(current_user.id))
         )
     elif current_user.role == "teacher":
         query = query.join(Course, Assignment.course_id == Course.id).where(Course.teacher_id == current_user.id)
@@ -172,6 +175,7 @@ def list_assignments(
         count_query = count_query.where(Assignment.id == -1)
     total = db.scalar(count_query) or 0
     assignments = db.scalars(query.order_by(Assignment.id).offset((page - 1) * page_size).limit(page_size)).all()
+    populate_audience_cache(db, task_type="assignment", tasks=list(assignments))
     # 仅学生视角计算提交状态，供任务中心区分已交/待办（教师/管理员保持默认 False）
     submitted_map = _submitted_map(db, assignments, current_user.id) if current_user.role == "student" else {}
     items = []
@@ -195,6 +199,10 @@ def create_assignment(
         if course.teacher_id != current_user.id:
             raise api_error(403, "FORBIDDEN", "只能在自己的课程中创建作业")
     data = payload.model_dump()
+    audience_mode = data.pop("audience_mode")
+    audience_class_ids = data.pop("audience_class_ids")
+    whitelist_student_ids = data.pop("whitelist_student_ids")
+    excluded_student_ids = data.pop("excluded_student_ids")
     # Phase 4：教师显式选择的环境必须 available；省略时服务层解析 basic 当前可用版本
     from app.services.environment_service import (
         resolve_basic_available_version,
@@ -207,6 +215,13 @@ def create_assignment(
         data["environment_version_id"] = basic.id if basic else None
     assignment = Assignment(**data, created_by_id=current_user.id)
     db.add(assignment)
+    db.flush()
+    save_audience(
+        db, task_type="assignment", task_id=assignment.id, course=course,
+        audience_mode=audience_mode, audience_class_ids=audience_class_ids,
+        whitelist_student_ids=whitelist_student_ids, excluded_student_ids=excluded_student_ids,
+        actor_id=current_user.id,
+    )
     db.commit()
     db.refresh(assignment)
     return assignment
@@ -220,10 +235,18 @@ def get_assignment(
 ):
     assignment = require_assignment(assignment_id, db)
     course = db.get(Course, assignment.course_id)
-    if not course or not can_access_course_content(course, current_user, db):
+    if current_user.role == "student":
+        if not course or not (
+            student_in_assignment_audience(db, assignment, current_user.id)
+            or can_access_course_content(course, current_user, db)
+        ):
+            raise api_error(403, "FORBIDDEN", "没有权限查看该作业")
+        if assignment.status != "published":
+            raise api_error(403, "ASSIGNMENT_NOT_AVAILABLE", "作业未发布")
+        if not student_in_assignment_audience(db, assignment, current_user.id):
+            raise api_error(403, "NOT_IN_ASSIGNMENT_AUDIENCE", "你不在本次作业发布范围内")
+    elif not course or not can_access_course_content(course, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限查看该作业")
-    if current_user.role == "student" and assignment.status != "published":
-        raise api_error(403, "ASSIGNMENT_NOT_AVAILABLE", "作业未发布")
     return _assignment_with_summary(db, assignment)
 
 
@@ -237,6 +260,9 @@ def update_assignment(
     assignment = require_assignment(assignment_id, db)
     ensure_assignment_manager(assignment, current_user, db)
     updates = payload.model_dump(exclude_unset=True)
+    audience_updates = {key: updates.pop(key) for key in (
+        "audience_mode", "audience_class_ids", "whitelist_student_ids", "excluded_student_ids",
+    ) if key in updates}
     # Phase 4 门禁：已发布作业的环境字段不可直接改，必须先回到 draft（发布后绑定不可变）
     from app.services.environment_service import ENV_FIELDS, validate_environment_selection
 
@@ -248,9 +274,76 @@ def update_assignment(
         validate_environment_selection(db, updates["environment_version_id"])
     for key, value in updates.items():
         setattr(assignment, key, value)
+    if audience_updates:
+        previous_mode = assignment.audience_mode
+        has_submissions = db.scalar(
+            select(Submission.id)
+            .join(JudgeQuestion, Submission.question_id == JudgeQuestion.id)
+            .where(JudgeQuestion.assignment_id == assignment.id)
+            .limit(1)
+        ) is not None
+        if assignment.status == "published" and has_submissions:
+            if audience_updates.get("audience_mode", previous_mode) != previous_mode:
+                raise api_error(409, "ASSIGNMENT_AUDIENCE_MODE_LOCKED", "已有学生提交，不能切换发布基础范围")
+            from app.services.audience_service import effective_student_ids
+            current_ids = effective_student_ids(
+                db, task_type="assignment", task_id=assignment.id,
+                course=assignment.course if assignment.course else db.get(Course, assignment.course_id),
+            )
+        current = {
+            "audience_mode": previous_mode,
+            "audience_class_ids": assignment.audience_class_ids,
+            "whitelist_student_ids": assignment.whitelist_student_ids,
+            "excluded_student_ids": assignment.excluded_student_ids,
+        }
+        current.update(audience_updates)
+        save_audience(
+            db, task_type="assignment", task_id=assignment.id,
+            course=assignment.course if assignment.course else db.get(Course, assignment.course_id),
+            actor_id=current_user.id, **current,
+        )
+        if assignment.status == "published" and has_submissions:
+            started_ids = set(db.scalars(
+                select(Submission.student_id)
+                .join(JudgeQuestion, Submission.question_id == JudgeQuestion.id)
+                .where(JudgeQuestion.assignment_id == assignment.id)
+            ).all())
+            from app.services.audience_service import effective_student_ids as _effective_ids
+            new_ids = _effective_ids(
+                db, task_type="assignment", task_id=assignment.id,
+                course=assignment.course if assignment.course else db.get(Course, assignment.course_id),
+            )
+            if (current_ids - new_ids) & started_ids:
+                raise api_error(409, "ASSIGNMENT_AUDIENCE_STUDENT_SUBMITTED", "不能移除已经提交作业的学生")
     db.commit()
     db.refresh(assignment)
     return assignment
+
+
+@router.post("/{assignment_id}/audience/import", response_model=CourseStudentImportResult)
+async def import_assignment_audience(
+    assignment_id: int,
+    kind: str = "include",
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """CSV 导入作业范围白名单（include）或排除名单（exclude）。"""
+    if kind not in ("include", "exclude"):
+        raise api_error(422, "INVALID_AUDIENCE_KIND", "kind 必须为 include 或 exclude")
+    assignment = require_assignment(assignment_id, db)
+    ensure_assignment_manager(assignment, current_user, db)
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise api_error(422, "CSV_TOO_LARGE", "CSV 文件不能超过 2 MB")
+    rows, error = parse_student_csv(content)
+    if error:
+        raise api_error(422, "CSV_INVALID", error)
+    result = import_audience_students(db, task_type="assignment", task_id=assignment.id, kind=kind, rows=rows)
+    return CourseStudentImportResult(
+        created=result["created"], updated=result["updated"], skipped=result["skipped"],
+        errors=[CourseStudentImportRow(**row) for row in result["errors"]],
+    )
 
 
 @router.post("/{assignment_id}/publish", response_model=AssignmentRead)
@@ -278,6 +371,10 @@ def publish_assignment(
             "ASSIGNMENT_HAS_NO_QUESTIONS",
             "作业必须至少包含一道题才能发布",
         )
+    require_effective_audience(
+        db, task_type="assignment", task_id=assignment.id,
+        course=assignment.course if assignment.course else db.get(Course, assignment.course_id),
+    )
 
     # AI 评分门禁：非 legacy 题目需要锁定 Rubric
     questions = [q for q in all_questions if q.grading_mode != "legacy"]

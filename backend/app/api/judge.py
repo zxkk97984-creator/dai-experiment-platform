@@ -24,6 +24,7 @@ from app.services.import_policy import classify_imports
 from app.services.time_utils import as_utc, utc_now
 from app.worker.judge_worker import _get_timeout, _run_docker_pytest, _status_from_pytest
 from app.services.student_ai_results import build_student_grading_breakdown
+from app.services.audience_service import student_in_assignment_audience
 
 router = APIRouter(prefix="/judge", tags=["judge"])
 
@@ -78,7 +79,15 @@ def create_submission(
     if not assignment or assignment.status != "published":
         raise api_error(400, "ASSIGNMENT_NOT_AVAILABLE", "作业不可提交")
     course = db.get(Course, assignment.course_id)
-    if not course or not can_access_course_content(course, current_user, db):
+    if current_user.role == "student":
+        if not course or not (
+            student_in_assignment_audience(db, assignment, current_user.id)
+            or can_access_course_content(course, current_user, db)
+        ):
+            raise api_error(403, "FORBIDDEN", "没有权限提交该题目")
+        if not student_in_assignment_audience(db, assignment, current_user.id):
+            raise api_error(403, "NOT_IN_ASSIGNMENT_AUDIENCE", "你不在本次作业发布范围内")
+    elif not course or not can_access_course_content(course, current_user, db):
         raise api_error(403, "FORBIDDEN", "没有权限提交该题目")
     require_assignment_before_deadline(assignment)
     # check max attempts

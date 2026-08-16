@@ -19,6 +19,10 @@ const modalAiExpanded = ref(true)
 const settings = ref({ title: '', duration_minutes: 60, start_at: '', end_at: '', show_score_after_grading: false, show_questions_after_review: false, show_answers_after_review: false })
 const settingsReady = ref(false)
 const settingsSaving = ref(false)
+const audienceMode = ref('all_enrolled')
+const audienceClassIds = ref([])
+const audienceWhitelistIds = ref([])
+const audienceExcludedIds = ref([])
 
 function blankChoice() {
   return { options: [{ key: 'A', text: '', correct: false }, { key: 'B', text: '', correct: false }], scoring_mode: 'all_or_nothing' }
@@ -38,6 +42,8 @@ function toLocalInput(value) {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
   return local.toISOString().slice(0, 16)
 }
+function onAudienceImported() { load() }
+
 async function load() {
   loading.value = true
   try {
@@ -52,6 +58,10 @@ async function load() {
         show_questions_after_review: Boolean(exam.value.show_questions_after_review),
         show_answers_after_review: Boolean(exam.value.show_answers_after_review),
       }
+      audienceMode.value = exam.value.audience_mode || 'all_enrolled'
+      audienceClassIds.value = [...(exam.value.audience_class_ids || [])]
+      audienceWhitelistIds.value = [...(exam.value.whitelist_student_ids || [])]
+      audienceExcludedIds.value = [...(exam.value.excluded_student_ids || [])]
       settingsReady.value = true
     }
   } catch { app.showToast('加载失败', 'error') } finally { loading.value = false }
@@ -144,11 +154,31 @@ async function save() {
 function finishEditing() { showForm.value = false; load() }
 async function remove(qId) { if(confirm('确认删除此题？')) { try { await examsAPI.deleteQuestion(examId, qId); load() } catch { app.showToast('删除失败', 'error') } } }
 
+function questionPublishOk(q) {
+  if (!q || !q.prompt?.trim() || !(Number(q.points) > 0)) return false
+  if (q.question_type === 'code') return Boolean(configStatus(q).ok)
+  if (q.question_type === 'single_choice') {
+    return Object.keys(q.options || {}).length >= 2 && (q.correct_answer?.correct || []).length === 1
+  }
+  if (q.question_type === 'multi_choice') {
+    return Object.keys(q.options || {}).length >= 2 && (q.correct_answer?.correct || []).length >= 1
+  }
+  if (q.question_type === 'fill_blank') return (q.correct_answer?.blanks || []).length > 0
+  return false
+}
+
+const questionChecks = computed(() => questions.value.map((q, index) => ({
+  label: `第 ${String(index + 1).padStart(2, '0')} 题 · ${q.question_type === 'code' ? '编程题' : q.question_type === 'single_choice' ? '单选题' : q.question_type === 'multi_choice' ? '多选题' : '填空题'}`,
+  ok: questionPublishOk(q),
+  hint: q.question_type === 'code' && !questionPublishOk(q) ? 'AI 配置未完成' : '',
+})))
+
 const publishChecks = computed(() => [
   { label: '已设置考试名称', ok: Boolean(settings.value.title.trim()) },
   { label: '开始时间早于最晚进入时间', ok: Boolean(settings.value.start_at && settings.value.end_at && new Date(settings.value.start_at) < new Date(settings.value.end_at)) },
   { label: '考试时长有效', ok: Number(settings.value.duration_minutes) > 0 },
-  { label: '至少包含一道合格题目', ok: questions.value.length > 0 },
+  ...questionChecks.value,
+  { label: '已设置有效考生范围', ok: audienceMode.value === 'all_enrolled' || (audienceMode.value === 'selected_classes' && audienceClassIds.value.length > 0) || (audienceMode.value === 'whitelist_only' && audienceWhitelistIds.value.length > 0) },
 ])
 const readyToPublish = computed(() => publishChecks.value.every(check => check.ok))
 const totalPoints = computed(() => questions.value.reduce((sum, item) => sum + Number(item.points || 0), 0))
@@ -176,6 +206,10 @@ async function saveSettings({ publish = false, unpublish = false } = {}) {
       show_score_after_grading: settings.value.show_score_after_grading,
       show_questions_after_review: settings.value.show_questions_after_review || settings.value.show_answers_after_review,
       show_answers_after_review: settings.value.show_answers_after_review,
+      audience_mode: audienceMode.value,
+      audience_class_ids: audienceClassIds.value,
+      whitelist_student_ids: audienceWhitelistIds.value,
+      excluded_student_ids: audienceExcludedIds.value,
     }
     if (publish) payload.status = 'published'
     if (unpublish) payload.status = 'draft'
@@ -309,6 +343,28 @@ onMounted(load)
               <span>学生在最晚进入时间前开始，即可获得完整的 {{ settings.duration_minutes || 0 }} 分钟。</span>
             </div>
 
+            <div class="audience-section">
+              <div class="strategy-heading">
+                <h3>考生范围</h3>
+                <p>班级 + 白名单，白名单优先于排除名单。</p>
+              </div>
+              <TaskAudiencePicker
+                task-kind="exam"
+                :task-id="examId"
+                :course-id="exam?.course_id"
+                :audience-mode="audienceMode"
+                :class-ids="audienceClassIds"
+                :whitelist-ids="audienceWhitelistIds"
+                :excluded-ids="audienceExcludedIds"
+                :disabled="exam?.status !== 'draft'"
+                @update:audience-mode="audienceMode = $event"
+                @update:class-ids="audienceClassIds = $event"
+                @update:whitelist-ids="audienceWhitelistIds = $event"
+                @update:excluded-ids="audienceExcludedIds = $event"
+                @imported="onAudienceImported"
+              />
+            </div>
+
             <div class="strategy-section">
               <div class="strategy-heading">
                 <h3>公开策略</h3>
@@ -351,7 +407,7 @@ onMounted(load)
             <div class="checklist">
               <div v-for="check in publishChecks" :key="check.label" class="check-row" :class="{ ok: check.ok }">
                 <span class="check-icon" aria-hidden="true"><AppIcon :name="check.ok ? 'check' : 'warning'" :size="14" /></span>
-                <span>{{ check.label }}</span>
+                <span>{{ check.label }}<template v-if="check.hint"> · {{ check.hint }}</template></span>
                 <small>{{ check.ok ? '通过' : '待完善' }}</small>
               </div>
             </div>
@@ -561,7 +617,7 @@ onMounted(load)
 .rail-form input:disabled { background:var(--surface-subtle); color:var(--muted); }
 .timing-note { display:flex; align-items:flex-start; gap:8px; margin:15px 0 0; padding:10px 11px; border-radius: var(--radius-md); background:var(--warning-bg); color:var(--danger); font-size:10px; line-height:1.55; }
 .timing-note .app-icon { flex:none; margin-top:1px; }
-.strategy-section { margin-top:18px; padding-top:18px; border-top:1px solid var(--border); }
+.strategy-section,.audience-section { margin-top:18px; padding-top:18px; border-top:1px solid var(--border); }
 .strategy-heading { margin-bottom:13px; }
 .strategy-heading h3 { margin:0; color:var(--fg); font-size:13px; }
 .strategy-heading p { margin:4px 0 0; color:var(--muted); font-size:10px; line-height:1.5; }

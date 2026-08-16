@@ -308,11 +308,73 @@ class Assignment(TimestampMixin, Base):
     )  # unrestricted | restricted
     allowed_imports: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
+    audience_mode: Mapped[str] = mapped_column(
+        String(20), default="all_enrolled", server_default="all_enrolled", nullable=False, index=True
+    )
+    audience_class_links: Mapped[list["AssignmentAudienceClass"]] = relationship(
+        back_populates="assignment", cascade="all, delete-orphan"
+    )
+    audience_student_links: Mapped[list["AssignmentAudienceStudent"]] = relationship(
+        back_populates="assignment", cascade="all, delete-orphan"
+    )
+
     course: Mapped[Course] = relationship()
     questions: Mapped[list["JudgeQuestion"]] = relationship(
         back_populates="assignment",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def audience_class_ids(self) -> list[int]:
+        if "_audience_class_ids" in self.__dict__:
+            return self.__dict__["_audience_class_ids"]
+        return [link.teaching_class_id for link in self.audience_class_links]
+
+    @property
+    def whitelist_student_ids(self) -> list[int]:
+        if "_whitelist_student_ids" in self.__dict__:
+            return self.__dict__["_whitelist_student_ids"]
+        return [link.student_id for link in self.audience_student_links if link.kind == "include"]
+
+    @property
+    def excluded_student_ids(self) -> list[int]:
+        if "_excluded_student_ids" in self.__dict__:
+            return self.__dict__["_excluded_student_ids"]
+        return [link.student_id for link in self.audience_student_links if link.kind == "exclude"]
+
+
+class AssignmentAudienceClass(TimestampMixin, Base):
+    """作业发布范围——选中的教学班（必须已绑定当前课程）。"""
+
+    __tablename__ = "assignment_audience_classes"
+    __table_args__ = (
+        UniqueConstraint("assignment_id", "teaching_class_id", name="uq_assignment_audience_class"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    assignment_id: Mapped[int] = mapped_column(ForeignKey("assignments.id", ondelete="CASCADE"), index=True)
+    teaching_class_id: Mapped[int] = mapped_column(ForeignKey("teaching_classes.id"), index=True)
+
+    assignment: Mapped["Assignment"] = relationship(back_populates="audience_class_links")
+
+
+class AssignmentAudienceStudent(TimestampMixin, Base):
+    """作业发布范围——额外加入 / 排除的学生。"""
+
+    __tablename__ = "assignment_audience_students"
+    __table_args__ = (
+        UniqueConstraint("assignment_id", "student_id", "kind", name="uq_assignment_audience_student_kind"),
+        Index("ix_assignment_audience_students_kind", "assignment_id", "kind"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    assignment_id: Mapped[int] = mapped_column(ForeignKey("assignments.id", ondelete="CASCADE"), index=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(20), default="include")  # include | exclude
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    assignment: Mapped["Assignment"] = relationship(back_populates="audience_student_links")
+    student: Mapped[User] = relationship(foreign_keys=[student_id])
 
 
 class JudgeQuestion(TimestampMixin, Base):
@@ -414,9 +476,70 @@ class Exam(TimestampMixin, Base):
     review_released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     review_released_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    audience_mode: Mapped[str] = mapped_column(
+        String(20), default="all_enrolled", server_default="all_enrolled", nullable=False, index=True
+    )
+    audience_class_links: Mapped[list["ExamAudienceClass"]] = relationship(
+        back_populates="exam", cascade="all, delete-orphan"
+    )
+    audience_student_links: Mapped[list["ExamAudienceStudent"]] = relationship(
+        back_populates="exam", cascade="all, delete-orphan"
+    )
 
     course: Mapped[Course] = relationship()
     questions: Mapped[list["ExamQuestion"]] = relationship(back_populates="exam", cascade="all, delete-orphan")
+
+    @property
+    def audience_class_ids(self) -> list[int]:
+        if "_audience_class_ids" in self.__dict__:
+            return self.__dict__["_audience_class_ids"]
+        return [link.teaching_class_id for link in self.audience_class_links]
+
+    @property
+    def whitelist_student_ids(self) -> list[int]:
+        if "_whitelist_student_ids" in self.__dict__:
+            return self.__dict__["_whitelist_student_ids"]
+        return [link.student_id for link in self.audience_student_links if link.kind == "include"]
+
+    @property
+    def excluded_student_ids(self) -> list[int]:
+        if "_excluded_student_ids" in self.__dict__:
+            return self.__dict__["_excluded_student_ids"]
+        return [link.student_id for link in self.audience_student_links if link.kind == "exclude"]
+
+
+class ExamAudienceClass(TimestampMixin, Base):
+    """考试发布范围——选中的教学班（必须已绑定当前课程）。"""
+
+    __tablename__ = "exam_audience_classes"
+    __table_args__ = (
+        UniqueConstraint("exam_id", "teaching_class_id", name="uq_exam_audience_class"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    exam_id: Mapped[int] = mapped_column(ForeignKey("exams.id", ondelete="CASCADE"), index=True)
+    teaching_class_id: Mapped[int] = mapped_column(ForeignKey("teaching_classes.id"), index=True)
+
+    exam: Mapped["Exam"] = relationship(back_populates="audience_class_links")
+
+
+class ExamAudienceStudent(TimestampMixin, Base):
+    """考试发布范围——额外加入 / 排除的学生。"""
+
+    __tablename__ = "exam_audience_students"
+    __table_args__ = (
+        UniqueConstraint("exam_id", "student_id", "kind", name="uq_exam_audience_student_kind"),
+        Index("ix_exam_audience_students_kind", "exam_id", "kind"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    exam_id: Mapped[int] = mapped_column(ForeignKey("exams.id", ondelete="CASCADE"), index=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(20), default="include")  # include | exclude
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    exam: Mapped["Exam"] = relationship(back_populates="audience_student_links")
+    student: Mapped[User] = relationship(foreign_keys=[student_id])
 
 
 class ExamSubmission(TimestampMixin, Base):

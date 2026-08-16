@@ -14,6 +14,7 @@ import AIQuestionConfig from '../../components/ai/AIQuestionConfig.vue'
 import AiConfigForm from '../../components/ai/AiConfigForm.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import EnvironmentProfilePicker from '../../components/common/EnvironmentProfilePicker.vue'
+import TaskAudiencePicker from '../../components/teacher/TaskAudiencePicker.vue'
 import QeMarkdownEditor from '../../components/teacher/question-editor/QeMarkdownEditor.vue'
 import QeCodeEditor from '../../components/teacher/question-editor/QeCodeEditor.vue'
 import QeTestCases from '../../components/teacher/question-editor/QeTestCases.vue'
@@ -103,6 +104,11 @@ const envOptions = ref([])
 const assignmentEnvId = ref(null)
 const assignmentPolicy = ref('unrestricted')
 const assignmentAllowedImports = ref([])
+const audienceMode = ref('all_enrolled')
+const audienceClassIds = ref([])
+const audienceWhitelistIds = ref([])
+const audienceExcludedIds = ref([])
+const audienceSaving = ref(false)
 // 题目级环境：env_mode = inherit(继承作业) | override(指定版本)
 const questionEnvMode = ref('inherit')
 const questionEnvId = ref(null)
@@ -201,6 +207,10 @@ async function fetch() {
    assignmentEnvId.value = aRes.data.environment_version_id ?? null
    assignmentPolicy.value = aRes.data.import_policy_mode || 'unrestricted'
    assignmentAllowedImports.value = [...(aRes.data.allowed_imports || [])]
+   audienceMode.value = aRes.data.audience_mode || 'all_enrolled'
+   audienceClassIds.value = [...(aRes.data.audience_class_ids || [])]
+   audienceWhitelistIds.value = [...(aRes.data.whitelist_student_ids || [])]
+   audienceExcludedIds.value = [...(aRes.data.excluded_student_ids || [])]
    if (!assignmentEnvId.value && envOptions.value.length) {
      assignmentEnvId.value = envOptions.value[0].environment_version_id
    }
@@ -256,6 +266,26 @@ async function saveSchedule(nextDue = pendingScheduleDue.value) {
    scheduleSaving.value = false
  }
 }
+
+async function saveAssignmentAudience() {
+  audienceSaving.value = true
+  try {
+    const res = await assignmentsAPI.update(route.params.id, {
+      audience_mode: audienceMode.value,
+      audience_class_ids: audienceClassIds.value,
+      whitelist_student_ids: audienceWhitelistIds.value,
+      excluded_student_ids: audienceExcludedIds.value,
+    })
+    assignment.value = res.data
+    app.showToast('发布范围已保存', 'success')
+  } catch (e) {
+    app.showToast(e.response?.data?.detail?.message || '发布范围保存失败', 'error')
+  } finally {
+    audienceSaving.value = false
+  }
+}
+
+function onAudienceImported() { fetch() }
 
 // 保存作业默认环境与白名单（发布后绑定不可变，后端 409）
 async function saveAssignmentEnv() {
@@ -720,6 +750,32 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
                   <p v-if="assignmentMismatch" class="form-hint env-warn">{{ assignmentMismatch }}</p>
                 </div>
                 <button v-if="assignmentDraft" class="btn-primary btn-sm" @click="saveAssignmentEnv">保存作业环境设置</button>
+              </div>
+
+              <div class="qe-side-divider"></div>
+
+              <div class="qe-side-sec qe-side-sec--audience">
+                <div class="qe-side-sec-head">
+                  <h3 class="qe-side-title">发布范围</h3>
+                  <span v-if="!assignmentDraft" class="badge badge-neutral">已有提交后受限</span>
+                </div>
+                <p class="qe-side-sub">选择班级或学生，白名单学生无需提前选课。</p>
+                <TaskAudiencePicker
+                  task-kind="assignment"
+                  :task-id="route.params.id"
+                  :course-id="assignment?.course_id"
+                  :audience-mode="audienceMode"
+                  :class-ids="audienceClassIds"
+                  :whitelist-ids="audienceWhitelistIds"
+                  :excluded-ids="audienceExcludedIds"
+                  :disabled="!assignmentDraft"
+                  @update:audience-mode="audienceMode = $event"
+                  @update:class-ids="audienceClassIds = $event"
+                  @update:whitelist-ids="audienceWhitelistIds = $event"
+                  @update:excluded-ids="audienceExcludedIds = $event"
+                  @imported="onAudienceImported"
+                />
+                <button v-if="assignmentDraft" class="btn-primary btn-sm" :disabled="audienceSaving" @click="saveAssignmentAudience">保存发布范围</button>
               </div>
 
               <div class="qe-side-divider"></div>

@@ -24,6 +24,9 @@ from app.schemas.dashboard import (
 from app.services.submission_status import (
     assignment_display, exam_display, experiment_display,
 )
+from app.services.audience_service import (
+    assignment_visible_condition, effective_student_ids, exam_visible_condition,
+)
 
 PRIORITY_CAP = 8
 FEEDBACK_CAP = 5
@@ -102,7 +105,7 @@ def build_student_dashboard(db: Session, user: User, now: datetime | None = None
             .join(Course, Course.id == Assignment.course_id)
             .where(
                 Assignment.course_id.in_(enrolled_ids),
-                Assignment.status == "published",
+                assignment_visible_condition(user.id),
                 exists().where(
                     and_(
                         JudgeQuestion.assignment_id == Assignment.id,
@@ -132,7 +135,7 @@ def build_student_dashboard(db: Session, user: User, now: datetime | None = None
             .join(Course, Course.id == Exam.course_id)
             .where(
                 Exam.course_id.in_(enrolled_ids),
-                Exam.status == "published",
+                exam_visible_condition(user.id),
                 or_(Exam.start_at > now, Exam.end_at > now),
                 ~exists().where(
                     ExamSubmission.exam_id == Exam.id,
@@ -235,7 +238,7 @@ def build_student_dashboard(db: Session, user: User, now: datetime | None = None
                 select(Assignment.course_id, func.count(Assignment.id))
                 .where(
                     Assignment.course_id.in_(enrolled_ids),
-                    Assignment.status == "published",
+                    assignment_visible_condition(user.id),
                     exists().where(
                         and_(
                             JudgeQuestion.assignment_id == Assignment.id,
@@ -254,7 +257,7 @@ def build_student_dashboard(db: Session, user: User, now: datetime | None = None
                 select(Exam.course_id, func.count(Exam.id))
                 .where(
                     Exam.course_id.in_(enrolled_ids),
-                    Exam.status == "published",
+                    exam_visible_condition(user.id),
                     or_(Exam.start_at > now, Exam.end_at > now),
                     ~exists().where(
                         ExamSubmission.exam_id == Exam.id,
@@ -475,25 +478,20 @@ def _deadline_stats_batch(db: Session, assignments: list[Assignment]) -> dict[in
     for (assignment_id, student_id), questions in seen.items():
         if total_questions.get(assignment_id, 0) > 0 and len(questions) >= total_questions[assignment_id]:
             completed.setdefault(assignment_id, set()).add(student_id)
-    # 当前 enrolled 学生（按课程分组，一次查询）
-    course_ids = list({a.course_id for a in assignments})
-    enrolled_by_course: dict[int, set[int]] = {}
-    if course_ids:
-        for cid, sid in db.execute(
-            select(CourseEnrollment.course_id, CourseEnrollment.student_id)
-            .where(
-                CourseEnrollment.course_id.in_(course_ids),
-                CourseEnrollment.status == "enrolled",
-            )
-        ).all():
-            enrolled_by_course.setdefault(cid, set()).add(sid)
-    return {
-        a.id: (
-            len(completed.get(a.id, set()) & enrolled_by_course.get(a.course_id, set())),
-            len(enrolled_by_course.get(a.course_id, set())),
+    # 有效发布范围：作业级 audience（课程在册 / 指定班级 / 白名单 ± 排除）
+    from app.models import Course as _Course
+
+    result = {}
+    for a in assignments:
+        course = db.get(_Course, a.course_id)
+        audience = effective_student_ids(
+            db, task_type="assignment", task_id=a.id, course=course,
+        ) if course else set()
+        result[a.id] = (
+            len(completed.get(a.id, set()) & audience),
+            len(audience),
         )
-        for a in assignments
-    }
+    return result
 
 
 def _task_urgency(now: datetime, due_at: datetime | None, oldest_at: datetime | None) -> str:

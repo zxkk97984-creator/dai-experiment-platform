@@ -101,3 +101,4 @@
 - [x] 课程名单 CSV 导入（`POST /courses/{id}/students/import`）。
 - [x] 历史 `tests_passed/tests_total` 回填脚本 `scripts/backfill_test_counts.py`。
 - [x] 创建课程表单增加课程编号。
+- [x] 作业 / 考试任务级发布范围：`all_enrolled / selected_classes / whitelist_only` + 白名单/排除名单，统计按有效范围计算；前端发布检查改为逐题检查。

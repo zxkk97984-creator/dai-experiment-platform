@@ -7,6 +7,11 @@ export const examsAPI = {
   update(id, data) { return client.patch(`/exams/${id}`, data) },
   delete(id) { return client.delete(`/exams/${id}`) },
   getSession(id) { return client.get(`/exams/${id}/session`) },
+  importAudienceStudents(examId, kind, file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    return client.post(`/exams/${examId}/audience/import`, formData, { params: { kind } })
+  },
   start(id) { return client.post(`/exams/${id}/start`) },
   submit(id, data = {}) { return client.post(`/exams/${id}/submit`, data) },
   getGrades(id) { return client.get(`/exams/${id}/grades`) },

@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Course, CourseEnrollment, Exam, ExamSubmission, User
+from app.services.audience_service import effective_student_ids
 from app.schemas.statistics import ExamStatisticsRead, TeacherGradeStatisticsRead
 
 
@@ -44,15 +45,10 @@ def build_teacher_grade_statistics(db: Session, user: User) -> TeacherGradeStati
         submissions = db.scalars(
             select(ExamSubmission).where(ExamSubmission.exam_id == exam.id)
         ).all()
-        expected = (
-            db.scalar(
-                select(func.count(func.distinct(CourseEnrollment.student_id))).where(
-                    CourseEnrollment.course_id == exam.course_id,
-                    CourseEnrollment.status == "enrolled",
-                )
-            )
-            or 0
+        audience_ids = effective_student_ids(
+            db, task_type="exam", task_id=exam.id, course=exam.course,
         )
+        expected = len(audience_ids)
         expected = max(expected, len({submission.student_id for submission in submissions}))
         scores = [submission.score for submission in submissions if submission.score is not None]
         graded_count = len(scores)

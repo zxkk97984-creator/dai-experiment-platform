@@ -1,14 +1,19 @@
 """作业发布门禁测试：POST 仅 draft、PATCH 不可改 status、发布需至少一题、零题不视为已提交。"""
 
 from conftest import auth_header, create_course_db, create_user, login
+from app.models import CourseEnrollment
 
 API = "/api/v1"
 
 
 def _setup_teacher(client, db_session_factory):
     create_user(db_session_factory, "teacher", "teacher")
+    student = create_user(db_session_factory, "audience-student", "student")
     token, _ = login(client, "teacher")
     course_id = create_course_db(db_session_factory, teacher_username="teacher", status="draft")
+    with db_session_factory() as db:
+        db.add(CourseEnrollment(course_id=course_id, student_id=student.id, status="enrolled", origin="manual"))
+        db.commit()
     return token, course_id
 
 
