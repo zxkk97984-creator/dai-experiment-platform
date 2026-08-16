@@ -210,7 +210,7 @@ onMounted(fetchDetail)
         </section>
 
         <div class="workbench">
-          <div class="wb-col stack">
+          <div class="wb-col stack wb-col--left">
             <div class="code-panel">
               <div class="code-panel-head">
                 <span class="fname">submission.py</span>
@@ -273,7 +273,7 @@ onMounted(fetchDetail)
             </div>
           </div>
 
-          <div class="wb-col stack">
+          <div class="wb-col stack wb-col--right">
             <div v-if="detail.ai_result" class="evidence-block ai">
               <div class="row-between">
                 <span class="eyebrow" style="color: var(--info);">AI 评分依据 · 模型判断</span>
@@ -360,7 +360,7 @@ onMounted(fetchDetail)
 .score-strip { grid-template-columns: repeat(3, 1fr); }
 
 /* 双栏工作台：左列 = 代码/测试/反馈/评分标准，右列 = AI 评分依据。
-   两列高度接近，避免教师下拉复核时单侧出现大段留白。 */
+   桌面端两栏固定等高、各自内部滚动，内容多寡不再造成单侧留白。 */
 .workbench {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
@@ -368,7 +368,19 @@ onMounted(fetchDetail)
   align-items: start;
   min-width: 0;
 }
-.wb-col.stack { min-width: 0; }
+.wb-col.stack { min-width: 0; min-height: 0; }
+
+@media (min-width: 1025px) {
+  .workbench {
+    height: calc(100vh - var(--header-height) - 2 * var(--page-pad));
+    align-items: stretch;
+  }
+  .wb-col.stack {
+    overflow-y: auto;
+  }
+  /* 保持各面板自然高度，由所在栏内部滚动，不挤压代码卡片 */
+  .wb-col.stack > * { flex: 0 0 auto; }
+}
 
 .test-groups { gap: 12px; }
 .test-groups > * { margin-top: 0; }
