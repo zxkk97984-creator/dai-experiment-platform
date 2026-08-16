@@ -67,7 +67,10 @@ cd backend
 ```
 
 > `--reset-demo` 只删除 `demo_seed_marks` 登记过的行（按外键拓扑逆序）。
-> 未登记行（即使用户手动给 Demo 题目提交过）绝不删除；外键阻断时整体回滚并报告。
+> 未登记业务行（即使用户手动给 Demo 题目提交过）绝不删除；外键阻断时整体回滚并报告。
+> 为保障可重复重置，以下 API/审计运行态会随 Demo 数据一并清理：
+> `notifications` / `notification_reads` / `user_preferences`（引用 Demo 用户）、
+> `grade_overrides`（引用 Demo code_grades）。
 > 绝不 DROP DATABASE、不动环境控制面、不动 E2E 数据。
 
 ---
@@ -79,7 +82,7 @@ cd backend
 | `demo_admin` | 系统管理员 | admin | 管理端：用户 / 教务 / 课程 / 环境档位 |
 | `teacher_zhang` | 张明远 | teacher | **旗舰教师**：完整课程 / 作业 / 考试 / AI 复核链路 |
 | `teacher_chen` | 陈思远 | teacher | 第二教师：支撑课程 + 章节测验 |
-| `teacher_zhao` | 赵清禾 | teacher | 第三教师：含 1 门草稿课程 |
+| `teacher_zhao` | 赵清禾 | teacher | 第三教师：含 1 门草稿课程 + 1 门白名单课程 |
 | `demo_developer` | 实验平台开发者 | developer | 模板 / Studio |
 | `demo_student_elite` | 林书瑶 | student | 优秀学生：全勤、高分、AI 无复核 |
 | `demo_student_average` | 周子涵 | student | 普通学生：偶尔迟交、AI 建议较多 |
@@ -107,6 +110,11 @@ Notebook 模板（published）→ 挂课时 + 独立模块 → 学生打开（st
 学期初全局公告 → 课程公告 → 已读回执 → 学生首页未读数真实变化；教务页展示当前学期
 与已关闭历史学期。
 
+**链路 D：白名单课程与权限边界**
+教师赵清禾发布「AI 创新实践（白名单）」课程（不绑定教学班）→ 仅 elite / average / new
+三名学生进入白名单 → elite 已手动选课可访问内容，average / new 仅可发现未选课，
+struggling 不在白名单（课程列表不可见），用于验证课程可见性、白名单管理和选课权限。
+
 ---
 
 ## 五、数据规模（播种后真实计数）
@@ -117,12 +125,12 @@ Notebook 模板（published）→ 挂课时 + 独立模块 → 学生打开（st
 | academic_terms | 2 | assignments | 10 |
 | teaching_classes | 6 | judge_questions | 15 |
 | teaching_class_students | 60 | submissions | ~636 |
-| courses | 7 | exams / exam_questions | 3 / 15 |
-| chapters | 19 | exam_submissions / exam_answers | ~72 / ~360 |
-| lessons | 63 | notebook_templates / versions | 4 / 4 |
-| course_enrollments | 210 | experiment_modules / records / submissions | 4 / ~157 / ~156 |
+| courses | 8 | exams / exam_questions | 3 / 15 |
+| chapters | 21 | exam_submissions / exam_answers | ~72 / ~360 |
+| lessons | 69 | notebook_templates / versions | 4 / 4 |
+| course_enrollments | 211 | experiment_modules / records / submissions | 4 / ~157 / ~156 |
 | question_rubrics | 5 | code_grades | ~180 |
-| announcements | 5 | | |
+| course_whitelist_students | 3 | announcements | 5 |
 
 （数量由固定随机种子决定，同一代码版本 + 同一参考日期下完全一致。）
 
@@ -132,6 +140,7 @@ Notebook 模板（published）→ 挂课时 + 独立模块 → 学生打开（st
 
 - **幂等**：连续两次 `seed-demo` 计数一致（无重复行）。
 - **重置**：`--reset-demo` 清空业务表后重播，计数与首次一致；环境控制面保留。
+  已实测在调用过通知/偏好/教师改分接口后仍可正常重置（自动清理引用 Demo 数据的运行态与审计行）。
 - **真实判题**：basic 镜像 ID 可用时，固定核心学生（elite/average）的 legacy 作业提交
   走真实 Docker 判题（`seed_fixture=false`、真实 `execution_time_ms`）；
   其余提交为显式 seed_fixture。判题结果状态只含 accepted / wrong_answer /
@@ -139,9 +148,10 @@ Notebook 模板（published）→ 挂课时 + 独立模块 → 学生打开（st
 - **API**：8 个固定账号全部可登录；/dashboard/teacher、/dashboard/student、
   /courses、/assignments、/judge/submissions、/ai-grading/grades、/exams/{id}/questions、
   /exams/{id}/grades、/experiments/records 均返回 200 与真实数据。
+  白名单课程权限：elite/average/new 可见，struggling 不可见；elite 已选课可访问内容。
 - **前端**：学生首页 / 学生作业列表 / 教师首页 / AI 评分复核 / 管理端用户 均渲染真实数据，
   零 console 错误。
-- **测试**：`pytest tests/automated/test_seed_demo.py` 2 通过；既有测试基线不变。
+- **测试**：`pytest tests/automated/test_seed_demo.py` 2 通过；全量后端测试 `pytest -q` 为 **1064 passed, 3 skipped**。
 
 ---
 

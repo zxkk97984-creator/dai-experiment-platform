@@ -9,6 +9,21 @@ from app.services.exam_service import score_choice_answer, validate_publish, val
 from conftest import auth_header, create_course_db, create_user, login
 
 
+def _enroll_student_for_publish(db_session_factory, course_id, username):
+    """为考试发布创建一名已选课学生作为 all_enrolled audience。"""
+    from app.models import CourseEnrollment, User
+
+    with db_session_factory() as db:
+        student = db.query(User).filter(User.username == username).first()
+        db.add(CourseEnrollment(
+            course_id=course_id,
+            student_id=student.id,
+            status="enrolled",
+            origin="manual",
+        ))
+        db.commit()
+
+
 # ═══════════════════════════════════════════════════════════════
 # 1. PublicCase 历史格式迁移
 # ═══════════════════════════════════════════════════════════════
@@ -167,8 +182,10 @@ def test_points_must_be_positive(db_session_factory):
 def test_publish_fails_with_invalid_questions(client, db_session_factory):
     """发布时若题目有校验错误，应拒绝发布"""
     create_user(db_session_factory, "pv_t", "teacher")
+    create_user(db_session_factory, "pv_s", "student")
     t_tok, _ = login(client, "pv_t")
     cid = create_course_db(db_session_factory, teacher_username="pv_t", title="VC", status="published")
+    _enroll_student_for_publish(db_session_factory, cid, "pv_s")
     import datetime
     from datetime import timezone, timedelta
     now = datetime.datetime.now(timezone.utc)
@@ -201,8 +218,10 @@ def test_publish_fails_with_invalid_questions(client, db_session_factory):
 def test_active_code_draft_can_save_but_publish_requires_test_groups(client, db_session_factory):
     """active 编程题可先保存草稿，但配置不完整时不能发布。"""
     create_user(db_session_factory, "pv2_t", "teacher")
+    create_user(db_session_factory, "pv2_s", "student")
     t_tok, _ = login(client, "pv2_t")
     cid = create_course_db(db_session_factory, teacher_username="pv2_t", title="VC2", status="published")
+    _enroll_student_for_publish(db_session_factory, cid, "pv2_s")
     import datetime
     from datetime import timezone, timedelta
     now = datetime.datetime.now(timezone.utc)

@@ -710,9 +710,29 @@ def _setup_activity_course(client, db_session_factory, visibility):
     cid = create_course_db(db_session_factory, teacher_username="t_act", title="可见范围课程", status="published", visibility=visibility)
     _add_chapter_lesson(client, t_tok, cid)
 
+    # 当前后端发布作业/考试要求存在有效 audience。
+    # public 课程：创建一个已选课成员作为 all_enrolled 受众；
+    # whitelist 课程：创建一个白名单成员并让作业/考试按 whitelist_only 发布。
+    member_tok = _token(client, db_session_factory, "s_act_member", "student")
+    member_id = _student_id(client, member_tok)
+    audience_payload = {}
+    if visibility == "public":
+        resp = _enroll(client, member_tok, cid)
+        assert resp.status_code == 201, resp.text
+    elif visibility == "whitelist":
+        resp = client.post(
+            f"{API}/courses/{cid}/whitelist", headers=auth_header(t_tok),
+            json={"student_id": member_id},
+        )
+        assert resp.status_code == 201, resp.text
+        audience_payload = {
+            "audience_mode": "whitelist_only",
+            "whitelist_student_ids": [member_id],
+        }
+
     resp = client.post(
         f"{API}/assignments", headers=auth_header(t_tok),
-        json={"course_id": cid, "title": "作业", "status": "draft"},
+        json={"course_id": cid, "title": "作业", "status": "draft", **audience_payload},
     )
     aid = resp.json()["id"]
     resp = client.post(
@@ -730,6 +750,7 @@ def _setup_activity_course(client, db_session_factory, visibility):
             "course_id": cid, "title": "考试", "duration_minutes": 30,
             "start_at": (now - timedelta(minutes=5)).isoformat(),
             "end_at": (now + timedelta(minutes=30)).isoformat(),
+            **audience_payload,
         },
     )
     eid = resp.json()["id"]

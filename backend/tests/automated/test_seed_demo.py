@@ -59,7 +59,7 @@ def _counts(db_session_factory):
 
     from app.models import (
         AcademicTerm, Announcement, Assignment, Chapter, CodeGrade, Course,
-        CourseEnrollment, Exam, ExamAnswer, ExamQuestion, ExamSubmission,
+        CourseEnrollment, CourseWhitelistStudent, Exam, ExamAnswer, ExamQuestion, ExamSubmission,
         ExperimentModule, ExperimentRecord, ExperimentSubmission, JudgeQuestion,
         Lesson, LessonProgress, NotebookTemplate, NotebookTemplateVersion,
         QuestionRubric, Submission, TeachingClass, TeachingClassStudent, User,
@@ -67,7 +67,7 @@ def _counts(db_session_factory):
 
     models = [
         User, AcademicTerm, TeachingClass, TeachingClassStudent, Course, Chapter,
-        Lesson, CourseEnrollment, LessonProgress, Assignment, JudgeQuestion,
+        Lesson, CourseEnrollment, CourseWhitelistStudent, LessonProgress, Assignment, JudgeQuestion,
         Submission, Exam, ExamQuestion, ExamSubmission, ExamAnswer,
         NotebookTemplate, NotebookTemplateVersion, ExperimentModule,
         ExperimentRecord, ExperimentSubmission, QuestionRubric, CodeGrade,
@@ -91,7 +91,8 @@ def test_seed_demo_runs_and_is_idempotent(db_session_factory):
 
     # 核心数量断言
     assert c1["users"] >= 65
-    assert c1["courses"] >= 7
+    assert c1["courses"] >= 8
+    assert c1["course_whitelist_students"] >= 3
     assert c1["assignments"] >= 9
     assert c1["submissions"] >= 200
     assert c1["code_grades"] >= 100
@@ -105,6 +106,30 @@ def test_seed_demo_runs_and_is_idempotent(db_session_factory):
             text("SELECT username, COUNT(*) c FROM users GROUP BY username HAVING c > 1")
         ).all()
         assert not dup, f"用户名重复: {dup}"
+
+    # 白名单课程权限：elite 可见且已选课，struggling 不可见
+    from app.models import Course, CourseWhitelistStudent, CourseEnrollment, User
+
+    with db_session_factory() as db:
+        whitelist = db.scalar(select(Course).where(Course.title == "AI 创新实践（白名单）"))
+        assert whitelist is not None
+        assert whitelist.visibility == "whitelist"
+        elite = db.scalar(select(User).where(User.username == "demo_student_elite"))
+        struggling = db.scalar(select(User).where(User.username == "demo_student_struggling"))
+        assert elite is not None and struggling is not None
+        assert db.scalar(select(CourseWhitelistStudent).where(
+            CourseWhitelistStudent.course_id == whitelist.id,
+            CourseWhitelistStudent.student_id == elite.id,
+        )) is not None
+        assert db.scalar(select(CourseWhitelistStudent).where(
+            CourseWhitelistStudent.course_id == whitelist.id,
+            CourseWhitelistStudent.student_id == struggling.id,
+        )) is None
+        assert db.scalar(select(CourseEnrollment).where(
+            CourseEnrollment.course_id == whitelist.id,
+            CourseEnrollment.student_id == elite.id,
+            CourseEnrollment.origin == "manual",
+        )) is not None
 
     # 回归：期末已发布未开始，不得出现未来 started 提交（曾导致倒计时显示 817 小时）
     from app.models import Exam, ExamSubmission
@@ -132,6 +157,35 @@ def test_seed_demo_reset_then_reseed_matches(db_session_factory):
     first = _run_seed(db_session_factory)
     c_first = _counts(db_session_factory)
 
+    # 模拟 API/教师操作产生的运行态与审计数据：通知、已读、偏好、改分
+    from app.models import CodeGrade, GradeOverride, Notification, NotificationRead, User, UserPreference
+
+    with db_session_factory() as db:
+        demo_user = db.scalar(select(User).where(User.username == "demo_student_elite"))
+        code_grade = db.scalars(select(CodeGrade).limit(1)).first()
+        assert demo_user is not None
+        notification = Notification(
+            recipient_id=demo_user.id,
+            type="work",
+            title="测试通知",
+            content="用于验证 reset 会清理 API 运行态",
+            dedupe_key="test-reset-derived",
+            visible=True,
+        )
+        db.add(notification)
+        db.flush()
+        db.add(NotificationRead(notification_id=notification.id, user_id=demo_user.id))
+        db.add(UserPreference(user_id=demo_user.id, preferences={"sidebar_collapsed": True}))
+        if code_grade is not None:
+            db.add(GradeOverride(
+                code_grade_id=code_grade.id,
+                original_snapshot={"score": 1},
+                replacement_snapshot={"score": 2},
+                reason="reset 测试",
+                reviewer_id=demo_user.id,
+            ))
+        db.commit()
+
     # 单独执行清理步骤（不立即重播）
     with db_session_factory() as db:
         reset_demo_data(db)
@@ -139,6 +193,13 @@ def test_seed_demo_reset_then_reseed_matches(db_session_factory):
     # reset 后业务表应为 0（保留环境控制面）
     assert c_after_reset["users"] == 0
     assert c_after_reset["courses"] == 0
+
+    # API 运行态 / 审计行也应被清理
+    with db_session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(Notification)) == 0
+        assert db.scalar(select(func.count()).select_from(NotificationRead)) == 0
+        assert db.scalar(select(func.count()).select_from(UserPreference)) == 0
+        assert db.scalar(select(func.count()).select_from(GradeOverride)) == 0
 
     # 清空后再次播种：计数与首次一致（可复现）
     second = _run_seed(db_session_factory)

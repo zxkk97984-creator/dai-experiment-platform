@@ -23,12 +23,14 @@ from app.models import (
     Assignment,
     Chapter,
     Course,
+    CourseEnrollment,
     EnvironmentProfile,
     EnvironmentVersion,
     JudgeQuestion,
     Lesson,
     NotebookTemplate,
     NotebookTemplateVersion,
+    User,
 )
 from app.services.environment_seed import seed_environment_catalog
 from conftest import auth_header, create_user, login
@@ -103,7 +105,11 @@ def _make_draft_version(db_session_factory, slug="basic"):
 
 
 def _make_course_with_lesson(db_session_factory, teacher_id, title="教师课程"):
-    """建课程 + 章节 + 课时，返回 (course_id, lesson_id)。"""
+    """建课程 + 章节 + 课时，返回 (course_id, lesson_id)。
+
+    同时创建一名已选课学生作为作业发布的 all_enrolled audience，
+    以适应当前“发布作业/考试必须有有效 audience”的后端规则。
+    """
     with db_session_factory() as db:
         course = Course(title=title, status="published", teacher_id=teacher_id)
         db.add(course)
@@ -113,6 +119,23 @@ def _make_course_with_lesson(db_session_factory, teacher_id, title="教师课程
         db.flush()
         lesson = Lesson(chapter_id=chapter.id, title="课时 1", content_type="notebook")
         db.add(lesson)
+        student = db.scalar(select(User).where(User.username == "env-student"))
+        if student is None:
+            student = User(
+                username="env-student",
+                real_name="环境测试学生",
+                role="student",
+                status="active",
+                password_hash="not-used",
+            )
+            db.add(student)
+            db.flush()
+        db.add(CourseEnrollment(
+            course_id=course.id,
+            student_id=student.id,
+            status="enrolled",
+            origin="manual",
+        ))
         db.commit()
         return course.id, lesson.id
 

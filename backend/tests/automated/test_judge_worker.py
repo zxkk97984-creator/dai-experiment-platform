@@ -72,11 +72,21 @@ def test_sample_run_permission_denied_all_cases(client, db_session_factory):
     # 未选课
     create_user(db_session_factory, "t_perm2", "teacher")
     create_user(db_session_factory, "s_perm2", "student")
+    create_user(db_session_factory, "s_perm2_aud", "student")
     t_tok, _ = login(client, "t_perm2")
     s_tok, _ = login(client, "s_perm2")
     cid = create_course_db(db_session_factory, teacher_username='t_perm2', title='C', status='published', visibility='public')
     # 不选课（评分事实不可变：题必须在发布前建好）
     aid = create_assignment_db(db_session_factory, course_id=cid, teacher_username='t_perm2', title='A', status='draft')
+    with db_session_factory() as db:
+        aud = db.query(models.User).filter(models.User.username == "s_perm2_aud").first()
+        aud_id = aud.id
+    # 当前发布要求有效 audience；s_perm2 保持未选课，另建一名受众学生用于发布
+    r = client.patch(f'/api/v1/assignments/{aid}', headers=auth_header(t_tok), json={
+        "audience_mode": "whitelist_only",
+        "whitelist_student_ids": [aud_id],
+    })
+    assert r.status_code == 200, r.text
     q = client.post(f'/api/v1/assignments/{aid}/questions', headers=auth_header(t_tok), json={
         'title': 'Q', 'function_name': 'f', 'hidden_tests': 'def test(): pass', 'grading_mode': 'legacy',
     })
@@ -119,6 +129,15 @@ def test_sample_run_permission_denied_all_cases(client, db_session_factory):
     q3 = client.post(f'/api/v1/assignments/{a3id}/questions', headers=auth_header(t_dc), json={
         'title':'Q3','function_name':'f','hidden_tests':'def test(): pass', 'grading_mode': 'legacy',
     })
+    with db_session_factory() as db:
+        dc_student = db.query(models.User).filter(models.User.username == "s_dc2").first()
+        dc_student_id = dc_student.id
+    # 草稿课程无法 enroll，使用 whitelist_only 作为有效 audience
+    r = client.patch(f'/api/v1/assignments/{a3id}', headers=auth_header(t_dc), json={
+        "audience_mode": "whitelist_only",
+        "whitelist_student_ids": [dc_student_id],
+    })
+    assert r.status_code == 200, r.text
     pub3 = client.post(f'/api/v1/assignments/{a3id}/publish', headers=auth_header(t_dc))
     assert pub3.status_code == 200, pub3.text
     r = client.post(f'/api/v1/judge/questions/{q3.json()["id"]}/sample-run',

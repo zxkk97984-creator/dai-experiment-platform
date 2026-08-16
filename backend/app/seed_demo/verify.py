@@ -15,6 +15,7 @@ from app.models import (
     CodeGrade,
     Course,
     CourseEnrollment,
+    CourseWhitelistStudent,
     Exam,
     ExamAnswer,
     ExamQuestion,
@@ -52,6 +53,7 @@ def verify_demo_data(db: Session) -> dict:
         "chapters": count(db, Chapter),
         "lessons": count(db, Lesson),
         "course_enrollments": count(db, CourseEnrollment),
+        "course_whitelist_students": count(db, CourseWhitelistStudent),
         "lesson_progress": count(db, LessonProgress),
         "assignments": count(db, Assignment),
         "judge_questions": count(db, JudgeQuestion),
@@ -74,8 +76,10 @@ def verify_demo_data(db: Session) -> dict:
     # 基础断言：核心实体必须存在
     if counts["users"] < 65:
         errors.append(f"用户数不足 65：{counts['users']}")
-    if counts["courses"] < 7:
-        errors.append(f"课程数不足 7：{counts['courses']}")
+    if counts["courses"] < 8:
+        errors.append(f"课程数不足 8：{counts['courses']}")
+    if counts["course_whitelist_students"] < 3:
+        errors.append(f"课程白名单数不足 3：{counts['course_whitelist_students']}")
     if counts["assignments"] < 9:
         errors.append(f"作业数不足 9：{counts['assignments']}")
     if counts["submissions"] < 200:
@@ -99,6 +103,18 @@ def verify_demo_data(db: Session) -> dict:
     ).all()
     if dup:
         errors.append(f"用户名重复: {dup}")
+
+    # 白名单课程必须存在且仅白名单学生可见（权限场景）
+    whitelist_course = db.scalar(
+        select(Course).where(Course.title == "AI 创新实践（白名单）")
+    )
+    if whitelist_course is None:
+        errors.append("缺少白名单课程：AI 创新实践（白名单）")
+    else:
+        if whitelist_course.visibility != "whitelist":
+            errors.append("白名单课程 visibility 不是 whitelist")
+        if whitelist_course.status != "published":
+            errors.append("白名单课程未发布")
 
     # 外键抽查：随机查询存在性
     orphan = db.execute(

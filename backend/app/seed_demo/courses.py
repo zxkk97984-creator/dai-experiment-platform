@@ -11,9 +11,24 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AcademicTerm, Chapter, Course, Lesson, LessonProgress, User
+from app.models import (
+    AcademicTerm,
+    Chapter,
+    Course,
+    CourseEnrollment,
+    CourseWhitelistStudent,
+    Lesson,
+    LessonProgress,
+    User,
+)
 
-from .constants import COURSE_CATALOG, FLAGSHIP_COURSE_TITLE
+from .constants import (
+    COURSE_CATALOG,
+    COURSE_META,
+    FLAGSHIP_COURSE_TITLE,
+    WHITELIST_COURSE_STUDENTS,
+    WHITELIST_COURSE_TITLE,
+)
 from .marks import mark
 from .rng import make_rng
 from .timeline import DemoClock
@@ -63,19 +78,30 @@ def create_courses(
 
     for title, teacher_key, env_slug, status, topics in COURSE_CATALOG:
         teacher = users[teacher_key]
+        meta = COURSE_META.get(title, {})
+        visibility = meta.get("visibility", "class")
+        start_time = clock.day(meta.get("start_offset_days", -90), 9) if status == "published" else None
         course = db.scalar(select(Course).where(Course.title == title))
         if course is None:
             course = Course(
                 title=title,
+                code=meta.get("code"),
                 description=(
                     f"《{title}》——Demo 演示课程，覆盖章节、课时、作业与考试全流程。"
                     if title == FLAGSHIP_COURSE_TITLE
-                    else f"《{title}》——Demo 支撑课程，用于教学班与课程管理演示。"
+                    else (
+                        "《AI 创新实践（白名单）》——仅对白名单学生可见的选修课，"
+                        "用于验证课程可见性、白名单管理与选课权限。"
+                        if title == WHITELIST_COURSE_TITLE
+                        else f"《{title}》——Demo 支撑课程，用于教学班与课程管理演示。"
+                    )
                 ),
                 status=status,
                 teacher_id=teacher.id,
                 academic_term_id=term.id,
-                visibility="class",
+                visibility=visibility,
+                cover=meta.get("cover"),
+                start_time=start_time,
                 default_score=100.0,
             )
             db.add(course)
@@ -84,7 +110,13 @@ def create_courses(
         else:
             course.status = status
             course.teacher_id = teacher.id
-            course.visibility = "class"
+            course.visibility = visibility
+            if meta.get("code"):
+                course.code = meta["code"]
+            if meta.get("cover"):
+                course.cover = meta["cover"]
+            if start_time is not None:
+                course.start_time = start_time
             if course.academic_term_id is None:
                 course.academic_term_id = term.id
             db.flush()
@@ -149,6 +181,59 @@ def create_courses(
                 mark(db, "lessons", lesson.id)
         db.flush()
     return courses
+
+
+def create_course_whitelists(
+    db: Session, users: dict, courses: dict,
+) -> None:
+    """为白名单课程创建可见学生白名单，并为其中一名学生建立 manual 选课。
+
+    白名单课程不绑定教学班：白名单决定“能否发现”，选课决定“能否访问内容”。
+    - elite：白名单 + manual 选课（可完整访问课程内容）
+    - average / new：仅白名单（可发现、可申请选课，但尚未选课）
+    - struggling：不在白名单（权限负例，不应在课程列表看到该课程）
+    """
+    course = courses.get(WHITELIST_COURSE_TITLE)
+    if course is None:
+        return
+    for username in WHITELIST_COURSE_STUDENTS:
+        student = users.get(username)
+        if student is None:
+            continue
+        existing = db.scalar(
+            select(CourseWhitelistStudent).where(
+                CourseWhitelistStudent.course_id == course.id,
+                CourseWhitelistStudent.student_id == student.id,
+            )
+        )
+        if existing is None:
+            existing = CourseWhitelistStudent(course_id=course.id, student_id=student.id)
+            db.add(existing)
+            db.flush()
+            logger.info("[创建] 课程白名单 %s -> %s", course.title, username)
+        mark(db, "course_whitelist_students", existing.id)
+
+    # elite 已选课，能访问白名单课程内容；其余仅可发现
+    elite = users.get("demo_student_elite")
+    if elite is not None:
+        enrollment = db.scalar(
+            select(CourseEnrollment).where(
+                CourseEnrollment.course_id == course.id,
+                CourseEnrollment.student_id == elite.id,
+            )
+        )
+        if enrollment is None:
+            enrollment = CourseEnrollment(
+                course_id=course.id,
+                student_id=elite.id,
+                status="enrolled",
+                origin="manual",
+            )
+            db.add(enrollment)
+            db.flush()
+            logger.info("[创建] 白名单课程选课 %s -> %s", course.title, elite.username)
+        mark(db, "course_enrollments", enrollment.id)
+    db.flush()
 
 
 def create_lesson_progress(

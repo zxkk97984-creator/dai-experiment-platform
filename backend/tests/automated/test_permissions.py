@@ -1,5 +1,8 @@
 """后端权限与错误协议 RED 测试"""
 from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import select
+
 from app import models
 from conftest import auth_header, create_assignment_db, create_course_db, create_user, login
 
@@ -22,15 +25,24 @@ def _setup_full(client, db_session_factory, course_status="published"):
         status=course_status,
         visibility="public",
     )
+    s_yes_id = client.get(f"{API}/auth/me", headers=auth_header(s_yes_tok)).json()["id"]
+    # 草稿课程无法 enroll，使用 whitelist_only 让 s_yes 成为有效 audience；
+    # 已发布课程仍使用 all_enrolled + 真实选课，保证退课后权限正确回收。
+    audience_payload = {}
     if course_status == "published":
         client.post(f"{API}/courses/{cid}/enroll", headers=auth_header(s_yes_tok))
+    else:
+        audience_payload = {
+            "audience_mode": "whitelist_only",
+            "whitelist_student_ids": [s_yes_id],
+        }
     ch = client.post(f"{API}/courses/{cid}/chapters", headers=auth_header(t_tok), json={"title": "Ch"})
     chid = ch.json()["id"]
     le = client.post(f"{API}/chapters/{chid}/lessons", headers=auth_header(t_tok), json={
         "title": "Lesson", "content_type": "markdown", "content": "test",
     })
     a = client.post(f"{API}/assignments", headers=auth_header(t_tok), json={
-        "course_id": cid, "title": "A", "status": "draft",
+        "course_id": cid, "title": "A", "status": "draft", **audience_payload,
     })
     aid = a.json()["id"]
     q = client.post(f"{API}/assignments/{aid}/questions", headers=auth_header(t_tok), json={
@@ -46,6 +58,7 @@ def _setup_full(client, db_session_factory, course_status="published"):
         "duration_minutes": 30,
         "start_at": (now - timedelta(minutes=5)).isoformat(),
         "end_at": (now + timedelta(hours=1)).isoformat(),
+        **audience_payload,
     })
     eid = e.json()["id"]
     # 添加一道选择题满足 validate_publish 要求，然后发布
@@ -174,6 +187,16 @@ def test_teacher_b_cannot_manage_teacher_a_resources(client, db_session_factory)
     tb_tok, _ = login(client, "tb_r")
 
     cid = create_course_db(db_session_factory, teacher_username="ta_r", title="TA Only", status="published")
+    # 为 stu_r 建立选课，作为 ta 课程作业/考试发布的 all_enrolled 受众
+    with db_session_factory() as db:
+        stu = db.scalar(select(models.User).where(models.User.username == "stu_r"))
+        db.add(models.CourseEnrollment(
+            course_id=cid,
+            student_id=stu.id,
+            status="enrolled",
+            origin="manual",
+        ))
+        db.commit()
     ch = client.post(f"{API}/courses/{cid}/chapters", headers=auth_header(ta_tok), json={"title": "Ch"})
     chid = ch.json()["id"]
     le = client.post(f"{API}/chapters/{chid}/lessons", headers=auth_header(ta_tok), json={

@@ -105,6 +105,8 @@ COURSE_CATALOG = [
      ["描述统计", "假设检验"]),
     ("Web API 开发入门", "teacher_zhao", "basic", "draft",
      ["HTTP 与 REST", "FastAPI 基础"]),
+    ("AI 创新实践（白名单）", "teacher_zhao", "basic", "published",
+     ["项目导论与选题", "方案设计与数据准备"]),
 ]
 
 # 各课程绑定的教学班（0-based 班索引；旗舰绑全部 6 班）
@@ -116,7 +118,69 @@ COURSE_CLASSES = {
     "机器学习基础": [2, 3, 4],
     "统计学习基础": [0, 4, 5],
     "Web API 开发入门": [0],
+    # 白名单课程不绑定教学班，仅通过 course_whitelist_students 控制可见性
 }
+
+# 课程补充元数据：code / visibility / cover / start_time 用于贴近真实可发布课程。
+# cover 使用内联 SVG data URI，避免依赖外部图片服务且可稳定复现。
+WHITELIST_COURSE_TITLE = "AI 创新实践（白名单）"
+COURSE_META = {
+    FLAGSHIP_COURSE_TITLE: {
+        "code": "CS-AI101",
+        "visibility": "class",
+        "cover": "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='400'%3E%3Crect width='100%25' height='100%25' fill='%231a73e8'/%3E%3Ctext x='40' y='220' font-size='48' fill='white'%3EPython %26amp; AI%3C/text%3E%3C/svg%3E",
+        "start_offset_days": -93,
+    },
+    "Python 程序设计基础": {
+        "code": "CS-PY101",
+        "visibility": "class",
+        "cover": "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='400'%3E%3Crect width='100%25' height='100%25' fill='%2338bdf8'/%3E%3Ctext x='40' y='220' font-size='48' fill='white'%3EPython 101%3C/text%3E%3C/svg%3E",
+        "start_offset_days": -90,
+    },
+    "数据结构与算法实战": {
+        "code": "CS-DS201",
+        "visibility": "class",
+        "cover": "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='400'%3E%3Crect width='100%25' height='100%25' fill='%23f59e0b'/%3E%3Ctext x='40' y='220' font-size='48' fill='white'%3EDS %26amp; Algo%3C/text%3E%3C/svg%3E",
+        "start_offset_days": -88,
+    },
+    "数据处理与可视化": {
+        "code": "CS-DP202",
+        "visibility": "class",
+        "cover": "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='400'%3E%3Crect width='100%25' height='100%25' fill='%2310b981'/%3E%3Ctext x='40' y='220' font-size='48' fill='white'%3EData Viz%3C/text%3E%3C/svg%3E",
+        "start_offset_days": -86,
+    },
+    "机器学习基础": {
+        "code": "CS-ML301",
+        "visibility": "class",
+        "cover": "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='400'%3E%3Crect width='100%25' height='100%25' fill='%238b5cf6'/%3E%3Ctext x='40' y='220' font-size='48' fill='white'%3EML Basics%3C/text%3E%3C/svg%3E",
+        "start_offset_days": -84,
+    },
+    "统计学习基础": {
+        "code": "CS-ST302",
+        "visibility": "class",
+        "cover": "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='400'%3E%3Crect width='100%25' height='100%25' fill='%23ec4899'/%3E%3Ctext x='40' y='220' font-size='48' fill='white'%3EStatistics%3C/text%3E%3C/svg%3E",
+        "start_offset_days": -82,
+    },
+    "Web API 开发入门": {
+        "code": "CS-WEB400",
+        "visibility": "class",
+        "cover": "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='400'%3E%3Crect width='100%25' height='100%25' fill='%2364748b'/%3E%3Ctext x='40' y='220' font-size='48' fill='white'%3EWeb API%3C/text%3E%3C/svg%3E",
+        "start_offset_days": -10,
+    },
+    WHITELIST_COURSE_TITLE: {
+        "code": "CS-AI401",
+        "visibility": "whitelist",
+        "cover": "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='400'%3E%3Crect width='100%25' height='100%25' fill='%230ea5e9'/%3E%3Ctext x='40' y='220' font-size='48' fill='white'%3EAI Studio%3C/text%3E%3C/svg%3E",
+        "start_offset_days": -20,
+    },
+}
+
+# 白名单课程可见学生：elite/average/new 可见；struggling 不在白名单，用于权限负例。
+WHITELIST_COURSE_STUDENTS = [
+    "demo_student_elite",
+    "demo_student_average",
+    "demo_student_new",
+]
 
 # ── 画像参数（评审 2.5：让统计页面表现真实差异） ─────────────────────────────
 # 每个画像：提交率、基础分数区间、重交概率、AI 复核概率、缺交作业数、实验完成度

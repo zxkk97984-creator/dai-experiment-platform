@@ -100,18 +100,27 @@ def test_legacy_grading_still_works_when_ai_disabled(client, db_session_factory,
     )
     # legacy 题目发布门禁不检查 ai_ready
     create_user(db_session_factory, "gov-legacy-t", "teacher")
+    create_user(db_session_factory, "gov-legacy-s", "student")
     ttoken, _ = login(client, "gov-legacy-t")
     with db_session_factory() as db:
-        from app.models import Assignment, Course
+        from app.models import Assignment, Course, CourseEnrollment, User
 
-        teacher = db.scalar(select(__import__("app.models", fromlist=["User"]).User).where(
-            __import__("app.models", fromlist=["User"]).User.username == "gov-legacy-t"))
+        teacher = db.scalar(select(User).where(User.username == "gov-legacy-t"))
+        student = db.scalar(select(User).where(User.username == "gov-legacy-s"))
         course = Course(title="CL", status="draft", visibility="class",
                         default_score=100, teacher_id=teacher.id)
         db.add(course)
         db.flush()
         assignment = Assignment(course_id=course.id, title="AL", status="draft")
         db.add(assignment)
+        db.flush()
+        # 当前发布门禁要求存在有效 audience，添加一名已选课学生作为 all_enrolled 受众
+        db.add(CourseEnrollment(
+            course_id=course.id,
+            student_id=student.id,
+            status="enrolled",
+            origin="manual",
+        ))
         db.commit()
         course_id, assignment_id = course.id, assignment.id
 
