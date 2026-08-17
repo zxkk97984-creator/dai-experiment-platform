@@ -141,6 +141,170 @@ def test_teacher_grades(client, db_session_factory):
     assert listed_exam["participant_count"] == 1
 
 
+def test_teacher_grade_detail_manual_score_override(client, db_session_factory):
+    """教师成绩详情可逐题改分：0~本题满分，超限拒绝，并同步重算总分。"""
+    from app.models import ExamAnswer, ExamSubmission
+    from sqlalchemy import select
+
+    ctx = _setup(client, db_session_factory)
+    client.patch(f"{API}/exams/{ctx['eid']}", headers=_h(ctx['t_tok']), json={"status": "published"})
+    client.post(f"{API}/exams/{ctx['eid']}/start", headers=_h(ctx['s_tok']))
+    client.put(f"{API}/exams/{ctx['eid']}/answers/{ctx['q1_id']}", headers=_h(ctx['s_tok']), json={"selected_options": ["A"]})
+    client.put(f"{API}/exams/{ctx['eid']}/answers/{ctx['q2_id']}", headers=_h(ctx['s_tok']), json={"code_answer": "def answer(): return True"})
+    client.post(f"{API}/exams/{ctx['eid']}/submit", headers=_h(ctx['s_tok']))
+
+    # 先把提交固定为已完成，避免异步判题影响测试确定性
+    with db_session_factory() as db:
+        sub = db.scalar(select(ExamSubmission).where(ExamSubmission.exam_id == ctx["eid"]))
+        answers = db.scalars(select(ExamAnswer).where(ExamAnswer.submission_id == sub.id)).all()
+        by_qid = {a.question_id: a for a in answers}
+        by_qid[ctx["q1_id"]].score = 10
+        by_qid[ctx["q1_id"]].grading_status = "completed"
+        by_qid[ctx["q2_id"]].score = 20
+        by_qid[ctx["q2_id"]].grading_status = "completed"
+        sub.status = "graded"
+        sub.score = 30
+        db.commit()
+        sub_id, q1_answer_id = sub.id, by_qid[ctx["q1_id"]].id
+
+    detail_url = f"{API}/exams/{ctx['eid']}/grades/{sub_id}"
+    score_url = f"{detail_url}/answers/{q1_answer_id}/score"
+
+    # 缺少理由：422，不允许修改
+    r = client.patch(score_url, headers=_h(ctx['t_tok']), json={"score": 7.5})
+    assert r.status_code == 422, r.text
+
+    # 超上限：422，不改动原分数
+    r = client.patch(score_url, headers=_h(ctx['t_tok']), json={"score": 10.5, "reason": "超出上限测试"})
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["code"] == "SCORE_OUT_OF_RANGE"
+
+    # 合法改分：10 → 7.5，父级总分同步为 27.5，并记录教师改分理由
+    r = client.patch(score_url, headers=_h(ctx['t_tok']), json={"score": 7.5, "reason": "学生部分正确"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    changed = next(a for a in body["answers"] if a["id"] == q1_answer_id)
+    assert changed["score"] == 7.5
+    assert changed["manual_score_reason"] == "学生部分正确"
+    assert changed["manual_score_at"] is not None
+    assert body["submission"]["score"] == 27.5
+    assert body["analysis"]["objective_score"] == 7.5
+
+    # 详情页返回教师题目解析字段，但逐题 answers 仍不泄露私有字段
+    assert body["questions"]
+    assert all("correct_answer" not in a for a in body["answers"])
+    assert all("correct_answer" in q for q in body["questions"])
+
+    # 学生无权改分
+    r = client.patch(score_url, headers=_h(ctx['s_tok']), json={"score": 6, "reason": "学生无权限测试"})
+    assert r.status_code == 403
+
+    # 发布讲评后，学生端可以看到教师改分理由和改后得分
+    client.patch(f"{API}/exams/{ctx['eid']}", headers=_h(ctx['t_tok']), json={
+        "show_score_after_grading": True,
+        "show_questions_after_review": True,
+        "show_answers_after_review": True,
+    })
+    with db_session_factory() as db:
+        from app.models import Exam
+        exam = db.get(Exam, ctx["eid"])
+        exam.review_released_at = datetime.datetime.now(datetime.timezone.utc)
+        db.commit()
+
+    r = client.get(f"{API}/exams/{ctx['eid']}/session", headers=_h(ctx['s_tok']))
+    assert r.status_code == 200, r.text
+    saved = next(a for a in r.json()["saved_answers"] if a["question_id"] == ctx["q1_id"])
+    assert saved["score"] == 7.5
+    assert saved["manual_score_reason"] == "学生部分正确"
+
+
+def test_teacher_grade_detail_can_score_unanswered_question(client, db_session_factory):
+    """整题未作答（无 ExamAnswer 行）时，教师也可按题目直接给分。"""
+    from app.models import ExamAnswer, ExamSubmission
+    from sqlalchemy import select
+
+    ctx = _setup(client, db_session_factory)
+    client.patch(f"{API}/exams/{ctx['eid']}", headers=_h(ctx['t_tok']), json={"status": "published"})
+    client.post(f"{API}/exams/{ctx['eid']}/start", headers=_h(ctx['s_tok']))
+    client.put(f"{API}/exams/{ctx['eid']}/answers/{ctx['q1_id']}", headers=_h(ctx['s_tok']), json={"selected_options": ["A"]})
+    client.post(f"{API}/exams/{ctx['eid']}/submit", headers=_h(ctx['s_tok']))
+
+    with db_session_factory() as db:
+        sub = db.scalar(select(ExamSubmission).where(ExamSubmission.exam_id == ctx["eid"]))
+        q1 = db.scalar(select(ExamAnswer).where(
+            ExamAnswer.submission_id == sub.id, ExamAnswer.question_id == ctx["q1_id"]
+        ))
+        q1.score = 10
+        q1.grading_status = "completed"
+        sub.status = "graded"
+        sub.score = 10
+        db.commit()
+        sub_id = sub.id
+
+    # q2 没有答题记录，教师按 question_id 给 15 分后自动补建答案并重算总分
+    r = client.patch(
+        f"{API}/exams/{ctx['eid']}/grades/{sub_id}/questions/{ctx['q2_id']}/score",
+        headers=_h(ctx['t_tok']),
+        json={"score": 15, "reason": "整题未作答给分"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["submission"]["score"] == 25
+    assert len(body["answers"]) == 2
+    assert next(a for a in body["answers"] if a["question_id"] == ctx["q2_id"])["score"] == 15
+
+    # 超上限仍被拒绝
+    r = client.patch(
+        f"{API}/exams/{ctx['eid']}/grades/{sub_id}/questions/{ctx['q2_id']}/score",
+        headers=_h(ctx['t_tok']),
+        json={"score": 20.1, "reason": "超出上限测试"},
+    )
+    assert r.status_code == 422
+
+
+def test_review_required_waits_until_every_question_scored(client, db_session_factory):
+    """待复核提交不能因为只改了已有答题记录就提前汇总。"""
+    from app.models import ExamAnswer, ExamSubmission
+    from sqlalchemy import select
+
+    ctx = _setup(client, db_session_factory)
+    client.patch(f"{API}/exams/{ctx['eid']}", headers=_h(ctx['t_tok']), json={"status": "published"})
+    client.post(f"{API}/exams/{ctx['eid']}/start", headers=_h(ctx['s_tok']))
+    client.put(f"{API}/exams/{ctx['eid']}/answers/{ctx['q1_id']}", headers=_h(ctx['s_tok']), json={"selected_options": ["A"]})
+    client.post(f"{API}/exams/{ctx['eid']}/submit", headers=_h(ctx['s_tok']))
+
+    with db_session_factory() as db:
+        sub = db.scalar(select(ExamSubmission).where(ExamSubmission.exam_id == ctx["eid"]))
+        q1 = db.scalar(select(ExamAnswer).where(
+            ExamAnswer.submission_id == sub.id, ExamAnswer.question_id == ctx["q1_id"]
+        ))
+        q1.score = 10
+        q1.grading_status = "completed"
+        sub.status = "review_required"
+        sub.review_reason = "存在未完成评分"
+        db.commit()
+        sub_id, q1_id = sub.id, q1.id
+
+    r = client.patch(
+        f"{API}/exams/{ctx['eid']}/grades/{sub_id}/answers/{q1_id}/score",
+        headers=_h(ctx['t_tok']),
+        json={"score": 9, "reason": "调整客观题得分"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["submission"]["status"] == "review_required", "q2 尚未给分，不能提前汇总"
+
+    r = client.patch(
+        f"{API}/exams/{ctx['eid']}/grades/{sub_id}/questions/{ctx['q2_id']}/score",
+        headers=_h(ctx['t_tok']),
+        json={"score": 20, "reason": "编程题人工给分"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["submission"]["status"] == "graded"
+    assert body["submission"]["score"] == 29
+    assert body["submission"]["review_reason"] is None
+
+
 def test_p0_maybe_finalize_checks_running_not_just_pending(client, db_session_factory):
     """P0 回归：finalize_if_ready 检查包含 running/queued 状态，不会提前汇总"""
     from app.services.exam_grading import finalize_if_ready, FinalizeOutcome

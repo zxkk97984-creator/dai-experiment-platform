@@ -481,6 +481,9 @@ def get_my_grade(exam_id, student, db):
         item = {"question_id": a.question_id, "grading_status": a.grading_status,
                 "score": a.score if answers_visible else None,
                 "system_error": "评分遇到系统问题，请联系教师" if a.system_error else None}
+        if answers_visible:
+            item["manual_score_reason"] = a.manual_score_reason
+            item["manual_score_at"] = a.manual_score_at
         # active 模式：返回安全的学生反馈（F/A/R/Q、扣分依据、测试结果、代码建议）
         # shadow 模式：不泄露 AI 数据，仅返回确定性分数
         cg = db.scalar(
@@ -603,6 +606,8 @@ def _saved_answer_payload(answer: ExamAnswer, *, include_score: bool = False) ->
     if include_score:
         payload["score"] = answer.score
         payload["grading_status"] = answer.grading_status
+        payload["manual_score_reason"] = answer.manual_score_reason
+        payload["manual_score_at"] = answer.manual_score_at
     return payload
 
 

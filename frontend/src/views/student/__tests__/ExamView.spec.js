@@ -41,7 +41,7 @@ function sessionFor(status, extra = {}) {
       submitted_at: active ? null : SERVER_NOW, submission_reason: 'manual', ...extra.submission,
     },
     questions: active || extra.visibility?.questions ? (extra.questions || QUESTIONS) : [],
-    saved_answers: [],
+    saved_answers: extra.saved_answers || [],
     visibility: { score: false, questions: false, answers: false, review_released: false, ...extra.visibility },
   }
 }
@@ -74,6 +74,18 @@ describe('ExamView 安全状态与结果展示', () => {
     expect(wrapper.text()).toContain('已交卷，等待教师复核')
     expect(wrapper.text()).toContain('不会按 0 分计入')
     expect(wrapper.text()).not.toContain('system_error')
+    wrapper.unmount()
+  })
+
+  it('讲评开放后展示教师改分说明', async () => {
+    const wrapper = await mountExam('graded', {
+      visibility: { score: true, questions: true, answers: true, review_released: true },
+      submission: { score: 55, score_visible: true },
+      saved_answers: [{ question_id: 1, score: 8, manual_score_reason: '学生部分正确', selected_options: ['A'] }],
+    })
+    expect(wrapper.text()).toContain('教师改分说明')
+    expect(wrapper.text()).toContain('学生部分正确')
+    expect(wrapper.text()).toContain('教师改分后得分：8 / 10 分')
     wrapper.unmount()
   })
 

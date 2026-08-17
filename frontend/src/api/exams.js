@@ -16,6 +16,12 @@ export const examsAPI = {
   submit(id, data = {}) { return client.post(`/exams/${id}/submit`, data) },
   getGrades(id) { return client.get(`/exams/${id}/grades`) },
   getGradeDetail(examId, submissionId) { return client.get(`/exams/${examId}/grades/${submissionId}`) },
+  updateGradeAnswerScore(examId, submissionId, answerId, score, reason) {
+    return client.patch(`/exams/${examId}/grades/${submissionId}/answers/${answerId}/score`, { score, reason })
+  },
+  updateGradeQuestionScore(examId, submissionId, questionId, score, reason) {
+    return client.patch(`/exams/${examId}/grades/${submissionId}/questions/${questionId}/score`, { score, reason })
+  },
   getQuestions(id) { return client.get(`/exams/${id}/questions`) },
   createQuestion(id, data) { return client.post(`/exams/${id}/questions`, data) },
   updateQuestion(examId, qId, data) { return client.patch(`/exams/${examId}/questions/${qId}`, data) },

@@ -864,6 +864,21 @@ class ExamQuestionTeacherRead(ExamQuestionRead):
     has_locked_rubric: bool = False
 
 
+class ExamAnswerScoreUpdate(BaseModel):
+    """教师手动修改逐题得分——分值不可低于 0 或高于本题满分（后端再校验），且必须填写改分理由。"""
+
+    score: float = Field(ge=0, allow_inf_nan=False)
+    reason: str = Field(min_length=3, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def reason_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("改分理由至少 3 个字符")
+        return value
+
+
 class ExamSubmissionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

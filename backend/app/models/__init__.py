@@ -672,6 +672,9 @@ class ExamAnswer(TimestampMixin, Base):
     # ── 判题结果 ──────────────────────────────────────────────
     result_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     system_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ── 教师手动改分（学生端可见） ─────────────────────────────
+    manual_score_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    manual_score_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     submission: Mapped[ExamSubmission] = relationship(back_populates="answers")
     question: Mapped[ExamQuestion] = relationship()

@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
 import ast
 import keyword
 import math
@@ -6,15 +7,15 @@ from pathlib import Path
 import tempfile
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.courses import can_access_course_content, ensure_course_manager, require_course
 from app.config import Settings, get_settings
 from app.dependencies import get_current_user, get_db, require_roles, PaginationParams, pagination
 from app.errors import api_error
-from app.models import Course, CourseEnrollment, Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission, QuestionRubric, User
-from app.schemas import CourseStudentImportResult, CourseStudentImportRow, ExamAnswerBatchRequest, ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionTeacherRead, ExamQuestionUpdate, ExamRead, ExamRetryRequest, ExamSampleRunRequest, ExamSessionRead, ExamSubmitRequest, ExamSubmissionRead, ExamTimeExtensionRequest, ExamUpdate, PaginatedResponse, SampleRunResponse
+from app.models import CodeGrade, Course, CourseEnrollment, Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission, QuestionRubric, User
+from app.schemas import CourseStudentImportResult, CourseStudentImportRow, ExamAnswerBatchRequest, ExamAnswerScoreUpdate, ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionTeacherRead, ExamQuestionUpdate, ExamRead, ExamRetryRequest, ExamSampleRunRequest, ExamSessionRead, ExamSubmitRequest, ExamSubmissionRead, ExamTimeExtensionRequest, ExamUpdate, PaginatedResponse, SampleRunResponse
 from app.services.exam_service import build_student_exam_session, build_student_exam_summary, create_question, delete_question, exam_max_score, extend_exam_submission, force_submit_exam_submission, get_my_grade, get_question, list_questions, release_exam_review, require_exam_editable, retry_exam_submission as retry_exam_submission_service, save_answer, start_exam as svc_start_exam, student_exam_status, submit_exam as svc_submit_exam, update_question, validate_publish
 from app.services.time_utils import as_utc, utc_now
 from app.services.audience_service import (
@@ -680,30 +681,75 @@ def exam_grades(
     }
 
 
-@router.get("/{exam_id}/grades/{submission_id}")
-def exam_grade_detail(
-    exam_id: int,
-    submission_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("teacher", "admin")),
-):
-    exam = require_exam(exam_id, db)
-    if current_user.role == "teacher":
-        ensure_course_manager(exam.course, current_user)
-    submission = db.get(ExamSubmission, submission_id)
-    if not submission or submission.exam_id != exam_id:
-        raise api_error(404, "SUBMISSION_NOT_FOUND", "考试提交不存在")
+def _question_teacher_payload(question: ExamQuestion, has_locked_rubric: bool) -> dict:
+    """成绩详情中的教师题目视图——包含正确答案等解析字段。"""
+    return {
+        "id": question.id,
+        "exam_id": question.exam_id,
+        "question_type": question.question_type,
+        "prompt": question.prompt,
+        "options": question.options,
+        "points": float(question.points),
+        "order_index": question.order_index,
+        "starter_code": question.starter_code,
+        "public_cases": question.public_cases,
+        "grading_mode": question.grading_mode,
+        "correct_answer": question.correct_answer,
+        "hidden_tests": question.hidden_tests,
+        "time_limit_ms": question.time_limit_ms,
+        "memory_limit_mb": question.memory_limit_mb,
+        "teacher_constraints": question.teacher_constraints,
+        "reference_solution": question.reference_solution,
+        "test_groups": question.test_groups,
+        "score_cap_rules": question.score_cap_rules,
+        "has_locked_rubric": has_locked_rubric,
+    }
 
+
+def _exam_grade_detail_payload(exam: Exam, submission: ExamSubmission, db: Session) -> dict:
+    """构建成绩详情页数据：试卷题目 + 逐题作答 + 成绩分析。"""
+    questions = db.scalars(
+        select(ExamQuestion)
+        .where(ExamQuestion.exam_id == exam.id)
+        .order_by(ExamQuestion.order_index, ExamQuestion.id)
+    ).all()
     answers = db.scalars(
         select(ExamAnswer)
         .join(ExamQuestion, ExamQuestion.id == ExamAnswer.question_id)
-        .where(ExamAnswer.submission_id == submission_id)
+        .where(ExamAnswer.submission_id == submission.id)
         .order_by(ExamQuestion.order_index, ExamQuestion.id)
     ).all()
-    objective_score = sum(float(answer.score or 0) for answer in answers if answer.question.question_type != "code")
-    objective_total = sum(float(answer.question.points) for answer in answers if answer.question.question_type != "code")
-    code_score = sum(float(answer.score or 0) for answer in answers if answer.question.question_type == "code")
-    code_total = sum(float(answer.question.points) for answer in answers if answer.question.question_type == "code")
+
+    locked_ids: set[int] = set()
+    if questions:
+        locked_ids = set(db.scalars(
+            select(QuestionRubric.exam_question_id).where(
+                QuestionRubric.exam_question_id.in_([q.id for q in questions]),
+                QuestionRubric.status == "locked",
+            )
+        ).all())
+
+    question_map = {q.id: q for q in questions}
+    answer_by_question = {a.question_id: a for a in answers}
+
+    objective_score = 0.0
+    objective_total = 0.0
+    code_score = 0.0
+    code_total = 0.0
+    correct_count = 0
+    for question in questions:
+        answer = answer_by_question.get(question.id)
+        if question.question_type == "code":
+            code_total += float(question.points)
+            if answer is not None:
+                code_score += float(answer.score or 0)
+        else:
+            objective_total += float(question.points)
+            if answer is not None:
+                objective_score += float(answer.score or 0)
+        if answer is not None and answer.score is not None and float(answer.score) >= float(question.points):
+            correct_count += 1
+
     elapsed_minutes = None
     if submission.started_at and submission.submitted_at:
         try:
@@ -737,31 +783,228 @@ def exam_grade_detail(
             "review_reason": submission.review_reason,
         },
         "analysis": {
-            "objective_score": round(objective_score, 1),
-            "objective_total": round(objective_total, 1),
-            "code_score": round(code_score, 1),
-            "code_total": round(code_total, 1),
-            "question_count": len(answers),
-            "correct_count": sum(1 for answer in answers if answer.score is not None and float(answer.score) >= float(answer.question.points)),
+            "objective_score": round(objective_score, 2),
+            "objective_total": round(objective_total, 2),
+            "code_score": round(code_score, 2),
+            "code_total": round(code_total, 2),
+            "question_count": len(questions) or len(answers),
+            "correct_count": correct_count,
         },
-        "answers": [
-            {
-                "id": answer.id,
-                "question_id": answer.question_id,
-                "order_index": answer.question.order_index,
-                "question_type": answer.question.question_type,
-                "prompt": answer.question.prompt,
-                "points": float(answer.question.points),
-                "score": float(answer.score) if answer.score is not None else None,
-                "grading_status": answer.grading_status,
-                "selected_options": answer.selected_options,
-                "code_answer": answer.code_answer,
-                "text_answers": answer.text_answers,
-                "system_error": answer.system_error,
-            }
-            for answer in answers
-        ],
+        "questions": [_question_teacher_payload(q, q.id in locked_ids) for q in questions],
+        "answers": [_answer_payload(answer, question_map) for answer in answers],
     }
+
+
+def _answer_payload(answer: ExamAnswer, question_map: dict[int, ExamQuestion]) -> dict:
+    question = question_map.get(answer.question_id) or answer.question
+    return {
+        "id": answer.id,
+        "question_id": answer.question_id,
+        "order_index": question.order_index,
+        "question_type": question.question_type,
+        "prompt": question.prompt,
+        "points": float(question.points),
+        "score": float(answer.score) if answer.score is not None else None,
+        "grading_status": answer.grading_status,
+        "selected_options": answer.selected_options,
+        "code_answer": answer.code_answer,
+        "text_answers": answer.text_answers,
+        "tests_passed": answer.tests_passed,
+        "tests_total": answer.tests_total,
+        "manual_score_reason": answer.manual_score_reason,
+        "manual_score_at": answer.manual_score_at,
+        "system_error": answer.system_error,
+    }
+
+
+def _require_grade_detail_access(exam: Exam, current_user: User) -> None:
+    if current_user.role == "teacher":
+        ensure_course_manager(exam.course, current_user)
+
+
+def _round_manual_score(value: float) -> float:
+    """手动改分保留两位小数，避免把 17.93 这类 AI 评分吞成 17.9。"""
+    return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+@router.get("/{exam_id}/grades/{submission_id}")
+def exam_grade_detail(
+    exam_id: int,
+    submission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("teacher", "admin")),
+):
+    exam = require_exam(exam_id, db)
+    _require_grade_detail_access(exam, current_user)
+    submission = db.get(ExamSubmission, submission_id)
+    if not submission or submission.exam_id != exam_id:
+        raise api_error(404, "SUBMISSION_NOT_FOUND", "考试提交不存在")
+    return _exam_grade_detail_payload(exam, submission, db)
+
+
+def _set_manual_answer_score(exam: Exam, submission: ExamSubmission, answer: ExamAnswer, question: ExamQuestion, score: float, reason: str, db: Session) -> dict:
+    """写入逐题手动得分并重算父级总分。"""
+    max_points = float(question.points)
+    if not math.isfinite(score) or score < 0 or score > max_points:
+        raise api_error(
+            422,
+            "SCORE_OUT_OF_RANGE",
+            f"得分必须在 0 到本题满分 {max_points:g} 分之间",
+            fields={"score": [f"得分必须在 0 到 {max_points:g} 之间"]},
+        )
+
+    answer.score = _round_manual_score(score)
+    answer.grading_status = "completed"
+    answer.finished_at = utc_now()
+    answer.manual_score_reason = reason.strip()
+    answer.manual_score_at = utc_now()
+
+    # 编程题若存在正式 AI 评分记录，同步教师改分结果，避免 AI 复核列表仍显示待处理。
+    if question.question_type == "code":
+        code_grade = db.scalar(
+            select(CodeGrade).where(
+                CodeGrade.exam_answer_id == answer.id,
+                CodeGrade.mode == "active",
+            )
+        )
+        if code_grade is not None and max_points > 0:
+            code_grade.scaled_score = answer.score
+            code_grade.final_score_100 = _round_manual_score(answer.score / max_points * 100)
+            code_grade.status = "completed"
+            code_grade.needs_teacher_review = False
+            code_grade.review_reason = None
+            code_grade.finished_at = code_grade.finished_at or utc_now()
+
+    db.flush()
+
+    # 待复核提交：所有题目都有分数后自动转为已完成，并清除复核标记。
+    if submission.status == "review_required":
+        # 只要还有任何一道题没有分数（包括整题未作答、尚无 ExamAnswer 行），
+        # 就保持待复核，不允许提前按已存在的答案汇总。
+        missing = db.scalar(
+            select(ExamQuestion.id)
+            .outerjoin(
+                ExamAnswer,
+                and_(
+                    ExamAnswer.question_id == ExamQuestion.id,
+                    ExamAnswer.submission_id == submission.id,
+                ),
+            )
+            .where(
+                ExamQuestion.exam_id == submission.exam_id,
+                or_(ExamAnswer.id.is_(None), ExamAnswer.score.is_(None)),
+            )
+            .limit(1)
+        )
+        if missing is not None:
+            db.commit()
+            db.refresh(submission)
+            return _exam_grade_detail_payload(exam, submission, db)
+
+    total = db.scalar(
+        select(func.sum(ExamAnswer.score)).where(ExamAnswer.submission_id == submission.id)
+    )
+    total = _round_manual_score(float(total or 0))
+    submission.score = total
+    if submission.status == "review_required":
+        submission.status = "graded"
+        submission.review_reason = None
+        submission.review_required_at = None
+    submission.graded_at = utc_now()
+
+    grade = db.scalar(
+        select(ExamGrade).where(
+            ExamGrade.exam_id == submission.exam_id,
+            ExamGrade.student_id == submission.student_id,
+        )
+    )
+    if grade is None:
+        db.add(ExamGrade(exam_id=submission.exam_id, student_id=submission.student_id, score=total))
+    else:
+        grade.score = total
+
+    db.commit()
+    db.refresh(submission)
+    return _exam_grade_detail_payload(exam, submission, db)
+
+
+def _require_editable_submission(exam: Exam, submission_id: int, db: Session) -> ExamSubmission:
+    submission = db.get(ExamSubmission, submission_id)
+    if not submission or submission.exam_id != exam.id:
+        raise api_error(404, "SUBMISSION_NOT_FOUND", "考试提交不存在")
+    if submission.status not in ("graded", "review_required"):
+        raise api_error(409, "SUBMISSION_NOT_EDITABLE", "仅已完成评分或待复核的提交可手动修改分数")
+    return submission
+
+
+@router.patch("/{exam_id}/grades/{submission_id}/answers/{answer_id}/score")
+def update_exam_answer_score(
+    exam_id: int,
+    submission_id: int,
+    answer_id: int,
+    payload: ExamAnswerScoreUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("teacher", "admin")),
+):
+    """教师手动修改某道题的得分，并同步重算总分。"""
+    exam = require_exam(exam_id, db)
+    _require_grade_detail_access(exam, current_user)
+    submission = _require_editable_submission(exam, submission_id, db)
+
+    answer = db.scalar(
+        select(ExamAnswer).where(
+            ExamAnswer.id == answer_id,
+            ExamAnswer.submission_id == submission_id,
+        )
+    )
+    if answer is None:
+        raise api_error(404, "ANSWER_NOT_FOUND", "答题记录不存在")
+    question = db.get(ExamQuestion, answer.question_id)
+    if question is None or question.exam_id != exam_id:
+        raise api_error(404, "QUESTION_NOT_FOUND", "题目不存在")
+    return _set_manual_answer_score(exam, submission, answer, question, float(payload.score), payload.reason, db)
+
+
+@router.patch("/{exam_id}/grades/{submission_id}/questions/{question_id}/score")
+def update_exam_question_score(
+    exam_id: int,
+    submission_id: int,
+    question_id: int,
+    payload: ExamAnswerScoreUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("teacher", "admin")),
+):
+    """对尚未生成答题记录的题目手动给分（例如学生整题未作答）。"""
+    exam = require_exam(exam_id, db)
+    _require_grade_detail_access(exam, current_user)
+    submission = _require_editable_submission(exam, submission_id, db)
+
+    question = db.scalar(
+        select(ExamQuestion).where(
+            ExamQuestion.id == question_id,
+            ExamQuestion.exam_id == exam_id,
+        )
+    )
+    if question is None:
+        raise api_error(404, "QUESTION_NOT_FOUND", "题目不存在")
+    answer = db.scalar(
+        select(ExamAnswer).where(
+            ExamAnswer.submission_id == submission_id,
+            ExamAnswer.question_id == question_id,
+        )
+    )
+    if answer is None:
+        answer = ExamAnswer(
+            submission_id=submission_id,
+            question_id=question_id,
+            selected_options=None,
+            code_answer=None,
+            text_answers=None,
+            version=1,
+        )
+        db.add(answer)
+        db.flush()
+    return _set_manual_answer_score(exam, submission, answer, question, float(payload.score), payload.reason, db)
 
 
 # ── 考试题目管理 ──
