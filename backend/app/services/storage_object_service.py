@@ -198,9 +198,14 @@ class StorageObjectService:
             created_by_id=created_by_id,
         )
         try:
-            with self.db.begin_nested():
-                self.db.add(obj)
-                self.db.flush()
+            # Do not open a nested transaction here.  In SQLite's legacy
+            # transaction mode, releasing a savepoint created by
+            # ``begin_nested`` can make a standalone flush visible even when
+            # the caller subsequently rolls back.  This service deliberately
+            # has caller-owned transaction boundaries, so a plain flush keeps
+            # the metadata row atomic with the business binding.
+            self.db.add(obj)
+            self.db.flush()
         except IntegrityError as exc:
             raise StorageObjectConflict(
                 f"storage object {namespace}/{object_key} already exists"

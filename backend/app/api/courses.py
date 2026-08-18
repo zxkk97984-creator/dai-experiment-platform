@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session, selectinload
 from app.config import Settings, get_settings
 from app.dependencies import PaginationParams, get_current_user, get_db, pagination, require_roles
 from app.errors import api_error
-from app.services.lesson_video_service import remove_storage_key
 from app.services.course_access_service import student_visible_course_predicate
 from app.models import (
     AcademicTerm, Chapter, Course, CourseEnrollment, CourseTeachingClass,
@@ -39,6 +38,8 @@ from app.schemas import (
     TeachingClassSummary,
 )
 from app.services.roster_service import sync_course_class_enrollments
+from app.services.storage_object_binding_service import retire_bound_object
+from app.storage import StorageArea, StorageService
 
 router = APIRouter(tags=["courses"])
 
@@ -140,7 +141,7 @@ def can_view_course(course: Course, user: User, db: Session) -> bool:
     - admin：任意课程
     - teacher：仅自己的课程
     - student：published + 教学班成员或教师手动加入 / 白名单成员 / 存量已选（private）
-    - 其他角色（developer 等）：fail closed
+    - 其他角色：fail closed
     """
     if user.role == "admin":
         return True
@@ -230,7 +231,7 @@ def list_courses(
         access_filters.append(student_visible_course_predicate(current_user.id))
     elif current_user.role == "teacher":
         access_filters.append(Course.teacher_id == current_user.id)
-    elif current_user.role == "developer":
+    elif current_user.role not in ("admin",):
         access_filters.append(Course.id == -1)
     query = query.where(*access_filters)
     count_query = count_query.where(*access_filters)
@@ -413,6 +414,7 @@ def update_course(
     course_id: int,
     payload: CourseUpdate,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(get_current_user),
 ):
     course = require_course(course_id, db)
@@ -421,6 +423,13 @@ def update_course(
     updates = payload.model_dump(exclude_unset=True)
     publishing = updates.get("status") == "published" and course.status != "published"
     class_ids = updates.pop("teaching_class_ids", None)
+    old_cover_key = course.cover
+    old_cover_object_id = course.cover_object_id
+    cover_binding_changed = "cover" in updates and updates["cover"] != course.cover
+    if cover_binding_changed:
+        # Direct legacy cover edits must detach a Phase 2B object.  The
+        # physical object is retired only after this business-row commit.
+        course.cover_object_id = None
     if "academic_term_id" in updates and updates["academic_term_id"] is not None:
         term = db.get(AcademicTerm, updates["academic_term_id"])
         if not term:
@@ -438,6 +447,15 @@ def update_course(
         _ensure_course_publishable(course)
     db.commit()
     db.refresh(course)
+    if cover_binding_changed and old_cover_object_id is not None:
+        retire_bound_object(
+            db,
+            StorageService.from_settings(settings),
+            object_id=old_cover_object_id,
+            area=StorageArea.COVERS,
+            legacy_key=old_cover_key,
+            logger_name="course_cover",
+        )
     return get_course(course.id, db, current_user)
 
 
@@ -758,6 +776,7 @@ def update_lesson(
             raise api_error(400, "INVALID_CHAPTER", "目标章节不存在或不属于同一课程")
 
     old_key = lesson.video_storage_key
+    old_object_id = lesson.video_object_id
     clear_files = False  # 提交成功后需要删除旧本地文件
     if "video_url" in data and data["video_url"]:
         # 写入非空外链：切换为 external 并清空上传元数据
@@ -767,6 +786,7 @@ def update_lesson(
             lesson.video_filename = None
             lesson.video_content_type = None
             lesson.video_size = None
+            lesson.video_object_id = None
             clear_files = True
     if (
         data.get("content_type")
@@ -779,6 +799,7 @@ def update_lesson(
         lesson.video_filename = None
         lesson.video_content_type = None
         lesson.video_size = None
+        lesson.video_object_id = None
         lesson.video_url = None
         clear_files = True
 
@@ -786,8 +807,15 @@ def update_lesson(
         setattr(lesson, key, value)
     db.commit()
     db.refresh(lesson)
-    if clear_files and old_key:
-        remove_storage_key(settings, old_key)
+    if clear_files:
+        retire_bound_object(
+            db,
+            StorageService.from_settings(settings),
+            object_id=old_object_id,
+            area=StorageArea.VIDEOS,
+            legacy_key=old_key,
+            logger_name="lesson_video",
+        )
     return lesson
 
 
@@ -803,12 +831,19 @@ def delete_lesson(
         raise api_error(404, "LESSON_NOT_FOUND", "课时不存在")
     ensure_course_manager(lesson.chapter.course, current_user)
     _ensure_course_term_writable(lesson.chapter.course)
-    # 删除前保存 storage key，数据库提交成功后清理本地文件
+    # 删除前保存对象绑定，数据库提交成功后清理本地文件
     old_key = lesson.video_storage_key
+    old_object_id = lesson.video_object_id
     db.delete(lesson)
     db.commit()
-    if old_key:
-        remove_storage_key(settings, old_key)
+    retire_bound_object(
+        db,
+        StorageService.from_settings(settings),
+        object_id=old_object_id,
+        area=StorageArea.VIDEOS,
+        legacy_key=old_key,
+        logger_name="lesson_video",
+    )
 
 
 @router.patch("/chapters/{chapter_id}", response_model=ChapterRead)
@@ -844,12 +879,24 @@ def delete_chapter(
         raise api_error(404, "CHAPTER_NOT_FOUND", "章节不存在")
     ensure_course_manager(chapter.course, current_user)
     _ensure_course_term_writable(chapter.course)
-    # 删除前收集章节内全部本地视频 key，级联删除成功后逐个清理文件
-    old_keys = [l.video_storage_key for l in chapter.lessons if l.video_storage_key]
+    # 删除前收集章节内全部视频对象绑定，级联删除成功后逐个清理文件
+    old_objects = [
+        (lesson.video_object_id, lesson.video_storage_key)
+        for lesson in chapter.lessons
+        if lesson.video_object_id is not None or lesson.video_storage_key
+    ]
     db.delete(chapter)
     db.commit()
-    for key in old_keys:
-        remove_storage_key(settings, key)
+    storage = StorageService.from_settings(settings)
+    for object_id, key in old_objects:
+        retire_bound_object(
+            db,
+            storage,
+            object_id=object_id,
+            area=StorageArea.VIDEOS,
+            legacy_key=key,
+            logger_name="lesson_video",
+        )
 
 
 # ── 课程白名单 ────────────────────────────────────────────────

@@ -26,6 +26,10 @@ from app.services.course_cover_service import (
     remove_storage_key,
     store_upload,
 )
+from app.services.storage_object_binding_service import (
+    register_active_object,
+    retire_bound_object,
+)
 from .storage_media import storage_response
 
 router = APIRouter(tags=["course-covers"])
@@ -45,22 +49,43 @@ async def put_course_cover(
 
     stored = await store_upload(file, course_id, settings)
 
-    # 文件写入完成后锁定课程行，读取锁内真正的最新旧 key，
-    # 避免并发上传互相覆盖时留下孤儿文件
-    locked = db.execute(
-        select(Course).where(Course.id == course_id).with_for_update()
-    ).scalar_one()
-    old_key = locked.cover
-    locked.cover = stored.storage_key
+    storage = StorageService.from_settings(settings)
     try:
+        new_object = register_active_object(
+            db,
+            storage,
+            area=StorageArea.COVERS,
+            namespace="course-covers",
+            object_key=stored.storage_key,
+            original_filename=file.filename or "cover",
+            content_type=stored.content_type,
+            size_bytes=stored.size,
+            created_by_id=current_user.id,
+        )
+        # 文件写入完成后锁定课程行，读取锁内真正的最新旧 key，
+        # 避免并发上传互相覆盖时留下孤儿文件
+        locked = db.execute(
+            select(Course).where(Course.id == course_id).with_for_update()
+        ).scalar_one()
+        old_key = locked.cover
+        old_object_id = locked.cover_object_id
+        locked.cover = stored.storage_key
+        locked.cover_object_id = new_object.id
         db.commit()
     except Exception:
         # 数据库提交失败：删除刚写入的新文件，保留旧字段和旧文件
         db.rollback()
         remove_storage_key(settings, stored.storage_key)
         raise
-    # 数据库提交成功后删除旧受管文件（尽力而为，失败只记录日志）
-    remove_storage_key(settings, old_key)
+    # 业务行提交成功后才进入旧对象 deleting，避免先删旧对象造成数据丢失。
+    retire_bound_object(
+        db,
+        storage,
+        object_id=old_object_id,
+        area=StorageArea.COVERS,
+        legacy_key=old_key,
+        logger_name="course_cover",
+    )
     return locked
 
 
@@ -78,10 +103,18 @@ def delete_course_cover(
         select(Course).where(Course.id == course_id).with_for_update()
     ).scalar_one()
     old_key = locked.cover
+    old_object_id = locked.cover_object_id
     locked.cover = None
+    locked.cover_object_id = None
     db.commit()
-    # 尽力删除旧受管文件；历史外链 / 文件不存在 / 删除失败只记录日志
-    remove_storage_key(settings, old_key)
+    retire_bound_object(
+        db,
+        StorageService.from_settings(settings),
+        object_id=old_object_id,
+        area=StorageArea.COVERS,
+        legacy_key=old_key,
+        logger_name="course_cover",
+    )
     return None
 
 

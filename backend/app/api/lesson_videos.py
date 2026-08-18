@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
@@ -28,6 +29,10 @@ from app.services.lesson_video_service import (
     remove_storage_key,
     store_upload,
     verify_playback_signature,
+)
+from app.services.storage_object_binding_service import (
+    register_active_object,
+    retire_bound_object,
 )
 from .storage_media import storage_response
 from .courses import can_access_course_content, ensure_course_manager, require_course
@@ -71,16 +76,34 @@ async def put_lesson_video(
     lesson = _require_video_lesson(lesson_id, db)
     ensure_course_manager(lesson.chapter.course, current_user)
 
-    old_key = lesson.video_storage_key
     stored = await store_upload(file, lesson_id, settings)
+    storage = StorageService.from_settings(settings)
 
     try:
+        new_object = register_active_object(
+            db,
+            storage,
+            area=StorageArea.VIDEOS,
+            namespace="lesson-videos",
+            object_key=stored.storage_key,
+            original_filename=stored.filename,
+            content_type=stored.content_type,
+            size_bytes=stored.size,
+            created_by_id=current_user.id,
+        )
+        # 文件写入和对象元数据准备好后再锁定最新课时，避免并发替换时误删。
+        lesson = db.execute(
+            select(Lesson).where(Lesson.id == lesson_id).with_for_update()
+        ).scalar_one()
+        old_key = lesson.video_storage_key
+        old_object_id = lesson.video_object_id
         lesson.video_source = "upload"
         lesson.video_url = None
         lesson.video_storage_key = stored.storage_key
         lesson.video_filename = stored.filename
         lesson.video_content_type = stored.content_type
         lesson.video_size = stored.size
+        lesson.video_object_id = new_object.id
         db.commit()
     except Exception:
         db.rollback()
@@ -89,9 +112,16 @@ async def put_lesson_video(
         raise
     db.refresh(lesson)
 
-    # 数据库提交成功后删除旧文件；失败只记录，不回滚新视频
-    if old_key and old_key != stored.storage_key:
-        remove_storage_key(settings, old_key)
+    # 业务行提交成功后才进入旧对象 deleting，避免先删旧对象造成数据丢失。
+    if old_object_id is not None or (old_key and old_key != stored.storage_key):
+        retire_bound_object(
+            db,
+            storage,
+            object_id=old_object_id,
+            area=StorageArea.VIDEOS,
+            legacy_key=old_key,
+            logger_name="lesson_video",
+        )
 
     sig, expires_at = create_playback_signature(
         lesson.id, current_user.id, lesson.video_storage_key, settings
@@ -115,14 +145,22 @@ def delete_lesson_video(
     ensure_course_manager(lesson.chapter.course, current_user)
 
     old_key = lesson.video_storage_key
+    old_object_id = lesson.video_object_id
     lesson.video_source = "external"
     lesson.video_storage_key = None
     lesson.video_filename = None
     lesson.video_content_type = None
     lesson.video_size = None
+    lesson.video_object_id = None
     db.commit()
-    if old_key:
-        remove_storage_key(settings, old_key)
+    retire_bound_object(
+        db,
+        StorageService.from_settings(settings),
+        object_id=old_object_id,
+        area=StorageArea.VIDEOS,
+        legacy_key=old_key,
+        logger_name="lesson_video",
+    )
     return None
 
 

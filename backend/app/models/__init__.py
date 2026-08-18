@@ -211,11 +211,16 @@ class Course(TimestampMixin, Base):
     academic_term_id: Mapped[int | None] = mapped_column(ForeignKey("academic_terms.id"), nullable=True, index=True)
     # ── 课程设置 ──────────────────────────────────────────────
     cover: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # 新上传封面使用对象元数据绑定；为空时继续读取 legacy cover 字段。
+    cover_object_id: Mapped[int | None] = mapped_column(
+        ForeignKey("storage_objects.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     visibility: Mapped[str] = mapped_column(String(20), default="class", server_default="class", nullable=False)
     default_score: Mapped[float] = mapped_column(Float, default=100.0, server_default="100")
 
     teacher: Mapped[User | None] = relationship()
+    cover_object: Mapped[StorageObject | None] = relationship(foreign_keys=[cover_object_id])
     academic_term: Mapped[AcademicTerm | None] = relationship(back_populates="courses")
     teaching_class_links: Mapped[list[CourseTeachingClass]] = relationship(
         back_populates="course", cascade="all, delete-orphan"
@@ -267,6 +272,10 @@ class Lesson(TimestampMixin, Base):
     video_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)  # 安全化后的原文件名
     video_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     video_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # 新上传视频使用对象元数据绑定；为空时继续读取 legacy video_storage_key。
+    video_object_id: Mapped[int | None] = mapped_column(
+        ForeignKey("storage_objects.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, default=0)
     # 发布状态：draft（草稿）/ published（已发布）/ pending（待发布）
@@ -274,6 +283,7 @@ class Lesson(TimestampMixin, Base):
 
     chapter: Mapped[Chapter] = relationship(back_populates="lessons")
     notebook_template: Mapped["NotebookTemplate | None"] = relationship(foreign_keys=[template_id])
+    video_object: Mapped[StorageObject | None] = relationship(foreign_keys=[video_object_id])
 
 
 # ── 选课 ─────────────────────────────────────────────────────
