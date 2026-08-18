@@ -4,12 +4,11 @@
 - 仅允许 JPEG、PNG、GIF、WebP，明确拒绝 SVG（脚本/外部资源风险）；
 - 扩展名、声明 MIME 与文件魔数三者同时校验；
 - 磁盘文件名使用 uuid4().hex，原文件名不进入磁盘路径；
-- 文件先写入 .staging 目录，校验通过后 os.replace 原子移动到最终位置；
+- 文件先写入 .staging 目录，校验通过后由统一 Storage 层原子移动到最终位置；
 - 封面为公开展示资产，无签名播放逻辑（与视频不同）。
 """
 from __future__ import annotations
 
-import os
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +17,7 @@ from fastapi import UploadFile
 
 from app.config import Settings
 from app.errors import api_error
+from app.storage import StorageArea, StorageError, StorageLimitExceeded, StorageService
 
 # 扩展名 -> 标准 MIME 白名单（大小写不敏感）
 ALLOWED_COVER_TYPES: dict[str, str] = {
@@ -27,8 +27,6 @@ ALLOWED_COVER_TYPES: dict[str, str] = {
     ".gif": "image/gif",
     ".webp": "image/webp",
 }
-
-_CHUNK_SIZE = 1024 * 1024  # 流式读取块大小
 
 # 封面存储 key 的逻辑前缀（数据库仅保存逻辑 key，不保存绝对路径）
 COVER_KEY_PREFIX = "covers/"
@@ -99,40 +97,13 @@ def _validate_upload(upload: UploadFile, settings: Settings) -> str:
     return expected_mime
 
 
-def _staging_path(settings: Settings) -> Path:
-    """staging 目录：位于封面根目录内，上传时创建。"""
-    path = settings.cover_storage_path / ".staging"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def resolve_storage_path(settings: Settings, storage_key: str | None) -> Path:
-    """把存储 key 解析为磁盘路径；非 covers/ 前缀或越出封面根目录一律拒绝。
-
-    先移除逻辑前缀再拼接，避免 key 内的 `../` 片段被 normalize 回根目录内
-    而绕过 relative_to 校验。
-    """
-    if not storage_key or not storage_key.startswith(COVER_KEY_PREFIX):
-        raise api_error(404, "COVER_NOT_FOUND", "封面文件不存在")
-    root = settings.cover_storage_path
-    relative = storage_key[len(COVER_KEY_PREFIX):]
-    try:
-        candidate = (root / relative).resolve()
-        candidate.relative_to(root.resolve())
-    except (ValueError, OSError):
-        raise api_error(404, "COVER_NOT_FOUND", "封面文件不存在")
-    return candidate
-
-
 def remove_storage_key(settings: Settings, storage_key: str | None) -> None:
     """删除磁盘文件；文件不存在或删除失败只记录，不抛异常（生命周期尽力而为）。"""
-    if not storage_key:
+    if not storage_key or not storage_key.startswith(COVER_KEY_PREFIX):
         return
     try:
-        path = resolve_storage_path(settings, storage_key)
-        if path.exists():
-            path.unlink()
-    except Exception:
+        StorageService.from_settings(settings).delete(StorageArea.COVERS, storage_key)
+    except StorageError:
         # 旧文件删除失败不能回滚已成功提交的新封面，只记录结构化错误
         import logging
 
@@ -159,37 +130,19 @@ async def store_upload(
     ext = Path(upload.filename).suffix.lower()
     storage_key = f"{COVER_KEY_PREFIX}{course_id}/{uuid.uuid4().hex}{ext}"
 
-    staging = _staging_path(settings)
-    staging_file = staging / f"{uuid.uuid4().hex}.part"
-    total = 0
     try:
-        with staging_file.open("wb") as out:
-            while True:
-                chunk = await upload.read(_CHUNK_SIZE)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > settings.cover_max_upload_bytes:
-                    raise api_error(413, "COVER_TOO_LARGE", "封面文件超过 5 MB 大小限制")
-                out.write(chunk)
-        if total == 0:
+        stored = StorageService.from_settings(settings).put(
+            StorageArea.COVERS,
+            storage_key,
+            upload.file,
+            max_bytes=settings.cover_max_upload_bytes,
+        )
+        if stored.size == 0:
             raise api_error(400, "COVER_FILE_EMPTY", "图片文件为空")
-
-        # 原子移动到最终位置：key 移除逻辑前缀后的相对路径（磁盘上不再有
-        # covers/ 目录层，与 resolve_storage_path 的解析规则保持一致）
-        relative = storage_key[len(COVER_KEY_PREFIX):]
-        final = settings.cover_storage_path / relative
-        final.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(staging_file, final)
         return StoredCover(
             storage_key=storage_key,
             content_type=content_type,
-            size=total,
+            size=stored.size,
         )
-    finally:
-        # 任何异常或客户端取消都清理 staging 文件
-        if staging_file.exists():
-            try:
-                staging_file.unlink()
-            except OSError:
-                pass
+    except StorageLimitExceeded as exc:
+        raise api_error(413, "COVER_TOO_LARGE", "封面文件超过 5 MB 大小限制") from exc

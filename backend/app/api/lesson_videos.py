@@ -11,7 +11,6 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
-from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
@@ -23,13 +22,14 @@ from app.schemas import (
     LessonVideoPlaybackRead,
     LessonVideoUploadRead,
 )
+from app.storage import StorageArea, StorageError, StorageService
 from app.services.lesson_video_service import (
     create_playback_signature,
     remove_storage_key,
-    resolve_storage_path,
     store_upload,
     verify_playback_signature,
 )
+from .storage_media import storage_response
 from .courses import can_access_course_content, ensure_course_manager, require_course
 
 router = APIRouter(tags=["lesson-videos"])
@@ -156,6 +156,7 @@ def get_lesson_video_playback_url(
 @router.get("/media/lesson-videos/{lesson_id}")
 def stream_lesson_video(
     lesson_id: int,
+    request: Request,
     uid: Annotated[int, Query()],
     expires: Annotated[int, Query()],
     sig: Annotated[str, Query()],
@@ -181,19 +182,22 @@ def stream_lesson_video(
 
     # 签名内容包含当前 storage key，verify 通过即代表课时仍指向签名所对应的当前文件
     # （替换/移除视频后旧签名必然校验失败）
-    path = resolve_storage_path(settings, lesson.video_storage_key)
-    if not path.is_file():
+    try:
+        response = storage_response(
+            request,
+            StorageService.from_settings(settings),
+            StorageArea.VIDEOS,
+            lesson.video_storage_key,
+            media_type=lesson.video_content_type or "application/octet-stream",
+            filename=lesson.video_filename
+            or lesson.video_storage_key.rsplit("/", 1)[-1],
+            headers={
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "private, no-store",
+                "Accept-Ranges": "bytes",
+            },
+        )
+    except StorageError:
         logger.error("lesson video file missing on disk: lesson=%s key=%s", lesson_id, lesson.video_storage_key)
         raise api_error(404, "VIDEO_NOT_FOUND", "视频文件不存在")
-
-    return FileResponse(
-        path,
-        media_type=lesson.video_content_type or "application/octet-stream",
-        filename=lesson.video_filename or path.name,
-        content_disposition_type="inline",
-        headers={
-            "X-Content-Type-Options": "nosniff",
-            "Cache-Control": "private, no-store",
-            "Accept-Ranges": "bytes",
-        },
-    )
+    return response

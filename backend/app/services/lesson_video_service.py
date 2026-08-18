@@ -1,7 +1,7 @@
 """教师上传视频的存储与签名服务。
 
 首期采用本地磁盘存储（backend/storage/videos/）：
-- 上传文件先写入 .staging 目录，校验完成后以 os.replace 原子移动到最终位置；
+- 上传文件先写入 .staging 目录，校验完成后由统一 Storage 层原子移动到最终位置；
 - 磁盘文件名使用 uuid4().hex，原文件名只作展示元数据；
 - 播放地址为 HMAC 签名短期 URL，媒体端点再次执行权限检查。
 """
@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -19,6 +18,7 @@ from fastapi import UploadFile
 
 from app.config import Settings
 from app.errors import api_error
+from app.storage import StorageArea, StorageError, StorageLimitExceeded, StorageService
 
 # 扩展名 -> 标准 MIME 白名单（大小写不敏感）
 ALLOWED_VIDEO_TYPES: dict[str, str] = {
@@ -31,9 +31,6 @@ ALLOWED_VIDEO_TYPES: dict[str, str] = {
 _EBML_MAGIC = b"\x1a\x45\xdf\xa3"
 # ISO-BMFF（MP4/MOV）容器头：前 4 字节大端长度 + "ftyp"
 _FTYP_MAGIC = b"ftyp"
-
-_CHUNK_SIZE = 1024 * 1024  # 流式读取块大小
-
 
 @dataclass(frozen=True)
 class StoredVideo:
@@ -103,35 +100,13 @@ def _validate_upload(upload: UploadFile, settings: Settings) -> tuple[str, str]:
     return filename, expected_mime
 
 
-def _staging_path(settings: Settings) -> Path:
-    """staging 目录：位于视频根目录内，上传时创建。"""
-    path = settings.video_storage_path / ".staging"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def resolve_storage_path(settings: Settings, storage_key: str | None) -> Path:
-    """把存储 key 解析为磁盘路径；越出视频根目录一律拒绝，防止路径穿越。"""
-    if not storage_key:
-        raise api_error(404, "VIDEO_NOT_FOUND", "视频文件不存在")
-    root = settings.video_storage_path
-    try:
-        candidate = (root / storage_key).resolve()
-        candidate.relative_to(root.resolve())
-    except (ValueError, OSError):
-        raise api_error(404, "VIDEO_NOT_FOUND", "视频文件不存在")
-    return candidate
-
-
 def remove_storage_key(settings: Settings, storage_key: str | None) -> None:
     """删除磁盘文件；文件不存在或删除失败只记录，不抛异常（生命周期尽力而为）。"""
     if not storage_key:
         return
     try:
-        path = resolve_storage_path(settings, storage_key)
-        if path.exists():
-            path.unlink()
-    except Exception:
+        StorageService.from_settings(settings).delete(StorageArea.VIDEOS, storage_key)
+    except StorageError:
         # 旧文件删除失败不能回滚已成功的新视频，只记录结构化错误
         import logging
 
@@ -151,39 +126,23 @@ async def store_upload(
     ext = Path(filename).suffix.lower()
     storage_key = f"lessons/{lesson_id}/{uuid.uuid4().hex}{ext}"
 
-    staging = _staging_path(settings)
-    staging_file = staging / f"{uuid.uuid4().hex}.part"
-    total = 0
     try:
-        with staging_file.open("wb") as out:
-            while True:
-                chunk = await upload.read(_CHUNK_SIZE)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > settings.video_max_upload_bytes:
-                    raise api_error(413, "VIDEO_TOO_LARGE", "视频文件超过 500 MiB 大小限制")
-                out.write(chunk)
-        if total == 0:
+        stored = StorageService.from_settings(settings).put(
+            StorageArea.VIDEOS,
+            storage_key,
+            upload.file,
+            max_bytes=settings.video_max_upload_bytes,
+        )
+        if stored.size == 0:
             raise api_error(400, "VIDEO_FILE_EMPTY", "视频文件为空")
-
-        # 原子移动到最终位置
-        final = settings.video_storage_path / storage_key
-        final.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(staging_file, final)
         return StoredVideo(
             storage_key=storage_key,
             filename=filename,
             content_type=content_type,
-            size=total,
+            size=stored.size,
         )
-    finally:
-        # 任何异常或客户端取消都清理 staging 文件
-        if staging_file.exists():
-            try:
-                staging_file.unlink()
-            except OSError:
-                pass
+    except StorageLimitExceeded as exc:
+        raise api_error(413, "VIDEO_TOO_LARGE", "视频文件超过 500 MiB 大小限制") from exc
 
 
 def create_playback_signature(

@@ -15,6 +15,7 @@ from fastapi import HTTPException, UploadFile
 
 from app import models
 from app.services import course_cover_service as svc
+from app.storage import InvalidStorageKey, StorageArea, StorageService
 from conftest import auth_header, create_course_db, create_user, login
 
 API = "/api/v1"
@@ -187,21 +188,19 @@ def test_service_stored_key_is_uuid_without_original_name(test_settings):
 
 
 def test_service_resolve_rejects_non_covers_key_and_traversal(test_settings):
+    storage = StorageService.from_settings(test_settings)
     # 非 covers/ 前缀一律拒绝
     for bad in ("videos/1/x.mp4", "lessons/1/x.mp4", "covers2/1/x.jpg"):
-        with pytest.raises(HTTPException) as exc:
-            svc.resolve_storage_path(test_settings, bad)
-        assert _error_code(exc.value) == COVER_NOT_FOUND, bad
+        with pytest.raises(InvalidStorageKey):
+            storage.exists(StorageArea.COVERS, bad)
     # 目录穿越一律拒绝
     for bad in ("../escape.jpg", "covers/../escape.jpg", "covers/1/../../etc/passwd"):
-        with pytest.raises(HTTPException) as exc:
-            svc.resolve_storage_path(test_settings, bad)
-        assert _error_code(exc.value) == COVER_NOT_FOUND, bad
+        with pytest.raises(InvalidStorageKey):
+            storage.exists(StorageArea.COVERS, bad)
     # None 与空串同样拒绝
     for bad in (None, ""):
-        with pytest.raises(HTTPException) as exc:
-            svc.resolve_storage_path(test_settings, bad)
-        assert _error_code(exc.value) == COVER_NOT_FOUND
+        with pytest.raises(InvalidStorageKey):
+            storage.exists(StorageArea.COVERS, bad)
 
 
 def test_service_accepts_all_formats(test_settings):

@@ -4,8 +4,6 @@ import copy
 import hashlib
 import io
 import json
-import os
-import shutil
 import stat
 import uuid
 import zipfile
@@ -36,6 +34,13 @@ from app.schemas.studio import (
     StudioTemplateMetadataUpdate,
     StudioTemplateRead,
     StudioVersionRead,
+)
+from app.services.studio_asset_service import StudioAssetBundleService
+from app.storage import (
+    StorageConflict,
+    StorageError,
+    StorageNotFound,
+    StorageService,
 )
 
 
@@ -584,25 +589,10 @@ def parse_import(filename: str, data: bytes) -> ImportedNotebook:
         )
 
 
-def _safe_storage_path(settings: Settings, relative: str) -> Path:
-    posix = PurePosixPath(relative)
-    if posix.is_absolute() or ".." in posix.parts:
-        raise api_error(500, "ASSET_PATH_INVALID", "资源目录不安全")
-    root = settings.studio_storage_path
-    target = (root / Path(*posix.parts)).resolve()
-    try:
-        target.relative_to(root)
-    except ValueError:
-        raise api_error(500, "ASSET_PATH_INVALID", "资源目录越界")
-    return target
-
-
 def _remove_generated_path(settings: Settings, relative: str | None) -> None:
     if not relative:
         return
-    target = _safe_storage_path(settings, relative)
-    if target.exists():
-        shutil.rmtree(target)
+    StudioAssetBundleService(StorageService.from_settings(settings)).delete(relative)
 
 
 def _write_import_assets(
@@ -613,32 +603,20 @@ def _write_import_assets(
 ) -> str | None:
     if not assets:
         return None
-    root = settings.studio_storage_path
-    root.mkdir(parents=True, exist_ok=True)
     token = uuid.uuid4().hex[:12]
     relative = (
         PurePosixPath("templates")
         / str(template_id)
         / f"draft-r{revision}-{token}"
     ).as_posix()
-    final = _safe_storage_path(settings, relative)
-    staging = root / ".staging" / uuid.uuid4().hex
-    staging.mkdir(parents=True, exist_ok=False)
     try:
-        for asset_path, content in assets:
-            path = PurePosixPath(asset_path)
-            target = staging / Path(*path.parts)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(content)
-        final.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(staging, final)
+        StudioAssetBundleService(StorageService.from_settings(settings)).put(
+            relative,
+            assets,
+        )
         return relative
-    except Exception:
-        if staging.exists():
-            shutil.rmtree(staging)
-        if final.exists():
-            shutil.rmtree(final)
-        raise
+    except StorageError as exc:
+        raise api_error(500, "ASSET_STORAGE_FAILED", "导入资源保存失败") from exc
 
 
 def create_imported_template(

@@ -8,8 +8,8 @@
 """
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -19,13 +19,14 @@ from app.dependencies import get_current_user, get_db
 from app.errors import api_error
 from app.models import Course, User
 from app.schemas import CourseRead
+from app.storage import StorageArea, StorageError, StorageService
 from app.services.course_cover_service import (
     COVER_KEY_PREFIX,
     content_type_for_storage_key,
     remove_storage_key,
-    resolve_storage_path,
     store_upload,
 )
+from .storage_media import storage_response
 
 router = APIRouter(tags=["course-covers"])
 
@@ -87,10 +88,11 @@ def delete_course_cover(
 @router.get("/media/course-covers/{course_id}")
 def get_course_cover_media(
     course_id: int,
+    request: Request,
     v: Annotated[str | None, Query()] = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> FileResponse:
+) -> Response:
     course = db.get(Course, course_id)
     # 统一 404，隐藏“课程不存在”和“课程存在但没有可读取封面”的差异
     if not course or not course.cover or not course.cover.startswith(COVER_KEY_PREFIX):
@@ -98,19 +100,22 @@ def get_course_cover_media(
     # 版本参数与当前 key 不同：旧 URL 在未命中缓存时不得读取到新图
     if v is not None and v != course.cover:
         raise api_error(404, "COVER_NOT_FOUND", "封面不存在")
-    path = resolve_storage_path(settings, course.cover)
-    if not path.is_file():
+    try:
+        response = storage_response(
+            request,
+            StorageService.from_settings(settings),
+            StorageArea.COVERS,
+            course.cover,
+            media_type=content_type_for_storage_key(course.cover),
+            headers={
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": (
+                    "public, max-age=31536000, immutable"
+                    if v is not None
+                    else "public, max-age=300"
+                ),
+            },
+        )
+    except StorageError:
         raise api_error(404, "COVER_NOT_FOUND", "封面不存在")
-    if v is not None:
-        cache_control = "public, max-age=31536000, immutable"
-    else:
-        cache_control = "public, max-age=300"
-    return FileResponse(
-        path,
-        media_type=content_type_for_storage_key(course.cover),
-        content_disposition_type="inline",
-        headers={
-            "X-Content-Type-Options": "nosniff",
-            "Cache-Control": cache_control,
-        },
-    )
+    return response
