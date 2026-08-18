@@ -11,6 +11,7 @@ from .backend import (
     StorageReadStream,
 )
 from .local import LocalFilesystemStorage
+from .object_metadata import StorageObjectBackend, StorageObjectStatus
 from .service import StorageArea, StorageService
 
 __all__ = [
@@ -18,6 +19,7 @@ __all__ = [
     "LocalFilesystemStorage",
     "StorageArea",
     "StorageBackend",
+    "StorageObjectBackend",
     "StorageConflict",
     "StorageError",
     "StorageLimitExceeded",
@@ -26,5 +28,6 @@ __all__ = [
     "StorageObjectLister",
     "StorageRangeError",
     "StorageReadStream",
+    "StorageObjectStatus",
     "StorageService",
 ]

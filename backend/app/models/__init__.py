@@ -5,6 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.database import Base
+from app.storage.object_metadata import StorageObjectBackend, StorageObjectStatus
 
 # 控制面主键：MySQL 使用 BIGINT（计划 4.x），SQLite 测试库回退 INTEGER（rowid 别名，可自增）
 BIGINT_PK = BigInteger().with_variant(Integer, "sqlite")
@@ -64,6 +65,64 @@ class User(TimestampMixin, Base):
     teaching_class_memberships: Mapped[list["TeachingClassStudent"]] = relationship(
         back_populates="student", cascade="all, delete-orphan"
     )
+
+
+# ── 统一文件对象元数据 ────────────────────────────────────────
+
+
+class StorageObject(TimestampMixin, Base):
+    """持久化文件对象的事实记录；本阶段不绑定任何业务表。"""
+
+    __tablename__ = "storage_objects"
+    __table_args__ = (
+        UniqueConstraint("namespace", "object_key", name="uq_storage_objects_namespace_key"),
+        CheckConstraint("namespace <> ''", name="ck_storage_objects_namespace_nonempty"),
+        CheckConstraint("object_key <> ''", name="ck_storage_objects_key_nonempty"),
+        CheckConstraint("backend <> ''", name="ck_storage_objects_backend_nonempty"),
+        CheckConstraint(
+            "status IN ('staging', 'active', 'deleting', 'deleted', 'failed')",
+            name="ck_storage_objects_status",
+        ),
+        CheckConstraint(
+            "size_bytes IS NULL OR size_bytes >= 0",
+            name="ck_storage_objects_size_nonnegative",
+        ),
+        CheckConstraint(
+            "sha256 IS NULL OR length(sha256) = 64",
+            name="ck_storage_objects_sha256_length",
+        ),
+        CheckConstraint("version >= 1", name="ck_storage_objects_version_positive"),
+        CheckConstraint(
+            "(status = 'deleted' AND deleted_at IS NOT NULL)"
+            " OR (status <> 'deleted' AND deleted_at IS NULL)",
+            name="ck_storage_objects_deleted_at_status",
+        ),
+        Index("ix_storage_objects_namespace_status", "namespace", "status"),
+        Index("ix_storage_objects_status_deleted_at", "status", "deleted_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
+    namespace: Mapped[str] = mapped_column(String(64), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    backend: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=StorageObjectBackend.LOCAL.value, server_default="local"
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=StorageObjectStatus.STAGING.value, server_default="staging"
+    )
+    original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    etag: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+
+    created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id])
 
 
 # ── 学期 / 教学班 ────────────────────────────────────────────
