@@ -50,6 +50,33 @@ def test_lesson_create_defaults_to_draft(client, db_session_factory):
     assert chapters[0]["lessons"][0]["status"] == "draft"
 
 
+def test_notebook_lesson_read_includes_template_id(client, db_session_factory):
+    """课程目录返回 Notebook 课时的模板绑定，教师编辑页可直接进入 Studio"""
+    teacher = create_user(db_session_factory, "teacher_with_template", "teacher")
+    teacher_token, _ = login(client, "teacher_with_template")
+    course_id = _create_course(client, teacher_token)
+    chapter = _create_chapter(client, teacher_token, course_id)
+    lesson = _create_lesson(client, teacher_token, chapter["id"], title="Notebook 课时")
+
+    from app.models import Lesson, NotebookTemplate
+
+    with db_session_factory() as db:
+        template = NotebookTemplate(
+            name="Notebook 课时模板",
+            status="draft",
+            owner_id=teacher.id,
+        )
+        db.add(template)
+        db.flush()
+        db.get(Lesson, lesson["id"]).template_id = template.id
+        db.commit()
+
+    chapters = client.get(
+        f"/api/v1/courses/{course_id}/chapters", headers=auth_header(teacher_token)
+    ).json()["items"]
+    assert chapters[0]["lessons"][0]["template_id"] == template.id
+
+
 def test_update_lesson_title_and_status(client, db_session_factory):
     """PATCH 课时：修改标题与发布状态"""
     create_user(db_session_factory, "teacher", "teacher")

@@ -193,12 +193,11 @@ def test_class_visibility_allows_class_members_and_teacher_added_students(client
 
 
 def _seed_users(db_session_factory):
-    """教师/管理员/developer/active学生/disabled学生各一"""
+    """教师/管理员/active学生/disabled学生各一"""
     create_user(db_session_factory, "stu_a", "student", real_name="张三")
     create_user(db_session_factory, "stu_b", "student", real_name="李四")
     create_user(db_session_factory, "stu_off", "student")
     create_user(db_session_factory, "t_other", "teacher")
-    create_user(db_session_factory, "dev1", "developer")
     # disabled 学生
     with db_session_factory() as db:
         from sqlalchemy import select
@@ -221,12 +220,10 @@ def test_students_endpoint_teacher_and_admin(client, db_session_factory):
         assert usernames == {"stu_a", "stu_b"}
 
 
-def test_students_endpoint_forbidden_for_student_and_developer(client, db_session_factory):
+def test_students_endpoint_forbidden_for_student(client, db_session_factory):
     stu_tok = _token(client, db_session_factory, "s_only", "student")
-    dev_tok = _token(client, db_session_factory, "dev_only", "developer")
-    for tok in (stu_tok, dev_tok):
-        resp = client.get(f"{API}/users/students", headers=auth_header(tok))
-        assert resp.status_code == 403, resp.text
+    resp = client.get(f"{API}/users/students", headers=auth_header(stu_tok))
+    assert resp.status_code == 403, resp.text
 
 
 def test_students_endpoint_q_filters_username_and_real_name(client, db_session_factory):
@@ -323,9 +320,8 @@ def test_admin_manages_any_course_whitelist(client, db_session_factory):
 def test_whitelist_management_forbidden_for_non_owner(client, db_session_factory):
     t_tok, s_tok, course_id = _setup_whitelist_course(client, db_session_factory)
     other_tok = _token(client, db_session_factory, "t_other_wl", "teacher")
-    dev_tok = _token(client, db_session_factory, "dev_wl", "developer")
     s_id = _student_id(client, s_tok)
-    for tok in (other_tok, dev_tok, s_tok):
+    for tok in (other_tok, s_tok):
         resp = client.get(f"{API}/courses/{course_id}/whitelist", headers=auth_header(tok))
         assert resp.status_code == 403, f"GET whitelist: {resp.status_code}"
         resp = client.post(
@@ -659,11 +655,16 @@ def test_other_teacher_cannot_access_course(client, db_session_factory):
     assert resp.json()["total"] == 0
 
 
-def test_developer_keeps_empty_course_list(client, db_session_factory):
-    t_tok = _token(client, db_session_factory, "t_dev")
-    dev_tok = _token(client, db_session_factory, "dev2", "developer")
-    create_course_db(db_session_factory, teacher_username="t_dev", title="可见范围课程", status="published", visibility="public")
-    resp = client.get(f"{API}/courses", headers=auth_header(dev_tok))
+def test_unenrolled_student_keeps_private_course_list_empty(client, db_session_factory):
+    student_tok = _token(client, db_session_factory, "s_no_access", "student")
+    create_course_db(
+        db_session_factory,
+        teacher_username="t_private_owner",
+        title="可见范围课程",
+        status="published",
+        visibility="private",
+    )
+    resp = client.get(f"{API}/courses", headers=auth_header(student_tok))
     assert resp.status_code == 200
     assert resp.json()["total"] == 0
 

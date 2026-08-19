@@ -209,6 +209,32 @@ def create_exam_submissions(
     db.flush()
 
 
+def sync_exam_grades(db: Session, exams: dict) -> int:
+    """通过正式考试 finalizer 汇总 seed 构造的历史时间线。
+
+    Seed 仍然可以预先构造历史提交，但必须把可评分提交留在 ``grading``，
+    由生产链路共用的 ``finalize_if_ready`` 负责状态转换、求和和 ExamGrade
+    幂等 upsert。这样演示数据不会再维护一份可能与线上规则漂移的汇总实现。
+    """
+    from app.services.exam_grading import FinalizeOutcome, finalize_if_ready
+
+    exam_ids = [exam.id for exam in exams.values()]
+    submission_ids = list(
+        db.scalars(
+            select(ExamSubmission.id).where(
+                ExamSubmission.exam_id.in_(exam_ids),
+                ExamSubmission.status == "grading",
+            )
+        ).all()
+    )
+    finalized = 0
+    for submission_id in submission_ids:
+        result = finalize_if_ready(submission_id, db)
+        if result.outcome == FinalizeOutcome.GRADED:
+            finalized += 1
+    return finalized
+
+
 def _exam_questions(db, exam: Exam) -> list[ExamQuestion]:
     return list(
         db.scalars(
@@ -242,25 +268,22 @@ def _fill_midterm(db, clock, users, exam, students, archetype_map):
         started_at = clock.midterm_start() + timedelta(minutes=rng.randint(5, 40))
         expires_at = started_at + timedelta(minutes=exam.duration_minutes)
         submitted_at = started_at + timedelta(minutes=rng.randint(20, 55))
-        graded_at = clock.midterm_review_released() + timedelta(hours=rng.randint(0, 6))
-
         sub = ExamSubmission(
             exam_id=exam.id,
             student_id=student.id,
-            status="graded",
-            score=0.0,
+            status="grading",
+            score=None,
             started_at=started_at,
             expires_at=expires_at,
             last_saved_at=submitted_at,
             submission_reason="time_up" if rng.random() < 0.2 else "submit",
             submitted_at=submitted_at,
-            graded_at=graded_at,
+            graded_at=None,
         )
         db.add(sub)
         db.flush()
         mark(db, "exam_submissions", sub.id)
 
-        total = 0.0
         for question in questions:
             # 选择题：按画像正确率决定对错；编程题：AI 评分（CodeGrade 单独处理）
             ans = db.scalar(
@@ -271,7 +294,6 @@ def _fill_midterm(db, clock, users, exam, students, archetype_map):
             )
             if ans is not None:
                 mark(db, "exam_answers", ans.id)
-                total += ans.score or 0
                 continue
             if question.question_type == "single_choice":
                 correct_prob = (profile["score_lo"] + profile["score_hi"]) / 200.0
@@ -335,9 +357,11 @@ def _fill_midterm(db, clock, users, exam, students, archetype_map):
             db.add(ans)
             db.flush()
             mark(db, "exam_answers", ans.id)
-            total += ans.score or 0
 
-        sub.score = round(total, 2)
+        # The formal finalizer computes the total after the code answer is
+        # completed.  Do not persist a partial score while the parent is
+        # still in grading.
+        sub.score = None
         db.flush()
 
 
@@ -365,12 +389,16 @@ def _fill_quiz(db, clock, users, exam, students, archetype_map):
         )
         if existing is not None:
             mark(db, "exam_submissions", existing.id)
+            for ans in existing.answers:
+                mark(db, "exam_answers", ans.id)
             continue
         # 状态分布：graded / submitted / review_required；missed 不建提交行
         # （考试成绩视图的 missed 是"已选课但无提交"的派生状态，不是存储状态）
         state_roll = rng.random()
         if state_roll < 0.55:
-            status, score = "graded", rng.uniform(55, 98)
+            # Leave publishable submissions in the same intermediate state as
+            # the production submit -> grading -> finalize path.
+            status, score = "grading", None
         elif state_roll < 0.75:
             status, score = "submitted", None
         else:
@@ -383,8 +411,8 @@ def _fill_quiz(db, clock, users, exam, students, archetype_map):
             started_at=started_at,
             expires_at=started_at + timedelta(minutes=exam.duration_minutes),
             last_saved_at=started_at + timedelta(minutes=20) if status != "review_required" else None,
-            submitted_at=started_at + timedelta(minutes=rng.randint(20, 55)) if status in ("submitted", "graded", "review_required") else None,
-            graded_at=clock.quiz_end() + timedelta(hours=rng.randint(1, 12)) if status == "graded" else None,
+            submitted_at=started_at + timedelta(minutes=rng.randint(20, 55)) if status in ("grading", "submitted", "review_required") else None,
+            graded_at=None,
             review_reason="编程题需要教师复核" if status == "review_required" else None,
             review_required_at=clock.quiz_end() if status == "review_required" else None,
         )
@@ -396,11 +424,11 @@ def _fill_quiz(db, clock, users, exam, students, archetype_map):
                 submission_id=sub.id, question_id=question.id,
                 selected_options=(list(question.options.keys())[:1] if question.options else None),
                 code_answer=(BASIC_TASKS[0]["solution"] if question.question_type == "code" else None),
-                score=(question.points if question.question_type != "code" and status == "graded" else None),
-                grading_status=("completed" if question.question_type != "code" and status in ("graded",) else "pending"),
+                score=(question.points if question.question_type != "code" and status == "grading" else None),
+                grading_status=("completed" if question.question_type != "code" and status == "grading" else "pending"),
             )
             db.add(ans)
             db.flush()
             mark(db, "exam_answers", ans.id)
-        if status == "graded" and score is not None:
-            sub.score = round(score, 2)
+        # ``grading`` is finalized after AI code grading below; ``submitted``
+        # and ``review_required`` intentionally have no aggregate score.

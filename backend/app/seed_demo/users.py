@@ -32,8 +32,6 @@ from .constants import (
     CLASS_SIZE,
     CLOSED_TERM,
     ACTIVE_TERM,
-    DEVELOPER_REAL_NAME,
-    DEVELOPER_USERNAME,
     FIXED_STUDENT_DEFS,
     TEACHER_DEFS,
     background_usernames,
@@ -117,25 +115,6 @@ def create_users(db: Session, clock: DemoClock) -> dict:
             logger.info("[更新] 教师 %s（同步角色/状态）", username)
         mark(db, "users", user.id)
         users[username] = user
-
-    # developer
-    dev = db.scalar(select(User).where(User.username == DEVELOPER_USERNAME))
-    if dev is None:
-        dev = User(
-            username=DEVELOPER_USERNAME, real_name=DEVELOPER_REAL_NAME,
-            role="developer", status="active", password_hash=student_hash,
-        )
-        db.add(dev)
-        db.flush()
-        logger.info("[创建] developer 用户 %s", DEVELOPER_USERNAME)
-    else:
-        dev.real_name = DEVELOPER_REAL_NAME
-        dev.role = "developer"
-        dev.status = "active"
-        db.flush()
-        logger.info("[更新] developer 用户 %s", DEVELOPER_USERNAME)
-    mark(db, "users", dev.id)
-    users[DEVELOPER_USERNAME] = dev
 
     # 固定画像学生
     students: list[User] = []

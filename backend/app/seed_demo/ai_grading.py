@@ -31,7 +31,7 @@ from app.models import (
 from app.services.score_merger import merge_scores
 from app.services.static_analysis import analyze_python
 
-from .constants import ARCHETYPES, BACKGROUND_ARCHETYPE, FIXED_STUDENT_DEFS
+from .constants import ARCHETYPES, demo_archetype
 from .marks import mark
 from .rng import make_rng
 from .timeline import DemoClock
@@ -128,7 +128,6 @@ def create_assignment_ai_grades(
 ) -> int:
     """为 AI 作业的提交创建 CodeGrade（确定性 Fixture），返回创建条数。"""
     students: list[User] = users["students"]
-    archetype_map = {uname: a for uname, _n, a in FIXED_STUDENT_DEFS}
     count = 0
 
     for question in ai_questions:
@@ -142,7 +141,8 @@ def create_assignment_ai_grades(
             )
         ).all()
         for sub in submissions:
-            archetype = archetype_map.get(sub.student_id, BACKGROUND_ARCHETYPE)
+            student = db.get(User, sub.student_id)
+            archetype = demo_archetype(student.username if student else None)
             profile = ARCHETYPES[archetype]
             rng = make_rng("ai_grade", sub.student_id,
                            getattr(question, "title", None) or getattr(question, "prompt", ""),
@@ -312,10 +312,9 @@ def create_exam_ai_grades(
                 if sub is None:
                     continue
                 student = db.get(User, sub.student_id)
-                from .constants import FIXED_STUDENT_DEFS as _FSD
                 archetype = "average"
                 if student is not None:
-                    archetype = dict((u, a) for u, _n, a in _FSD).get(student.username, BACKGROUND_ARCHETYPE)
+                    archetype = demo_archetype(student.username)
                 profile = ARCHETYPES[archetype]
                 rng = make_rng("exam_ai_grade", sub.student_id,
                                getattr(question, "title", None) or getattr(question, "prompt", ""))

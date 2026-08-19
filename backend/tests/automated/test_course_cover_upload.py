@@ -354,7 +354,10 @@ def test_db_commit_failure_removes_new_file_keeps_old(
         raise RuntimeError("db down")
 
     monkeypatch.setattr(ORMSession, "commit", _fail_commit)
-    r = _put_cover(quiet_client, d["tok"]["t_own"], d["cid"], "b.jpg", jpeg_bytes(), "image/jpeg")
+    try:
+        r = _put_cover(quiet_client, d["tok"]["t_own"], d["cid"], "b.jpg", jpeg_bytes(), "image/jpeg")
+    finally:
+        quiet_client.close()
     assert r.status_code == 500
     # 新文件被清理，旧文件与旧数据库值保留
     assert _cover_keys(test_settings) == [first_key]

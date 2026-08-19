@@ -275,7 +275,10 @@ def test_error_internal_exception_500(client):
         raise RuntimeError("boom")
 
     tc = TestClient(app, raise_server_exceptions=False)
-    r = tc.get("/api/v1/test-runtime-error")
+    try:
+        r = tc.get("/api/v1/test-runtime-error")
+    finally:
+        tc.close()
     assert r.status_code == 500
     d = r.json()["detail"]
     assert set(d.keys()) == {"code", "message", "fields"}
@@ -291,13 +294,12 @@ def test_error_business_detail_not_double_nested(client, db_session_factory):
     assert not isinstance(body["detail"], dict) or "detail" not in body["detail"]
 
 
-def test_error_developer_has_no_course_access(client, db_session_factory):
-    """developer 对课程内容/列表无访问权——有真实 assignment/exam 数据"""
-    create_user(db_session_factory, "dev_x2", "developer")
+def test_error_unsupported_role_cannot_enter_business_apis(client, db_session_factory):
+    """历史非法角色不能进入业务 API；有效角色权限不被影响。"""
+    create_user(db_session_factory, "legacy_x2", "legacy")
     create_user(db_session_factory, "t_x2", "teacher")
     create_user(db_session_factory, "s_x2", "student")
     create_user(db_session_factory, "admin_x2", "admin")
-    d_tok, _ = login(client, "dev_x2")
     t_tok, _ = login(client, "t_x2")
     s_tok, _ = login(client, "s_x2")
     admin_tok, _ = login(client, "admin_x2")
@@ -338,22 +340,18 @@ def test_error_developer_has_no_course_access(client, db_session_factory):
     r = client.get(f"{API}/exams", headers=auth_header(s_tok))
     assert any(i["id"] == eid for i in r.json()["items"]), "student should see exam"
 
-    # admin 仍然能看到全部资源，developer 过滤不能误伤管理员
+    # admin 仍然能看到全部资源，非法角色处理不能误伤管理员
     r = client.get(f"{API}/assignments", headers=auth_header(admin_tok))
     assert any(i["id"] == aid for i in r.json()["items"]), "admin should see assignment"
     r = client.get(f"{API}/exams", headers=auth_header(admin_tok))
     assert any(i["id"] == eid for i in r.json()["items"]), "admin should see exam"
 
-    # developer course detail 403
-    r = client.get(f"{API}/courses/{cid}", headers=auth_header(d_tok))
-    assert r.status_code == 403, f"developer course detail: {r.status_code}"
-    # developer 列表不含这些资源
-    r = client.get(f"{API}/courses", headers=auth_header(d_tok))
-    assert len(r.json()["items"]) == 0, f"developer courses not empty"
-    r = client.get(f"{API}/assignments", headers=auth_header(d_tok))
-    assert len(r.json()["items"]) == 0, f"developer assignments not empty (has real data)"
-    r = client.get(f"{API}/exams", headers=auth_header(d_tok))
-    assert len(r.json()["items"]) == 0, f"developer exams not empty (has real data)"
+    legacy_login = client.post(
+        f"{API}/auth/login",
+        json={"username": "legacy_x2", "password": "Passw0rd!"},
+    )
+    assert legacy_login.status_code == 403
+    assert legacy_login.json()["detail"]["code"] == "ROLE_NOT_SUPPORTED"
 
 
 # ═══════════════════════════════════════════════════════════════

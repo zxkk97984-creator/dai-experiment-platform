@@ -100,7 +100,13 @@ def app(test_settings, db_session_factory, redis_client):
 
 @pytest.fixture()
 def client(app):
-    return TestClient(app)
+    test_client = TestClient(app)
+    try:
+        yield test_client
+    finally:
+        # TestClient creates an AnyIO portal thread on request.  Explicitly
+        # close it so pytest can terminate without waiting on epoll forever.
+        test_client.close()
 
 
 def create_user(db_session_factory, username, role, password="Passw0rd!", real_name=None):

@@ -24,11 +24,9 @@ def demo_password() -> str:
     return os.environ.get("DAI_DEMO_PASSWORD", DEFAULT_PASSWORD)
 
 
-# ── 固定演示账号（评审 7：不占用 admin/teacher/student，与 E2E 完全隔离） ──────
+# ── 固定演示账号 ─────────────────────────────────────────────────────────────
 ADMIN_USERNAME = "demo_admin"
 ADMIN_REAL_NAME = "系统管理员"
-DEVELOPER_USERNAME = "demo_developer"
-DEVELOPER_REAL_NAME = "实验平台开发者"
 
 # (username, real_name) —— 教师固定账号
 TEACHER_DEFS = [
@@ -44,6 +42,10 @@ FIXED_STUDENT_DEFS = [
     ("demo_student_struggling", "王雨桐", "struggling"),
     ("demo_student_new", "赵晨曦", "new"),
 ]
+
+FIXED_STUDENT_ARCHETYPES = {
+    username: archetype for username, _real_name, archetype in FIXED_STUDENT_DEFS
+}
 
 # 背景学生学号前缀（教学班 code 与学号共用）
 CLASS_PREFIXES = [f"246216{i:02d}" for i in range(1, 7)]  # 24621601..24621606
@@ -208,3 +210,12 @@ ARCHETYPES = {
 }
 # 背景学生统一按 average 分布（用 make_rng 按用户名派生个体差异）
 BACKGROUND_ARCHETYPE = "average"
+
+
+def demo_archetype(username: str | None) -> str:
+    """Resolve a student's deterministic demo profile from the username.
+
+    Database IDs are deliberately not used here: they can differ between an
+    isolated seed database and a reset/reseeded database.
+    """
+    return FIXED_STUDENT_ARCHETYPES.get(username, BACKGROUND_ARCHETYPE)

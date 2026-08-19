@@ -71,6 +71,11 @@ cd backend
 > 为保障可重复重置，以下 API/审计运行态会随 Demo 数据一并清理：
 > `notifications` / `notification_reads` / `user_preferences`（引用 Demo 用户）、
 > `grade_overrides`（引用 Demo code_grades）。
+> `exam_grades` 是考试汇总派生数据，会按 Demo 考试删除；环境控制面保留，仅将指向
+> Demo 用户的可空审计外键置空。未知的 `demo_seed_marks.table_name` 会使 reset 失败，
+> 不会被静默忽略。当前 seed 不创建 StorageObject 或上传文件，因此课程封面使用
+> `Course.cover` 中明确的 data URI 兼容数据，Studio 的 legacy 资源目录保持为空；
+> 手工上传的封面、视频和 Studio Asset 不会被此 reset 触碰。
 > 绝不 DROP DATABASE、不动环境控制面、不动 E2E 数据。
 
 ---
@@ -83,7 +88,6 @@ cd backend
 | `teacher_zhang` | 张明远 | teacher | **旗舰教师**：完整课程 / 作业 / 考试 / AI 复核链路 |
 | `teacher_chen` | 陈思远 | teacher | 第二教师：支撑课程 + 章节测验 |
 | `teacher_zhao` | 赵清禾 | teacher | 第三教师：含 1 门草稿课程 + 1 门白名单课程 |
-| `demo_developer` | 实验平台开发者 | developer | 模板 / Studio |
 | `demo_student_elite` | 林书瑶 | student | 优秀学生：全勤、高分、AI 无复核 |
 | `demo_student_average` | 周子涵 | student | 普通学生：偶尔迟交、AI 建议较多 |
 | `demo_student_struggling` | 王雨桐 | student | 学习困难：缺交、多次修改、待复核集中 |
@@ -121,16 +125,17 @@ struggling 不在白名单（课程列表不可见），用于验证课程可见
 
 | 表 | 数量 | 表 | 数量 |
 |---|---|---|---|
-| users | 65 | lesson_progress | ~1065 |
+| users | 64 | lesson_progress | ~1065 |
 | academic_terms | 2 | assignments | 10 |
 | teaching_classes | 6 | judge_questions | 15 |
 | teaching_class_students | 60 | submissions | ~636 |
 | courses | 8 | exams / exam_questions | 3 / 15 |
-| chapters | 21 | exam_submissions / exam_answers | ~72 / ~360 |
+| chapters | 21 | exam_submissions / exam_answers / exam_grades | 72 / 360 / 55 |
 | lessons | 69 | notebook_templates / versions | 4 / 4 |
 | course_enrollments | 211 | experiment_modules / records / submissions | 4 / ~157 / ~156 |
-| question_rubrics | 5 | code_grades | ~180 |
+| question_rubrics | 5 | code_grades | 180（completed 147 / review_required 33） |
 | course_whitelist_students | 3 | announcements | 5 |
+| storage_objects / storage_quarantines | 0 / 0 | demo_seed_marks | 3276 |
 
 （数量由固定随机种子决定，同一代码版本 + 同一参考日期下完全一致。）
 
@@ -145,13 +150,21 @@ struggling 不在白名单（课程列表不可见），用于验证课程可见
   走真实 Docker 判题（`seed_fixture=false`、真实 `execution_time_ms`）；
   其余提交为显式 seed_fixture。判题结果状态只含 accepted / wrong_answer /
   graded / running（AI 复核队列态），**零 system_error**（校验器会拦截回归）。
+- **考试评分**：期中与章节测验中进入可评分历史线的提交先保持 `grading`，随后统一调用
+  `app.services.exam_grading.finalize_if_ready`；只有所有答案为 `completed` 且有分数时才进入
+  `graded` 并生成 `ExamGrade`。固定参考日期下为 `graded 55 / review_required 15 / submitted 2`，
+  `ExamGrade` 为 55，考试答案 `system_error` 为 0。
+- **环境状态**：Demo 只消费已有 `basic` `available + image_digest` 版本，不创建 BuildJob；
+  校验器会拒绝 `available` 无 digest、`queued` 无活动任务以及 `succeeded` 残留错误。
+- **Storage 边界**：本轮 seed 只写数据库中的 Notebook/实验 JSON 和 data URI，不调用本地文件写入，
+  也不登记 `StorageObject`；真实上传链路仍由 Course/Lesson/Studio 的 StorageObject 业务服务负责。
 - **API**：8 个固定账号全部可登录；/dashboard/teacher、/dashboard/student、
   /courses、/assignments、/judge/submissions、/ai-grading/grades、/exams/{id}/questions、
   /exams/{id}/grades、/experiments/records 均返回 200 与真实数据。
   白名单课程权限：elite/average/new 可见，struggling 不可见；elite 已选课可访问内容。
 - **前端**：学生首页 / 学生作业列表 / 教师首页 / AI 评分复核 / 管理端用户 均渲染真实数据，
   零 console 错误。
-- **测试**：`pytest tests/automated/test_seed_demo.py` 2 通过；全量后端测试 `pytest -q` 为 **1064 passed, 3 skipped**。
+- **测试**：`pytest tests/automated/test_seed_demo.py` 4 通过；全量后端测试 `pytest -q` 为 **1193 passed, 3 skipped**（本轮 Phase 7 验收）。
 
 ---
 

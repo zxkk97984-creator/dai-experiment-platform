@@ -122,6 +122,7 @@ def run_demo_seed(
     exams = exams_mod.create_exams(db, clock, user_map, courses)
     exams_mod.create_exam_submissions(db, clock, user_map, exams)
     cg_count += ai_mod.create_exam_ai_grades(db, clock, user_map, exams)
+    exam_grade_count = exams_mod.sync_exam_grades(db, exams)
 
     # 7. 公告 + 已读
     from . import announcements as ann_mod
@@ -133,5 +134,13 @@ def run_demo_seed(
     summary = {}
     if run_verify:
         summary = verify_demo_data(db)
-        logger.info("== Demo Seed 完成：submissions=%s code_grades=%s ==", sub_count, cg_count)
-    return {"submissions": sub_count, "code_grades": cg_count, **summary}
+        logger.info(
+            "== Demo Seed 完成：submissions=%s code_grades=%s exam_grades=%s ==",
+            sub_count, cg_count, exam_grade_count,
+        )
+    return {
+        "submissions": sub_count,
+        "code_grades": cg_count,
+        "exam_grades": exam_grade_count,
+        **summary,
+    }

@@ -11,6 +11,10 @@
 - grade_overrides 是教师对 Demo 成绩的复核/改分审计；若不清理会永久阻塞
   code_grades 删除，导致 --reset-demo 无法工作。重置时仅清理“引用已登记
   Demo code_grades”的改分审计，不触碰其他非 Demo 改分记录。
+- exam_grades 是考试成绩汇总表，由运行时 finalizer 或 Demo seed 的可发布条件
+  汇总产生；重置时清理引用已登记 Demo exams 的汇总行，避免删除考试时被外键阻断。
+- 环境控制面保留，但其可空的审计用户引用在删除 Demo 用户前置空，避免历史构建
+  任务或环境版本阻塞演示数据重建。
 """
 from __future__ import annotations
 
@@ -19,7 +23,7 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .marks import all_marks, clear_marks, ensure_marks_table
+from .marks import all_marks, clear_marks, ensure_marks_table, validate_mark_tables
 
 logger = logging.getLogger("dai.seed_demo.cleanup")
 
@@ -36,6 +40,7 @@ DELETE_ORDER = [
     "submissions",                  # -> judge_questions, users, environment_versions
     "exam_answers",                 # -> exam_submissions, exam_questions
     "exam_submissions",             # -> exams, users
+    "exam_grades",                  # -> exams, users（API 派生汇总）
     "experiment_submissions",       # -> experiment_records, users
     "experiment_records",           # -> lessons/modules, notebook_template_versions, users
     "lesson_progress",              # -> lessons, users
@@ -126,16 +131,60 @@ def _delete_dependent_audit_rows(db: Session, marks: dict[str, list[int]]) -> in
     return total
 
 
+def _delete_dependent_exam_rows(db: Session, marks: dict[str, list[int]]) -> int:
+    """清理引用 Demo 考试的成绩汇总行。"""
+    exam_ids = marks.get("exams", [])
+    if not exam_ids:
+        return 0
+    total = 0
+    for i in range(0, len(exam_ids), 200):
+        chunk = exam_ids[i : i + 200]
+        placeholders = ",".join(f":id{j}" for j in range(len(chunk)))
+        params = {f"id{j}": rid for j, rid in enumerate(chunk)}
+        result = db.execute(
+            text(f"DELETE FROM exam_grades WHERE exam_id IN ({placeholders})"),
+            params,
+        )
+        total += result.rowcount or 0
+    return total
+
+
+def _detach_environment_user_references(db: Session, marks: dict[str, list[int]]) -> int:
+    """保留环境控制面，只移除指向将被删除用户的可空审计引用。"""
+    user_ids = marks.get("users", [])
+    if not user_ids:
+        return 0
+    placeholders = ",".join(f":uid{j}" for j in range(len(user_ids)))
+    params = {f"uid{j}": uid for j, uid in enumerate(user_ids)}
+    total = 0
+    for table, column in (
+        ("package_catalog", "created_by_id"),
+        ("package_catalog", "updated_by_id"),
+        ("environment_profiles", "created_by_id"),
+        ("environment_versions", "created_by_id"),
+        ("environment_build_jobs", "created_by_id"),
+    ):
+        result = db.execute(
+            text(f"UPDATE {table} SET {column} = NULL WHERE {column} IN ({placeholders})"),
+            params,
+        )
+        total += result.rowcount or 0
+    return total
+
+
 def reset_demo_data(db: Session) -> int:
     """删除所有登记过的 Demo 数据；返回删除行数。若外键阻断则回滚并抛异常。"""
     ensure_marks_table(db)
     marks = all_marks(db)
+    validate_mark_tables(marks)
     total = 0
     blocked: list[str] = []
 
     try:
         total += _delete_derived_system_rows(db, marks)
         total += _delete_dependent_audit_rows(db, marks)
+        total += _delete_dependent_exam_rows(db, marks)
+        total += _detach_environment_user_references(db, marks)
         # 先断开 notebook_templates 的循环外键（current_version_id）——
         # 仅对登记过的 Demo 模板置空，不触碰非 Demo 模板
         tmpl_ids = marks.get("notebook_templates", [])

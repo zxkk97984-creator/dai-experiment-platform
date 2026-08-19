@@ -210,11 +210,14 @@ def test_failed_cover_replacement_keeps_old_binding_and_object(
 
     monkeypatch.setattr(ORMSession, "commit", fail_commit)
     quiet_client = TestClient(app, raise_server_exceptions=False)
-    failed = quiet_client.put(
-        f"{API}/courses/{course_id}/cover",
-        headers=auth_header(token),
-        files={"file": ("second.png", _png_bytes(110), "image/png")},
-    )
+    try:
+        failed = quiet_client.put(
+            f"{API}/courses/{course_id}/cover",
+            headers=auth_header(token),
+            files={"file": ("second.png", _png_bytes(110), "image/png")},
+        )
+    finally:
+        quiet_client.close()
     assert failed.status_code == 500
 
     with db_session_factory() as db:

@@ -140,6 +140,7 @@ def test_middleware_counts_5xx_and_logs_template(
         with caplog.at_level(logging.WARNING, logger="dai.main"):
             resp = local_client.get(f"{API}/health/ready")
     finally:
+        local_client.close()
         monkeypatch.undo()
 
     assert resp.status_code == 503

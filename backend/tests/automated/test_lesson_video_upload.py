@@ -33,15 +33,14 @@ def mov_bytes(size: int = 200) -> bytes:
 
 
 def _setup(client, db_session_factory, visibility="public", enroll="s_yes"):
-    """教师 owner + 其他教师 + 已选课学生 + 未选课学生 + 开发者 + 管理员"""
+    """教师 owner + 其他教师 + 已选课学生 + 未选课学生 + 管理员"""
     create_user(db_session_factory, "t_own", "teacher")
     create_user(db_session_factory, "t_other", "teacher")
     create_user(db_session_factory, "s_yes", "student")
     create_user(db_session_factory, "s_no", "student")
-    create_user(db_session_factory, "dev", "developer")
     create_user(db_session_factory, "admin", "admin")
     tok = {u: login(client, u)[0] for u in
-           ["t_own", "t_other", "s_yes", "s_no", "dev", "admin"]}
+           ["t_own", "t_other", "s_yes", "s_no", "admin"]}
 
     # 领域 fixture 直接创建 published 课程（发布门禁由 course_publish 测试覆盖）
     cid = create_course_db(
@@ -132,9 +131,9 @@ def test_admin_uploads_success(client, db_session_factory):
     assert r.status_code == 200, r.text
 
 
-def test_other_teacher_student_developer_forbidden(client, db_session_factory):
+def test_other_teacher_and_students_forbidden(client, db_session_factory):
     d = _setup(client, db_session_factory)
-    for role in ("t_other", "s_yes", "s_no", "dev"):
+    for role in ("t_other", "s_yes", "s_no"):
         r = _upload(client, d["tok"][role], d["lid"], "a.mp4", mp4_bytes(), "video/mp4")
         assert r.status_code == 403, f"{role}: {r.status_code}"
         assert r.json()["detail"]["code"] == "FORBIDDEN"
@@ -392,7 +391,10 @@ def test_db_commit_failure_removes_new_file(client, app, db_session_factory, tes
     from sqlalchemy.orm import Session as ORMSession
 
     monkeypatch.setattr(ORMSession, "commit", _fail_commit)
-    r = _upload(quiet_client, d["tok"]["t_own"], d["lid"], "a.mp4", mp4_bytes(), "video/mp4")
+    try:
+        r = _upload(quiet_client, d["tok"]["t_own"], d["lid"], "a.mp4", mp4_bytes(), "video/mp4")
+    finally:
+        quiet_client.close()
     assert r.status_code == 500
     # 新文件被清理，数据库记录未变
     assert _video_keys(test_settings) == []
@@ -425,7 +427,7 @@ def test_playback_url_grants_for_enrolled_owner_admin(client, db_session_factory
 
 def test_playback_url_denied_for_unenrolled_nonowner(client, db_session_factory):
     d = _uploaded_setup(client, db_session_factory)
-    for role in ("s_no", "t_other", "dev"):
+    for role in ("s_no", "t_other"):
         r = client.get(f"{API}/lessons/{d['lid']}/video-playback-url", headers=auth_header(d["tok"][role]))
         assert r.status_code == 403, f"{role}: {r.status_code}"
 

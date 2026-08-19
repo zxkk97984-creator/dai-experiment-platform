@@ -213,10 +213,13 @@ def test_publish_failure_rolls_back_version_manifest_and_destination_objects(
 
     monkeypatch.setattr(ORMSession, "commit", fail_commit)
     quiet_client = TestClient(app, raise_server_exceptions=False)
-    response = quiet_client.post(
-        f"{API}/studio/templates/{template_id}/publish",
-        headers=_headers(ctx, "studio_teacher"),
-    )
+    try:
+        response = quiet_client.post(
+            f"{API}/studio/templates/{template_id}/publish",
+            headers=_headers(ctx, "studio_teacher"),
+        )
+    finally:
+        quiet_client.close()
     assert response.status_code == 500
     monkeypatch.setattr(ORMSession, "commit", original_commit)
 
