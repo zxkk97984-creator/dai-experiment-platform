@@ -16,7 +16,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import ExamAnswer, Submission
+from app.models import ExamAnswer, ExamSubmission, Submission
 
 logger = logging.getLogger("dai.judge_queue")
 
@@ -257,13 +257,26 @@ def requeue_stale_jobs(db: Session, *, job_type: str | None = None,
         models_to_scan.append(("exam", ExamAnswer, EXAM_JUDGE_QUEUE))
 
     for jt, model, queue_key in models_to_scan:
+        def _recovery_query():
+            query = select(model)
+            if jt == "exam":
+                # Only answers belonging to a grading submission are executable.
+                # Submitted/review_required answers can intentionally remain pending
+                # as historical snapshots; recovering them would send non-code
+                # answers through the code judge and create false system_error rows.
+                query = query.join(
+                    ExamSubmission,
+                    ExamSubmission.id == ExamAnswer.submission_id,
+                ).where(ExamSubmission.status == "grading")
+            return query
+
         # pending 超时 → 重新入队（CAS：仍 pending + 未达上限 + 超时）
         # populate_existing：CAS 令牌（started_at/queued_at）必须读库内实际值——
         # 同会话 identity map 里的对象可能带微秒，而 MySQL DATETIME(0) 入库已截断，
         # 直接绑回会导致条件永不命中（running_reset=0 的根因）。
         pending_deadline = now - _td(seconds=stale_pending_seconds)
         pending_jobs = db.scalars(
-            select(model)
+            _recovery_query()
             .execution_options(populate_existing=True)
             .where(
                 model.grading_status == "pending",
@@ -277,7 +290,7 @@ def requeue_stale_jobs(db: Session, *, job_type: str | None = None,
 
         # 超过最大重试 → system_error（不扣分：基础设施问题不应让学生承担）
         over_max = db.scalars(
-            select(model).where(
+            _recovery_query().where(
                 model.grading_status == "pending",
                 model.attempt_count >= MAX_ATTEMPTS,
             )
@@ -314,7 +327,7 @@ def requeue_stale_jobs(db: Session, *, job_type: str | None = None,
         # queued 超时 → 重新推送 Redis（消息可能丢失；CAS 更新 queued_at 防重复推送）
         queued_deadline = now - _td(seconds=stale_queued_seconds)
         queued_jobs = db.scalars(
-            select(model)
+            _recovery_query()
             .execution_options(populate_existing=True)
             .where(
                 model.grading_status == "queued",
@@ -348,7 +361,7 @@ def requeue_stale_jobs(db: Session, *, job_type: str | None = None,
         # running 超时 → 重置为 pending（Worker 崩溃；CAS：仍 running 且 started_at 未变）
         running_deadline = now - _td(seconds=stale_running_seconds)
         running_jobs = db.scalars(
-            select(model)
+            _recovery_query()
             .execution_options(populate_existing=True)
             .where(
                 model.grading_status == "running",

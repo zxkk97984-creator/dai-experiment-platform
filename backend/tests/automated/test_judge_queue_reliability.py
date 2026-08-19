@@ -375,6 +375,68 @@ def test_requeue_stale_pending_jobs(db_session_factory):
         assert stats["pending_requeued"] >= 1, f"应扫描到 pending 任务: {stats}"
 
 
+def test_exam_recovery_ignores_pending_answers_outside_grading(db_session_factory):
+    """恢复扫描不得把非 grading 提交中的答案误当成可执行判题任务。
+
+    这类答案在演示数据中代表尚未正式交卷或已经等待人工复核的历史快照；
+    若被重新入队，Worker 会绕过提交状态并把无隐藏测试的选择题写成
+    system_error。
+    """
+    with db_session_factory() as db:
+        from app.models import Course, Exam, User
+
+        teacher = User(
+            username="qe_non_grading_t", real_name="QENGT", role="teacher",
+            status="active", password_hash="x",
+        )
+        student = User(
+            username="qe_non_grading_s", real_name="QENGS", role="student",
+            status="active", password_hash="x",
+        )
+        db.add_all([teacher, student])
+        db.flush()
+
+        course = Course(title="QENGC", status="published", teacher_id=teacher.id)
+        db.add(course)
+        db.flush()
+        exam = Exam(course_id=course.id, title="QENGE", status="published", duration_minutes=60)
+        db.add(exam)
+        db.flush()
+        question = ExamQuestion(
+            exam_id=exam.id,
+            question_type="single_choice",
+            prompt="选择题",
+            options={"A": "正确"},
+            correct_answer={"correct": ["A"]},
+            points=10,
+        )
+        db.add(question)
+        db.flush()
+        submission = ExamSubmission(
+            exam_id=exam.id,
+            student_id=student.id,
+            status="submitted",
+        )
+        db.add(submission)
+        db.flush()
+        answer = ExamAnswer(
+            submission_id=submission.id,
+            question_id=question.id,
+            selected_options=["A"],
+            grading_status="pending",
+        )
+        db.add(answer)
+        db.commit()
+        answer_id = answer.id
+
+        stats = requeue_stale_jobs(db, job_type="exam", stale_pending_seconds=0)
+
+        db.refresh(answer)
+        assert stats["pending_requeued"] == 0
+        assert answer.id == answer_id
+        assert answer.grading_status == "pending"
+
+
 def test_max_retries_system_error(db_session_factory):
     """超过最大重试次数的 pending 任务被标记为 system_error"""
     sid = _setup_assignment_submission(db_session_factory)
