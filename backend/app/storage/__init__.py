@@ -11,7 +11,11 @@ from .backend import (
     StorageReadStream,
 )
 from .local import LocalFilesystemStorage
-from .object_metadata import StorageObjectBackend, StorageObjectStatus
+from .object_metadata import (
+    StorageObjectBackend,
+    StorageObjectStatus,
+    StorageQuarantineStatus,
+)
 from .s3 import S3CompatibleStorage
 from .service import StorageArea, StorageService
 
@@ -31,5 +35,6 @@ __all__ = [
     "StorageRangeError",
     "StorageReadStream",
     "StorageObjectStatus",
+    "StorageQuarantineStatus",
     "StorageService",
 ]

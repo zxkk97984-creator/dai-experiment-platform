@@ -158,6 +158,15 @@ def test_s3_physical_prefix_does_not_change_logical_keys():
         ]
 
 
+def test_local_key_prefix_can_list_namespace_root(tmp_path):
+    backend = LocalFilesystemStorage(tmp_path / "covers", key_prefix="covers")
+    backend.put("covers/42/cover.png", BytesIO(b"cover"))
+
+    assert [item.key for item in backend.list_objects("covers")] == [
+        "covers/42/cover.png"
+    ]
+
+
 def test_storage_service_selects_one_s3_backend_for_all_areas():
     with mock_aws():
         client = boto3.client("s3", region_name="us-east-1")

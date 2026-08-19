@@ -18,3 +18,11 @@ class StorageObjectStatus(StrEnum):
     DELETING = "deleting"
     DELETED = "deleted"
     FAILED = "failed"
+
+
+class StorageQuarantineStatus(StrEnum):
+    """Persisted state of a reconcile finding awaiting safe collection."""
+
+    QUARANTINED = "quarantined"
+    FAILED = "failed"
+    RESOLVED = "resolved"

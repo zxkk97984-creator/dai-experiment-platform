@@ -225,7 +225,14 @@ class LocalFilesystemStorage(StorageBackend):
 
     def list_objects(self, prefix: str) -> tuple[StorageMetadata, ...]:
         """Enumerate object keys below a logical prefix for Bundle services."""
-        base = self._resolve(prefix)
+        # A prefixed backend (the cover area uses ``key_prefix='covers'``)
+        # must also be able to enumerate its namespace root.  That root is a
+        # listing prefix, not a single-object key, so it intentionally bypasses
+        # ``_resolve``'s empty-relative-key rejection.
+        if self._key_prefix and prefix == self._key_prefix:
+            base = self._root
+        else:
+            base = self._resolve(prefix)
         if base.is_file():
             return (self._metadata(prefix, base),)
         if not base.exists():

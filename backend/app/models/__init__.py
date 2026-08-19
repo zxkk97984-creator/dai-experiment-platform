@@ -5,7 +5,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.database import Base
-from app.storage.object_metadata import StorageObjectBackend, StorageObjectStatus
+from app.storage.object_metadata import (
+    StorageObjectBackend,
+    StorageObjectStatus,
+    StorageQuarantineStatus,
+)
 
 # 控制面主键：MySQL 使用 BIGINT（计划 4.x），SQLite 测试库回退 INTEGER（rowid 别名，可自增）
 BIGINT_PK = BigInteger().with_variant(Integer, "sqlite")
@@ -123,6 +127,80 @@ class StorageObject(TimestampMixin, Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
     created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id])
+
+
+class StorageQuarantine(TimestampMixin, Base):
+    """Persistent quarantine ledger for reconcile findings.
+
+    A finding is deliberately kept outside ``storage_objects``.  It records
+    that a physical object or metadata row needs observation and a later,
+    safe collection attempt; it is not itself a business reference.
+    """
+
+    __tablename__ = "storage_quarantines"
+    __table_args__ = (
+        UniqueConstraint(
+            "backend",
+            "area",
+            "object_key",
+            "kind",
+            name="uq_storage_quarantine_target_kind",
+        ),
+        CheckConstraint(
+            "backend IN ('local', 's3')",
+            name="ck_storage_quarantine_backend",
+        ),
+        CheckConstraint(
+            "status IN ('quarantined', 'failed', 'resolved')",
+            name="ck_storage_quarantine_status",
+        ),
+        CheckConstraint("attempts >= 0", name="ck_storage_quarantine_attempts_nonnegative"),
+        CheckConstraint(
+            "(status = 'resolved' AND resolved_at IS NOT NULL)"
+            " OR (status <> 'resolved' AND resolved_at IS NULL)",
+            name="ck_storage_quarantine_resolved_at_status",
+        ),
+        Index(
+            "ix_storage_quarantines_status_until",
+            "status",
+            "quarantine_until",
+        ),
+        Index(
+            "ix_storage_quarantines_object_status",
+            "object_id",
+            "status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
+    backend: Mapped[str] = mapped_column(String(32), nullable=False)
+    area: Mapped[str] = mapped_column(String(32), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    object_id: Mapped[int | None] = mapped_column(
+        ForeignKey("storage_objects.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=StorageQuarantineStatus.QUARANTINED.value,
+        server_default=StorageQuarantineStatus.QUARANTINED.value,
+    )
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    quarantine_until: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    details_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    storage_object: Mapped[StorageObject | None] = relationship(
+        foreign_keys=[object_id]
+    )
 
 
 # ── 学期 / 教学班 ────────────────────────────────────────────
@@ -834,6 +912,74 @@ class NotebookTemplateVersion(Base):
         foreign_keys=[template_id],
     )
     published_by: Mapped[User] = relationship()
+
+
+class StudioAssetManifest(TimestampMixin, Base):
+    """A draft or published Studio asset collection.
+
+    The manifest owns the collection relationship; individual files remain
+    ``StorageObject`` rows and are never represented as directory objects.
+    Exactly one of ``template_id`` (draft) and ``version_id`` (published
+    snapshot) is set.
+    """
+
+    __tablename__ = "studio_asset_manifests"
+    __table_args__ = (
+        UniqueConstraint("template_id", name="uq_studio_asset_manifest_template"),
+        UniqueConstraint("version_id", name="uq_studio_asset_manifest_version"),
+        CheckConstraint(
+            "(template_id IS NOT NULL AND version_id IS NULL)"
+            " OR (template_id IS NULL AND version_id IS NOT NULL)",
+            name="ck_studio_asset_manifest_owner",
+        ),
+        CheckConstraint("revision >= 1", name="ck_studio_asset_manifest_revision_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
+    template_id: Mapped[int | None] = mapped_column(
+        ForeignKey("notebook_templates.id", ondelete="CASCADE"), nullable=True
+    )
+    version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("notebook_template_versions.id", ondelete="CASCADE"), nullable=True
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+
+    entries: Mapped[list["StudioAssetManifestEntry"]] = relationship(
+        back_populates="manifest",
+        cascade="all, delete-orphan",
+        order_by="StudioAssetManifestEntry.relative_path",
+    )
+
+
+class StudioAssetManifestEntry(TimestampMixin, Base):
+    """One relative resource path bound to one concrete StorageObject."""
+
+    __tablename__ = "studio_asset_manifest_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "manifest_id",
+            "relative_path",
+            name="uq_studio_asset_manifest_entry_path",
+        ),
+        CheckConstraint(
+            "relative_path <> ''",
+            name="ck_studio_asset_manifest_entry_path_nonempty",
+        ),
+        Index("ix_studio_asset_manifest_entries_manifest_id", "manifest_id"),
+        Index("ix_studio_asset_manifest_entries_storage_object_id", "storage_object_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
+    manifest_id: Mapped[int] = mapped_column(
+        ForeignKey("studio_asset_manifests.id", ondelete="CASCADE"), nullable=False
+    )
+    storage_object_id: Mapped[int] = mapped_column(
+        ForeignKey("storage_objects.id", ondelete="RESTRICT"), nullable=False
+    )
+    relative_path: Mapped[str] = mapped_column(String(500), nullable=False)
+
+    manifest: Mapped[StudioAssetManifest] = relationship(back_populates="entries")
+    storage_object: Mapped[StorageObject] = relationship()
 
 
 # ── 实验模块 ──────────────────────────────────────────────────

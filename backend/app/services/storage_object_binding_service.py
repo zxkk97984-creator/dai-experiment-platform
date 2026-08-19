@@ -39,6 +39,10 @@ def register_active_object(
     obj = service.create_staging(
         namespace=namespace,
         object_key=object_key,
+        # Persist the abstract backend selected by StorageService.  This is
+        # storage metadata plumbing, not a Course/Lesson/Studio policy; it
+        # keeps S3-created objects reconcilable without naming a provider.
+        backend=storage.backend_name,
         original_filename=original_filename,
         content_type=content_type,
         size_bytes=size_bytes,

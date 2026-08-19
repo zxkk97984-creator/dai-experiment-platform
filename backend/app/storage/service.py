@@ -27,7 +27,15 @@ class StorageArea(StrEnum):
 
 
 class StorageService:
-    def __init__(self, backends: Mapping[str | StorageArea, StorageBackend]) -> None:
+    def __init__(
+        self,
+        backends: Mapping[str | StorageArea, StorageBackend],
+        *,
+        backend_name: str = "local",
+    ) -> None:
+        if not isinstance(backend_name, str) or not backend_name.strip():
+            raise ValueError("storage backend name must be a non-empty string")
+        self.backend_name = backend_name.strip()
         self._backends = {
             area.value if isinstance(area, StorageArea) else area: backend
             for area, backend in backends.items()
@@ -42,7 +50,8 @@ class StorageService:
                     StorageArea.COVERS: backend,
                     StorageArea.VIDEOS: backend,
                     StorageArea.STUDIO: backend,
-                }
+                },
+                backend_name="s3",
             )
         if settings.storage_backend != "local":
             raise ValueError("DAI_STORAGE_BACKEND must be 'local' or 's3'")
@@ -54,7 +63,8 @@ class StorageService:
                 ),
                 StorageArea.VIDEOS: LocalFilesystemStorage(settings.video_storage_path),
                 StorageArea.STUDIO: LocalFilesystemStorage(settings.studio_storage_path),
-            }
+            },
+            backend_name="local",
         )
 
     def _backend(self, area: str | StorageArea) -> StorageBackend:
