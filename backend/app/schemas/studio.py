@@ -161,6 +161,16 @@ class StudioPreviewRunResponse(BaseModel):
     execution_time_ms: int | None = None
 
 
+class StudioAssetRead(BaseModel):
+    """Public manifest entry; contains no physical storage path."""
+
+    relative_path: str
+    storage_object_id: int | None = None
+    content_type: str | None = None
+    size_bytes: int | None = None
+    sha256: str | None = None
+
+
 class StudioVersionRead(BaseModel):
     id: int
     template_id: int
@@ -170,6 +180,8 @@ class StudioVersionRead(BaseModel):
     cell_order: list[str]
     notebook_metadata: dict
     assets_dir: str | None = None
+    asset_manifest_id: int | None = None
+    assets: list[StudioAssetRead] = Field(default_factory=list)
     published_at: datetime
     published_by_id: int
     # 发布时从草稿复制的不可变环境快照（Phase 4）
@@ -189,6 +201,8 @@ class StudioTemplateRead(BaseModel):
     draft_revision: int
     draft_metadata: dict
     draft_assets_dir: str | None = None
+    draft_asset_manifest_id: int | None = None
+    draft_assets: list[StudioAssetRead] = Field(default_factory=list)
     # 草稿环境绑定（Phase 4）：发布时复制到新版本，历史版本不更新
     draft_environment_version_id: int | None = None
     draft_import_policy_mode: str = "unrestricted"

@@ -290,7 +290,7 @@ export const useStudioStore = defineStore('studio', () => {
   async function exportDraft() {
     try {
       const res = await studioAPI.exportDraft(templateId.value)
-      downloadBlob(res, `template-${templateId.value}-draft.ipynb`)
+      downloadBlob(res, `template-${templateId.value}-draft.zip`)
     } catch {
       app.showToast('导出失败', 'error')
     }
@@ -299,7 +299,7 @@ export const useStudioStore = defineStore('studio', () => {
   async function exportVersion(versionId) {
     try {
       const res = await studioAPI.exportVersion(templateId.value, versionId)
-      downloadBlob(res, `template-${templateId.value}-v${versionId}.ipynb`)
+      downloadBlob(res, `template-${templateId.value}-v${versionId}.zip`)
     } catch {
       app.showToast('导出失败', 'error')
     }

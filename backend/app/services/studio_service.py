@@ -5,7 +5,6 @@ import hashlib
 import io
 import json
 import stat
-import uuid
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -24,9 +23,11 @@ from app.models import (
     Lesson,
     NotebookTemplate,
     NotebookTemplateVersion,
+    StudioAssetManifest,
     User,
 )
 from app.schemas.studio import (
+    StudioAssetRead,
     StudioCell,
     StudioDraftUpdate,
     StudioTemplateBindRequest,
@@ -35,12 +36,19 @@ from app.schemas.studio import (
     StudioTemplateRead,
     StudioVersionRead,
 )
-from app.services.studio_asset_service import StudioAssetBundleService
+from app.services.studio_asset_manifest_service import (
+    DraftAssetBindingPlan,
+    StagedStudioAssetBundle,
+    StudioAssetInfo,
+    StudioAssetManifestService,
+    VersionAssetBindingPlan,
+    validate_relative_asset_path,
+)
 from app.storage import (
+    InvalidStorageKey,
     StorageConflict,
     StorageError,
     StorageNotFound,
-    StorageService,
 )
 
 
@@ -96,7 +104,25 @@ def _normalize_cells(cells: list[dict] | None) -> list[dict]:
     return [_normalize_cell(cell) for cell in (cells or [])]
 
 
-def _version_read(version: NotebookTemplateVersion) -> StudioVersionRead:
+def _asset_reads(assets: tuple[StudioAssetInfo, ...]) -> list[StudioAssetRead]:
+    return [
+        StudioAssetRead(
+            relative_path=asset.relative_path,
+            storage_object_id=asset.storage_object_id,
+            content_type=asset.content_type,
+            size_bytes=asset.size_bytes,
+            sha256=asset.sha256,
+        )
+        for asset in assets
+    ]
+
+
+def _version_read(
+    version: NotebookTemplateVersion,
+    *,
+    manifest_id: int | None = None,
+    assets: tuple[StudioAssetInfo, ...] = (),
+) -> StudioVersionRead:
     return StudioVersionRead(
         id=version.id,
         template_id=version.template_id,
@@ -105,13 +131,25 @@ def _version_read(version: NotebookTemplateVersion) -> StudioVersionRead:
         cells=_normalize_cells(version.cells),
         cell_order=version.cell_order,
         notebook_metadata=version.notebook_metadata or {},
-        assets_dir=version.assets_dir,
+        assets_dir=StudioAssetManifestService.public_legacy_prefix(version.assets_dir),
+        asset_manifest_id=manifest_id,
+        assets=_asset_reads(assets),
         published_at=version.published_at,
         published_by_id=version.published_by_id,
         environment_version_id=version.environment_version_id,
         import_policy_mode=version.import_policy_mode,
         allowed_imports=list(version.allowed_imports or []),
     )
+
+
+def version_read(
+    db: Session, settings: Settings, version: NotebookTemplateVersion
+) -> StudioVersionRead:
+    assets_service = StudioAssetManifestService.from_settings(settings)
+    manifest_id, assets = assets_service.version_assets(
+        db, version.id, version.assets_dir
+    )
+    return _version_read(version, manifest_id=manifest_id, assets=assets)
 
 
 def _binding_ids(db: Session, template_id: int) -> tuple[int | None, int | None]:
@@ -126,13 +164,20 @@ def _binding_ids(db: Session, template_id: int) -> tuple[int | None, int | None]
     return lesson_id, module_id
 
 
-def template_read(db: Session, template: NotebookTemplate) -> StudioTemplateRead:
+def template_read(
+    db: Session,
+    template: NotebookTemplate,
+    settings: Settings | None = None,
+) -> StudioTemplateRead:
+    settings = settings or Settings()
+    assets_service = StudioAssetManifestService.from_settings(settings)
     lesson_id, module_id = _binding_ids(db, template.id)
     current = None
     if template.current_version_id:
         version = db.get(NotebookTemplateVersion, template.current_version_id)
         if version and version.template_id == template.id:
-            current = _version_read(version)
+            current = version_read(db, settings, version)
+    draft_manifest_id, draft_assets = assets_service.draft_assets(db, template)
     return StudioTemplateRead(
         id=template.id,
         name=template.name,
@@ -143,7 +188,11 @@ def template_read(db: Session, template: NotebookTemplate) -> StudioTemplateRead
         draft_cells=_normalize_cells(template.draft_cells),
         draft_revision=template.draft_revision,
         draft_metadata=template.draft_metadata or {},
-        draft_assets_dir=template.draft_assets_dir,
+        draft_assets_dir=StudioAssetManifestService.public_legacy_prefix(
+            template.draft_assets_dir
+        ),
+        draft_asset_manifest_id=draft_manifest_id,
+        draft_assets=_asset_reads(draft_assets),
         draft_environment_version_id=template.draft_environment_version_id,
         draft_import_policy_mode=template.draft_import_policy_mode,
         draft_allowed_imports=list(template.draft_allowed_imports or []),
@@ -168,12 +217,14 @@ def get_managed_template(
     return template
 
 
-def list_templates(db: Session, user: User) -> list[StudioTemplateRead]:
+def list_templates(
+    db: Session, user: User, settings: Settings | None = None
+) -> list[StudioTemplateRead]:
     query = select(NotebookTemplate)
     if user.role != "admin":
         query = query.where(NotebookTemplate.owner_id == user.id)
     templates = db.scalars(query.order_by(NotebookTemplate.id)).all()
-    return [template_read(db, template) for template in templates]
+    return [template_read(db, template, settings) for template in templates]
 
 
 def _authorize_context(
@@ -185,8 +236,6 @@ def _authorize_context(
     creating: bool,
 ) -> Lesson | ExperimentModule | None:
     if lesson_id is not None:
-        if user.role == "developer":
-            raise api_error(403, "FORBIDDEN", "开发者不能绑定课程课时")
         lesson = db.get(Lesson, lesson_id)
         if not lesson:
             raise api_error(404, "LESSON_NOT_FOUND", "课时不存在")
@@ -199,14 +248,12 @@ def _authorize_context(
         return lesson
 
     if module_id is not None:
-        if user.role == "teacher":
-            raise api_error(403, "FORBIDDEN", "教师不能绑定独立实验模块")
         module = db.get(ExperimentModule, module_id)
         if not module:
             raise api_error(
                 404, "EXPERIMENT_MODULE_NOT_FOUND", "独立实验模块不存在"
             )
-        if user.role == "developer" and module.owner_id != user.id:
+        if user.role == "teacher" and module.owner_id != user.id:
             raise api_error(403, "FORBIDDEN", "只能绑定自己创建的实验模块")
         return module
 
@@ -270,7 +317,7 @@ def _resolve_draft_environment(
     }
 
 
-def create_template(
+def _create_template_record(
     db: Session, payload: StudioTemplateCreate, user: User
 ) -> NotebookTemplate:
     _authorize_context(
@@ -295,19 +342,77 @@ def create_template(
             payload.allowed_imports,
         ),
     )
+    db.add(template)
+    db.flush()
+    db.add(StudioAssetManifest(template_id=template.id, revision=1))
+    db.flush()
+    _bind(
+        db,
+        template,
+        user,
+        payload.lesson_id,
+        payload.module_id,
+        creating=True,
+    )
+    return template
+
+
+def create_template_record(
+    db: Session, payload: StudioTemplateCreate, user: User
+) -> NotebookTemplate:
+    """在调用方事务中创建模板；调用方负责 commit/rollback。"""
+    return _create_template_record(db, payload, user)
+
+
+def create_template(
+    db: Session, payload: StudioTemplateCreate, user: User
+) -> NotebookTemplate:
     try:
-        db.add(template)
-        db.flush()
-        _bind(
+        template = create_template_record(db, payload, user)
+        db.commit()
+        db.refresh(template)
+        return template
+    except Exception:
+        db.rollback()
+        raise
+
+
+def ensure_module_template(
+    db: Session, module: ExperimentModule, user: User
+) -> NotebookTemplate:
+    """确保模块有一个属于当前所有者的可编辑 Notebook 草稿。"""
+    if user.role == "teacher" and module.owner_id != user.id:
+        raise api_error(403, "FORBIDDEN", "只能管理自己创建的实验模块")
+
+    if module.template_id is not None:
+        template = db.get(NotebookTemplate, module.template_id)
+        if template is None:
+            raise api_error(
+                409,
+                "MODULE_TEMPLATE_INCONSISTENT",
+                "实验模块关联的 Notebook 模板不存在",
+            )
+        if template.owner_id != module.owner_id:
+            raise api_error(
+                409,
+                "MODULE_TEMPLATE_INCONSISTENT",
+                "实验模块与 Notebook 模板所有者不一致",
+            )
+        return template
+
+    try:
+        template = _create_template_record(
             db,
-            template,
+            StudioTemplateCreate(
+                name=module.name,
+                description=module.description,
+                module_id=module.id,
+            ),
             user,
-            payload.lesson_id,
-            payload.module_id,
-            creating=True,
         )
         db.commit()
         db.refresh(template)
+        db.refresh(module)
         return template
     except Exception:
         db.rollback()
@@ -335,8 +440,12 @@ def bind_template(
     payload: StudioTemplateBindRequest,
     user: User,
 ) -> NotebookTemplate:
-    if user.role == "teacher" and payload.lesson_id is None:
-        raise api_error(403, "LESSON_REQUIRED", "教师模板必须绑定课时")
+    if user.role == "teacher" and payload.lesson_id is None and payload.module_id is None:
+        raise api_error(
+            403,
+            "CONTEXT_REQUIRED",
+            "教师模板必须绑定自己课程的课时或自己的独立实验模块",
+        )
     try:
         _bind(
             db,
@@ -398,6 +507,13 @@ def atomic_replace_draft(
         values["draft_assets_dir"] = assets_dir
     if environment is not None:
         values.update(environment)
+    manifest = db.scalar(
+        select(StudioAssetManifest).where(
+            StudioAssetManifest.template_id == template.id
+        )
+    )
+    if manifest is not None:
+        manifest.revision = expected_revision + 1
     result = db.execute(
         update(NotebookTemplate)
         .where(
@@ -520,8 +636,11 @@ def _parse_notebook(data: bytes) -> tuple[list[dict], dict]:
 def _safe_zip_path(name: str) -> PurePosixPath:
     if not name or "\\" in name or name.startswith(("/", "\\")):
         raise api_error(400, "ZIP_UNSAFE_PATH", "ZIP 包含不安全路径")
+    raw_parts = name.split("/")
+    if any(not part or part == "." or part == ".." for part in raw_parts):
+        raise api_error(400, "ZIP_UNSAFE_PATH", "ZIP 包含不安全路径")
     path = PurePosixPath(name)
-    if path.is_absolute() or ".." in path.parts:
+    if not path.parts or path.is_absolute() or ".." in path.parts:
         raise api_error(400, "ZIP_UNSAFE_PATH", "ZIP 包含目录穿越路径")
     if path.parts and ":" in path.parts[0]:
         raise api_error(400, "ZIP_UNSAFE_PATH", "ZIP 包含绝对路径")
@@ -550,10 +669,12 @@ def parse_import(filename: str, data: bytes) -> ImportedNotebook:
         total_size = 0
         notebooks = []
         assets: list[tuple[str, bytes]] = []
+        seen_asset_paths: set[str] = set()
         for info in infos:
-            path = _safe_zip_path(info.filename)
             if info.is_dir():
+                _safe_zip_path(info.filename.rstrip("/"))
                 continue
+            path = _safe_zip_path(info.filename)
             mode = (info.external_attr >> 16) & 0o170000
             if stat.S_ISLNK(mode):
                 raise api_error(400, "ZIP_SYMLINK", "ZIP 不允许符号链接")
@@ -565,6 +686,10 @@ def parse_import(filename: str, data: bytes) -> ImportedNotebook:
             if total_size > MAX_IMPORT_BYTES:
                 raise api_error(400, "ZIP_TOO_LARGE", "ZIP 解压总大小过大")
             suffix = path.suffix.lower()
+            try:
+                relative_path = validate_relative_asset_path(path.as_posix())
+            except InvalidStorageKey as exc:
+                raise api_error(400, "ZIP_UNSAFE_PATH", "ZIP 包含不安全路径") from exc
             if suffix not in ALLOWED_ASSET_EXTENSIONS:
                 raise api_error(
                     400, "ZIP_UNSUPPORTED_FILE", f"ZIP 不支持文件类型：{suffix}"
@@ -576,9 +701,12 @@ def parse_import(filename: str, data: bytes) -> ImportedNotebook:
             if len(content) > MAX_ZIP_ENTRY_BYTES:
                 raise api_error(400, "ZIP_ENTRY_TOO_LARGE", "ZIP 单个条目过大")
             if suffix == ".ipynb":
-                notebooks.append((path.as_posix(), content))
+                notebooks.append((relative_path, content))
             else:
-                assets.append((path.as_posix(), content))
+                if relative_path in seen_asset_paths:
+                    raise api_error(400, "ZIP_DUPLICATE_ASSET", "ZIP 包含重复资源路径")
+                seen_asset_paths.add(relative_path)
+                assets.append((relative_path, content))
         if len(notebooks) != 1:
             raise api_error(
                 400, "ZIP_AMBIGUOUS_NOTEBOOK", "ZIP 必须且只能包含一个 Notebook"
@@ -587,36 +715,6 @@ def parse_import(filename: str, data: bytes) -> ImportedNotebook:
         return ImportedNotebook(
             cells=cells, metadata=metadata, assets=tuple(assets)
         )
-
-
-def _remove_generated_path(settings: Settings, relative: str | None) -> None:
-    if not relative:
-        return
-    StudioAssetBundleService(StorageService.from_settings(settings)).delete(relative)
-
-
-def _write_import_assets(
-    settings: Settings,
-    template_id: int,
-    revision: int,
-    assets: tuple[tuple[str, bytes], ...],
-) -> str | None:
-    if not assets:
-        return None
-    token = uuid.uuid4().hex[:12]
-    relative = (
-        PurePosixPath("templates")
-        / str(template_id)
-        / f"draft-r{revision}-{token}"
-    ).as_posix()
-    try:
-        StudioAssetBundleService(StorageService.from_settings(settings)).put(
-            relative,
-            assets,
-        )
-        return relative
-    except StorageError as exc:
-        raise api_error(500, "ASSET_STORAGE_FAILED", "导入资源保存失败") from exc
 
 
 def create_imported_template(
@@ -651,14 +749,22 @@ def create_imported_template(
             list(allowed_imports or []),
         ),
     )
-    generated_path = None
+    assets_service = StudioAssetManifestService.from_settings(settings)
+    staged: StagedStudioAssetBundle | None = None
+    binding: DraftAssetBindingPlan | None = None
     try:
         db.add(template)
         db.flush()
-        generated_path = _write_import_assets(
-            settings, template.id, 1, imported.assets
+        staged = assets_service.stage_bundle(
+            template.id, 1, imported.assets
         )
-        template.draft_assets_dir = generated_path
+        binding = assets_service.bind_draft_assets(
+            db,
+            template,
+            revision=1,
+            staged=staged,
+            created_by_id=user.id,
+        )
         _bind(
             db,
             template,
@@ -669,10 +775,12 @@ def create_imported_template(
         )
         db.commit()
         db.refresh(template)
+        if binding is not None:
+            assets_service.finalize_draft_assets(db, binding)
         return template
     except Exception:
         db.rollback()
-        _remove_generated_path(settings, generated_path)
+        assets_service.cleanup_staged_bundle(staged)
         raise
 
 
@@ -684,24 +792,33 @@ def import_into_template(
     expected_revision: int,
     imported: ImportedNotebook,
 ) -> NotebookTemplate:
-    generated_path = _write_import_assets(
-        settings,
-        template.id,
-        expected_revision + 1,
-        imported.assets,
+    assets_service = StudioAssetManifestService.from_settings(settings)
+    staged = assets_service.stage_bundle(
+        template.id, expected_revision + 1, imported.assets
     )
+    binding: DraftAssetBindingPlan | None = None
     try:
+        binding = assets_service.bind_draft_assets(
+            db,
+            template,
+            revision=expected_revision + 1,
+            staged=staged,
+            created_by_id=template.owner_id,
+        )
         updated = atomic_replace_draft(
             db,
             template,
             expected_revision,
             imported.cells,
             metadata=imported.metadata,
-            assets_dir=generated_path,
+            assets_dir=staged.prefix,
         )
+        if binding is not None:
+            assets_service.finalize_draft_assets(db, binding)
         return updated
     except Exception:
-        _remove_generated_path(settings, generated_path)
+        db.rollback()
+        assets_service.cleanup_staged_bundle(staged)
         raise
 
 
@@ -712,42 +829,6 @@ def canonical_snapshot(cells: list[dict], metadata: dict) -> bytes:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
-
-
-def _copy_version_assets(
-    settings: Settings,
-    template_id: int,
-    version_number: int,
-    draft_assets_dir: str | None,
-) -> str:
-    relative = (
-        PurePosixPath("templates")
-        / str(template_id)
-        / "versions"
-        / str(version_number)
-    ).as_posix()
-    final = _safe_storage_path(settings, relative)
-    if final.exists():
-        raise api_error(409, "PUBLISH_CONFLICT", "版本资源目录已存在")
-    root = settings.studio_storage_path
-    root.mkdir(parents=True, exist_ok=True)
-    staging = root / ".staging" / uuid.uuid4().hex
-    staging.mkdir(parents=True, exist_ok=False)
-    try:
-        if draft_assets_dir:
-            source = _safe_storage_path(settings, draft_assets_dir)
-            if not source.is_dir():
-                raise api_error(500, "ASSET_MISSING", "草稿资源目录不存在")
-            shutil.copytree(source, staging, dirs_exist_ok=True)
-        final.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(staging, final)
-        return relative
-    except Exception:
-        if staging.exists():
-            shutil.rmtree(staging)
-        if final.exists():
-            shutil.rmtree(final)
-        raise
 
 
 def publish_template(
@@ -777,14 +858,9 @@ def publish_template(
     cells = copy.deepcopy(_normalize_cells(template.draft_cells))
     metadata = copy.deepcopy(template.draft_metadata or {})
     digest = hashlib.sha256(canonical_snapshot(cells, metadata)).hexdigest()
-    assets_dir = None
+    assets_service = StudioAssetManifestService.from_settings(settings)
+    asset_plan: VersionAssetBindingPlan | None = None
     try:
-        assets_dir = _copy_version_assets(
-            settings,
-            template.id,
-            version_number,
-            template.draft_assets_dir,
-        )
         version = NotebookTemplateVersion(
             template_id=template.id,
             version_number=version_number,
@@ -792,7 +868,7 @@ def publish_template(
             cells=cells,
             cell_order=[cell["id"] for cell in cells],
             notebook_metadata=metadata,
-            assets_dir=assets_dir,
+            assets_dir=None,
             published_by_id=user.id,
             # 从草稿复制不可变环境快照；已发布版本与已开始实验不随新发布自动升级
             environment_version_id=template.draft_environment_version_id,
@@ -801,6 +877,15 @@ def publish_template(
         )
         db.add(version)
         db.flush()
+        asset_plan = assets_service.create_version_snapshot(
+            db,
+            template_id=template.id,
+            version_id=version.id,
+            version_number=version_number,
+            legacy_prefix=template.draft_assets_dir,
+            created_by_id=user.id,
+        )
+        version.assets_dir = asset_plan.prefix
         template.current_version_id = version.id
         template.status = "published"
         db.commit()
@@ -808,23 +893,44 @@ def publish_template(
         return version
     except IntegrityError:
         db.rollback()
-        _remove_generated_path(settings, assets_dir)
+        assets_service.cleanup_version_snapshot(asset_plan)
         raise api_error(409, "PUBLISH_CONFLICT", "并发发布冲突，请重试")
+    except StorageNotFound as exc:
+        db.rollback()
+        assets_service.cleanup_version_snapshot(asset_plan)
+        raise api_error(500, "ASSET_MISSING", "草稿资源不存在") from exc
+    except StorageConflict as exc:
+        db.rollback()
+        assets_service.cleanup_version_snapshot(asset_plan)
+        raise api_error(409, "PUBLISH_CONFLICT", "版本资源已存在") from exc
+    except StorageError as exc:
+        db.rollback()
+        assets_service.cleanup_version_snapshot(asset_plan)
+        raise api_error(500, "ASSET_STORAGE_FAILED", "版本资源保存失败") from exc
     except Exception:
         db.rollback()
-        _remove_generated_path(settings, assets_dir)
+        assets_service.cleanup_version_snapshot(asset_plan)
         raise
 
 
 def list_versions(
-    db: Session, template: NotebookTemplate
+    db: Session,
+    template: NotebookTemplate,
+    settings: Settings | None = None,
 ) -> list[StudioVersionRead]:
     versions = db.scalars(
         select(NotebookTemplateVersion)
         .where(NotebookTemplateVersion.template_id == template.id)
         .order_by(NotebookTemplateVersion.version_number)
     ).all()
-    return [_version_read(version) for version in versions]
+    assets_service = StudioAssetManifestService.from_settings(settings or Settings())
+    result: list[StudioVersionRead] = []
+    for version in versions:
+        manifest_id, assets = assets_service.version_assets(
+            db, version.id, version.assets_dir
+        )
+        result.append(_version_read(version, manifest_id=manifest_id, assets=assets))
+    return result
 
 
 def get_version(
@@ -865,6 +971,34 @@ def export_notebook(cells: list[dict], metadata: dict) -> bytes:
         metadata=copy.deepcopy(metadata),
     )
     return nbformat.writes(notebook).encode("utf-8")
+
+
+def export_template_zip(
+    db: Session,
+    settings: Settings,
+    template: NotebookTemplate,
+    *,
+    version_id: int | None,
+    scope: str,
+) -> tuple[bytes, str]:
+    assets_service = StudioAssetManifestService.from_settings(settings)
+    if version_id is not None:
+        version = get_version(db, template, version_id)
+        cells = version.cells
+        metadata = version.notebook_metadata or {}
+        _, assets = assets_service.version_assets(
+            db, version.id, version.assets_dir
+        )
+        suffix = f"v{version.version_number}"
+    elif scope == "draft":
+        cells = template.draft_cells or []
+        metadata = template.draft_metadata or {}
+        _, assets = assets_service.draft_assets(db, template)
+        suffix = "draft"
+    else:
+        raise api_error(422, "VERSION_REQUIRED", "请选择要导出的模板版本")
+    notebook = export_notebook(cells, metadata)
+    return assets_service.export_zip(notebook, assets), suffix
 
 
 def preview_run(template: NotebookTemplate, user: User, cell_id: str, manager,

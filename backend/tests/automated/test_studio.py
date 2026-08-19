@@ -49,8 +49,8 @@ def studio_context(client, db_session_factory):
         ("studio_admin", "admin"),
         ("studio_teacher", "teacher"),
         ("studio_teacher_other", "teacher"),
-        ("studio_dev", "developer"),
-        ("studio_dev_other", "developer"),
+        ("studio_module_owner", "teacher"),
+        ("studio_module_other", "teacher"),
         ("studio_student", "student"),
         ("studio_student_new", "student"),
     ):
@@ -82,16 +82,21 @@ def studio_context(client, db_session_factory):
             chapter_id=other_chapter.id, title="Other lesson", order_index=0
         )
         own_module = ExperimentModule(
-            name="Developer module",
+            name="Independent module",
             status="published",
-            owner_id=users["studio_dev"].id,
+            owner_id=users["studio_module_owner"].id,
+        )
+        teacher_module = ExperimentModule(
+            name="Teacher module",
+            status="draft",
+            owner_id=users["studio_teacher"].id,
         )
         other_module = ExperimentModule(
-            name="Other developer module",
+            name="Other independent module",
             status="draft",
-            owner_id=users["studio_dev_other"].id,
+            owner_id=users["studio_module_other"].id,
         )
-        db.add_all([lesson, other_lesson, own_module, other_module])
+        db.add_all([lesson, other_lesson, own_module, teacher_module, other_module])
         db.flush()
         db.add_all(
             [
@@ -113,6 +118,7 @@ def studio_context(client, db_session_factory):
             "lesson_id": lesson.id,
             "other_lesson_id": other_lesson.id,
             "module_id": own_module.id,
+            "teacher_module_id": teacher_module.id,
             "other_module_id": other_module.id,
         }
 
@@ -164,13 +170,13 @@ def test_studio_roles_owner_listing_and_context_binding(client, db_session_facto
     )
     assert forbidden_context.status_code == 403
 
-    dev_template = client.post(
+    module_template = client.post(
         "/api/v1/studio/templates",
-        headers=_headers(ctx, "studio_dev"),
+        headers=_headers(ctx, "studio_module_owner"),
         json={"name": "Independent", "module_id": ctx["module_id"]},
     )
-    assert dev_template.status_code == 201, dev_template.text
-    assert dev_template.json()["module_id"] == ctx["module_id"]
+    assert module_template.status_code == 201, module_template.text
+    assert module_template.json()["module_id"] == ctx["module_id"]
 
     teacher_cannot_claim_module = client.post(
         "/api/v1/studio/templates",
@@ -178,6 +184,14 @@ def test_studio_roles_owner_listing_and_context_binding(client, db_session_facto
         json={"name": "No module", "module_id": ctx["module_id"]},
     )
     assert teacher_cannot_claim_module.status_code == 403
+
+    teacher_can_bind_own_module = client.post(
+        f"/api/v1/studio/templates/{teacher_template['id']}/bind",
+        headers=_headers(ctx, "studio_teacher"),
+        json={"module_id": ctx["teacher_module_id"]},
+    )
+    assert teacher_can_bind_own_module.status_code == 200, teacher_can_bind_own_module.text
+    assert teacher_can_bind_own_module.json()["module_id"] == ctx["teacher_module_id"]
 
     own = client.get(
         "/api/v1/studio/templates",
@@ -191,7 +205,7 @@ def test_studio_roles_owner_listing_and_context_binding(client, db_session_facto
     )
     assert {item["id"] for item in admin.json()} == {
         teacher_template["id"],
-        dev_template.json()["id"],
+        module_template.json()["id"],
     }
 
 
@@ -488,7 +502,12 @@ def test_export_draft_and_version_are_parseable_and_output_free(client, studio_c
         )
         assert response.status_code == 200, response.text
         assert "attachment" in response.headers["content-disposition"]
-        notebook = nbformat.reads(response.content.decode("utf-8"), as_version=4)
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            assert archive.namelist() == ["notebook.ipynb"]
+            notebook = nbformat.reads(
+                archive.read("notebook.ipynb").decode("utf-8"),
+                as_version=4,
+            )
         assert [cell.source for cell in notebook.cells] == ["# Heading", "print(42)"]
         assert notebook.cells[1].metadata["dai"] == {
             "student_editable": False,

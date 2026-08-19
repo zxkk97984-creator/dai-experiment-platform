@@ -33,10 +33,11 @@ from app.schemas.studio import (
 )
 from app.services.kernel_manager import get_kernel_manager
 from app.services import studio_service
+from app.storage import StorageError, StorageNotFound
 
 
 router = APIRouter(prefix="/studio", tags=["studio"])
-studio_user = require_roles("admin", "teacher", "developer")
+studio_user = require_roles("admin", "teacher")
 
 
 def _import_create_form(
@@ -78,9 +79,10 @@ def _import_existing_form(
 @router.get("/templates", response_model=list[StudioTemplateRead])
 def get_templates(
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(studio_user),
 ):
-    return studio_service.list_templates(db, current_user)
+    return studio_service.list_templates(db, current_user, settings)
 
 
 @router.post(
@@ -91,10 +93,11 @@ def get_templates(
 def post_template(
     payload: StudioTemplateCreate,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(studio_user),
 ):
     template = studio_service.create_template(db, payload, current_user)
-    return studio_service.template_read(db, template)
+    return studio_service.template_read(db, template, settings)
 
 
 # This static route is intentionally registered before /templates/{id}.
@@ -125,17 +128,18 @@ async def import_new_template(
         allowed_imports=payload.allowed_imports,
         imported=imported,
     )
-    return studio_service.template_read(db, template)
+    return studio_service.template_read(db, template, settings)
 
 
 @router.get("/templates/{template_id}", response_model=StudioTemplateRead)
 def get_template(
     template_id: int,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(studio_user),
 ):
     template = studio_service.get_managed_template(db, template_id, current_user)
-    return studio_service.template_read(db, template)
+    return studio_service.template_read(db, template, settings)
 
 
 @router.patch("/templates/{template_id}", response_model=StudioTemplateRead)
@@ -143,11 +147,12 @@ def patch_template(
     template_id: int,
     payload: StudioTemplateMetadataUpdate,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(studio_user),
 ):
     template = studio_service.get_managed_template(db, template_id, current_user)
     template = studio_service.update_metadata(db, template, payload)
-    return studio_service.template_read(db, template)
+    return studio_service.template_read(db, template, settings)
 
 
 @router.post("/templates/{template_id}/bind", response_model=StudioTemplateRead)
@@ -155,11 +160,12 @@ def bind_template(
     template_id: int,
     payload: StudioTemplateBindRequest,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(studio_user),
 ):
     template = studio_service.get_managed_template(db, template_id, current_user)
     template = studio_service.bind_template(db, template, payload, current_user)
-    return studio_service.template_read(db, template)
+    return studio_service.template_read(db, template, settings)
 
 
 @router.put("/templates/{template_id}/draft", response_model=StudioTemplateRead)
@@ -167,6 +173,7 @@ def put_draft(
     template_id: int,
     payload: StudioDraftUpdate,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(studio_user),
 ):
     template = studio_service.get_managed_template(db, template_id, current_user)
@@ -175,7 +182,7 @@ def put_draft(
     get_kernel_manager().destroy(
         studio_service.preview_session_key(template.id, current_user.id)
     )
-    return studio_service.template_read(db, template)
+    return studio_service.template_read(db, template, settings)
 
 
 @router.post(
@@ -203,7 +210,7 @@ async def import_existing_template(
     get_kernel_manager().destroy(
         studio_service.preview_session_key(template.id, current_user.id)
     )
-    return studio_service.template_read(db, template)
+    return studio_service.template_read(db, template, settings)
 
 
 @router.post(
@@ -220,7 +227,7 @@ def publish_template(
     version = studio_service.publish_template(
         db, settings, template_id, current_user
     )
-    return studio_service._version_read(version)
+    return studio_service.version_read(db, settings, version)
 
 
 @router.get(
@@ -230,10 +237,11 @@ def publish_template(
 def get_history(
     template_id: int,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(studio_user),
 ):
     template = studio_service.get_managed_template(db, template_id, current_user)
-    return studio_service.list_versions(db, template)
+    return studio_service.list_versions(db, template, settings)
 
 
 @router.get(
@@ -244,11 +252,12 @@ def get_history_version(
     template_id: int,
     version_id: int,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(studio_user),
 ):
     template = studio_service.get_managed_template(db, template_id, current_user)
     version = studio_service.get_version(db, template, version_id)
-    return studio_service._version_read(version)
+    return studio_service.version_read(db, settings, version)
 
 
 @router.get("/templates/{template_id}/export")
@@ -257,25 +266,26 @@ def export_template(
     scope: Literal["draft"] = Query(default="draft"),
     version_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(studio_user),
 ):
     template = studio_service.get_managed_template(db, template_id, current_user)
-    if version_id is not None:
-        version = studio_service.get_version(db, template, version_id)
-        cells = version.cells
-        metadata = version.notebook_metadata or {}
-        suffix = f"v{version.version_number}"
-    elif scope == "draft":
-        cells = template.draft_cells or []
-        metadata = template.draft_metadata or {}
-        suffix = "draft"
-    else:
-        raise api_error(422, "VERSION_REQUIRED", "请选择要导出的模板版本")
-    content = studio_service.export_notebook(cells, metadata)
-    filename = f"template-{template.id}-{suffix}.ipynb"
+    try:
+        content, suffix = studio_service.export_template_zip(
+            db,
+            settings,
+            template,
+            version_id=version_id,
+            scope=scope,
+        )
+    except StorageNotFound as exc:
+        raise api_error(500, "ASSET_MISSING", "导出资源不存在") from exc
+    except StorageError as exc:
+        raise api_error(500, "ASSET_STORAGE_FAILED", "导出资源读取失败") from exc
+    filename = f"template-{template.id}-{suffix}.zip"
     return Response(
         content=content,
-        media_type="application/x-ipynb+json",
+        media_type="application/zip",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
             "Cache-Control": "no-store",
