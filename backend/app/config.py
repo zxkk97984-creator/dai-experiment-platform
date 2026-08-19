@@ -1,6 +1,7 @@
 import re
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -49,6 +50,18 @@ class Settings(BaseSettings):
         Path(__file__).resolve().parents[1] / "storage" / "covers"
     )
     cover_max_upload_bytes: int = Field(default=5 * 1024 * 1024, gt=0)
+    # Storage backend selection is deliberately provider-neutral.  Development
+    # defaults to local files; S3-compatible deployments configure the
+    # endpoint and credentials without changing business services or DB keys.
+    storage_backend: Literal["local", "s3"] = "local"
+    storage_s3_endpoint_url: str | None = None
+    storage_s3_bucket: str = "dai-platform"
+    storage_s3_region: str = "us-east-1"
+    storage_s3_access_key_id: SecretStr = SecretStr("")
+    storage_s3_secret_access_key: SecretStr = SecretStr("")
+    storage_s3_session_token: SecretStr = SecretStr("")
+    storage_s3_addressing_style: Literal["auto", "path", "virtual"] = "auto"
+    storage_s3_key_prefix: str = ""
     # 判题临时文件目录——Docker Compose 下必须与 judge 容器挂载相同路径
     judge_work_dir: str = ""
     # 宿主机侧判题工作目录——DoD 模式下传给 Docker daemon 的宿主机绝对路径
@@ -64,6 +77,11 @@ class Settings(BaseSettings):
     ai_model: str = "deepseek-v4-flash"
     ai_timeout_seconds: float = Field(default=60.0, gt=0, le=180)
     ai_max_retries: int = Field(default=3, ge=0, le=8)
+    # 测试组生成是同步教师请求，且 reasoning 模型输出大：单次调用放宽超时，
+    # 模型层不自动重试（业务层 generate_test_groups 还有一次修复生成），
+    # 避免“60s × 多次重试”把请求拖到前端超时之后。
+    ai_test_group_timeout_seconds: float = Field(default=120.0, gt=0, le=300)
+    ai_test_group_max_retries: int = Field(default=0, ge=0, le=3)
     ai_queue_name: str = "judge:ai:queue"
 
     @property

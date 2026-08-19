@@ -18,3 +18,5 @@ jupyter-client==8.9.1
 ipykernel==6.29.5
 ruff==0.12.5
 radon==6.0.1
+boto3==1.35.99
+moto[s3]==5.1.17

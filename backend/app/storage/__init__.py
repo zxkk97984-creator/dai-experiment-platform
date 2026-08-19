@@ -12,6 +12,7 @@ from .backend import (
 )
 from .local import LocalFilesystemStorage
 from .object_metadata import StorageObjectBackend, StorageObjectStatus
+from .s3 import S3CompatibleStorage
 from .service import StorageArea, StorageService
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "LocalFilesystemStorage",
     "StorageArea",
     "StorageBackend",
+    "S3CompatibleStorage",
     "StorageObjectBackend",
     "StorageConflict",
     "StorageError",

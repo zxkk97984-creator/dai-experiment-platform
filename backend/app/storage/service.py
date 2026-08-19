@@ -17,6 +17,7 @@ from .backend import (
     StorageReadStream,
 )
 from .local import LocalFilesystemStorage
+from .s3 import S3CompatibleStorage
 
 
 class StorageArea(StrEnum):
@@ -34,6 +35,17 @@ class StorageService:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "StorageService":
+        if settings.storage_backend == "s3":
+            backend = S3CompatibleStorage.from_settings(settings)
+            return cls(
+                {
+                    StorageArea.COVERS: backend,
+                    StorageArea.VIDEOS: backend,
+                    StorageArea.STUDIO: backend,
+                }
+            )
+        if settings.storage_backend != "local":
+            raise ValueError("DAI_STORAGE_BACKEND must be 'local' or 's3'")
         return cls(
             {
                 StorageArea.COVERS: LocalFilesystemStorage(

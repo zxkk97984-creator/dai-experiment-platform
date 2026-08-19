@@ -75,6 +75,17 @@ services:
       DAI_REDIS_URL: redis://redis:6379/0
       DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
       DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
+      # 文件存储后端保持 provider-neutral：默认 local，S3-compatible 部署
+      # 通过这些配置切换，业务 Service 和数据库 object_key 不变。
+      DAI_STORAGE_BACKEND: ${DAI_STORAGE_BACKEND:-local}
+      DAI_STORAGE_S3_ENDPOINT_URL: ${DAI_STORAGE_S3_ENDPOINT_URL:-}
+      DAI_STORAGE_S3_BUCKET: ${DAI_STORAGE_S3_BUCKET:-dai-platform}
+      DAI_STORAGE_S3_REGION: ${DAI_STORAGE_S3_REGION:-us-east-1}
+      DAI_STORAGE_S3_ACCESS_KEY_ID: ${DAI_STORAGE_S3_ACCESS_KEY_ID:-}
+      DAI_STORAGE_S3_SECRET_ACCESS_KEY: ${DAI_STORAGE_S3_SECRET_ACCESS_KEY:-}
+      DAI_STORAGE_S3_SESSION_TOKEN: ${DAI_STORAGE_S3_SESSION_TOKEN:-}
+      DAI_STORAGE_S3_ADDRESSING_STYLE: ${DAI_STORAGE_S3_ADDRESSING_STYLE:-auto}
+      DAI_STORAGE_S3_KEY_PREFIX: ${DAI_STORAGE_S3_KEY_PREFIX:-}
       DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
       # 登录限流：生产 API 位于前端 Nginx 反向代理之后，必须信任 X-Forwarded-For
       # 最右一跳作为客户端 IP；否则所有用户共享 Nginx 容器 IP 的限流桶
@@ -100,6 +111,8 @@ services:
       DAI_AI_MODEL: ${DAI_AI_MODEL:-deepseek-v4-flash}
       DAI_AI_TIMEOUT_SECONDS: ${DAI_AI_TIMEOUT_SECONDS:-60}
       DAI_AI_MAX_RETRIES: ${DAI_AI_MAX_RETRIES:-3}
+      DAI_AI_TEST_GROUP_TIMEOUT_SECONDS: ${DAI_AI_TEST_GROUP_TIMEOUT_SECONDS:-120}
+      DAI_AI_TEST_GROUP_MAX_RETRIES: ${DAI_AI_TEST_GROUP_MAX_RETRIES:-0}
       DAI_AI_QUEUE_NAME: ${DAI_AI_QUEUE_NAME:-judge:ai:queue}
     depends_on:
       mysql:
@@ -140,6 +153,8 @@ services:
       DAI_AI_MODEL: ${DAI_AI_MODEL:-deepseek-v4-flash}
       DAI_AI_TIMEOUT_SECONDS: ${DAI_AI_TIMEOUT_SECONDS:-60}
       DAI_AI_MAX_RETRIES: ${DAI_AI_MAX_RETRIES:-3}
+      DAI_AI_TEST_GROUP_TIMEOUT_SECONDS: ${DAI_AI_TEST_GROUP_TIMEOUT_SECONDS:-120}
+      DAI_AI_TEST_GROUP_MAX_RETRIES: ${DAI_AI_TEST_GROUP_MAX_RETRIES:-0}
       DAI_AI_QUEUE_NAME: ${DAI_AI_QUEUE_NAME:-judge:ai:queue}
     depends_on:
       mysql:
