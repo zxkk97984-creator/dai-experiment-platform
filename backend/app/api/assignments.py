@@ -192,6 +192,7 @@ def list_assignments(
 def create_assignment(
     payload: AssignmentCreate,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(require_roles("teacher", "admin")),
 ):
     course = require_course(payload.course_id, db)
@@ -209,9 +210,9 @@ def create_assignment(
         validate_environment_selection,
     )
 
-    validate_environment_selection(db, data["environment_version_id"])
+    validate_environment_selection(db, data["environment_version_id"], settings=settings)
     if data["environment_version_id"] is None:
-        basic = resolve_basic_available_version(db)
+        basic = resolve_basic_available_version(db, settings=settings)
         data["environment_version_id"] = basic.id if basic else None
     assignment = Assignment(**data, created_by_id=current_user.id)
     db.add(assignment)
@@ -255,6 +256,7 @@ def update_assignment(
     assignment_id: int,
     payload: AssignmentUpdate,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(get_current_user),
 ):
     assignment = require_assignment(assignment_id, db)
@@ -271,7 +273,7 @@ def update_assignment(
         # 环境设置属于评分输入：发布后或已有提交后不可修改
         ensure_scoring_editable(db, assignment)
     if updates.get("environment_version_id") is not None:
-        validate_environment_selection(db, updates["environment_version_id"])
+        validate_environment_selection(db, updates["environment_version_id"], settings=settings)
     for key, value in updates.items():
         setattr(assignment, key, value)
     if audience_updates:
@@ -490,6 +492,7 @@ def create_question(
     assignment_id: int,
     payload: JudgeQuestionCreate,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(get_current_user),
 ):
     assignment = require_assignment(assignment_id, db)
@@ -504,7 +507,7 @@ def create_question(
     data.setdefault("environment_version_id", None)
     from app.services.environment_service import validate_environment_selection
 
-    validate_environment_selection(db, data.get("environment_version_id"))
+    validate_environment_selection(db, data.get("environment_version_id"), settings=settings)
     question = JudgeQuestion(assignment_id=assignment_id, **data)
     db.add(question)
     db.commit()
@@ -518,6 +521,7 @@ def update_question(
     question_id: int,
     payload: JudgeQuestionUpdate,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(get_current_user),
 ):
     """更新作业编程题——要求教师所有权且评分配置处于可编辑状态"""
@@ -532,7 +536,7 @@ def update_question(
     from app.services.environment_service import validate_environment_selection
 
     if updates.get("environment_version_id") is not None:
-        validate_environment_selection(db, updates["environment_version_id"])
+        validate_environment_selection(db, updates["environment_version_id"], settings=settings)
     for key, value in updates.items():
         setattr(question, key, value)
     db.commit()

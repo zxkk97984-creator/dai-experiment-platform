@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.config import Settings, get_settings
 from app.dependencies import get_current_user, get_db, require_roles, PaginationParams, pagination
 from app.errors import api_error
 from app.models import (
@@ -266,6 +267,7 @@ def list_student_module_catalog(
 def create_module(
     payload: ExperimentModuleCreate,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(require_roles("teacher")),
 ):
     if current_user.role == "teacher" and payload.template_id is not None:
@@ -292,6 +294,7 @@ def create_module(
                     module_id=module.id,
                 ),
                 current_user,
+                settings,
             )
 
         db.commit()
@@ -306,6 +309,7 @@ def create_module(
 def ensure_module_template(
     module_id: int,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(require_roles("teacher")),
 ):
     """为历史孤立模块幂等初始化空白 Notebook 草稿。"""
@@ -315,7 +319,7 @@ def ensure_module_template(
     if module.owner_id != current_user.id:
         raise api_error(403, "FORBIDDEN", "只能初始化自己创建的实验模块")
 
-    studio_service.ensure_module_template(db, module, current_user)
+    studio_service.ensure_module_template(db, module, current_user, settings)
     db.refresh(module)
     return module
 

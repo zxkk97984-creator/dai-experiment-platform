@@ -96,7 +96,7 @@ def post_template(
     settings: Settings = Depends(get_settings),
     current_user: User = Depends(studio_user),
 ):
-    template = studio_service.create_template(db, payload, current_user)
+    template = studio_service.create_template(db, payload, current_user, settings)
     return studio_service.template_read(db, template, settings)
 
 
@@ -177,7 +177,7 @@ def put_draft(
     current_user: User = Depends(studio_user),
 ):
     template = studio_service.get_managed_template(db, template_id, current_user)
-    template = studio_service.save_draft(db, template, payload)
+    template = studio_service.save_draft(db, template, payload, settings)
     # Invalidation must not eagerly create a replacement container.
     get_kernel_manager().destroy(
         studio_service.preview_session_key(template.id, current_user.id)

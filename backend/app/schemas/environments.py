@@ -527,7 +527,9 @@ class EnvironmentPublicationCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     environment_version_id: int = Field(gt=0)
-    expected_current_version_id: int | None = None
+    # Required even when the expected pointer is NULL.  This distinguishes
+    # an intentional first-publish compare from an omitted stale-page token.
+    expected_current_version_id: int | None
 
 
 class EnvironmentPublicationRead(BaseModel):

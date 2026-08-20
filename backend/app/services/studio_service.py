@@ -295,6 +295,7 @@ def _resolve_draft_environment(
     environment_version_id: int | None,
     import_policy_mode: str,
     allowed_imports: list[str],
+    settings: Settings | None = None,
 ) -> dict:
     """创建路径的环境解析（Phase 4）——显式选择必须 available；省略时解析 basic 当前可用版本。
 
@@ -305,10 +306,10 @@ def _resolve_draft_environment(
         validate_environment_selection,
     )
 
-    validate_environment_selection(db, environment_version_id)
+    validate_environment_selection(db, environment_version_id, settings=settings)
     env_id = environment_version_id
     if env_id is None:
-        basic = resolve_basic_available_version(db)
+        basic = resolve_basic_available_version(db, settings=settings)
         env_id = basic.id if basic else None
     return {
         "draft_environment_version_id": env_id,
@@ -318,7 +319,10 @@ def _resolve_draft_environment(
 
 
 def _create_template_record(
-    db: Session, payload: StudioTemplateCreate, user: User
+    db: Session,
+    payload: StudioTemplateCreate,
+    user: User,
+    settings: Settings | None = None,
 ) -> NotebookTemplate:
     _authorize_context(
         db,
@@ -340,6 +344,7 @@ def _create_template_record(
             payload.environment_version_id,
             payload.import_policy_mode,
             payload.allowed_imports,
+            settings,
         ),
     )
     db.add(template)
@@ -358,17 +363,23 @@ def _create_template_record(
 
 
 def create_template_record(
-    db: Session, payload: StudioTemplateCreate, user: User
+    db: Session,
+    payload: StudioTemplateCreate,
+    user: User,
+    settings: Settings | None = None,
 ) -> NotebookTemplate:
     """在调用方事务中创建模板；调用方负责 commit/rollback。"""
-    return _create_template_record(db, payload, user)
+    return _create_template_record(db, payload, user, settings)
 
 
 def create_template(
-    db: Session, payload: StudioTemplateCreate, user: User
+    db: Session,
+    payload: StudioTemplateCreate,
+    user: User,
+    settings: Settings | None = None,
 ) -> NotebookTemplate:
     try:
-        template = create_template_record(db, payload, user)
+        template = create_template_record(db, payload, user, settings)
         db.commit()
         db.refresh(template)
         return template
@@ -378,7 +389,10 @@ def create_template(
 
 
 def ensure_module_template(
-    db: Session, module: ExperimentModule, user: User
+    db: Session,
+    module: ExperimentModule,
+    user: User,
+    settings: Settings | None = None,
 ) -> NotebookTemplate:
     """确保模块有一个属于当前所有者的可编辑 Notebook 草稿。"""
     if user.role == "teacher" and module.owner_id != user.id:
@@ -409,6 +423,7 @@ def ensure_module_template(
                 module_id=module.id,
             ),
             user,
+            settings,
         )
         db.commit()
         db.refresh(template)
@@ -537,6 +552,7 @@ def save_draft(
     db: Session,
     template: NotebookTemplate,
     payload: StudioDraftUpdate,
+    settings: Settings | None = None,
 ) -> NotebookTemplate:
     environment = None
     updates = payload.model_dump(exclude_unset=True)
@@ -549,7 +565,11 @@ def save_draft(
         # 显式选择的环境必须 available（省略时保留草稿已有环境，不重新解析）
         from app.services.environment_service import validate_environment_selection
 
-        validate_environment_selection(db, env_fields.get("environment_version_id"))
+        validate_environment_selection(
+            db,
+            env_fields.get("environment_version_id"),
+            settings=settings,
+        )
         environment = {
             "draft_environment_version_id": env_fields.get(
                 "environment_version_id", template.draft_environment_version_id
@@ -747,6 +767,7 @@ def create_imported_template(
             environment_version_id,
             import_policy_mode,
             list(allowed_imports or []),
+            settings,
         ),
     )
     assets_service = StudioAssetManifestService.from_settings(settings)

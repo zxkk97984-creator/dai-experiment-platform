@@ -37,8 +37,12 @@ def get_packages_for_version(db: Session, version_id: int) -> list[PackageCatalo
     )
 
 
-def current_available_version(db: Session, profile_slug: str) -> EnvironmentVersion | None:
-    """档位当前可用版本；legacy profiles retain the old max-version fallback."""
+def current_available_version(
+    db: Session,
+    profile_slug: str,
+    settings: Settings | None = None,
+) -> EnvironmentVersion | None:
+    """Resolve the current image, keeping the max-version fallback for V1 only."""
     profile = db.scalar(select(EnvironmentProfile).where(EnvironmentProfile.slug == profile_slug))
     if profile is None:
         return None
@@ -49,6 +53,8 @@ def current_available_version(db: Session, profile_slug: str) -> EnvironmentVers
             if version is not None and version.status == "available" and version.image_digest
             else None
         )
+    if settings is not None and settings.environment_editor_v2_enabled:
+        return None
     return db.scalar(
         select(EnvironmentVersion)
         .where(EnvironmentVersion.profile_id == profile.id, EnvironmentVersion.status == "available")
@@ -57,12 +63,20 @@ def current_available_version(db: Session, profile_slug: str) -> EnvironmentVers
     )
 
 
-def require_available_version(db: Session, version_id: int) -> EnvironmentVersion:
+def require_available_version(
+    db: Session,
+    version_id: int,
+    settings: Settings | None = None,
+) -> EnvironmentVersion:
     """Backward-compatible name for the teacher-selectable gate."""
-    return require_teacher_selectable_version(db, version_id)
+    return require_teacher_selectable_version(db, version_id, settings=settings)
 
 
-def require_teacher_selectable_version(db: Session, version_id: int) -> EnvironmentVersion:
+def require_teacher_selectable_version(
+    db: Session,
+    version_id: int,
+    settings: Settings | None = None,
+) -> EnvironmentVersion:
     """New environment selection gate: active profile + current pointer."""
     version = db.get(EnvironmentVersion, version_id)
     if version is None:
@@ -72,6 +86,8 @@ def require_teacher_selectable_version(db: Session, version_id: int) -> Environm
     profile = db.get(EnvironmentProfile, version.profile_id)
     if profile is None or profile.status != "active":
         raise api_error(409, "VERSION_NOT_AVAILABLE", "环境档位已停用")
+    if profile.current_version_id is None and settings is not None and settings.environment_editor_v2_enabled:
+        raise api_error(409, "VERSION_NOT_AVAILABLE", "环境档位尚未发布当前版本")
     if profile.current_version_id is not None and profile.current_version_id != version.id:
         raise api_error(409, "VERSION_NOT_AVAILABLE", "该版本已不是环境当前发布版本")
     return version
@@ -88,7 +104,10 @@ def require_runnable_version(db: Session, version_id: int) -> EnvironmentVersion
     return version
 
 
-def list_available_options(db: Session) -> list[EnvironmentOptionRead]:
+def list_available_options(
+    db: Session,
+    settings: Settings | None = None,
+) -> list[EnvironmentOptionRead]:
     """教师可用环境列表——active profile 下所有 available 版本，按档位排序。"""
     profiles = db.scalars(
         select(EnvironmentProfile).where(EnvironmentProfile.status == "active").order_by(EnvironmentProfile.slug)
@@ -99,7 +118,7 @@ def list_available_options(db: Session) -> list[EnvironmentOptionRead]:
             version = db.get(EnvironmentVersion, profile.current_version_id)
             if version is not None and version.status == "available" and version.image_digest:
                 versions.append(version)
-        else:
+        elif settings is None or not settings.environment_editor_v2_enabled:
             version = db.scalar(
                 select(EnvironmentVersion)
                 .where(EnvironmentVersion.profile_id == profile.id, EnvironmentVersion.status == "available")
@@ -501,18 +520,25 @@ def retry_build_job(
 ENV_FIELDS = ("environment_version_id", "import_policy_mode", "allowed_imports")
 
 
-def resolve_basic_available_version(db: Session) -> EnvironmentVersion | None:
+def resolve_basic_available_version(
+    db: Session,
+    settings: Settings | None = None,
+) -> EnvironmentVersion | None:
     """basic 档位当前可用版本——创建路径未显式指定环境时的服务层解析。
 
     Phase 3 模型层 default 仅作存量兼容；Phase 4 起创建路径由服务层显式解析并写入。
     """
-    return current_available_version(db, "basic")
+    return current_available_version(db, "basic", settings=settings)
 
 
-def validate_environment_selection(db: Session, env_id: int | None) -> None:
+def validate_environment_selection(
+    db: Session,
+    env_id: int | None,
+    settings: Settings | None = None,
+) -> None:
     """教师选择环境时的可用性校验——非 None 时必须是 available（VERSION_NOT_AVAILABLE）。"""
     if env_id is not None:
-        require_teacher_selectable_version(db, env_id)
+        require_teacher_selectable_version(db, env_id, settings=settings)
 
 
 def require_publishable_version(db: Session, version_id: int) -> EnvironmentVersion:

@@ -7,12 +7,16 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.models import (
+    Assignment,
+    Course,
     EnvironmentBuildJob,
     EnvironmentDraft,
     EnvironmentProfile,
+    EnvironmentPublication,
     EnvironmentVersion,
     PackageCatalog,
     ProfileVersionPackage,
+    User,
 )
 from app.services import environment_editor_service as service
 from app.services.environment_service import (
@@ -317,6 +321,86 @@ def test_teacher_selection_and_historical_runtime_gates_are_separate(db_session_
         assert resolve_run_image_ref(db, old.id) == old.image_digest
 
 
+def test_v2_selection_rejects_available_version_without_current_pointer(
+    db_session_factory, test_settings
+):
+    with db_session_factory() as db:
+        profile = EnvironmentProfile(slug="unpublished", display_name="Unpublished", status="active")
+        db.add(profile)
+        db.flush()
+        version = EnvironmentVersion(
+            profile_id=profile.id,
+            version_number=1,
+            status="available",
+            base_image_ref="python:3.12-slim@sha256:" + "a" * 64,
+            image_digest="sha256:" + "b" * 64,
+            python_version="3.12",
+            minimum_memory_mb=256,
+            manifest_sha256="c" * 64,
+        )
+        db.add(version)
+        db.commit()
+
+        with pytest.raises(HTTPException) as exc_info:
+            require_teacher_selectable_version(db, version.id, settings=_settings(test_settings))
+        assert _detail(exc_info.value)["code"] == "VERSION_NOT_AVAILABLE"
+
+
+def test_publish_requires_current_pointer_compare_and_active_profile(
+    db_session_factory, test_settings
+):
+    with db_session_factory() as db:
+        profile, draft = service.create_profile_with_draft(
+            db,
+            display_name="CAS",
+            description=None,
+            slug="publish-cas",
+            actor_id=None,
+            settings=_settings(test_settings),
+        )
+        version, job = service.start_draft_build(
+            db, profile.id, actor_id=None, settings=test_settings
+        )
+        version.status = "available"
+        version.image_digest = "sha256:" + "d" * 64
+        job.status = "succeeded"
+        draft.state = "ready"
+        draft.active_build_job_id = None
+        db.commit()
+
+        profile.status = "inactive"
+        db.commit()
+        with pytest.raises(HTTPException) as inactive:
+            service.publish_version(
+                db,
+                profile.id,
+                version_id=version.id,
+                expected_current_version_id=None,
+                actor_id=None,
+            )
+        assert _detail(inactive.value)["code"] == "PROFILE_INACTIVE"
+
+        profile.status = "active"
+        db.commit()
+        service.publish_version(
+            db,
+            profile.id,
+            version_id=version.id,
+            expected_current_version_id=None,
+            actor_id=None,
+        )
+
+        with pytest.raises(HTTPException) as missing_compare:
+            service.publish_version(
+                db,
+                profile.id,
+                version_id=version.id,
+                expected_current_version_id=None,
+                actor_id=None,
+            )
+        assert _detail(missing_compare.value)["code"] == "CURRENT_VERSION_CONFLICT"
+
+
 def test_publish_and_rollback_are_audited_and_remove_candidate_draft(
     db_session_factory, test_settings
 ):
@@ -431,3 +515,88 @@ def test_historical_teacher_summary_is_safe_and_works_for_archived_profile(
         assert option.packages[0].locked_version == "2.1.3"
         assert option.system_packages[0].name == "ffmpeg"
         assert not hasattr(option, "image_digest")
+
+
+def test_teacher_cannot_read_unpublished_archived_version_summary(
+    db_session_factory,
+):
+    with db_session_factory() as db:
+        teacher = User(
+            username="summary-teacher",
+            real_name="Summary Teacher",
+            role="teacher",
+            status="active",
+            password_hash="x",
+        )
+        profile = EnvironmentProfile(slug="archived-candidate", display_name="Candidate", status="inactive")
+        db.add_all([teacher, profile])
+        db.flush()
+        version = EnvironmentVersion(
+            profile_id=profile.id,
+            version_number=1,
+            status="available",
+            base_image_ref="python:3.12-slim@sha256:" + "a" * 64,
+            image_digest="sha256:" + "b" * 64,
+            python_version="3.12",
+            minimum_memory_mb=256,
+            manifest_sha256="c" * 64,
+        )
+        db.add(version)
+        db.commit()
+
+        with pytest.raises(HTTPException) as exc_info:
+            service.teacher_option_for_version(
+                db, version.id, actor_id=teacher.id, actor_role="teacher"
+            )
+        assert _detail(exc_info.value)["code"] == "VERSION_NOT_AVAILABLE"
+
+
+def test_teacher_can_read_summary_for_owned_historical_assignment(
+    db_session_factory,
+):
+    with db_session_factory() as db:
+        teacher = User(
+            username="summary-owner",
+            real_name="Summary Owner",
+            role="teacher",
+            status="active",
+            password_hash="x",
+        )
+        profile = EnvironmentProfile(slug="owned-history", display_name="Owned", status="inactive")
+        db.add_all([teacher, profile])
+        db.flush()
+        version = EnvironmentVersion(
+            profile_id=profile.id,
+            version_number=1,
+            status="available",
+            base_image_ref="python:3.12-slim@sha256:" + "a" * 64,
+            image_digest="sha256:" + "b" * 64,
+            python_version="3.12",
+            minimum_memory_mb=256,
+            manifest_sha256="c" * 64,
+        )
+        db.add(version)
+        db.flush()
+        db.add(
+            EnvironmentPublication(
+                profile_id=profile.id,
+                version_id=version.id,
+                action="migration_baseline",
+            )
+        )
+        course = Course(title="Owned Course", teacher_id=teacher.id)
+        db.add(course)
+        db.flush()
+        db.add(
+            Assignment(
+                course_id=course.id,
+                title="Bound Assignment",
+                environment_version_id=version.id,
+            )
+        )
+        db.commit()
+
+        option = service.teacher_option_for_version(
+            db, version.id, actor_id=teacher.id, actor_role="teacher"
+        )
+        assert option.environment_version_id == version.id

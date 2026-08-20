@@ -1,11 +1,35 @@
+import asyncio
 import os
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
-from fastapi.testclient import TestClient
 import fakeredis
 from sqlalchemy import text
+
+# This execution sandbox also cannot wake the asyncio loop from AnyIO's
+# worker threads.  FastAPI dispatches synchronous endpoints through that
+# pool, so a same-thread ASGI client still deadlocks unless the test backend
+# executes those synchronous callables inline.  Production keeps AnyIO's
+# normal worker-pool implementation; this is only the deterministic test
+# runtime adapter.
+from anyio._backends._asyncio import AsyncIOBackend
+
+
+@classmethod
+async def _run_sync_inline(
+    cls,
+    func,
+    args,
+    abandon_on_cancel=False,
+    limiter=None,
+):
+    await cls.checkpoint()
+    return func(*args)
+
+
+AsyncIOBackend.run_sync_in_worker_thread = _run_sync_inline
 
 ROOT = Path(__file__).resolve().parents[2]
 PYTEST_TEMP_ROOT = ROOT / ".pytest-temp-root"
@@ -20,6 +44,72 @@ from app.dependencies import get_db, get_redis_client
 from app.main import create_app
 from app.models import User
 from app.security import hash_password
+
+
+class SynchronousASGIClient:
+    """Run ASGI requests without AnyIO's cross-thread blocking portal.
+
+    The sandbox's current AnyIO backend cannot wake an event loop from another
+    thread (``BlockingPortal.call()`` waits forever in
+    ``loop.call_soon_threadsafe``).  Starlette's TestClient relies on exactly
+    that portal.  This adapter keeps the synchronous test API while running
+    each request on the calling thread's asyncio loop, so failures and
+    exceptions retain normal ASGI/HTTPX semantics.
+    """
+
+    def __init__(self, app, *, raise_server_exceptions: bool = True, **kwargs):
+        self._client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(
+                app=app,
+                raise_app_exceptions=raise_server_exceptions,
+                root_path=kwargs.pop("root_path", ""),
+                client=("testclient", 50000),
+            ),
+            base_url=kwargs.pop("base_url", "http://testserver"),
+            headers=kwargs.pop("headers", None),
+            cookies=kwargs.pop("cookies", None),
+            follow_redirects=kwargs.pop("follow_redirects", True),
+        )
+
+    def request(self, method: str, url: str, **kwargs):
+        return asyncio.run(self._client.request(method, url, **kwargs))
+
+    def get(self, url: str, **kwargs):
+        return self.request("GET", url, **kwargs)
+
+    def post(self, url: str, **kwargs):
+        return self.request("POST", url, **kwargs)
+
+    def put(self, url: str, **kwargs):
+        return self.request("PUT", url, **kwargs)
+
+    def patch(self, url: str, **kwargs):
+        return self.request("PATCH", url, **kwargs)
+
+    def delete(self, url: str, **kwargs):
+        return self.request("DELETE", url, **kwargs)
+
+    @property
+    def cookies(self):
+        return self._client.cookies
+
+    def close(self):
+        asyncio.run(self._client.aclose())
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+
+# Direct ``from fastapi.testclient import TestClient`` imports in a few
+# legacy tests must use the same non-blocking adapter as the shared fixture.
+import fastapi.testclient as _fastapi_testclient
+import starlette.testclient as _starlette_testclient
+
+_fastapi_testclient.TestClient = SynchronousASGIClient
+_starlette_testclient.TestClient = SynchronousASGIClient
 
 
 @pytest.fixture()
@@ -106,7 +196,7 @@ def app(test_settings, db_session_factory, redis_client):
 
 @pytest.fixture()
 def client(app):
-    test_client = TestClient(app)
+    test_client = SynchronousASGIClient(app)
     try:
         yield test_client
     finally:

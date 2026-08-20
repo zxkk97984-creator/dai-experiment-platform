@@ -1055,7 +1055,9 @@ def post_build_retry(
 ):
     """重试失败/超时构建——创建新尝试（attempt+1、retry_of_id 关联）并入队。"""
     if settings.environment_editor_v2_enabled:
-        _, new_job = retry_draft_build(db, job_id, actor_id=current_user.id)
+        _, new_job = retry_draft_build(
+            db, job_id, actor_id=current_user.id, settings=settings
+        )
         _enqueue_or_503(redis_client, new_job, settings)
         return _v2_build_read(db, new_job)
     return retry_build_job(db, job_id, actor_id=current_user.id, settings=settings, redis_client=redis_client)
@@ -1079,7 +1081,12 @@ def get_version_summary(
     request this summary so its locked selection remains visible after a
     publication, rollback, or profile archive.
     """
-    return teacher_option_for_version(db, version_id)
+    return teacher_option_for_version(
+        db,
+        version_id,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+    )
 
 
 @router.get("/available", response_model=list[EnvironmentOptionRead])

@@ -1444,17 +1444,12 @@ class EnvironmentBuildJob(TimestampMixin, Base):
     build_mode: Mapped[str] = mapped_column(
         String(16), nullable=False, default="legacy", server_default="legacy"
     )
-    build_mode: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="legacy", server_default="legacy"
-    )
     phase: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
     retry_of_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("environment_build_jobs.id"), nullable=True
     )
     worker_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
-    lease_token: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    build_config_fingerprint: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
     lease_token: Mapped[str | None] = mapped_column(String(128), nullable=True)
     build_config_fingerprint: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

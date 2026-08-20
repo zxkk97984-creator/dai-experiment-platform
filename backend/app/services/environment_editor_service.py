@@ -19,11 +19,18 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.errors import api_error
 from app.models import (
+    Assignment,
+    Course,
     EnvironmentBuildJob,
     EnvironmentDraft,
     EnvironmentProfile,
     EnvironmentVersion,
     EnvironmentPublication,
+    ExperimentModule,
+    ExperimentRecord,
+    NotebookTemplate,
+    NotebookTemplateVersion,
+    JudgeQuestion,
     PackageCatalog,
     ProfileVersionPackage,
 )
@@ -644,13 +651,15 @@ def retry_draft_build(
     # The public capability is only advisory.  Re-evaluate the whole
     # predicate after locking Job, Profile, and Draft so a concurrent save
     # cannot rebind an old failed candidate.
+    latest = _latest_job(db, version.id)
     if (
         job.status not in _FAILED_JOB_STATUSES
         or version.status == "available"
         or draft.candidate_version_id != version.id
         or draft.state != "failed"
         or _active_job(db, draft) is not None
-        or _latest_job(db, version.id).id != job.id
+        or latest is None
+        or latest.id != job.id
         or not _candidate_is_unchanged(draft, version)
     ):
         raise _error(409, "BUILD_NOT_RETRYABLE", "该构建任务当前不可重试")
@@ -722,7 +731,9 @@ def publish_version(
     ).scalar_one_or_none()
     if profile is None:
         raise _error(404, "NOT_FOUND", "环境不存在")
-    if expected_current_version_id is not None and profile.current_version_id != expected_current_version_id:
+    if profile.status != "active":
+        raise _error(409, "PROFILE_INACTIVE", "已归档环境不能发布或回滚")
+    if profile.current_version_id != expected_current_version_id:
         raise _error(
             409,
             "CURRENT_VERSION_CONFLICT",
@@ -857,8 +868,76 @@ def _public_option_for_version(
     )
 
 
-def teacher_option_for_version(db: Session, version_id: int):
-    """Return a safe summary for an existing binding, including an archived version."""
+def _teacher_has_environment_binding(
+    db: Session,
+    version_id: int,
+    actor_id: int,
+) -> bool:
+    """Check that a teacher owns a business object bound to this version.
+
+    This is deliberately an allow-list of immutable binding tables.  A
+    publication record alone is not enough to disclose a historical version
+    summary to an arbitrary teacher.
+    """
+
+    assignment = db.scalar(
+        select(Assignment.id)
+        .join(Course, Course.id == Assignment.course_id)
+        .where(
+            Assignment.environment_version_id == version_id,
+            Course.teacher_id == actor_id,
+        )
+        .limit(1)
+    )
+    if assignment is not None:
+        return True
+    question = db.scalar(
+        select(JudgeQuestion.id)
+        .join(Assignment, Assignment.id == JudgeQuestion.assignment_id)
+        .join(Course, Course.id == Assignment.course_id)
+        .where(
+            JudgeQuestion.environment_version_id == version_id,
+            Course.teacher_id == actor_id,
+        )
+        .limit(1)
+    )
+    if question is not None:
+        return True
+    notebook_version = db.scalar(
+        select(NotebookTemplateVersion.id)
+        .join(NotebookTemplate, NotebookTemplate.id == NotebookTemplateVersion.template_id)
+        .where(
+            NotebookTemplateVersion.environment_version_id == version_id,
+            NotebookTemplate.owner_id == actor_id,
+        )
+        .limit(1)
+    )
+    if notebook_version is not None:
+        return True
+    experiment_record = db.scalar(
+        select(ExperimentRecord.id)
+        .join(ExperimentModule, ExperimentModule.id == ExperimentRecord.module_id)
+        .where(
+            ExperimentRecord.environment_version_id == version_id,
+            ExperimentModule.owner_id == actor_id,
+        )
+        .limit(1)
+    )
+    return experiment_record is not None
+
+
+def teacher_option_for_version(
+    db: Session,
+    version_id: int,
+    *,
+    actor_id: int | None = None,
+    actor_role: str = "admin",
+):
+    """Return a safe summary for a bound version, including archived history.
+
+    ``actor_role=admin`` is retained for internal migration/audit callers.
+    Teacher requests must prove an actual business binding owned by them.
+    """
 
     version = db.get(EnvironmentVersion, version_id)
     profile = db.get(EnvironmentProfile, version.profile_id) if version else None
@@ -875,10 +954,12 @@ def teacher_option_for_version(db: Session, version_id: int):
             EnvironmentPublication.version_id == version.id,
         )
     )
-    # An archived legacy profile may predate the publication audit table; its
-    # available image is still a valid existing binding, but an active V2
-    # candidate without publication evidence must stay hidden.
-    if published is None and version.first_published_at is None and profile.status != "inactive":
+    if actor_role != "admin" and (
+        actor_id is None
+        or not _teacher_has_environment_binding(db, version.id, actor_id)
+    ):
+        raise api_error(404, "VERSION_NOT_AVAILABLE", "该环境版本不是已发布的历史版本")
+    if published is None and version.first_published_at is None and actor_role != "admin":
         raise api_error(404, "VERSION_NOT_AVAILABLE", "该环境版本不是已发布的历史版本")
     return _public_option_for_version(db, profile, version)
 

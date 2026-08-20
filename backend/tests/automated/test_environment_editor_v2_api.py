@@ -117,3 +117,13 @@ def test_build_is_not_teacher_selectable_until_publish(client, db_session_factor
     assert after.json()[0]["environment_version_id"] == version.id
     assert "image_digest" not in after.json()[0]
     assert "system_packages" in after.json()[0]
+
+
+def test_publish_requires_expected_current_version_field(client, db_session_factory, test_settings):
+    headers = _admin(client, db_session_factory, test_settings, "v2-api-publish-token")
+    response = client.post(
+        f"{API}/profiles/1/publications",
+        headers=headers,
+        json={"environment_version_id": 1},
+    )
+    assert response.status_code == 422
