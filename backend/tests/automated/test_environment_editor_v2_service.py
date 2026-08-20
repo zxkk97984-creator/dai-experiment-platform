@@ -197,7 +197,9 @@ def test_build_creates_immutable_candidate_and_retries_without_new_version(
         db.commit()
         assert service.can_retry_build(db, job.id) is True
 
-        retry_version, retry_job = service.retry_draft_build(db, job.id, actor_id=None)
+        retry_version, retry_job = service.retry_draft_build(
+            db, job.id, actor_id=None, settings=test_settings
+        )
         assert retry_version.id == version.id
         assert retry_job.retry_of_id == job.id
         assert retry_job.attempt_number == 2

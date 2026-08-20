@@ -343,6 +343,9 @@ def _docker_build(
     context_dir: Path,
     timeout_seconds: int,
     on_line,
+    should_continue=None,
+    register_process=None,
+    unregister_process=None,
 ) -> None:
     """docker build（argv 调用，禁止 shell）——流式日志，超时抛 BuildTimeout"""
     argv = [
@@ -356,35 +359,63 @@ def _docker_build(
         argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, bufsize=1, encoding="utf-8", errors="replace",
     )
+    if register_process is not None:
+        register_process(proc)
     started = time.monotonic()
     assert proc.stdout is not None
-    for line in proc.stdout:
-        if time.monotonic() - started > timeout_seconds:
-            proc.kill()
-            proc.wait()
-            raise BuildTimeout(f"构建超过 {timeout_seconds} 秒")
-        on_line(line.rstrip("\n"))
-    returncode = proc.wait()
+    try:
+        for line in proc.stdout:
+            if should_continue is not None:
+                should_continue()
+            if time.monotonic() - started > timeout_seconds:
+                proc.kill()
+                proc.wait()
+                raise BuildTimeout(f"构建超过 {timeout_seconds} 秒")
+            on_line(line.rstrip("\n"))
+        returncode = proc.wait()
+    finally:
+        if unregister_process is not None:
+            unregister_process(proc)
+    if should_continue is not None:
+        should_continue()
     if returncode != 0:
         raise BuildFailure(f"docker build 失败（exit={returncode}）")
 
 
-def _docker_run(argv: list[str], timeout_seconds: int, on_line) -> int:
+def _docker_run(
+    argv: list[str],
+    timeout_seconds: int,
+    on_line,
+    should_continue=None,
+    register_process=None,
+    unregister_process=None,
+) -> int:
     """docker run（离线验证）——argv 调用，禁止 shell"""
     proc = subprocess.Popen(
         ["docker", "run", "--rm", *argv],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, bufsize=1, encoding="utf-8", errors="replace",
     )
+    if register_process is not None:
+        register_process(proc)
     started = time.monotonic()
     assert proc.stdout is not None
-    for line in proc.stdout:
-        if time.monotonic() - started > timeout_seconds:
-            proc.kill()
-            proc.wait()
-            raise BuildTimeout(f"验证容器超过 {timeout_seconds} 秒")
-        on_line(line.rstrip("\n"))
-    return proc.wait()
+    try:
+        for line in proc.stdout:
+            if should_continue is not None:
+                should_continue()
+            if time.monotonic() - started > timeout_seconds:
+                proc.kill()
+                proc.wait()
+                raise BuildTimeout(f"验证容器超过 {timeout_seconds} 秒")
+            on_line(line.rstrip("\n"))
+        returncode = proc.wait()
+    finally:
+        if unregister_process is not None:
+            unregister_process(proc)
+    if should_continue is not None:
+        should_continue()
+    return returncode
 
 
 def _docker_inspect_id(tag: str) -> str:
@@ -452,6 +483,9 @@ def _run_smoke(
     import_names: list[str],
     timeout_seconds: int,
     on_line,
+    should_continue=None,
+    register_process=None,
+    unregister_process=None,
 ) -> tuple[dict, dict]:
     """离线容器验证：catalog import 名 + pytest/ipykernel import + pip freeze --all。
 
@@ -467,7 +501,14 @@ def _run_smoke(
         "--network", "none", "--user", "1000:1000",
         temp_tag, "python", "-c", script,
     ]
-    code = _docker_run(argv, timeout_seconds, lambda line: (import_lines.append(line), on_line(line)))
+    code = _docker_run(
+        argv,
+        timeout_seconds,
+        lambda line: (import_lines.append(line), on_line(line)),
+        should_continue=should_continue,
+        register_process=register_process,
+        unregister_process=unregister_process,
+    )
     for line in import_lines:
         if line.startswith("DAI_SMOKE_IMPORTS="):
             try:
@@ -484,6 +525,9 @@ def _run_smoke(
         ["--network", "none", "--user", "1000:1000", temp_tag, "python", "-m", "pip", "freeze", "--all"],
         timeout_seconds,
         lambda line: (freeze_lines.append(line), on_line(line)),
+        should_continue=should_continue,
+        register_process=register_process,
+        unregister_process=unregister_process,
     )
     pip_freeze = _parse_pip_freeze(freeze_lines) if freeze_code == 0 else {}
     return import_report, pip_freeze
@@ -497,6 +541,9 @@ def execute_build(
     temp_tag: str | None = None,
     dockerfile_text: str | None = None,
     kernel_runner_text: str | None = None,
+    lease_check=None,
+    register_process=None,
+    unregister_process=None,
 ) -> BuildResult:
     """执行一次完整构建：docker build → 离线 smoke → digest 捕获。
 
@@ -520,12 +567,21 @@ def execute_build(
         (context_dir / "kernel_runner.py").write_text(runner_text, encoding="utf-8")
         on_log(f"# 构建临时标签: {temp_tag}")
         _docker_build(temp_tag, context_dir / "Dockerfile", context_dir,
-                      settings.env_build_timeout_seconds, on_log)
+                      settings.env_build_timeout_seconds, on_log,
+                      should_continue=lease_check,
+                      register_process=register_process,
+                      unregister_process=unregister_process)
 
         on_log("# 离线 import smoke 验证")
         import_names = [name for p in spec.packages for name in p.import_names]
         import_report, pip_freeze = _run_smoke(
-            temp_tag, import_names, settings.env_build_timeout_seconds, on_log
+            temp_tag,
+            import_names,
+            settings.env_build_timeout_seconds,
+            on_log,
+            should_continue=lease_check,
+            register_process=register_process,
+            unregister_process=unregister_process,
         )
         on_log("# 捕获镜像 digest")
         digest = _docker_inspect_id(temp_tag)

@@ -173,3 +173,114 @@ def test_v2_worker_records_phases_and_releases_draft(db_session_factory, test_se
         assert job.result_summary["image_size_bytes"] == 1234
         assert draft.state == "ready"
         assert draft.active_build_job_id is None
+
+
+def test_v2_claim_persists_mode_and_unique_lease_token(
+    db_session_factory, test_settings
+):
+    settings = _v2_settings(test_settings)
+    with db_session_factory() as db:
+        profile = EnvironmentProfile(slug="lease", display_name="Lease", status="active")
+        db.add(profile)
+        db.flush()
+        draft = EnvironmentDraft(
+            profile_id=profile.id,
+            revision=1,
+            state="editing",
+            python_version="3.12",
+            minimum_memory_mb=256,
+            requested_spec={"schema_version": 1, "python_packages": [], "system_packages": []},
+        )
+        db.add(draft)
+        db.commit()
+        _version, job = start_draft_build(db, profile.id, actor_id=None, settings=settings)
+        assert job.build_mode == "v2"
+        assert job.lease_token is None
+
+        assert worker.claim_build_job(db, job.id, "worker-a", worker.utc_now()) is True
+        db.refresh(job)
+        assert job.build_mode == "v2"
+        assert job.lease_token
+        assert len(job.lease_token) >= 32
+
+
+def test_old_worker_cannot_finalize_after_lease_reclaimed(
+    db_session_factory, test_settings, monkeypatch
+):
+    settings = _v2_settings(test_settings)
+    with db_session_factory() as db_a:
+        profile = EnvironmentProfile(slug="lease-reclaim", display_name="Lease", status="active")
+        db_a.add(profile)
+        db_a.flush()
+        draft = EnvironmentDraft(
+            profile_id=profile.id,
+            revision=1,
+            state="editing",
+            python_version="3.12",
+            minimum_memory_mb=256,
+            requested_spec={"schema_version": 1, "python_packages": [], "system_packages": []},
+        )
+        db_a.add(draft)
+        db_a.commit()
+        version, job = start_draft_build(db_a, profile.id, actor_id=None, settings=settings)
+        assert worker.claim_build_job(db_a, job.id, "worker-a", worker.utc_now()) is True
+        old_token = job.lease_token
+
+        with db_session_factory() as db_b:
+            stale = db_b.get(EnvironmentBuildJob, job.id)
+            stale.lease_until = worker.utc_now()
+            db_b.commit()
+            stats = worker.recover_stale_builds(db_b, settings, worker.utc_now())
+            assert stats["requeued"] == 1
+            assert worker.claim_build_job(db_b, job.id, "worker-b", worker.utc_now()) is True
+            db_b.refresh(stale)
+            assert stale.lease_token != old_token
+
+        def fake_build(*args, **kwargs):
+            return V2BuildResult(
+                image_digest="sha256:" + "e" * 64,
+                image_size_bytes=1234,
+                resolved_spec={"schema_version": 1, "python_lock": [], "system_packages": [], "lock_sha256": "a" * 64},
+                result_summary={"image_size_bytes": 1234},
+                dockerfile_sha256="b" * 64,
+            )
+
+        monkeypatch.setattr("app.worker.environment_builder_worker.execute_v2_build", fake_build)
+        result = worker.process_v2_build(db_a, settings, "worker-a", job.id)
+        assert result in {"lease_lost", "building"}
+        db_a.expire_all()
+        assert db_a.get(EnvironmentVersion, version.id).status != "available"
+
+
+def test_persisted_build_mode_wins_over_runtime_feature_flag(
+    db_session_factory, test_settings, monkeypatch
+):
+    settings = _v2_settings(test_settings)
+    with db_session_factory() as db:
+        profile = EnvironmentProfile(slug="mode", display_name="Mode", status="active")
+        db.add(profile)
+        db.flush()
+        db.add(
+            EnvironmentDraft(
+                profile_id=profile.id,
+                revision=1,
+                state="editing",
+                python_version="3.12",
+                minimum_memory_mb=256,
+                requested_spec={"schema_version": 1, "python_packages": [], "system_packages": []},
+            )
+        )
+        db.commit()
+        _version, job = start_draft_build(db, profile.id, actor_id=None, settings=settings)
+        assert worker.claim_build_job(db, job.id, "worker-v2", worker.utc_now()) is True
+
+        settings.environment_editor_v2_enabled = False
+        calls = []
+
+        def fake_v2(*args, **kwargs):
+            calls.append("v2")
+            return "dispatched"
+
+        monkeypatch.setattr(worker, "process_v2_build", fake_v2)
+        assert worker.process_build(db, settings, "worker-v2", job.id) == "dispatched"
+        assert calls == ["v2"]

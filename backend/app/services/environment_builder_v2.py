@@ -70,6 +70,32 @@ def platform_runner_sha256() -> str:
     return hashlib.sha256(_load_kernel_runner().encode("utf-8")).hexdigest()
 
 
+def build_config_fingerprint(python_version: str, settings: Settings) -> str:
+    """Hash the non-secret V2 resolver/build inputs used by a worker.
+
+    The fingerprint is persisted with a job so a worker can fail closed when
+    the API and worker are running different platform configurations.  Source
+    URLs and proxy values are represented by stable source keys/presence only;
+    credentials are never persisted.
+    """
+
+    payload = {
+        "schema_version": 1,
+        "python_version": python_version,
+        "base_image_ref": settings.env_python_base_images.get(python_version),
+        "platform_python_packages": dict(sorted(settings.env_platform_python_packages.items())),
+        "platform_bundle_version": settings.env_platform_bundle_version,
+        "platform_runner_sha256": platform_runner_sha256(),
+        "pip_source_key": pip_source_key(settings.env_pip_index_url),
+        "apt_snapshot_key": apt_snapshot_key(
+            python_version, settings.env_apt_snapshot_sources.get(python_version)
+        ),
+        "build_network_mode": settings.env_build_network_mode,
+        "explicit_proxy": bool(settings.env_build_http_proxy),
+    }
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
 def canonical_v2_manifest(
     *,
     base_image_ref: str,
@@ -301,6 +327,50 @@ def _docker_proxy_args(settings: Settings) -> list[str]:
     ]
 
 
+def _run_capture(
+    command: list[str],
+    *,
+    timeout: int,
+    env: dict[str, str] | None = None,
+    lease_check=None,
+    register_process=None,
+    unregister_process=None,
+):
+    """Run a Docker helper while allowing an expired lease to kill it."""
+
+    if lease_check is None and register_process is None and unregister_process is None:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+        )
+
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    if register_process is not None:
+        register_process(process)
+    try:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate()
+            raise V2BuildTimeout("Docker 子进程超过构建时限")
+    finally:
+        if unregister_process is not None:
+            unregister_process(process)
+    if lease_check is not None:
+        lease_check()
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
 def _validate_build_proxy(proxy: str | None) -> None:
     if not proxy:
         return
@@ -361,7 +431,15 @@ def _decode_report(output: str) -> dict:
     raise V2BuildFailure("构建容器未返回 pip installation report", code="PIP_RESOLUTION_FAILED")
 
 
-def _resolve_in_base_image(manifest: dict, settings: Settings, timeout: int) -> dict:
+def _resolve_in_base_image(
+    manifest: dict,
+    settings: Settings,
+    timeout: int,
+    *,
+    lease_check=None,
+    register_process=None,
+    unregister_process=None,
+) -> dict:
     requirements = []
     for item in manifest["requested_spec"]["python_packages"]:
         requirements.append(item["name"] if item["version"] is None else f"{item['name']}=={item['version']}")
@@ -400,7 +478,7 @@ def _resolve_in_base_image(manifest: dict, settings: Settings, timeout: int) -> 
         )
     )
     try:
-        result = subprocess.run(
+        result = _run_capture(
             [
                 "docker",
                 "run",
@@ -413,12 +491,13 @@ def _resolve_in_base_image(manifest: dict, settings: Settings, timeout: int) -> 
                 "-c",
                 script,
             ],
-            capture_output=True,
-            text=True,
             timeout=timeout,
             env=_subprocess_env(settings),
+            lease_check=lease_check,
+            register_process=register_process,
+            unregister_process=unregister_process,
         )
-    except subprocess.TimeoutExpired as exc:
+    except V2BuildTimeout as exc:
         raise V2BuildTimeout("依赖解析超过构建时限", detail={"phase": "resolving"}) from exc
     if result.returncode != 0:
         stderr = result.stderr or ""
@@ -438,7 +517,16 @@ def _resolve_in_base_image(manifest: dict, settings: Settings, timeout: int) -> 
     return _decode_report(result.stdout)
 
 
-def _run_docker_build(context: Path, tag: str, settings: Settings, timeout: int) -> None:
+def _run_docker_build(
+    context: Path,
+    tag: str,
+    settings: Settings,
+    timeout: int,
+    *,
+    lease_check=None,
+    register_process=None,
+    unregister_process=None,
+) -> None:
     _validate_build_proxy(settings.env_build_http_proxy)
     command = [
         "docker",
@@ -462,20 +550,30 @@ def _run_docker_build(context: Path, tag: str, settings: Settings, timeout: int)
             f"HTTPS_PROXY={settings.env_build_http_proxy}",
         ]
     try:
-        result = subprocess.run(
+        result = _run_capture(
             command,
-            capture_output=True,
-            text=True,
             timeout=timeout,
             env=_subprocess_env(settings),
+            lease_check=lease_check,
+            register_process=register_process,
+            unregister_process=unregister_process,
         )
-    except subprocess.TimeoutExpired as exc:
+    except V2BuildTimeout as exc:
         raise V2BuildTimeout("Docker 构建超过构建时限", detail={"phase": "building"}) from exc
     if result.returncode != 0:
         raise V2BuildFailure("Docker 镜像构建失败", code="BUILD_FAILED", detail={"stderr": result.stderr[-1000:]})
 
 
-def _validate_image(tag: str, manifest: dict, settings: Settings, timeout: int) -> tuple[dict, str, int]:
+def _validate_image(
+    tag: str,
+    manifest: dict,
+    settings: Settings,
+    timeout: int,
+    *,
+    lease_check=None,
+    register_process=None,
+    unregister_process=None,
+) -> tuple[dict, str, int]:
     import_names = {"ipykernel", "pytest"}
     for item in manifest["requested_spec"]["python_packages"]:
         import_names.update(item.get("import_names") or [])
@@ -557,14 +655,15 @@ payload = {{
 print("DAI_VALIDATION_BASE64=" + base64.b64encode(json.dumps(payload).encode()).decode())
 """
     try:
-        result = subprocess.run(
+        result = _run_capture(
             ["docker", "run", "--rm", "--network", "none", "--user", "1000:1000", tag, "python", "-c", script],
-            capture_output=True,
-            text=True,
             timeout=timeout,
             env=_subprocess_env(settings),
+            lease_check=lease_check,
+            register_process=register_process,
+            unregister_process=unregister_process,
         )
-    except subprocess.TimeoutExpired as exc:
+    except V2BuildTimeout as exc:
         raise V2BuildTimeout("镜像验证超过构建时限", detail={"phase": "validating"}) from exc
     if result.returncode != 0:
         raise V2BuildFailure("镜像验证失败", code="BUILD_VALIDATION_FAILED", detail={"stderr": result.stderr[-1000:]})
@@ -581,14 +680,15 @@ print("DAI_VALIDATION_BASE64=" + base64.b64encode(json.dumps(payload).encode()).
     if not isinstance(validation, dict):
         raise V2BuildFailure("镜像未返回验证报告", code="BUILD_VALIDATION_FAILED")
     try:
-        inspect = subprocess.run(
+        inspect = _run_capture(
             ["docker", "image", "inspect", tag, "--format", "{{json .}}"],
-            capture_output=True,
-            text=True,
             timeout=30,
             env=_subprocess_env(settings),
+            lease_check=lease_check,
+            register_process=register_process,
+            unregister_process=unregister_process,
         )
-    except subprocess.TimeoutExpired as exc:
+    except V2BuildTimeout as exc:
         raise V2BuildTimeout("读取镜像信息超过时限", detail={"phase": "finalizing"}) from exc
     if inspect.returncode != 0:
         raise V2BuildFailure("无法读取镜像 digest", code="BUILD_VALIDATION_FAILED")
@@ -611,6 +711,9 @@ def execute_v2_build(
     on_log=None,
     timeout: int | None = None,
     temp_tag: str | None = None,
+    lease_check=None,
+    register_process=None,
+    unregister_process=None,
 ) -> V2BuildResult:
     """Resolve, build, and validate one V2 immutable version."""
 
@@ -625,7 +728,14 @@ def execute_v2_build(
     _validate_preflight(manifest, settings)
     mark_phase("resolving_system")
     mark_phase("resolving_python")
-    report = _resolve_in_base_image(manifest, settings, timeout)
+    report = _resolve_in_base_image(
+        manifest,
+        settings,
+        timeout,
+        lease_check=lease_check,
+        register_process=register_process,
+        unregister_process=unregister_process,
+    )
     pip_lock = build_pip_lock_from_report(report)
     resolved_versions = {
         str(item["name"]).lower().replace("_", "-"): item["version"] for item in pip_lock
@@ -665,9 +775,25 @@ def execute_v2_build(
         (context / "kernel_runner.py").write_text(runner_source, encoding="utf-8")
         mark_phase("building")
         tag = temp_tag or f"dai-env:v2-build-{manifest['manifest_sha256'][:16]}"
-        _run_docker_build(context, tag, settings, timeout)
+        _run_docker_build(
+            context,
+            tag,
+            settings,
+            timeout,
+            lease_check=lease_check,
+            register_process=register_process,
+            unregister_process=unregister_process,
+        )
         mark_phase("validating")
-        validation, digest, size = _validate_image(tag, manifest, settings, timeout)
+        validation, digest, size = _validate_image(
+            tag,
+            manifest,
+            settings,
+            timeout,
+            lease_check=lease_check,
+            register_process=register_process,
+            unregister_process=unregister_process,
+        )
     mark_phase("finalizing")
     lock_payload = {"python_lock": pip_lock, "system_packages": manifest["requested_spec"]["system_packages"]}
     lock_sha256 = hashlib.sha256(_canonical_json(lock_payload).encode("utf-8")).hexdigest()

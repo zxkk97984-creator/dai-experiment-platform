@@ -20,14 +20,16 @@ from __future__ import annotations
 import json as _json
 import logging
 import os
+import secrets
 import socket
+import threading
 import time
 from datetime import timedelta
 
 from sqlalchemy import select, update
 
 from app.config import Settings, get_settings
-from app.database import SessionLocal
+from app.database import SessionLocal, sessionmaker_for_engine
 from app.models import EnvironmentBuildJob, EnvironmentDraft, EnvironmentProfile, EnvironmentVersion
 from app.services.environment_builder import (
     BuildFailure,
@@ -46,6 +48,7 @@ from app.services.environment_builder_v2 import (
     V2BuildResult,
     V2BuildTimeout,
     canonical_v2_manifest,
+    build_config_fingerprint,
     execute_v2_build,
 )
 from app.services.environment_candidates import refresh_apt_candidate_cache
@@ -58,6 +61,98 @@ logger = logging.getLogger("dai.worker.env_build")
 # lease 时长：Worker 崩溃后其他实例可接管；总构建时长上限来自 settings.env_build_timeout_seconds
 LEASE_SECONDS = 60
 APT_CACHE_REFRESH_SECONDS = 6 * 60 * 60
+
+
+class LeaseLost(RuntimeError):
+    """Raised when a Worker no longer owns the DB lease for a build job."""
+
+
+class LeaseGuard:
+    """Refresh a build lease from an independent short-lived DB session.
+
+    The main build session is also used for phase/log CAS updates.  A separate
+    session is required here because Docker can run for minutes without
+    producing output and SQLAlchemy sessions are not thread-safe.
+    """
+
+    def __init__(self, bind, job_id: int, owner_id: str, lease_token: str):
+        self._session_factory = sessionmaker_for_engine(bind)
+        self.job_id = job_id
+        self.owner_id = owner_id
+        self.lease_token = lease_token
+        self.lost = threading.Event()
+        self._stop = threading.Event()
+        self._process_lock = threading.Lock()
+        self._process = None
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"env-build-lease-{job_id}",
+            daemon=True,
+        )
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb):
+        self._stop.set()
+        self._thread.join(timeout=2)
+        self._kill_process_if_needed()
+
+    def register_process(self, process):
+        with self._process_lock:
+            self._process = process
+            lost = self.lost.is_set()
+        if lost:
+            self._kill_process_if_needed()
+
+    def unregister_process(self, process):
+        with self._process_lock:
+            if self._process is process:
+                self._process = None
+
+    def assert_owned(self):
+        if self.lost.is_set():
+            raise LeaseLost(f"build job {self.job_id} lease is no longer owned")
+
+    def _kill_process_if_needed(self):
+        with self._process_lock:
+            process = self._process
+        if process is not None and process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+
+    def _run(self):
+        interval = max(1, LEASE_SECONDS // 3)
+        while not self._stop.wait(interval):
+            try:
+                with self._session_factory() as db:
+                    result = db.execute(
+                        update(EnvironmentBuildJob)
+                        .where(
+                            EnvironmentBuildJob.id == self.job_id,
+                            EnvironmentBuildJob.status == "building",
+                            EnvironmentBuildJob.worker_id == self.owner_id,
+                            EnvironmentBuildJob.lease_token == self.lease_token,
+                        )
+                        .values(
+                            heartbeat_at=utc_now(),
+                            lease_until=utc_now() + timedelta(seconds=LEASE_SECONDS),
+                        )
+                    )
+                    if result.rowcount != 1:
+                        db.rollback()
+                        self.lost.set()
+                        self._kill_process_if_needed()
+                        return
+                    db.commit()
+            except Exception:  # noqa: BLE001 - lease loss is fail-closed
+                logger.exception("构建任务 %s heartbeat 失败", self.job_id)
+                self.lost.set()
+                self._kill_process_if_needed()
+                return
 
 
 def _mark_version_failed(db, version_id: int) -> None:
@@ -95,20 +190,96 @@ def _redact_error_detail(value):
     return value
 
 
-def _fail(db, job: EnvironmentBuildJob, status: str, exc: BuildFailure, now) -> str:
-    _mark_version_failed(db, job.environment_version_id)
-    job.status = status
-    job.error_code = exc.code
-    job.error_message = str(exc)[:500]
-    job.phase = "done"
-    job.finished_at = now
-    job.lease_until = None
+def _cleanup_temp_image(temp_tag: str | None) -> None:
+    if not temp_tag:
+        return
+    try:
+        import subprocess
+
+        subprocess.run(
+            ["docker", "image", "rm", "--force", temp_tag],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except Exception:  # noqa: BLE001 - cleanup must not hide the lease result
+        logger.warning("无法清理临时环境镜像 %s", temp_tag, exc_info=True)
+
+
+def _touch_job_lease(
+    db,
+    *,
+    job_id: int,
+    owner_id: str,
+    lease_token: str,
+    phase: str | None = None,
+    log_text: str | None = None,
+) -> None:
+    values = {
+        "heartbeat_at": utc_now(),
+        "lease_until": utc_now() + timedelta(seconds=LEASE_SECONDS),
+    }
+    if phase is not None:
+        values["phase"] = phase
+    if log_text is not None:
+        values["log_text"] = log_text
+    result = db.execute(
+        update(EnvironmentBuildJob)
+        .where(
+            EnvironmentBuildJob.id == job_id,
+            EnvironmentBuildJob.status == "building",
+            EnvironmentBuildJob.worker_id == owner_id,
+            EnvironmentBuildJob.lease_token == lease_token,
+        )
+        .values(**values)
+    )
+    if result.rowcount != 1:
+        db.rollback()
+        raise LeaseLost(f"build job {job_id} lease is no longer owned")
     db.commit()
+
+
+def _fail(
+    db,
+    job: EnvironmentBuildJob,
+    status: str,
+    exc: BuildFailure,
+    now,
+    *,
+    owner_id: str,
+    lease_token: str,
+    temp_tag: str | None = None,
+) -> str:
+    result = db.execute(
+        update(EnvironmentBuildJob)
+        .where(
+            EnvironmentBuildJob.id == job.id,
+            EnvironmentBuildJob.status == "building",
+            EnvironmentBuildJob.worker_id == owner_id,
+            EnvironmentBuildJob.lease_token == lease_token,
+        )
+        .values(
+            status=status,
+            error_code=exc.code,
+            error_message=str(exc)[:500],
+            phase="done",
+            finished_at=now,
+            lease_until=None,
+        )
+    )
+    if result.rowcount != 1:
+        db.rollback()
+        _cleanup_temp_image(temp_tag)
+        return "lease_lost"
+    _mark_version_failed(db, job.environment_version_id)
+    db.commit()
+    _cleanup_temp_image(temp_tag)
     return status
 
 
 def claim_build_job(db, job_id: int, owner_id: str, now) -> bool:
     """条件更新抢占任务——并发 Worker 只有一个 claim 成功（rowcount==1）。"""
+    lease_token = secrets.token_urlsafe(32)
     result = db.execute(
         update(EnvironmentBuildJob)
         .where(
@@ -121,6 +292,7 @@ def claim_build_job(db, job_id: int, owner_id: str, now) -> bool:
             started_at=now,
             heartbeat_at=now,
             lease_until=now + timedelta(seconds=LEASE_SECONDS),
+            lease_token=lease_token,
         )
     )
     if result.rowcount != 1:
@@ -144,16 +316,37 @@ def process_build(
     now=None,
 ) -> str:
     """执行一个已 claim 的构建任务，返回终态（succeeded / failed / timed_out）。"""
-    if settings.environment_editor_v2_enabled:
-        return process_v2_build(db, settings, owner_id, job_id, now=now)
     now = now or utc_now()
     job = db.get(EnvironmentBuildJob, job_id)
     if job is None or job.status != "building":
         return job.status if job else "missing"
+    if job.build_mode == "v2":
+        return process_v2_build(db, settings, owner_id, job_id, now=now)
+    if job.build_mode != "legacy":
+        return _fail(
+            db,
+            job,
+            "failed",
+            BuildFailure("未知构建模式", code="BUILD_MODE_INVALID"),
+            now,
+            owner_id=owner_id,
+            lease_token=job.lease_token or "",
+        )
+    lease_token = job.lease_token
+    if not lease_token:
+        return "lease_lost"
 
     version = db.get(EnvironmentVersion, job.environment_version_id)
     if version is None:
-        return _fail(db, job, "failed", BuildFailure("环境版本不存在", code="VERSION_MISSING"), now)
+        return _fail(
+            db,
+            job,
+            "failed",
+            BuildFailure("环境版本不存在", code="VERSION_MISSING"),
+            now,
+            owner_id=owner_id,
+            lease_token=lease_token,
+        )
     profile = db.get(EnvironmentProfile, version.profile_id)
     packages = get_packages_for_version(db, version.id)
     spec = canonical_build_spec(
@@ -172,24 +365,75 @@ def process_build(
         """逐行回调：脱敏 + 60 KiB 尾部截断后入库，并刷新 lease（崩溃恢复依据）"""
         logs.append(line)
         joined = redact_build_log("\n".join(logs))
-        job.log_text = truncate_build_log(joined, settings.env_build_log_max_bytes)
-        job.heartbeat_at = utc_now()
-        job.lease_until = job.heartbeat_at + timedelta(seconds=LEASE_SECONDS)
-        db.commit()
+        _touch_job_lease(
+            db,
+            job_id=job.id,
+            owner_id=owner_id,
+            lease_token=lease_token,
+            log_text=truncate_build_log(joined, settings.env_build_log_max_bytes),
+        )
 
     try:
-        result: BuildResult = execute_build(
-            spec, settings, on_log=on_log, temp_tag=temp_tag, dockerfile_text=dockerfile
-        )
+        with LeaseGuard(db.get_bind(), job.id, owner_id, lease_token) as lease:
+            result: BuildResult = execute_build(
+                spec,
+                settings,
+                on_log=on_log,
+                temp_tag=temp_tag,
+                dockerfile_text=dockerfile,
+                lease_check=lease.assert_owned,
+                register_process=lease.register_process,
+                unregister_process=lease.unregister_process,
+            )
+            lease.assert_owned()
+    except LeaseLost:
+        _cleanup_temp_image(temp_tag)
+        return "lease_lost"
     except BuildTimeout as exc:
-        return _fail(db, job, "timed_out", exc, now)
+        return _fail(
+            db, job, "timed_out", exc, now,
+            owner_id=owner_id, lease_token=lease_token, temp_tag=temp_tag,
+        )
     except BuildFailure as exc:
-        return _fail(db, job, "failed", exc, now)
+        return _fail(
+            db, job, "failed", exc, now,
+            owner_id=owner_id, lease_token=lease_token, temp_tag=temp_tag,
+        )
     except Exception as exc:  # noqa: BLE001 —— Worker 未知异常也落 failed，避免任务丢失
         logger.exception("构建任务 %s 未知异常", job_id)
-        return _fail(db, job, "failed", BuildFailure(f"Worker 未知异常: {exc}", code="WORKER_ERROR"), now)
+        return _fail(
+            db,
+            job,
+            "failed",
+            BuildFailure(f"Worker 未知异常: {exc}", code="WORKER_ERROR"),
+            now,
+            owner_id=owner_id,
+            lease_token=lease_token,
+            temp_tag=temp_tag,
+        )
 
-    # 成功：事务内冻结 digest + 版本转 available
+    # 成功：先以 lease CAS 锁定终态，再写入版本，防止旧 Worker 覆盖新尝试。
+    result_update = db.execute(
+        update(EnvironmentBuildJob)
+        .where(
+            EnvironmentBuildJob.id == job.id,
+            EnvironmentBuildJob.status == "building",
+            EnvironmentBuildJob.worker_id == owner_id,
+            EnvironmentBuildJob.lease_token == lease_token,
+        )
+        .values(
+            status="succeeded",
+            error_code=None,
+            error_message=None,
+            phase="done",
+            lease_until=None,
+            finished_at=now,
+        )
+    )
+    if result_update.rowcount != 1:
+        db.rollback()
+        _cleanup_temp_image(temp_tag)
+        return "lease_lost"
     version.status = "available"
     version.image_digest = result.image_digest
     version.image_tag = spec.image_tag
@@ -197,11 +441,6 @@ def process_build(
     version.dockerfile_sha256 = spec_dockerfile_sha256(dockerfile)
     version.resolved_packages = result.resolved_packages
     version.available_at = now
-    job.status = "succeeded"
-    job.error_code = None
-    job.error_message = None
-    job.lease_until = None
-    job.finished_at = now
     db.commit()
     logger.info("环境 %s v%s 构建成功: %s", spec.profile_slug, version.version_number, result.image_digest)
 
@@ -226,6 +465,11 @@ def process_v2_build(
     job = db.get(EnvironmentBuildJob, job_id)
     if job is None or job.status != "building":
         return job.status if job else "missing"
+    if job.build_mode != "v2":
+        return process_build(db, settings, owner_id, job_id, now=now)
+    lease_token = job.lease_token
+    if not lease_token:
+        return "lease_lost"
     version = db.get(EnvironmentVersion, job.environment_version_id)
     profile = db.get(EnvironmentProfile, version.profile_id) if version else None
     if version is None or profile is None:
@@ -235,51 +479,84 @@ def process_v2_build(
             "failed",
             BuildFailure("环境版本或档位不存在", code="VERSION_MISSING"),
             now,
+            owner_id=owner_id,
+            lease_token=lease_token,
         )
 
     def set_phase(phase: str) -> None:
-        job.phase = phase
-        job.heartbeat_at = utc_now()
-        job.lease_until = job.heartbeat_at + timedelta(seconds=LEASE_SECONDS)
-        db.commit()
+        _touch_job_lease(
+            db,
+            job_id=job.id,
+            owner_id=owner_id,
+            lease_token=lease_token,
+            phase=phase,
+        )
 
     logs: list[str] = []
 
     def on_log(line: str) -> None:
         logs.append(line)
-        job.log_text = truncate_build_log(
-            redact_build_log("\n".join(logs)), settings.env_build_log_max_bytes
+        _touch_job_lease(
+            db,
+            job_id=job.id,
+            owner_id=owner_id,
+            lease_token=lease_token,
+            log_text=truncate_build_log(
+                redact_build_log("\n".join(logs)), settings.env_build_log_max_bytes
+            ),
         )
-        job.heartbeat_at = utc_now()
-        job.lease_until = job.heartbeat_at + timedelta(seconds=LEASE_SECONDS)
-        db.commit()
 
+    temp_tag = f"{settings.env_image_repository}:v2-build-job-{job.id}"
     try:
-        manifest = canonical_v2_manifest(
-            base_image_ref=version.base_image_ref,
-            python_version=version.python_version,
-            minimum_memory_mb=version.minimum_memory_mb,
-            requested_spec=version.requested_spec,
-            settings=settings,
-        )
-        if manifest["manifest_sha256"] != version.manifest_sha256:
-            raise V2BuildFailure(
-                "环境版本 manifest 与构建输入不一致",
-                code="BUILD_VALIDATION_FAILED",
-                detail={"expected": version.manifest_sha256, "actual": manifest["manifest_sha256"]},
+        with LeaseGuard(db.get_bind(), job.id, owner_id, lease_token) as lease:
+            expected_fingerprint = build_config_fingerprint(version.python_version, settings)
+            if (
+                job.build_config_fingerprint is not None
+                and job.build_config_fingerprint != expected_fingerprint
+            ):
+                raise V2BuildFailure(
+                    "Worker 构建配置与任务快照不一致",
+                    code="BUILD_CONFIG_MISMATCH",
+                    detail={"expected": job.build_config_fingerprint, "actual": expected_fingerprint},
+                )
+            manifest = canonical_v2_manifest(
+                base_image_ref=version.base_image_ref,
+                python_version=version.python_version,
+                minimum_memory_mb=version.minimum_memory_mb,
+                requested_spec=version.requested_spec,
+                settings=settings,
             )
-        result: V2BuildResult = execute_v2_build(
-            manifest,
-            settings,
-            on_phase=set_phase,
-            on_log=on_log,
-            timeout=settings.env_build_timeout_seconds,
-            temp_tag=f"{settings.env_image_repository}:v2-build-job-{job.id}",
-        )
+            if manifest["manifest_sha256"] != version.manifest_sha256:
+                raise V2BuildFailure(
+                    "环境版本 manifest 与构建输入不一致",
+                    code="BUILD_VALIDATION_FAILED",
+                    detail={"expected": version.manifest_sha256, "actual": manifest["manifest_sha256"]},
+                )
+            result: V2BuildResult = execute_v2_build(
+                manifest,
+                settings,
+                on_phase=set_phase,
+                on_log=on_log,
+                timeout=settings.env_build_timeout_seconds,
+                temp_tag=temp_tag,
+                lease_check=lease.assert_owned,
+                register_process=lease.register_process,
+                unregister_process=lease.unregister_process,
+            )
+            lease.assert_owned()
+    except LeaseLost:
+        _cleanup_temp_image(temp_tag)
+        return "lease_lost"
     except V2BuildTimeout as exc:
-        return _fail_v2(db, job, "timed_out", exc, now)
+        return _fail_v2(
+            db, job, "timed_out", exc, now,
+            owner_id=owner_id, lease_token=lease_token, temp_tag=temp_tag,
+        )
     except V2BuildFailure as exc:
-        return _fail_v2(db, job, "failed", exc, now)
+        return _fail_v2(
+            db, job, "failed", exc, now,
+            owner_id=owner_id, lease_token=lease_token, temp_tag=temp_tag,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("V2 构建任务 %s 未知异常", job_id)
         return _fail_v2(
@@ -288,9 +565,35 @@ def process_v2_build(
             "failed",
             V2BuildFailure(f"Worker 未知异常: {exc}", code="WORKER_ERROR"),
             now,
+            owner_id=owner_id,
+            lease_token=lease_token,
+            temp_tag=temp_tag,
         )
 
-    set_phase("finalizing")
+    # finalizing 也必须先通过同一 lease CAS；旧 Worker 不得更新版本或草稿。
+    result_update = db.execute(
+        update(EnvironmentBuildJob)
+        .where(
+            EnvironmentBuildJob.id == job.id,
+            EnvironmentBuildJob.status == "building",
+            EnvironmentBuildJob.worker_id == owner_id,
+            EnvironmentBuildJob.lease_token == lease_token,
+        )
+        .values(
+            status="succeeded",
+            phase="done",
+            error_code=None,
+            error_message=None,
+            error_detail=None,
+            result_summary=result.result_summary,
+            lease_until=None,
+            finished_at=now,
+        )
+    )
+    if result_update.rowcount != 1:
+        db.rollback()
+        _cleanup_temp_image(temp_tag)
+        return "lease_lost"
     version.status = "available"
     version.image_digest = result.image_digest
     version.dockerfile_sha256 = result.dockerfile_sha256
@@ -299,16 +602,8 @@ def process_v2_build(
         item["name"]: item["version"] for item in result.resolved_spec.get("python_lock", [])
     }
     version.available_at = now
-    job.status = "succeeded"
-    job.phase = "done"
-    job.error_code = None
-    job.error_message = None
-    job.error_detail = None
-    job.result_summary = result.result_summary
-    job.lease_until = None
-    job.finished_at = now
     draft = db.get(EnvironmentDraft, profile.id)
-    if draft is not None and draft.candidate_version_id == version.id:
+    if draft is not None and draft.candidate_version_id == version.id and draft.active_build_job_id == job.id:
         draft.active_build_job_id = None
         draft.state = "ready"
     db.commit()
@@ -316,15 +611,40 @@ def process_v2_build(
     return "succeeded"
 
 
-def _fail_v2(db, job: EnvironmentBuildJob, status: str, exc: V2BuildFailure, now) -> str:
+def _fail_v2(
+    db,
+    job: EnvironmentBuildJob,
+    status: str,
+    exc: V2BuildFailure,
+    now,
+    *,
+    owner_id: str,
+    lease_token: str,
+    temp_tag: str | None = None,
+) -> str:
+    result = db.execute(
+        update(EnvironmentBuildJob)
+        .where(
+            EnvironmentBuildJob.id == job.id,
+            EnvironmentBuildJob.status == "building",
+            EnvironmentBuildJob.worker_id == owner_id,
+            EnvironmentBuildJob.lease_token == lease_token,
+        )
+        .values(
+            status=status,
+            phase="done",
+            error_code=exc.code,
+            error_message=str(exc)[:500],
+            error_detail=_redact_error_detail(exc.detail) if exc.detail else None,
+            finished_at=now,
+            lease_until=None,
+        )
+    )
+    if result.rowcount != 1:
+        db.rollback()
+        _cleanup_temp_image(temp_tag)
+        return "lease_lost"
     _mark_version_failed(db, job.environment_version_id)
-    job.status = status
-    job.phase = "done"
-    job.error_code = exc.code
-    job.error_message = str(exc)[:500]
-    job.error_detail = _redact_error_detail(exc.detail) if exc.detail else None
-    job.finished_at = now
-    job.lease_until = None
     version = db.get(EnvironmentVersion, job.environment_version_id)
     if version is not None:
         draft = db.get(EnvironmentDraft, version.profile_id)
@@ -332,6 +652,7 @@ def _fail_v2(db, job: EnvironmentBuildJob, status: str, exc: V2BuildFailure, now
             draft.active_build_job_id = None
             draft.state = "failed"
     db.commit()
+    _cleanup_temp_image(temp_tag)
     return status
 
 
@@ -357,23 +678,49 @@ def recover_stale_builds(db, settings: Settings, now, redis_client=None) -> dict
     ).all()
     for job in stale:
         started = as_utc(job.started_at)
-        if started is not None and (now - started).total_seconds() > settings.env_build_timeout_seconds:
+        timed_out = (
+            started is not None
+            and (now - started).total_seconds() > settings.env_build_timeout_seconds
+        )
+        values = (
+            {
+                "status": "timed_out",
+                "phase": "done",
+                "error_code": "BUILD_TIMEOUT",
+                "error_message": "构建超过时限",
+                "lease_until": None,
+                "lease_token": None,
+                "finished_at": now,
+            }
+            if timed_out
+            else {
+                "status": "queued",
+                "phase": "queued" if job.build_mode == "v2" else job.phase,
+                "worker_id": None,
+                "lease_until": None,
+                "lease_token": None,
+            }
+        )
+        result = db.execute(
+            update(EnvironmentBuildJob)
+            .where(
+                EnvironmentBuildJob.id == job.id,
+                EnvironmentBuildJob.status == "building",
+                EnvironmentBuildJob.lease_until.is_not(None),
+                EnvironmentBuildJob.lease_until < now,
+                EnvironmentBuildJob.worker_id == job.worker_id,
+                EnvironmentBuildJob.lease_token == job.lease_token,
+            )
+            .values(**values)
+        )
+        if result.rowcount != 1:
+            continue
+        if timed_out:
             _mark_version_failed(db, job.environment_version_id)
-            job.status = "timed_out"
-            job.phase = "done"
-            job.error_code = "BUILD_TIMEOUT"
-            job.error_message = "构建超过时限"
-            job.lease_until = None
-            job.finished_at = now
-            if settings.environment_editor_v2_enabled:
+            if job.build_mode == "v2":
                 _mark_v2_draft_failed(db, job.environment_version_id, job.id)
             stats["timed_out"] += 1
         else:
-            job.status = "queued"
-            if settings.environment_editor_v2_enabled:
-                job.phase = "queued"
-            job.worker_id = None
-            job.lease_until = None
             version = db.get(EnvironmentVersion, job.environment_version_id)
             if version is not None and version.status not in ("available", "inactive"):
                 version.status = "queued"
@@ -457,7 +804,7 @@ def reconcile_build_state(db, settings: Settings, redis_client=None) -> dict:
         )
         if latest_job is not None and latest_job.status in ("failed", "timed_out"):
             version.status = "failed"
-            if settings.environment_editor_v2_enabled:
+            if job.build_mode == "v2":
                 _mark_v2_draft_failed(db, version.id, latest_job.id)
             stats["versions_failed"] += 1
     db.commit()
@@ -501,8 +848,16 @@ def run_once(db, redis_client, settings: Settings, owner_id: str) -> bool:
     except Exception:  # noqa: BLE001
         logger.exception("构建任务 %s 主流程异常", job.id)
         fresh = db.get(EnvironmentBuildJob, job.id)
-        if fresh is not None and fresh.status == "building":
-            _fail(db, fresh, "failed", BuildFailure("Worker 主流程异常", code="WORKER_ERROR"), utc_now())
+        if fresh is not None and fresh.status == "building" and fresh.lease_token:
+            _fail(
+                db,
+                fresh,
+                "failed",
+                BuildFailure("Worker 主流程异常", code="WORKER_ERROR"),
+                utc_now(),
+                owner_id=owner_id,
+                lease_token=fresh.lease_token,
+            )
     return True
 
 

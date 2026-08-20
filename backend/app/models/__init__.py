@@ -1360,6 +1360,9 @@ class EnvironmentVersion(TimestampMixin, Base):
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     # draft | queued | building | available | failed | inactive
+    build_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="legacy", server_default="legacy"
+    )
     base_image_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     image_tag: Mapped[str | None] = mapped_column(String(255), nullable=True)
     image_digest: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -1438,12 +1441,22 @@ class EnvironmentBuildJob(TimestampMixin, Base):
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
     # queued | building | succeeded | failed | timed_out
+    build_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="legacy", server_default="legacy"
+    )
+    build_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="legacy", server_default="legacy"
+    )
     phase: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
     retry_of_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("environment_build_jobs.id"), nullable=True
     )
     worker_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    lease_token: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    build_config_fingerprint: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
+    lease_token: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    build_config_fingerprint: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     log_text: Mapped[str | None] = mapped_column(Text, nullable=True)

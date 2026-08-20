@@ -37,6 +37,7 @@ from app.services.environment_spec import (
     validate_memory_mb,
     validate_python_version,
 )
+from app.services.environment_builder_v2 import build_config_fingerprint
 
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -465,6 +466,7 @@ def _new_build_attempt(
     version: EnvironmentVersion,
     draft: EnvironmentDraft,
     actor_id: int | None,
+    settings: Settings,
     retry_of: EnvironmentBuildJob | None = None,
 ) -> EnvironmentBuildJob:
     last_attempt = db.scalar(
@@ -476,8 +478,18 @@ def _new_build_attempt(
         environment_version_id=version.id,
         status="queued",
         phase="queued",
+        build_mode=version.build_mode,
         attempt_number=(last_attempt or 0) + 1,
         retry_of_id=retry_of.id if retry_of else None,
+        build_config_fingerprint=(
+            retry_of.build_config_fingerprint
+            if retry_of is not None
+            else (
+                build_config_fingerprint(version.python_version, settings)
+                if version.build_mode == "v2"
+                else None
+            )
+        ),
         created_by_id=actor_id,
     )
     db.add(job)
@@ -526,7 +538,12 @@ def start_draft_build(
             and draft.state == "failed"
         ):
             job = _new_build_attempt(
-                db, version=candidate, draft=draft, actor_id=actor_id, retry_of=latest
+                db,
+                version=candidate,
+                draft=draft,
+                actor_id=actor_id,
+                settings=settings,
+                retry_of=latest,
             )
             db.commit()
             db.refresh(candidate)
@@ -555,6 +572,7 @@ def start_draft_build(
         version_number=(max_number or 0) + 1,
         source_version_id=draft.source_version_id,
         status="queued",
+        build_mode="v2" if settings.environment_editor_v2_enabled else "legacy",
         base_image_ref=base_image_ref,
         python_version=python_version,
         minimum_memory_mb=minimum_memory_mb,
@@ -570,7 +588,9 @@ def start_draft_build(
     )
     db.add(version)
     db.flush()
-    job = _new_build_attempt(db, version=version, draft=draft, actor_id=actor_id)
+    job = _new_build_attempt(
+        db, version=version, draft=draft, actor_id=actor_id, settings=settings
+    )
     db.commit()
     db.refresh(version)
     db.refresh(job)
@@ -603,14 +623,13 @@ def retry_draft_build(
     job_id: int,
     *,
     actor_id: int | None,
+    settings: Settings,
 ) -> tuple[EnvironmentVersion, EnvironmentBuildJob]:
     job = db.execute(
         select(EnvironmentBuildJob).where(EnvironmentBuildJob.id == job_id).with_for_update()
     ).scalar_one_or_none()
     if job is None:
         raise _error(404, "NOT_FOUND", "构建任务不存在")
-    if not can_retry_build(db, job.id):
-        raise _error(409, "BUILD_NOT_RETRYABLE", "该构建任务当前不可重试")
     version = db.get(EnvironmentVersion, job.environment_version_id)
     if version is None:
         raise _error(404, "NOT_FOUND", "环境版本不存在")
@@ -622,11 +641,29 @@ def retry_draft_build(
     ).scalar_one_or_none()
     if profile is None or draft is None:
         raise _error(409, "BUILD_NOT_RETRYABLE", "该构建任务当前不可重试")
-    # Recheck after locking the rows; the capability predicate above is the
-    # public contract, while this guard closes a same-process race.
+    # The public capability is only advisory.  Re-evaluate the whole
+    # predicate after locking Job, Profile, and Draft so a concurrent save
+    # cannot rebind an old failed candidate.
+    if (
+        job.status not in _FAILED_JOB_STATUSES
+        or version.status == "available"
+        or draft.candidate_version_id != version.id
+        or draft.state != "failed"
+        or _active_job(db, draft) is not None
+        or _latest_job(db, version.id).id != job.id
+        or not _candidate_is_unchanged(draft, version)
+    ):
+        raise _error(409, "BUILD_NOT_RETRYABLE", "该构建任务当前不可重试")
     if _active_job(db, draft) is not None:
         raise _error(409, "DRAFT_BUILD_ACTIVE", "该环境已有进行中的构建")
-    new_job = _new_build_attempt(db, version=version, draft=draft, actor_id=actor_id, retry_of=job)
+    new_job = _new_build_attempt(
+        db,
+        version=version,
+        draft=draft,
+        actor_id=actor_id,
+        settings=settings,
+        retry_of=job,
+    )
     db.commit()
     db.refresh(version)
     db.refresh(new_job)
