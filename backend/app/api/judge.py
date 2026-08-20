@@ -16,7 +16,7 @@ from app.schemas.unified_submissions import TeacherJudgeSubmissionRead
 from app.services.environment_service import (
     installed_imports_for_version,
     public_environment_summary,
-    require_available_version,
+    require_runnable_version,
     resolve_effective_policy,
     resolve_run_image_ref,
 )
@@ -105,8 +105,8 @@ def create_submission(
     env_id = question.environment_version_id or assignment.environment_version_id
     policy = resolve_effective_policy(assignment, question)
     if env_id is not None:
-        # 校验版本 available 且 digest 非空（VERSION_NOT_AVAILABLE），快照后才允许入队
-        require_available_version(db, env_id)
+        # 已绑定版本只要求镜像仍可运行；它不必还是教师当前可选版本。
+        require_runnable_version(db, env_id)
     submission = Submission(
         question_id=payload.question_id,
         student_id=current_user.id,

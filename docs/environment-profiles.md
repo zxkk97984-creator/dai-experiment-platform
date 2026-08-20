@@ -4,6 +4,72 @@
 >
 > 架构模型：管理员维护「环境档位 → 不可变环境版本 → 受控包版本」，每个版本构建一份统一 judge/kernel 运行镜像并冻结内容 digest；作业/题目/提交/Notebook/实验记录只绑定环境版本 ID，运行时解析为 digest。**生产运行只使用绑定 digest，不使用 `latest` 标签。**
 
+## 0. 环境编辑器 V2
+
+V2 将管理员操作收敛为“Profile + Draft + immutable Version”三层：新建环境只需要名称和描述，系统自动创建 Python 3.12、256 MB 的草稿；管理员在草稿中选择 Python、直接 Python 包和 Debian 系统包，保存后提交构建。Worker 在固定 digest 的基础镜像内解析依赖、生成锁定结果并执行验证。构建成功只得到 `ready` 候选版本，必须由管理员单独确认发布。
+
+状态含义：
+
+| 对象状态 | 管理员 | 教师新选择 | 已绑定记录运行 |
+|---|---|---|---|
+| `editing` | 可编辑 | 不可见 | 不适用 |
+| `building` | 编辑区锁定 | 不可见 | 不适用 |
+| `failed` | 可修改或按服务端 capability 重试 | 不可见 | 不适用 |
+| `ready` / version `available` | 查看报告、确认发布 | 发布前不可见 | 镜像可运行 |
+| 当前发布版本 | 内容不可修改 | 每个 Profile 只显示这一版 | 可运行 |
+| 历史已发布版本 | 内容不可修改、可回滚 | 仅已有绑定补充显示 | 继续可运行 |
+
+发布或回滚只更新 `environment_profiles.current_version_id` 和审计表，不批量改动作业、提交、Notebook 或实验记录。归档 Profile 只隐藏教师新选择，已有绑定仍按版本 digest 运行。放弃草稿后才允许回滚；回滚目标必须是同 Profile 的历史发布版本且镜像仍可用。
+
+### 0.1 V2 配置
+
+V2 默认关闭。先部署迁移、API 和 Worker，确认构建服务就绪后再开启 `DAI_ENVIRONMENT_EDITOR_V2_ENABLED=true`。生产必须为 3.10、3.11、3.12 分别配置带 digest 的基础镜像：
+
+```text
+DAI_ENVIRONMENT_EDITOR_V2_ENABLED=false
+DAI_ENV_PYTHON_BASE_IMAGES={"3.10":"python:3.10-slim-bookworm@sha256:<64位hex>","3.11":"python:3.11-slim-bookworm@sha256:<64位hex>","3.12":"python:3.12-slim-bookworm@sha256:<64位hex>"}
+DAI_ENV_PIP_INDEX_URL=https://pypi.org/simple
+DAI_ENV_BUILD_NETWORK_MODE=default       # 仅构建安装阶段可选 host
+DAI_ENV_BUILD_HTTP_PROXY=                 # 不隐式继承 Worker 宿主机代理
+DAI_ENV_PLATFORM_BUNDLE_VERSION=v1
+DAI_ENV_BUILD_MAX_IMAGE_BYTES=21474836480
+```
+
+系统包源由平台按基础镜像绑定 Debian 快照；管理员不能提交 Dockerfile、shell、pip/apt 源或 URL/VCS 依赖。Python 包版本为空表示构建时解析最新兼容稳定版；直接依赖克隆到草稿时会固定当前已解析版本。平台固定的 `ipykernel`、`pytest` 和运行器不能从草稿删除。
+
+### 0.2 管理 API 和排障
+
+V2 管理端点均位于现有 `/environments` Router：`GET /editor-options`、`GET /build-readiness`、`GET/POST/PATCH /profiles`、`GET/PUT/DELETE /profiles/{id}/draft`、`POST /profiles/{id}/draft/builds`、`GET /profiles/{id}/versions`、`POST /profiles/{id}/publications`、`GET /builds/{id}`、`GET /builds/{id}/log` 和 `POST /builds/{id}/retry`。`GET /available` 只返回每个 active Profile 的 current version；已有绑定补充历史摘要使用 `GET /versions/{version_id}/summary`，响应不含镜像 digest、tag、基础镜像或源地址。
+
+常见错误码：
+
+- `DRAFT_REVISION_CONFLICT`：刷新服务器草稿，或在最新 revision 上重新应用本地修改。
+- `DRAFT_BUILD_ACTIVE` / `NO_ENVIRONMENT_CHANGES`：等待当前构建，或保存实际修改后再构建。
+- `PIP_PACKAGE_NOT_FOUND` / `PIP_RESOLUTION_FAILED` / `DEPENDENCY_CONFLICT`：检查包名和精确版本；最终以 Worker 在目标基础镜像中的解析报告为准。
+- `APT_PACKAGE_DENIED` / `APT_PACKAGE_NOT_FOUND`：检查平台 denylist、包名和快照版本。
+- `BUILD_PROXY_UNREACHABLE`：默认 Docker 网络不能访问 `127.0.0.1`/`localhost` 代理；配置显式可达代理，或经审核后仅为构建安装阶段启用 `host` 网络。
+- `VERSION_NOT_PUBLISHABLE` / `CURRENT_VERSION_CONFLICT`：目标必须是本草稿 ready 候选或历史已发布镜像，并携带最新 current version 做并发保护。
+
+历史失败 job 的“重试”按钮由服务端 capability 决定：只有它仍是当前 Draft 候选、最近一次 attempt、候选尚未成功且草稿未改动时才可重试。若草稿已修改，必须创建新的版本号；旧失败版本和日志保留。
+
+### 0.3 V2 迁移
+
+当前 V2 迁移为 `20260820_0001`，基于 `20260819_0003`。迁移会新增 Draft/Publication 表、回填 requested/resolved spec、固定历史 Python 3.12、设置 current pointer 和 migration baseline 审计记录；不删除旧包目录、镜像、构建日志或业务外键。生产只在备份并完成只读审计后执行：
+
+```bash
+cd backend
+.venv/bin/python -m alembic upgrade head
+```
+
+升级/降级循环只允许在一次性 SQLite/MySQL 测试库执行：
+
+```bash
+.venv/bin/python -m alembic downgrade 20260819_0003
+.venv/bin/python -m alembic upgrade head
+```
+
+关闭 V2 开关可恢复旧读/写流程；开启 V2 后旧包目录和旧版本创建写接口返回 `LEGACY_ENVIRONMENT_API_DISABLED`，读取接口保留。不要通过删除迁移、版本或镜像来回滚。
+
 ---
 
 ## 1. 生产组件
@@ -15,21 +81,22 @@
 | 服务 | 职责 | 关键点 |
 |---|---|---|
 | `environment-builder` | 单副本、单并发的环境构建 Worker | `command: python -m app.worker.environment_builder_worker`；只挂载 `/var/run/docker.sock`，**不挂载学生工作目录**；DB 是任务事实源，Redis list 只负责唤醒 |
-| `api` / `worker` | 不执行环境构建 | 仅需提供 `DAI_ENV_BASE_IMAGE`（生产校验全局生效） |
+| `api` / `worker` | 不执行环境构建 | V2 开启时读取三版本 digest 映射；V2 关闭时使用 `DAI_ENV_BASE_IMAGE` 兼容配置 |
 
 现有 `dai-judge-python:latest` / `dai-kernel-python:latest` 仅保留为未绑定环境版本的存量兼容路径与回滚窗口；新提交与新实验一律使用环境版本 digest。
 
 ### 1.2 环境变量（.env.example 已收录）
 
 ```text
-DAI_ENV_BASE_IMAGE=python:3.12-slim@sha256:<64位hex>   # 生产必须带 digest，见 3.1
+# V2=false 时使用；V2=true 时由 DAI_ENV_PYTHON_BASE_IMAGES 取代
+DAI_ENV_BASE_IMAGE=python:3.12-slim@sha256:<64位hex>
 DAI_ENV_BUILD_QUEUE_NAME=environment:build:queue
 DAI_ENV_BUILD_TIMEOUT_SECONDS=3600                     # 单次构建超时上限（60~86400）
 DAI_ENV_IMAGE_REPOSITORY=dai-env                       # 镜像仓库前缀
 DAI_ENV_BUILD_LOG_MAX_BYTES=61440                      # 构建日志 60 KiB 尾部上限
 ```
 
-**生产校验（`backend/app/config.py`）**：`DAI_ENVIRONMENT=production` 时 `DAI_ENV_BASE_IMAGE` 必须匹配 `<ref>@sha256:[0-9a-f]{64}`，可变标签（如 `python:3.12-slim`）直接拒绝启动——api/worker/builder 全部进程生效。
+**生产校验（`backend/app/config.py`）**：V2 关闭时 `DAI_ENV_BASE_IMAGE` 必须匹配 `<ref>@sha256:[0-9a-f]{64}`；V2 开启时改为强制 `DAI_ENV_PYTHON_BASE_IMAGES` 恰好包含 3.10、3.11、3.12 且每项固定 digest。
 
 ### 1.3 构建链路
 
@@ -46,9 +113,9 @@ environment-builder 消费 → claim(条件更新防抢占) → docker build(临
 
 ---
 
-## 2. 迁移顺序（分两次可部署发布）
+## 2. 历史环境与旧绑定迁移（Legacy 兼容说明）
 
-> Alembic head：`c5d6e7f8a901`（迁移 B）。迁移 A `b4c5d6e7f890`（控制面五表）→ 迁移 B `c5d6e7f8a901`（业务绑定）。
+> 本节保留旧环境控制面/业务绑定迁移的背景。新部署的 V2 additive migration 顺序和命令以 **0.3 V2 迁移** 为准；不要把本节的旧 revision 当作当前 head。
 
 **上线必须严格按此顺序，不可一次跳过：**
 
@@ -226,4 +293,4 @@ POST /environments/builds/{job_id}/retry     # 重试失败任务
 | 构建 timed_out | 检查 Docker 磁盘/网络；`DAI_ENV_BUILD_TIMEOUT_SECONDS` 上限 86400 |
 | 判题 `system_error` | 先查 digest 是否仍在本机（`docker image inspect <digest>`）；确认后从备份 `docker load` |
 | 迁移 B 拒绝升级 | basic v1 尚未 available/digest 为空——先完成 seed 构建 |
-| 生产启动被拒 | `DAI_ENV_BASE_IMAGE` 必须是带 `@sha256:` 的引用，见 3.1 |
+| 生产启动被拒 | V2 关闭时检查 `DAI_ENV_BASE_IMAGE`；V2 开启时检查 3.10/3.11/3.12 的 `DAI_ENV_PYTHON_BASE_IMAGES` digest 映射，见 0.1 |

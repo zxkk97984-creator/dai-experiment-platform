@@ -1,6 +1,6 @@
-"""环境控制面数据模型测试（Phase 1）
+"""环境控制面数据模型测试（Phase 1 + V2）
 
-覆盖：五张控制面表的建表、唯一约束、外键、状态默认值与版本关联。
+覆盖：控制面表的建表、唯一约束、外键、状态默认值与版本关联。
 注意：SQLite 下 BigInteger 主键不是 rowid 别名，插入时必须显式传 id。
 """
 from __future__ import annotations
@@ -24,6 +24,8 @@ CONTROL_TABLES = [
     "environment_versions",
     "profile_version_packages",
     "environment_build_jobs",
+    "environment_drafts",
+    "environment_publications",
 ]
 
 
@@ -106,7 +108,12 @@ def test_version_columns_and_defaults(db_session_factory):
         assert ver.version_number == 1
         assert ver.minimum_memory_mb == 256
         assert ver.image_digest is None
-        assert ver.python_version is None
+        assert ver.python_version == "3.12"
+        assert ver.requested_spec == {
+            "schema_version": 1,
+            "python_packages": [],
+            "system_packages": [],
+        }
         assert ver.available_at is None
 
 
@@ -120,6 +127,7 @@ def test_build_job_defaults(db_session_factory):
         db.add(job)
         db.commit()
         assert job.attempt_number == 1
+        assert job.phase == "queued"
         assert job.worker_id is None
         assert job.error_message is None
 

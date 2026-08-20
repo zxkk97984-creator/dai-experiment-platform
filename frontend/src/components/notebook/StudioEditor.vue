@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import CodeCell from './CodeCell.vue'
 import MarkdownCell from './MarkdownCell.vue'
@@ -26,6 +26,7 @@ const markdownEditSource = ref('')
 
 // ── Phase 4：环境面板与发布确认 ──────────────────────────────────
 const envOptions = ref([])
+const historicalEnvLoads = new Map()
 const showEnvPanel = ref(false)
 const showPublishDialog = ref(false)
 const publishBusy = ref(false)
@@ -62,12 +63,36 @@ const publishSummary = computed(() => {
   }
 })
 
+async function appendHistoricalEnvironment(versionId) {
+  if (!versionId || envOptions.value.some((option) => option.environment_version_id === versionId)) return
+  if (typeof environmentsAPI.getVersionSummary !== 'function') return
+  if (!historicalEnvLoads.has(versionId)) {
+    historicalEnvLoads.set(versionId, environmentsAPI.getVersionSummary(versionId).then((res) => {
+      if (res.data?.environment_version_id && !envOptions.value.some((option) => option.environment_version_id === versionId)) {
+        envOptions.value = [...envOptions.value, { ...res.data, historical: true }]
+      }
+    }).catch(() => {}).finally(() => historicalEnvLoads.delete(versionId)))
+  }
+  await historicalEnvLoads.get(versionId)
+}
+
 async function fetchEnvOptions() {
-  try {
+ try {
     const res = await environmentsAPI.listAvailable()
     envOptions.value = res.data || []
-  } catch { /* 环境列表加载失败不阻塞编辑 */ }
+    await appendHistoricalEnvironment(store.environmentVersionId)
+ } catch { /* 环境列表加载失败不阻塞编辑 */ }
 }
+
+// The template and environment list load in parallel.  Re-check after either
+// one completes so an already-bound historical version is never replaced by
+// the current-only picker response.
+watch(
+  () => [store.environmentVersionId, envOptions.value.length],
+  () => {
+    if (store.environmentVersionId && envOptions.value.length) void appendHistoricalEnvironment(store.environmentVersionId)
+  },
+)
 
 function openEnvPanel() {
   envDraftId.value = store.environmentVersionId

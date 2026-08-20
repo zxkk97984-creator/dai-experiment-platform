@@ -28,7 +28,7 @@ from sqlalchemy import select, update
 
 from app.config import Settings, get_settings
 from app.database import SessionLocal
-from app.models import EnvironmentBuildJob, EnvironmentProfile, EnvironmentVersion
+from app.models import EnvironmentBuildJob, EnvironmentDraft, EnvironmentProfile, EnvironmentVersion
 from app.services.environment_builder import (
     BuildFailure,
     BuildResult,
@@ -41,13 +41,23 @@ from app.services.environment_builder import (
     spec_dockerfile_sha256,
     truncate_build_log,
 )
+from app.services.environment_builder_v2 import (
+    V2BuildFailure,
+    V2BuildResult,
+    V2BuildTimeout,
+    canonical_v2_manifest,
+    execute_v2_build,
+)
+from app.services.environment_candidates import refresh_apt_candidate_cache
 from app.services.environment_service import get_packages_for_version
+from app.services.environment_spec import SUPPORTED_PYTHON_VERSIONS
 from app.services.time_utils import as_utc, utc_now
 
 logger = logging.getLogger("dai.worker.env_build")
 
 # lease 时长：Worker 崩溃后其他实例可接管；总构建时长上限来自 settings.env_build_timeout_seconds
 LEASE_SECONDS = 60
+APT_CACHE_REFRESH_SECONDS = 6 * 60 * 60
 
 
 def _mark_version_failed(db, version_id: int) -> None:
@@ -57,11 +67,40 @@ def _mark_version_failed(db, version_id: int) -> None:
         version.status = "failed"
 
 
+def _mark_v2_draft_failed(db, version_id: int, job_id: int | None = None) -> None:
+    """Release a V2 draft when recovery discovers a terminal failed attempt."""
+
+    version = db.get(EnvironmentVersion, version_id)
+    if version is None:
+        return
+    draft = db.get(EnvironmentDraft, version.profile_id)
+    if draft is None:
+        return
+    if draft.candidate_version_id == version.id and (
+        job_id is None or draft.active_build_job_id == job_id
+    ):
+        draft.active_build_job_id = None
+        draft.state = "failed"
+
+
+def _redact_error_detail(value):
+    """Redact nested V2 stderr/details before they are persisted as JSON."""
+
+    if isinstance(value, str):
+        return redact_build_log(value)
+    if isinstance(value, dict):
+        return {str(key): _redact_error_detail(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_error_detail(item) for item in value]
+    return value
+
+
 def _fail(db, job: EnvironmentBuildJob, status: str, exc: BuildFailure, now) -> str:
     _mark_version_failed(db, job.environment_version_id)
     job.status = status
     job.error_code = exc.code
     job.error_message = str(exc)[:500]
+    job.phase = "done"
     job.finished_at = now
     job.lease_until = None
     db.commit()
@@ -105,6 +144,8 @@ def process_build(
     now=None,
 ) -> str:
     """执行一个已 claim 的构建任务，返回终态（succeeded / failed / timed_out）。"""
+    if settings.environment_editor_v2_enabled:
+        return process_v2_build(db, settings, owner_id, job_id, now=now)
     now = now or utc_now()
     job = db.get(EnvironmentBuildJob, job_id)
     if job is None or job.status != "building":
@@ -172,6 +213,128 @@ def process_build(
     return "succeeded"
 
 
+def process_v2_build(
+    db,
+    settings: Settings,
+    owner_id: str,
+    job_id: int,
+    now=None,
+) -> str:
+    """Run the V2 phased resolver/build flow and update the Draft state."""
+
+    now = now or utc_now()
+    job = db.get(EnvironmentBuildJob, job_id)
+    if job is None or job.status != "building":
+        return job.status if job else "missing"
+    version = db.get(EnvironmentVersion, job.environment_version_id)
+    profile = db.get(EnvironmentProfile, version.profile_id) if version else None
+    if version is None or profile is None:
+        return _fail(
+            db,
+            job,
+            "failed",
+            BuildFailure("环境版本或档位不存在", code="VERSION_MISSING"),
+            now,
+        )
+
+    def set_phase(phase: str) -> None:
+        job.phase = phase
+        job.heartbeat_at = utc_now()
+        job.lease_until = job.heartbeat_at + timedelta(seconds=LEASE_SECONDS)
+        db.commit()
+
+    logs: list[str] = []
+
+    def on_log(line: str) -> None:
+        logs.append(line)
+        job.log_text = truncate_build_log(
+            redact_build_log("\n".join(logs)), settings.env_build_log_max_bytes
+        )
+        job.heartbeat_at = utc_now()
+        job.lease_until = job.heartbeat_at + timedelta(seconds=LEASE_SECONDS)
+        db.commit()
+
+    try:
+        manifest = canonical_v2_manifest(
+            base_image_ref=version.base_image_ref,
+            python_version=version.python_version,
+            minimum_memory_mb=version.minimum_memory_mb,
+            requested_spec=version.requested_spec,
+            settings=settings,
+        )
+        if manifest["manifest_sha256"] != version.manifest_sha256:
+            raise V2BuildFailure(
+                "环境版本 manifest 与构建输入不一致",
+                code="BUILD_VALIDATION_FAILED",
+                detail={"expected": version.manifest_sha256, "actual": manifest["manifest_sha256"]},
+            )
+        result: V2BuildResult = execute_v2_build(
+            manifest,
+            settings,
+            on_phase=set_phase,
+            on_log=on_log,
+            timeout=settings.env_build_timeout_seconds,
+            temp_tag=f"{settings.env_image_repository}:v2-build-job-{job.id}",
+        )
+    except V2BuildTimeout as exc:
+        return _fail_v2(db, job, "timed_out", exc, now)
+    except V2BuildFailure as exc:
+        return _fail_v2(db, job, "failed", exc, now)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("V2 构建任务 %s 未知异常", job_id)
+        return _fail_v2(
+            db,
+            job,
+            "failed",
+            V2BuildFailure(f"Worker 未知异常: {exc}", code="WORKER_ERROR"),
+            now,
+        )
+
+    set_phase("finalizing")
+    version.status = "available"
+    version.image_digest = result.image_digest
+    version.dockerfile_sha256 = result.dockerfile_sha256
+    version.resolved_spec = result.resolved_spec
+    version.resolved_packages = {
+        item["name"]: item["version"] for item in result.resolved_spec.get("python_lock", [])
+    }
+    version.available_at = now
+    job.status = "succeeded"
+    job.phase = "done"
+    job.error_code = None
+    job.error_message = None
+    job.error_detail = None
+    job.result_summary = result.result_summary
+    job.lease_until = None
+    job.finished_at = now
+    draft = db.get(EnvironmentDraft, profile.id)
+    if draft is not None and draft.candidate_version_id == version.id:
+        draft.active_build_job_id = None
+        draft.state = "ready"
+    db.commit()
+    logger.info("V2 环境 %s v%s 构建成功: %s", profile.slug, version.version_number, result.image_digest)
+    return "succeeded"
+
+
+def _fail_v2(db, job: EnvironmentBuildJob, status: str, exc: V2BuildFailure, now) -> str:
+    _mark_version_failed(db, job.environment_version_id)
+    job.status = status
+    job.phase = "done"
+    job.error_code = exc.code
+    job.error_message = str(exc)[:500]
+    job.error_detail = _redact_error_detail(exc.detail) if exc.detail else None
+    job.finished_at = now
+    job.lease_until = None
+    version = db.get(EnvironmentVersion, job.environment_version_id)
+    if version is not None:
+        draft = db.get(EnvironmentDraft, version.profile_id)
+        if draft is not None and draft.active_build_job_id == job.id:
+            draft.active_build_job_id = None
+            draft.state = "failed"
+    db.commit()
+    return status
+
+
 def _tag_official_image(temp_tag: str, image_tag: str) -> None:
     """仅全部验证完成后添加正式 dai-env-<slug>:vN 标签。"""
     _docker_tag(temp_tag, image_tag)
@@ -197,13 +360,18 @@ def recover_stale_builds(db, settings: Settings, now, redis_client=None) -> dict
         if started is not None and (now - started).total_seconds() > settings.env_build_timeout_seconds:
             _mark_version_failed(db, job.environment_version_id)
             job.status = "timed_out"
+            job.phase = "done"
             job.error_code = "BUILD_TIMEOUT"
             job.error_message = "构建超过时限"
             job.lease_until = None
             job.finished_at = now
+            if settings.environment_editor_v2_enabled:
+                _mark_v2_draft_failed(db, job.environment_version_id, job.id)
             stats["timed_out"] += 1
         else:
             job.status = "queued"
+            if settings.environment_editor_v2_enabled:
+                job.phase = "queued"
             job.worker_id = None
             job.lease_until = None
             version = db.get(EnvironmentVersion, job.environment_version_id)
@@ -289,6 +457,8 @@ def reconcile_build_state(db, settings: Settings, redis_client=None) -> dict:
         )
         if latest_job is not None and latest_job.status in ("failed", "timed_out"):
             version.status = "failed"
+            if settings.environment_editor_v2_enabled:
+                _mark_v2_draft_failed(db, version.id, latest_job.id)
             stats["versions_failed"] += 1
     db.commit()
     return stats
@@ -351,6 +521,7 @@ def run_worker_loop() -> None:
             logger.info("构建启动对账: %s", startup_stats)
 
     last_recovery = time.monotonic()
+    last_apt_refresh = time.monotonic()
     while True:
         try:
             with SessionLocal() as db:
@@ -360,10 +531,30 @@ def run_worker_loop() -> None:
                     if any(stats.values()) or any(reconcile_stats.values()):
                         logger.info("构建崩溃恢复: %s，对账: %s", stats, reconcile_stats)
                     last_recovery = time.monotonic()
+                if (
+                    settings.environment_editor_v2_enabled
+                    and time.monotonic() - last_apt_refresh > APT_CACHE_REFRESH_SECONDS
+                ):
+                    _refresh_apt_caches(settings, redis_client)
+                    last_apt_refresh = time.monotonic()
                 run_once(db, redis_client, settings, owner_id)
         except Exception:  # noqa: BLE001
             logger.exception("环境构建主循环异常")
             time.sleep(1)
+
+
+def _refresh_apt_caches(settings: Settings, redis_client) -> None:
+    for python_version in SUPPORTED_PYTHON_VERSIONS:
+        try:
+            count = refresh_apt_candidate_cache(
+                redis_client,
+                settings,
+                python_version=python_version,
+            )
+            if count:
+                logger.info("apt 候选缓存刷新完成 Python=%s packages=%s", python_version, count)
+        except Exception:  # noqa: BLE001 - indexing is optional; builds remain authoritative
+            logger.warning("apt 候选缓存刷新失败 Python=%s", python_version, exc_info=True)
 
 
 if __name__ == "__main__":

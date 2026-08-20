@@ -100,6 +100,7 @@ const form = ref({
 // ── 作业默认环境与白名单（draft 可编辑；发布后绑定不可变） ──────────
 const envOptions = ref([])
 const assignmentEnvId = ref(null)
+const historicalEnvLoads = new Map()
 const assignmentPolicy = ref('unrestricted')
 const assignmentAllowedImports = ref([])
 const audienceMode = ref('all_enrolled')
@@ -178,12 +179,36 @@ const publicCasesArr = computed({
  set: (arr) => { form.value.public_cases = JSON.stringify(arr) },
 })
 
+async function appendHistoricalEnvironment(versionId) {
+ if (!versionId || envOptions.value.some((option) => option.environment_version_id === versionId)) return
+ if (typeof environmentsAPI.getVersionSummary !== 'function') return
+ if (!historicalEnvLoads.has(versionId)) {
+   historicalEnvLoads.set(versionId, environmentsAPI.getVersionSummary(versionId).then((res) => {
+     if (res.data?.environment_version_id && !envOptions.value.some((option) => option.environment_version_id === versionId)) {
+       envOptions.value = [...envOptions.value, { ...res.data, historical: true }]
+     }
+   }).catch(() => {}).finally(() => historicalEnvLoads.delete(versionId)))
+ }
+ await historicalEnvLoads.get(versionId)
+}
+
 async function fetchEnv() {
  try {
    const res = await environmentsAPI.listAvailable()
    envOptions.value = res.data || []
+   await appendHistoricalEnvironment(assignmentEnvId.value)
  } catch { /* 环境加载失败不阻塞题目编辑 */ }
 }
+
+// fetch() and fetchEnv() start together.  If the assignment arrives after
+// the available list, append the locked historical version once the list is
+// ready instead of allowing the two requests to overwrite each other.
+watch(
+ () => [assignmentEnvId.value, envOptions.value.length],
+ () => {
+   if (assignmentEnvId.value && envOptions.value.length) void appendHistoricalEnvironment(assignmentEnvId.value)
+ },
+)
 
 async function fetch() {
  loading.value = true
@@ -196,6 +221,7 @@ async function fetch() {
    scheduleDueLocal.value = toDateTimeLocal(aRes.data.due_at)
    questions.value = qRes.data.items || qRes.data
    assignmentEnvId.value = aRes.data.environment_version_id ?? null
+   await appendHistoricalEnvironment(assignmentEnvId.value)
    assignmentPolicy.value = aRes.data.import_policy_mode || 'unrestricted'
    assignmentAllowedImports.value = [...(aRes.data.allowed_imports || [])]
    audienceMode.value = aRes.data.audience_mode || 'all_enrolled'

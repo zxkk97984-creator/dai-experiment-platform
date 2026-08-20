@@ -69,6 +69,12 @@ def db_session_factory(test_settings):
             conn.execute(
                 text("UPDATE notebook_templates SET current_version_id = NULL")
             )
+            # environment_profiles.current_version_id ↔ environment_versions
+            # is the V2 publication pointer cycle; clear it before dropping
+            # versions so SQLite/MySQL enforce the FK consistently.
+            conn.execute(
+                text("UPDATE environment_profiles SET current_version_id = NULL")
+            )
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
 

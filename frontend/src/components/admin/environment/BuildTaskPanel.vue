@@ -59,6 +59,14 @@ function closeLog() {
   logText.value = ''
 }
 
+function canRetry(job) {
+  // V2 is server-authoritative.  Legacy responses have no capabilities and
+  // retain the previous terminal-state fallback during the compatibility window.
+  return job?.capabilities
+    ? job.capabilities.can_retry === true
+    : job?.status === 'failed' || job?.status === 'timed_out'
+}
+
 async function handleRetry(job) {
   try {
     await environmentsAPI.retryBuild(job.id)
@@ -138,10 +146,11 @@ onBeforeUnmount(stopPolling)
             <td class="actions-cell">
               <button class="btn-ghost btn-sm log-btn" @click="openLog(job)">日志</button>
               <button
-                v-if="job.status === 'failed' || job.status === 'timed_out'"
+                v-if="canRetry(job)"
                 class="btn-sm retry-btn"
                 @click="handleRetry(job)"
               >重试</button>
+              <span v-if="job.phase && job.status === 'building'" class="text-tertiary text-sm">{{ job.phase }}</span>
             </td>
           </tr>
         </tbody>

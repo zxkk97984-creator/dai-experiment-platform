@@ -5,10 +5,13 @@ import { ref, onMounted } from 'vue'
 import { environmentsAPI } from '../../../api/environments.js'
 import { useAppStore } from '../../../stores/app.js'
 import { statusBadge } from '../../../utils/status.js'
+import EnvironmentEditorPanel from './EnvironmentEditorPanel.vue'
 
 const app = useAppStore()
+const emit = defineEmits(['v2-detected', 'refresh'])
 const profiles = ref([])
 const loading = ref(true)
+const isV2 = ref(false)
 const showCreate = ref(false)
 const createForm = ref({ slug: '', display_name: '', description: '' })
 
@@ -43,11 +46,21 @@ async function fetch() {
   try {
     const res = await environmentsAPI.listProfiles()
     profiles.value = res.data || []
+    const optionsProbe = typeof environmentsAPI.getEditorOptions === 'function'
+      ? await Promise.resolve(environmentsAPI.getEditorOptions()).catch(() => null)
+      : null
+    isV2.value = Boolean(optionsProbe?.data) || profiles.value.some((profile) => Object.prototype.hasOwnProperty.call(profile, 'draft'))
+    if (isV2.value) emit('v2-detected')
   } catch {
     app.showToast('加载失败', 'error')
   } finally {
     loading.value = false
   }
+}
+
+function refreshV2() {
+  emit('refresh')
+  fetch()
 }
 
 async function handleCreate() {
@@ -133,7 +146,8 @@ onMounted(fetch)
 </script>
 
 <template>
-  <div class="panel">
+  <EnvironmentEditorPanel v-if="isV2" :profiles="profiles" @refresh="refreshV2" />
+  <div v-else class="panel">
     <!-- ── 操作条 ─────────────────────────────────────────────────────── -->
     <div class="panel-bar">
       <p class="panel-hint">环境档位由管理员维护：勾选受控包组合成不可变版本，版本构建成功后教师可见。</p>

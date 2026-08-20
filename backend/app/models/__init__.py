@@ -1299,11 +1299,19 @@ class PackageCatalog(TimestampMixin, Base):
 
 
 class EnvironmentProfile(TimestampMixin, Base):
-    """环境档位——教师选择的环境维度；当前版本按最大版本号 available 计算。"""
+    """环境档位——教师选择的环境维度；当前版本由显式指针决定。"""
 
     __tablename__ = "environment_profiles"
     __table_args__ = (
         UniqueConstraint("slug", name="uq_env_profile_slug"),
+        # Profile.current_version_id 与 EnvironmentVersion.profile_id 形成循环
+        # 外键；迁移中同样在表创建后单独建立此约束。
+        ForeignKeyConstraint(
+            ["current_version_id"],
+            ["environment_versions.id"],
+            use_alter=True,
+            name="fk_env_profiles_current_version",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
@@ -1312,10 +1320,17 @@ class EnvironmentProfile(TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")  # active | inactive
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    current_version_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     versions: Mapped[list["EnvironmentVersion"]] = relationship(
         back_populates="profile",
         order_by="EnvironmentVersion.version_number",
+        foreign_keys="[EnvironmentVersion.profile_id]",
+    )
+    current_version: Mapped["EnvironmentVersion | None"] = relationship(
+        foreign_keys=[current_version_id],
+        primaryjoin="EnvironmentProfile.current_version_id == EnvironmentVersion.id",
+        post_update=True,
     )
 
 
@@ -1348,15 +1363,32 @@ class EnvironmentVersion(TimestampMixin, Base):
     base_image_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     image_tag: Mapped[str | None] = mapped_column(String(255), nullable=True)
     image_digest: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    python_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    python_version: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="3.12", server_default="3.12"
+    )
     minimum_memory_mb: Mapped[int] = mapped_column(Integer, nullable=False)
     manifest_sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
     dockerfile_sha256: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
+    requested_spec: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        default=lambda: {"schema_version": 1, "python_packages": [], "system_packages": []},
+    )
+    resolved_spec: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Phase 1 compatibility field; V2 reads resolved_spec first and falls back
+    # to this field for historical rows.
     resolved_packages: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     available_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_published_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
 
-    profile: Mapped[EnvironmentProfile] = relationship(back_populates="versions")
+    profile: Mapped[EnvironmentProfile] = relationship(
+        back_populates="versions",
+        foreign_keys=[profile_id],
+    )
     source_version: Mapped["EnvironmentVersion | None"] = relationship(
         remote_side="EnvironmentVersion.id", foreign_keys=[source_version_id]
     )
@@ -1406,6 +1438,7 @@ class EnvironmentBuildJob(TimestampMixin, Base):
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
     # queued | building | succeeded | failed | timed_out
+    phase: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
     retry_of_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("environment_build_jobs.id"), nullable=True
@@ -1416,6 +1449,8 @@ class EnvironmentBuildJob(TimestampMixin, Base):
     log_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error_detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    result_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -1423,4 +1458,98 @@ class EnvironmentBuildJob(TimestampMixin, Base):
     version: Mapped[EnvironmentVersion] = relationship()
     retry_of: Mapped["EnvironmentBuildJob | None"] = relationship(
         remote_side="EnvironmentBuildJob.id", foreign_keys=[retry_of_id]
+    )
+
+
+class EnvironmentDraft(TimestampMixin, Base):
+    """每个 Profile 唯一的管理员可编辑草稿。"""
+
+    __tablename__ = "environment_drafts"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('editing', 'building', 'ready', 'failed')",
+            name="ck_env_drafts_state",
+        ),
+        Index("ix_env_drafts_candidate_version_id", "candidate_version_id"),
+        Index("ix_env_drafts_active_build_job_id", "active_build_job_id"),
+    )
+
+    profile_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("environment_profiles.id", ondelete="CASCADE"), primary_key=True
+    )
+    source_version_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), nullable=True
+    )
+    candidate_version_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id"), nullable=True
+    )
+    active_build_job_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("environment_build_jobs.id"), nullable=True
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="editing", server_default="editing")
+    python_version: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="3.12", server_default="3.12"
+    )
+    minimum_memory_mb: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=256, server_default="256"
+    )
+    requested_spec: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        default=lambda: {"schema_version": 1, "python_packages": [], "system_packages": []},
+    )
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    profile: Mapped[EnvironmentProfile] = relationship(
+        foreign_keys=[profile_id],
+        primaryjoin="EnvironmentDraft.profile_id == EnvironmentProfile.id",
+    )
+    source_version: Mapped["EnvironmentVersion | None"] = relationship(
+        foreign_keys=[source_version_id],
+        primaryjoin="EnvironmentDraft.source_version_id == EnvironmentVersion.id",
+    )
+    candidate_version: Mapped["EnvironmentVersion | None"] = relationship(
+        foreign_keys=[candidate_version_id],
+        primaryjoin="EnvironmentDraft.candidate_version_id == EnvironmentVersion.id",
+    )
+    active_build_job: Mapped["EnvironmentBuildJob | None"] = relationship(
+        foreign_keys=[active_build_job_id],
+        primaryjoin="EnvironmentDraft.active_build_job_id == EnvironmentBuildJob.id",
+    )
+
+
+class EnvironmentPublication(TimestampMixin, Base):
+    """不可修改的发布/回滚审计记录。"""
+
+    __tablename__ = "environment_publications"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('publish', 'rollback', 'migration_baseline')",
+            name="ck_env_publications_action",
+        ),
+        Index("ix_env_publications_profile_created", "profile_id", "created_at"),
+        Index("ix_env_publications_version_id", "version_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
+    profile_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("environment_profiles.id", ondelete="RESTRICT"), nullable=False
+    )
+    version_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id", ondelete="RESTRICT"), nullable=False
+    )
+    previous_version_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("environment_versions.id", ondelete="RESTRICT"), nullable=True
+    )
+    action: Mapped[str] = mapped_column(String(24), nullable=False)
+    published_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+
+    profile: Mapped[EnvironmentProfile] = relationship(foreign_keys=[profile_id])
+    version: Mapped[EnvironmentVersion] = relationship(foreign_keys=[version_id])
+    previous_version: Mapped["EnvironmentVersion | None"] = relationship(
+        foreign_keys=[previous_version_id]
     )

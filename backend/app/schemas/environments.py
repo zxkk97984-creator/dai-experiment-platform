@@ -10,10 +10,83 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ── 包目录 ─────────────────────────────────────────────────────
+
+
+class PythonPackageSpec(BaseModel):
+    """管理员请求的一个 Python 直接依赖。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=128)
+    version: str | None = Field(default=None, max_length=64)
+    import_names: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _normalize(self):
+        from app.services.environment_spec import normalize_requested_spec
+
+        normalized = normalize_requested_spec(
+            {
+                "schema_version": 1,
+                "python_packages": [self.model_dump()],
+                "system_packages": [],
+            }
+        )["python_packages"][0]
+        self.name = normalized["name"]
+        self.version = normalized["version"]
+        self.import_names = normalized["import_names"]
+        return self
+
+
+class SystemPackageSpec(BaseModel):
+    """管理员请求的一个 apt 直接依赖。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=128)
+    version: str | None = Field(default=None, max_length=128)
+
+    @model_validator(mode="after")
+    def _normalize(self):
+        from app.services.environment_spec import normalize_requested_spec
+
+        normalized = normalize_requested_spec(
+            {
+                "schema_version": 1,
+                "python_packages": [],
+                "system_packages": [self.model_dump()],
+            }
+        )["system_packages"][0]
+        self.name = normalized["name"]
+        self.version = normalized["version"]
+        return self
+
+
+class RequestedEnvironmentSpec(BaseModel):
+    """完整 requested_spec——所有持久化和构建入口共用的输入契约。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    python_packages: list[PythonPackageSpec] = Field(default_factory=list)
+    system_packages: list[SystemPackageSpec] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _normalize(self):
+        from app.services.environment_spec import normalize_requested_spec
+
+        normalized = normalize_requested_spec(self.model_dump())
+        self.python_packages = [
+            PythonPackageSpec.model_validate(item) for item in normalized["python_packages"]
+        ]
+        self.system_packages = [
+            SystemPackageSpec.model_validate(item) for item in normalized["system_packages"]
+        ]
+        return self
 
 
 class PackageCatalogCreate(BaseModel):
@@ -151,7 +224,9 @@ class PackageCatalogRead(BaseModel):
 class EnvironmentProfileCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    slug: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    # V2 generates env-<short id> when omitted.  The legacy endpoint still
+    # validates a supplied slug in its service layer.
+    slug: str | None = Field(default=None, min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9-]*$")
     display_name: str = Field(min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
 
@@ -214,6 +289,11 @@ class PackageSummary(BaseModel):
     import_names: list[str]
 
 
+class SystemPackageSummary(BaseModel):
+    name: str
+    version: str | None = None
+
+
 class EnvironmentOptionRead(BaseModel):
     """教师可选环境选项——只含 available 版本，不含 digest/tag/构建日志"""
 
@@ -224,6 +304,7 @@ class EnvironmentOptionRead(BaseModel):
     description: str | None = None
     version_number: int
     packages: list[PackageSummary] = Field(default_factory=list)
+    system_packages: list[SystemPackageSummary] = Field(default_factory=list)
     minimum_memory_mb: int
 
 
@@ -346,3 +427,150 @@ class EnvironmentProfileListRead(EnvironmentProfileRead):
     """管理端档位列表项——附加当前可用版本（最新可用版本摘要，UI 列表展示用）"""
 
     latest_version: EnvironmentVersionListRead | None = None
+
+
+# ── Environment editor V2 ─────────────────────────────────────
+
+
+class EnvironmentCapabilities(BaseModel):
+    """Server-authoritative actions for the administrator editor."""
+
+    can_edit_profile: bool = False
+    can_create_draft: bool = False
+    can_edit_draft: bool = False
+    can_build: bool = False
+    can_retry: bool = False
+    can_publish: bool = False
+    can_abandon_draft: bool = False
+    can_rollback: bool = False
+    can_archive: bool = False
+    can_restore: bool = False
+
+
+class EnvironmentEditorOptionsRead(BaseModel):
+    python_versions: list[str]
+    default_python_version: str
+    minimum_memory_mb: int
+    maximum_memory_mb: int
+    default_memory_mb: int
+    max_python_packages: int
+    max_system_packages: int
+    source_display_names: dict[str, str] = Field(default_factory=dict)
+
+
+class BuildReadinessRead(BaseModel):
+    ready: bool
+    checks: dict[str, dict]
+
+
+class EnvironmentVersionEditorRead(BaseModel):
+    id: int
+    profile_id: int
+    version_number: int
+    source_version_id: int | None = None
+    status: str
+    python_version: str
+    minimum_memory_mb: int
+    requested_spec: dict
+    resolved_spec: dict | None = None
+    image_digest: str | None = None
+    image_size_bytes: int | None = None
+    first_published_at: datetime | None = None
+    first_published_by_id: int | None = None
+    available_at: datetime | None = None
+    created_at: datetime | None = None
+    published: bool = False
+    current: bool = False
+    diff: dict | None = None
+    build_report: dict | None = None
+
+
+class EnvironmentDraftRead(BaseModel):
+    profile_id: int
+    source_version_id: int | None = None
+    candidate_version_id: int | None = None
+    active_build_job_id: int | None = None
+    revision: int
+    state: Literal["editing", "building", "ready", "failed"]
+    python_version: str
+    minimum_memory_mb: int
+    requested_spec: RequestedEnvironmentSpec
+    capabilities: EnvironmentCapabilities = Field(default_factory=EnvironmentCapabilities)
+
+
+class EnvironmentDraftUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int = Field(ge=1)
+    python_version: str
+    minimum_memory_mb: int = Field(ge=64, le=65536)
+    requested_spec: RequestedEnvironmentSpec
+
+
+class EnvironmentProfileEditorListRead(BaseModel):
+    id: int
+    slug: str
+    display_name: str
+    description: str | None = None
+    status: str
+    current_version: EnvironmentVersionEditorRead | None = None
+    draft: EnvironmentDraftRead | None = None
+    recent_build: "EnvironmentBuildEditorRead | None" = None
+    capabilities: EnvironmentCapabilities = Field(default_factory=EnvironmentCapabilities)
+
+
+class EnvironmentProfileEditorRead(EnvironmentProfileEditorListRead):
+    versions: list[EnvironmentVersionEditorRead] = Field(default_factory=list)
+
+
+class EnvironmentPublicationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    environment_version_id: int = Field(gt=0)
+    expected_current_version_id: int | None = None
+
+
+class EnvironmentPublicationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    profile_id: int
+    version_id: int
+    previous_version_id: int | None = None
+    action: Literal["publish", "rollback", "migration_baseline"]
+    published_by_id: int | None = None
+    created_at: datetime | None = None
+
+
+class EnvironmentBuildEditorRead(BaseModel):
+    id: int
+    environment_version_id: int
+    profile_display_name: str | None = None
+    profile_slug: str | None = None
+    version_number: int | None = None
+    version_status: str | None = None
+    image_digest_short: str | None = None
+    status: str
+    phase: str
+    attempt_number: int
+    retry_of_id: int | None = None
+    worker_id: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    error_detail: dict | None = None
+    result_summary: dict | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    created_at: datetime | None = None
+    capabilities: EnvironmentCapabilities = Field(default_factory=EnvironmentCapabilities)
+
+
+class PackageCandidateRead(BaseModel):
+    manager: Literal["pip", "apt"]
+    name: str
+    versions: list[str] = Field(default_factory=list)
+    description: str | None = None
+    compatible: bool | None = None
+    denied: bool = False
+    deny_reason: str | None = None
+    indexing: bool = False

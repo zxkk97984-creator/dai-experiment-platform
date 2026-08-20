@@ -1,7 +1,7 @@
 <script setup>
 // EnvironmentProfilePicker：教师环境选择共享组件（Phase 4 作业/Studio 使用）
 // 只显示 active 档位下的 available 版本——draft/building/failed/inactive 一律不可见
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { environmentsAPI } from '../../api/environments.js'
 
 const props = defineProps({
@@ -27,7 +27,26 @@ async function fetchOptions() {
   loadError.value = false
   try {
     const res = await environmentsAPI.listAvailable()
-    options.value = res.data || []
+    const available = res.data || []
+    let nextOptions = available
+    const selectedId = props.modelValue == null ? null : Number(props.modelValue)
+    if (
+      selectedId != null
+      && !Number.isNaN(selectedId)
+      && !available.some((opt) => Number(opt.environment_version_id) === selectedId)
+      && typeof environmentsAPI.getVersionSummary === 'function'
+    ) {
+      try {
+        const historical = await environmentsAPI.getVersionSummary(selectedId)
+        if (historical?.data?.environment_version_id) {
+          nextOptions = [...available, { ...historical.data, historical: true }]
+        }
+      } catch {
+        // A deleted/unavailable historical image should not prevent the
+        // ordinary current-version picker from loading.
+      }
+    }
+    options.value = nextOptions
     emit('loaded', options.value)
   } catch {
     loadError.value = true
@@ -39,7 +58,8 @@ async function fetchOptions() {
 function optionLabel(opt) {
   const pkgSummary = (opt.packages || []).map((p) => p.pip_name).join(' · ')
   const memory = props.showMemory && opt.minimum_memory_mb ? `（最低 ${opt.minimum_memory_mb} MB）` : ''
-  return `${opt.display_name} v${opt.version_number}${pkgSummary ? ` · ${pkgSummary}` : ''}${memory}`
+  const historical = opt.historical ? '（历史版本，仅供现有绑定）' : ''
+  return `${opt.display_name} v${opt.version_number}${historical}${pkgSummary ? ` · ${pkgSummary}` : ''}${memory}`
 }
 
 function onSelect(e) {
@@ -48,6 +68,16 @@ function onSelect(e) {
 }
 
 onMounted(fetchOptions)
+
+// Assignment/template data often arrives after the picker itself mounts.  A
+// later historical binding must still be appended without making the current
+// picker list stale.
+watch(
+  () => props.modelValue,
+  (value, previous) => {
+    if (value != null && value !== previous && !loading.value) fetchOptions()
+  },
+)
 
 defineExpose({ fetchOptions })
 </script>
@@ -62,7 +92,7 @@ defineExpose({ fetchOptions })
       @change="onSelect"
     >
       <option value="" disabled>{{ loading ? '加载中…' : placeholder }}</option>
-      <option v-for="opt in options" :key="opt.environment_version_id" :value="opt.environment_version_id">
+      <option v-for="opt in options" :key="opt.environment_version_id" :value="opt.environment_version_id" :disabled="opt.historical">
         {{ optionLabel(opt) }}
       </option>
     </select>

@@ -6,11 +6,17 @@ import { environmentsAPI } from '../../../api/environments.js'
 import { useAppStore } from '../../../stores/app.js'
 import { statusBadge } from '../../../utils/status.js'
 
+const props = defineProps({
+  readOnly: { type: Boolean, default: false },
+})
+
 const app = useAppStore()
 const packages = ref([])
 const loading = ref(true)
 const showCreate = ref(false)
 const editing = ref(null)
+const formError = ref('')
+const formFieldErrors = ref([])
 
 const SOURCE_MAP = { pypi: 'PyPI', pytorch_cpu: 'PyTorch CPU' }
 const PKG_STATUS_MAP = {
@@ -48,6 +54,8 @@ function parseList(value) {
 
 async function handleCreate() {
   if (!createForm.value.pip_name || !createForm.value.locked_version) return
+  formError.value = ''
+  formFieldErrors.value = []
   try {
     await environmentsAPI.createPackage({
       pip_name: createForm.value.pip_name,
@@ -61,7 +69,10 @@ async function handleCreate() {
     createForm.value = { pip_name: '', locked_version: '', import_names: '', category_tags: '', source_key: 'pypi' }
     fetch()
   } catch (e) {
-    app.showToast(e.response?.data?.detail?.message || '创建失败', 'error')
+    const detail = e.response?.data?.detail || {}
+    formError.value = detail.message || '创建失败'
+    formFieldErrors.value = detail.field_errors || []
+    app.showToast(formError.value, 'error')
   }
 }
 
@@ -113,14 +124,20 @@ onMounted(fetch)
   <div class="panel">
     <!-- ── 操作条 ─────────────────────────────────────────────────────── -->
     <div class="panel-bar">
-      <p class="panel-hint">受控包目录：包名、版本与 import 名严格校验；已引用包不可原地修改，需创建新目录版本。</p>
-      <button class="btn-primary create-pkg-btn" @click="showCreate = !showCreate">
+      <p class="panel-hint">受控包目录：{{ props.readOnly ? 'V2 兼容期只读审计入口。' : '包名、版本与 import 名严格校验；已引用包不可原地修改，需创建新目录版本。' }}</p>
+      <button v-if="!props.readOnly" class="btn-primary create-pkg-btn" @click="showCreate = !showCreate; formError = ''; formFieldErrors = []">
         {{ showCreate ? '取消' : '新建包' }}
       </button>
     </div>
 
     <!-- ── 新建包表单（只有元数据字段） ─────────────────────────────── -->
-    <div v-if="showCreate" class="card pkg-form">
+    <div v-if="showCreate && !props.readOnly" class="card pkg-form">
+      <div v-if="formError" class="form-error" role="alert">
+        <strong>{{ formError }}</strong>
+        <ul v-if="formFieldErrors.length">
+          <li v-for="field in formFieldErrors" :key="`${field.path}-${field.code}`">{{ field.path }}：{{ field.message }}</li>
+        </ul>
+      </div>
       <div class="form-grid">
         <div class="form-group">
           <label>包名 *</label>
@@ -152,7 +169,7 @@ onMounted(fetch)
     </div>
 
     <!-- ── 编辑面板 ──────────────────────────────────────────────────── -->
-    <div v-if="editing" class="card pkg-form">
+    <div v-if="editing && !props.readOnly" class="card pkg-form">
       <h3 class="form-title">编辑包：{{ editing.pip_name }}=={{ editing.locked_version }}</h3>
       <p v-if="editing.referenced" class="immutable-hint">
         ⚠️ 该包已被环境版本引用：修改将创建新目录版本，历史环境不变。
@@ -214,9 +231,9 @@ onMounted(fetch)
               </span>
             </td>
             <td class="actions-cell">
-              <button class="btn-ghost btn-sm edit-pkg-btn" @click="startEdit(pkg)">编辑</button>
+              <button v-if="!props.readOnly" class="btn-ghost btn-sm edit-pkg-btn" @click="startEdit(pkg)">编辑</button>
               <button
-                v-if="pkg.status === 'active'"
+                v-if="pkg.status === 'active' && !props.readOnly"
                 class="btn-sm deactivate-btn"
                 @click="handleDeactivate(pkg)"
               >停用</button>
@@ -235,6 +252,8 @@ onMounted(fetch)
 }
 .panel-hint { margin: 0; font-size: var(--text-xs); color: var(--muted); }
 .pkg-form { padding: 16px; }
+.form-error { margin-bottom: 12px; padding: 9px 11px; border-radius: var(--radius-control, 8px); background: color-mix(in srgb, var(--danger, #b42318) 12%, var(--surface)); color: var(--fg); font-size: var(--text-sm, 13px); }
+.form-error ul { margin: 5px 0 0; padding-left: 18px; }
 .form-title { margin: 0 0 8px; font-size: 15px; }
 .immutable-hint { margin: 0 0 12px; font-size: var(--text-sm); color: var(--warning, var(--warning)); }
 .immutable-hint.muted { color: var(--faint); }

@@ -845,10 +845,15 @@ def publish_template(
     if not template:
         raise api_error(404, "TEMPLATE_NOT_FOUND", "Notebook 模板不存在")
     require_manager(template, user)
-    # Phase 4 发布门禁：草稿环境必须 available（发布后绑定不可变，历史版本不更新）
-    from app.services.environment_service import validate_environment_selection
+    # The draft already owns an exact environment binding.  It may be a
+    # historical version after a profile publication/rollback, so publishing
+    # the notebook checks image availability without requiring the version to
+    # remain teacher-selectable.  Publish-time failures are state conflicts;
+    # actual preview/runtime failures keep the 503 runnable gate.
+    from app.services.environment_service import require_publishable_version
 
-    validate_environment_selection(db, template.draft_environment_version_id)
+    if template.draft_environment_version_id is not None:
+        require_publishable_version(db, template.draft_environment_version_id)
     latest = db.scalar(
         select(func.max(NotebookTemplateVersion.version_number)).where(
             NotebookTemplateVersion.template_id == template.id

@@ -31,7 +31,16 @@ def _normalize_detail(detail):
     if isinstance(detail, dict) and set(detail.keys()) == {"code", "message", "fields"}:
         return detail
     if isinstance(detail, dict) and "code" in detail and "message" in detail:
-        return {"code": detail["code"], "message": detail["message"], "fields": detail.get("fields", {})}
+        normalized = {
+            "code": detail["code"],
+            "message": detail["message"],
+            "fields": detail.get("fields", {}),
+        }
+        if "field_errors" in detail:
+            normalized["field_errors"] = detail["field_errors"]
+        if "retryable" in detail:
+            normalized["retryable"] = detail["retryable"]
+        return normalized
     if isinstance(detail, str):
         return {"code": "ERROR", "message": detail, "fields": {}}
     return {"code": "ERROR", "message": str(detail), "fields": {}}
@@ -139,9 +148,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(_: Request, exc: RequestValidationError):
+        field_errors = []
+        for error in exc.errors():
+            loc = [str(part) for part in error.get("loc", ()) if part != "body"]
+            path = ".".join(loc) or "request"
+            message = str(error.get("msg", "请求字段无效")).removeprefix("Value error, ")
+            # Pydantic model-level validators report the package item as the
+            # location.  Point the admin editor at the actual editable field
+            # so its inline error can focus the right input.
+            if path.startswith("requested_spec.python_packages.") and path.count(".") == 2:
+                if "包名" in message:
+                    path += ".name"
+                elif "版本" in message:
+                    path += ".version"
+                elif "import" in message:
+                    path += ".import_names"
+            elif path.startswith("requested_spec.system_packages.") and path.count(".") == 2:
+                path += ".name" if "包名" in message else ".version"
+            if path == "python_version":
+                code = "PYTHON_VERSION_UNSUPPORTED"
+            elif path.startswith("requested_spec.system_packages.") or "系统包" in message:
+                code = "APT_PACKAGE_DENIED" if "禁止" in message else "PACKAGE_NAME_INVALID"
+            elif path.startswith("requested_spec.python_packages.") or "python 包" in message:
+                code = "PACKAGE_NAME_INVALID"
+            else:
+                # Keep the legacy 422 contract for every non-environment
+                # request while exposing structured V2 field details above.
+                code = "VALIDATION_ERROR"
+            field_errors.append({"path": path, "code": code, "message": message})
         return JSONResponse(
             status_code=422,
-            content={"detail": {"code": "VALIDATION_ERROR", "message": "请求参数校验失败", "fields": {"errors": [str(e) for e in exc.errors()]}}},
+            content={
+                "detail": {
+                    "code": field_errors[0]["code"] if len(field_errors) == 1 else "VALIDATION_ERROR",
+                    "message": "请求参数校验失败",
+                    "fields": {"errors": [str(e) for e in exc.errors()]},
+                    "field_errors": field_errors,
+                    "retryable": False,
+                }
+            },
         )
 
     @app.exception_handler(StarletteHTTPException)

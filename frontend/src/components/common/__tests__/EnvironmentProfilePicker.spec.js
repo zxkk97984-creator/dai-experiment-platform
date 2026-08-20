@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
 vi.mock('../../../api/environments', () => ({
-  environmentsAPI: { listAvailable: vi.fn() },
+  environmentsAPI: { listAvailable: vi.fn(), getVersionSummary: vi.fn() },
 }))
 
 import { environmentsAPI } from '../../../api/environments.js'
@@ -77,6 +77,23 @@ describe('EnvironmentProfilePicker 教师环境选择', () => {
     const wrapper = mountPicker(20)
     await flushPromises()
     expect(wrapper.find('select').element.value).toBe('20')
+  })
+
+  it('已有绑定版本不在 available 时补充历史只读选项', async () => {
+    environmentsAPI.listAvailable.mockResolvedValue({ data: [availableOptions[1]] })
+    environmentsAPI.getVersionSummary.mockResolvedValue({
+      data: {
+        ...availableOptions[0],
+        environment_version_id: 10,
+      },
+    })
+    const wrapper = mountPicker(10)
+    await flushPromises()
+    const historical = wrapper.findAll('option').find((option) => option.element.value === '10')
+    expect(environmentsAPI.getVersionSummary).toHaveBeenCalledWith(10)
+    expect(historical.text()).toContain('历史版本，仅供现有绑定')
+    expect(historical.attributes('disabled')).toBeDefined()
+    expect(wrapper.find('select').element.value).toBe('10')
   })
 
   it('选择后 emit update:modelValue', async () => {

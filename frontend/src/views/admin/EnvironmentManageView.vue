@@ -1,18 +1,29 @@
 <script setup>
 // 环境档位管理（管理员）——一个页面三个 tab：
 // 环境档位（档位 + 不可变版本）/ 构建任务（轮询 + 脱敏日志 + 重试）/ 库清单（受控包目录）
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import ProfilePanel from '../../components/admin/environment/ProfilePanel.vue'
 import BuildTaskPanel from '../../components/admin/environment/BuildTaskPanel.vue'
 import PackageCatalogPanel from '../../components/admin/environment/PackageCatalogPanel.vue'
 
-const tabs = [
+const allTabs = [
   { key: 'profiles', label: '环境档位' },
   { key: 'builds', label: '构建任务' },
   { key: 'packages', label: '库清单' },
 ]
+const showLegacyTabs = ref(true)
+const tabs = computed(() => allTabs.map((tab) => (
+  tab.key === 'packages' && !showLegacyTabs.value
+    ? { ...tab, label: '库清单（审计）' }
+    : tab
+)))
 const activeTab = ref('profiles')
+
+function handleV2Detected() {
+  showLegacyTabs.value = false
+  activeTab.value = 'profiles'
+}
 </script>
 
 <template>
@@ -39,9 +50,9 @@ const activeTab = ref('profiles')
       </div>
 
       <!-- ── Tab panels（v-if：切换即卸载，构建轮询随组件销毁停止） ──── -->
-      <ProfilePanel v-if="activeTab === 'profiles'" />
+      <ProfilePanel v-if="activeTab === 'profiles'" @v2-detected="handleV2Detected" />
       <BuildTaskPanel v-else-if="activeTab === 'builds'" />
-      <PackageCatalogPanel v-else-if="activeTab === 'packages'" />
+      <PackageCatalogPanel v-else-if="activeTab === 'packages'" :read-only="!showLegacyTabs" />
     </div>
   </AppLayout>
 </template>

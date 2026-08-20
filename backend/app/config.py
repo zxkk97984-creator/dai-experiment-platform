@@ -124,14 +124,28 @@ class Settings(BaseSettings):
                 "DAI_JUDGE_HOST_WORK_DIR 未设置，生产环境判题容器无法挂载宿主机工作目录"
             )
 
-        # 环境档位基础镜像——生产必须使用带 digest 的引用（供应链可复现，拒绝可变标签）
-        if not re.fullmatch(
+        # V1 环境档位基础镜像——V2 使用逐 Python 版本的 digest 映射，
+        # 因此开启 V2 后旧的单一配置只作为兼容字段，不再阻止启动。
+        if not self.environment_editor_v2_enabled and not re.fullmatch(
             r"[^\s@]+@sha256:[0-9a-f]{64}", self.env_base_image
         ):
             errors.append(
                 "DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的基础镜像引用"
                 f"（当前: {self.env_base_image}），拒绝可变标签"
             )
+
+        if self.environment_editor_v2_enabled:
+            supported = {"3.10", "3.11", "3.12"}
+            if set(self.env_python_base_images) != supported:
+                errors.append(
+                    "DAI_ENV_PYTHON_BASE_IMAGES 必须恰好配置 3.10、3.11、3.12"
+                )
+            for python_version, image_ref in self.env_python_base_images.items():
+                if not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", image_ref):
+                    errors.append(
+                        "DAI_ENV_PYTHON_BASE_IMAGES["
+                        f"{python_version}] 必须是带 @sha256: digest 的基础镜像引用"
+                    )
 
         if errors:
             raise ValueError("生产环境配置校验失败:\n  - " + "\n  - ".join(errors))
@@ -161,7 +175,9 @@ class Settings(BaseSettings):
     # 此时客户端 IP 取 X-Forwarded-For 最右一跳，否则使用直连地址。
     trusted_proxy: bool = False
 
-    # ── 环境档位控制面（Phase 1） ──────────────────────────────
+    # ── 环境档位控制面（Phase 1 / V2） ────────────────────────
+    # V2 默认关闭：先部署 additive schema、API 和 Worker，再通过配置切换。
+    environment_editor_v2_enabled: bool = False
     env_build_queue_name: str = "environment:build:queue"
     env_build_timeout_seconds: int = Field(default=3600, ge=60, le=86400)
     env_image_repository: str = "dai-env"
@@ -169,6 +185,34 @@ class Settings(BaseSettings):
     env_build_log_max_bytes: int = Field(default=60 * 1024, ge=1024, le=1024 * 1024)
     # 本地开发：pip 镜像源（国内网络直连 PyPI 不稳定；构建环境镜像时注入 --index-url）
     env_pip_index_url: str | None = None
+    # V2：每个受支持的 Python 小版本均使用平台固定的基础镜像引用。
+    # 开发默认使用可读标签；生产且 V2 开启时由 model_validator 强制 digest。
+    env_python_base_images: dict[str, str] = Field(
+        default_factory=lambda: {
+            "3.10": "python:3.10-slim-bookworm",
+            "3.11": "python:3.11-slim-bookworm",
+            "3.12": "python:3.12-slim-bookworm",
+        }
+    )
+    # 按 Python 基础镜像绑定的 Debian 快照源。构建器只读取配置，
+    # 管理员不能通过请求传入源地址。
+    env_apt_snapshot_sources: dict[str, list[str]] = Field(default_factory=dict)
+    env_platform_python_packages: dict[str, str] = Field(
+        default_factory=lambda: {"ipykernel": "6.29.5", "pytest": "8.3.4"}
+    )
+    env_platform_bundle_version: str = "v1"
+    env_build_network_mode: Literal["default", "host"] = "default"
+    env_build_http_proxy: str | None = None
+    env_apt_deny_patterns: list[str] = Field(
+        default_factory=lambda: [
+            r"^(docker|containerd|podman)(?:-.*)?$",
+            r"^(systemd|sysvinit|openrc)(?:-.*)?$",
+            r"^(sudo|doas|policykit-1)(?:-.*)?$",
+            r"^(openssh-server|dropbear)(?:-.*)?$",
+            r"^(linux-image|linux-headers|iptables|nftables|ufw)(?:-.*)?$",
+        ]
+    )
+    env_build_max_image_bytes: int = Field(default=20 * 1024 * 1024 * 1024, ge=1)
 
 
 @lru_cache

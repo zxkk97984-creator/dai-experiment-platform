@@ -558,7 +558,9 @@ def test_seed_enqueue_is_idempotent(db_session_factory, test_settings, redis_cli
 def test_seed_skips_available_versions(db_session_factory, test_settings, redis_client):
     with db_session_factory() as db:
         seed_environment_catalog(db, test_settings)
-        basic = db.query(EnvironmentVersion).join(EnvironmentProfile).filter(
+        basic = db.query(EnvironmentVersion).join(
+            EnvironmentProfile, EnvironmentProfile.id == EnvironmentVersion.profile_id
+        ).filter(
             EnvironmentProfile.slug == "basic"
         ).one()
         basic.status = "available"

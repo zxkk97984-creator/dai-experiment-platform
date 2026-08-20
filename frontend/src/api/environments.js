@@ -21,11 +21,35 @@ export const environmentsAPI = {
   listProfiles() {
     return client.get('/environments/profiles')
   },
+  getEditorOptions() {
+    return client.get('/environments/editor-options')
+  },
+  getBuildReadiness() {
+    return client.get('/environments/build-readiness')
+  },
   createProfile(data) {
     return client.post('/environments/profiles', data)
   },
   updateProfile(id, data) {
     return client.patch(`/environments/profiles/${id}`, data)
+  },
+  getProfile(id) {
+    return client.get(`/environments/profiles/${id}`)
+  },
+  createDraft(id) {
+    return client.post(`/environments/profiles/${id}/draft`)
+  },
+  getDraft(id) {
+    return client.get(`/environments/profiles/${id}/draft`)
+  },
+  saveDraft(id, data) {
+    return client.put(`/environments/profiles/${id}/draft`, data)
+  },
+  abandonDraft(id, revision) {
+    return client.delete(`/environments/profiles/${id}/draft`, { params: { expected_revision: revision } })
+  },
+  buildDraft(id) {
+    return client.post(`/environments/profiles/${id}/draft/builds`)
   },
   listVersions(profileId) {
     return client.get(`/environments/profiles/${profileId}/versions`)
@@ -50,9 +74,18 @@ export const environmentsAPI = {
   retryBuild(jobId) {
     return client.post(`/environments/builds/${jobId}/retry`)
   },
+  publish(profileId, data) {
+    return client.post(`/environments/profiles/${profileId}/publications`, data)
+  },
+  listPackageCandidates(params) {
+    return client.get('/environments/package-candidates', { params })
+  },
 
   // ── 教师可用环境 ──
   listAvailable() {
     return client.get('/environments/available')
+  },
+  getVersionSummary(versionId) {
+    return client.get(`/environments/versions/${versionId}/summary`)
   },
 }

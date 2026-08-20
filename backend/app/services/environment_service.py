@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -37,24 +38,32 @@ def get_packages_for_version(db: Session, version_id: int) -> list[PackageCatalo
 
 
 def current_available_version(db: Session, profile_slug: str) -> EnvironmentVersion | None:
-    """档位当前可用版本——版本号最大的 available 版本（不引入循环 current_version_id 外键）"""
+    """档位当前可用版本；legacy profiles retain the old max-version fallback."""
+    profile = db.scalar(select(EnvironmentProfile).where(EnvironmentProfile.slug == profile_slug))
+    if profile is None:
+        return None
+    if profile.current_version_id is not None:
+        version = db.get(EnvironmentVersion, profile.current_version_id)
+        return (
+            version
+            if version is not None and version.status == "available" and version.image_digest
+            else None
+        )
     return db.scalar(
         select(EnvironmentVersion)
-        .join(EnvironmentProfile, EnvironmentProfile.id == EnvironmentVersion.profile_id)
-        .where(
-            EnvironmentProfile.slug == profile_slug,
-            EnvironmentVersion.status == "available",
-        )
+        .where(EnvironmentVersion.profile_id == profile.id, EnvironmentVersion.status == "available")
         .order_by(EnvironmentVersion.version_number.desc())
         .limit(1)
     )
 
 
 def require_available_version(db: Session, version_id: int) -> EnvironmentVersion:
-    """运行链路校验：版本必须存在、available、所属档位未停用。
+    """Backward-compatible name for the teacher-selectable gate."""
+    return require_teacher_selectable_version(db, version_id)
 
-    版本缺失/未构建/档位停用 → VERSION_NOT_AVAILABLE。
-    """
+
+def require_teacher_selectable_version(db: Session, version_id: int) -> EnvironmentVersion:
+    """New environment selection gate: active profile + current pointer."""
     version = db.get(EnvironmentVersion, version_id)
     if version is None:
         raise api_error(404, "VERSION_NOT_AVAILABLE", "环境版本不存在")
@@ -63,20 +72,42 @@ def require_available_version(db: Session, version_id: int) -> EnvironmentVersio
     profile = db.get(EnvironmentProfile, version.profile_id)
     if profile is None or profile.status != "active":
         raise api_error(409, "VERSION_NOT_AVAILABLE", "环境档位已停用")
+    if profile.current_version_id is not None and profile.current_version_id != version.id:
+        raise api_error(409, "VERSION_NOT_AVAILABLE", "该版本已不是环境当前发布版本")
+    return version
+
+
+def require_runnable_version(db: Session, version_id: int) -> EnvironmentVersion:
+    """Historical binding gate: image availability only; profile may be archived."""
+
+    version = db.get(EnvironmentVersion, version_id)
+    if version is None:
+        raise api_error(503, "ENVIRONMENT_IMAGE_MISSING", "运行环境版本不存在")
+    if version.status != "available" or not version.image_digest:
+        raise api_error(503, "ENVIRONMENT_IMAGE_MISSING", "运行环境镜像暂不可用")
     return version
 
 
 def list_available_options(db: Session) -> list[EnvironmentOptionRead]:
     """教师可用环境列表——active profile 下所有 available 版本，按档位排序。"""
-    versions = db.scalars(
-        select(EnvironmentVersion)
-        .join(EnvironmentProfile, EnvironmentProfile.id == EnvironmentVersion.profile_id)
-        .where(
-            EnvironmentProfile.status == "active",
-            EnvironmentVersion.status == "available",
-        )
-        .order_by(EnvironmentProfile.slug, EnvironmentVersion.version_number.desc())
+    profiles = db.scalars(
+        select(EnvironmentProfile).where(EnvironmentProfile.status == "active").order_by(EnvironmentProfile.slug)
     ).all()
+    versions = []
+    for profile in profiles:
+        if profile.current_version_id is not None:
+            version = db.get(EnvironmentVersion, profile.current_version_id)
+            if version is not None and version.status == "available" and version.image_digest:
+                versions.append(version)
+        else:
+            version = db.scalar(
+                select(EnvironmentVersion)
+                .where(EnvironmentVersion.profile_id == profile.id, EnvironmentVersion.status == "available")
+                .order_by(EnvironmentVersion.version_number.desc())
+                .limit(1)
+            )
+            if version is not None:
+                versions.append(version)
 
     options: list[EnvironmentOptionRead] = []
     for version in versions:
@@ -481,7 +512,27 @@ def resolve_basic_available_version(db: Session) -> EnvironmentVersion | None:
 def validate_environment_selection(db: Session, env_id: int | None) -> None:
     """教师选择环境时的可用性校验——非 None 时必须是 available（VERSION_NOT_AVAILABLE）。"""
     if env_id is not None:
-        require_available_version(db, env_id)
+        require_teacher_selectable_version(db, env_id)
+
+
+def require_publishable_version(db: Session, version_id: int) -> EnvironmentVersion:
+    """Publish-time gate with a client-facing state-conflict status.
+
+    Runtime consumers use ``require_runnable_version`` and deliberately receive
+    503 when an image is unavailable.  Publishing is an administrator/teacher
+    state transition instead, so the same unavailable version is reported as a
+    409 conflict without weakening the historical runtime gate.
+    """
+    try:
+        return require_runnable_version(db, version_id)
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            raise api_error(
+                409,
+                "VERSION_NOT_AVAILABLE",
+                "环境版本尚未构建完成，暂不可发布",
+            ) from exc
+        raise
 
 
 def validate_publish_gate(
@@ -491,13 +542,12 @@ def validate_publish_gate(
 ) -> None:
     """作业发布门禁（Phase 4）：
 
-    - 作业默认环境必须 available；
-    - 题目覆盖环境必须 available；
+    - 作业默认环境与题目覆盖环境必须仍有可运行镜像；
     - 题目 memory_limit_mb 不得低于有效环境 minimum_memory_mb（MEMORY_BELOW_ENV_MIN）。
     未绑定环境（存量/测试库无种子）的记录跳过校验，保持既有发布行为不变。
     """
     if assignment.environment_version_id is not None:
-        require_available_version(db, assignment.environment_version_id)
+        require_publishable_version(db, assignment.environment_version_id)
     for question in questions:
         env_id = (
             question.environment_version_id
@@ -506,7 +556,7 @@ def validate_publish_gate(
         )
         if env_id is None:
             continue
-        version = require_available_version(db, env_id)
+        version = require_publishable_version(db, env_id)
         if question.memory_limit_mb < version.minimum_memory_mb:
             raise api_error(
                 409,
@@ -527,16 +577,14 @@ def resolve_run_image_ref(db: Session, version_id: int) -> str:
     禁止回退到 `dai-env-<slug>:vN` 标签（计划 2.3 Digest 语义）。
     版本缺失 / 未构建 / 档位停用 → ENVIRONMENT_IMAGE_MISSING（fail closed，不扣分）。
     """
-    version = db.get(EnvironmentVersion, version_id)
-    if version is None or version.status != "available" or not version.image_digest:
+    try:
+        version = require_runnable_version(db, version_id)
+    except HTTPException as exc:
         raise api_error(
             503,
             "ENVIRONMENT_IMAGE_MISSING",
             "运行环境暂不可用，本次提交不会扣分，请稍后重试",
-        )
-    profile = db.get(EnvironmentProfile, version.profile_id)
-    if profile is None or profile.status != "active":
-        raise api_error(503, "ENVIRONMENT_IMAGE_MISSING", "运行环境暂不可用，本次提交不会扣分，请稍后重试")
+        ) from exc
     return version.image_digest
 
 
@@ -545,6 +593,11 @@ def installed_imports_for_version(db: Session, version_id: int) -> set[str]:
 
     用于 classify_imports 的 installed_imports 参数（教学反馈，不是安全边界）。
     """
+    version = db.get(EnvironmentVersion, version_id)
+    resolved = version.resolved_spec if version and isinstance(version.resolved_spec, dict) else {}
+    resolved_imports = resolved.get("import_names")
+    if isinstance(resolved_imports, list):
+        return {str(name) for name in resolved_imports if str(name).strip()}
     return {
         name
         for pkg in get_packages_for_version(db, version_id)
@@ -577,10 +630,10 @@ def public_environment_summary(
     if version_id is None:
         return None
     version = db.get(EnvironmentVersion, version_id)
-    if version is None or version.status != "available":
+    if version is None or version.status != "available" or not version.image_digest:
         return None
     profile = db.get(EnvironmentProfile, version.profile_id)
-    if profile is None or profile.status != "active":
+    if profile is None:
         return None
     if policy is None:
         policy = ImportPolicy(mode="unrestricted")
