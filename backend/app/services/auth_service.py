@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.errors import api_error
 from app.models import User
+from app.roles import is_supported_role
 from app.schemas import TokenResponse
 from app.security import create_token, decode_token, token_ttl_seconds, verify_password
 
@@ -74,10 +75,14 @@ def authenticate_user(db: Session, username: str, password: str) -> User:
     user = db.scalar(select(User).where(User.username == username))
     if not user or user.status != "active" or not verify_password(password, user.password_hash):
         raise api_error(401, "INVALID_CREDENTIALS", "用户名或密码错误")
+    if not is_supported_role(user.role):
+        raise api_error(403, "ROLE_NOT_SUPPORTED", "账号角色不受支持，请联系管理员")
     return user
 
 
 def issue_token_pair(user: User, redis_client, settings: Settings) -> TokenResponse:
+    if not is_supported_role(user.role):
+        raise api_error(403, "ROLE_NOT_SUPPORTED", "账号角色不受支持，请联系管理员")
     access_token = create_token(
         subject=user.id,
         role=user.role,
@@ -128,6 +133,8 @@ def refresh_token_pair(db: Session, refresh_token: str, redis_client, settings: 
     user = db.get(User, int(user_id))
     if not user or user.status != "active":
         raise api_error(401, "USER_NOT_ACTIVE", "用户不存在或已禁用")
+    if not is_supported_role(user.role):
+        raise api_error(403, "ROLE_NOT_SUPPORTED", "账号角色不受支持，请联系管理员")
     _ensure_session_version(payload, user)
     return issue_token_pair(user, redis_client, settings)
 

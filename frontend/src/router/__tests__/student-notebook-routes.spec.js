@@ -11,14 +11,4 @@ describe('student notebook routes', () => {
     expect(route).toBeDefined()
     expect(route.meta.role).toBe('student')
   })
-
-  it('provides a dedicated developer template route', () => {
-    const route = router.getRoutes().find(
-      candidate => candidate.name === 'DeveloperTemplates',
-    )
-
-    expect(route).toBeDefined()
-    expect(route.path).toBe('/developer/templates')
-    expect(route.meta.role).toBe('developer')
-  })
 })

@@ -76,7 +76,6 @@ async function handleSave() {
             <option value="student">学生</option>
             <option value="teacher">教师</option>
             <option value="admin">管理员</option>
-            <option value="developer">开发者</option>
           </select>
         </div>
         <div class="form-group">

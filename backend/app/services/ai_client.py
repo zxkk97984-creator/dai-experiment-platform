@@ -18,11 +18,13 @@ _RETRYABLE_HTTP_STATUS = {429, 500, 502, 503, 504}
 _NON_RETRYABLE_HTTP_STATUS = {401, 403}
 
 # TASK-028/F-22：各操作 completion 预算（max_tokens）——防止无界输出与成本失控。
+# 注意：deepseek-v4-flash 是 reasoning 模型，reasoning_content 与最终 content
+# 共用 max_tokens；预算必须给两者同时留空间，否则会出现“推理耗尽 token、content 为空”。
 # 新操作必须在此登记预算后才能调用 chat_json（未知操作 fail-closed）。
 OPERATION_MAX_TOKENS: dict[str, int] = {
     "ai_grading": 1500,             # 单份作业/考试提交评分
     "rubric_generation": 2000,      # Rubric 生成（教师触发/发布门禁）
-    "test_group_generation": 3000,  # 测试组生成（最高成本：F/R 用例代码）
+    "test_group_generation": 12000, # 测试组生成（推理 + F/R 用例代码，成本最高）
 }
 
 
@@ -108,6 +110,22 @@ class DeepSeekClient:
         if max_tokens is None:
             raise ValueError(f"AI 操作 {operation!r} 未登记 completion 预算（OPERATION_MAX_TOKENS）")
 
+        # 每操作超时/重试覆盖。测试组生成是同步教师请求：单次放宽到 120s，
+        # 模型层不自动重试（业务层还有一次修复生成），避免 60s×4 次重试把
+        # 请求拖到前端超时之后。
+        operation_timeouts: dict[str, float] = {
+            "test_group_generation": self._settings.ai_test_group_timeout_seconds,
+        }
+        operation_max_retries: dict[str, int] = {
+            "test_group_generation": self._settings.ai_test_group_max_retries,
+        }
+        timeout_seconds = operation_timeouts.get(
+            operation, self._settings.ai_timeout_seconds
+        )
+        max_attempts = 1 + operation_max_retries.get(
+            operation, self._settings.ai_max_retries
+        )
+
         request_id = uuid.uuid4().hex[:12]
         payload = {
             "model": self._settings.ai_model,
@@ -122,15 +140,17 @@ class DeepSeekClient:
         }
 
         last_error: Exception | None = None
-        max_attempts = 1 + self._settings.ai_max_retries
 
-        for attempt in range(1, max_attempts + 1):
+        attempt = 0
+        while attempt < max_attempts:
+            attempt += 1
             start = time.monotonic()
             try:
                 response = self._client.post(
                     self._endpoint,
                     headers=headers,
                     json=payload,
+                    timeout=httpx.Timeout(timeout_seconds),
                 )
                 elapsed = time.monotonic() - start
 
@@ -138,6 +158,8 @@ class DeepSeekClient:
                 if response.status_code == 400 and payload.get("response_format") is not None:
                     logger.warning("AI 不支持 response_format，降级重试")
                     del payload["response_format"]
+                    # 兼容性降级不占业务重试预算：允许在 max_retries=0 时再发一次
+                    max_attempts += 1
                     continue
 
                 if response.status_code in _NON_RETRYABLE_HTTP_STATUS:
@@ -160,6 +182,7 @@ class DeepSeekClient:
                 data = response.json()
 
                 usage = data.get("usage") or {}
+                choices = data.get("choices", [])
                 logger.info(
                     "ai_chat_completed",
                     extra={
@@ -167,6 +190,8 @@ class DeepSeekClient:
                         "operation": operation,
                         "model": self._settings.ai_model,
                         "status": response.status_code,
+                        "finish_reason": choices[0].get("finish_reason")
+                        if choices else None,
                         "elapsed_ms": round(elapsed * 1000),
                         "attempts": attempt,
                         # TASK-028：usage 缺失时记录 None，不阻断核算
@@ -187,7 +212,6 @@ class DeepSeekClient:
                     except Exception:  # 指标路径绝不阻断业务
                         logger.debug("AI 指标回调失败（忽略）", exc_info=True)
 
-                choices = data.get("choices", [])
                 if not choices:
                     raise AIServiceError(
                         "empty_choices",
@@ -195,7 +219,17 @@ class DeepSeekClient:
                         retryable=True,
                     )
 
-                content = choices[0]["message"]["content"]
+                message = choices[0].get("message") or {}
+                content = message.get("content")
+                if not isinstance(content, str) or not content.strip():
+                    finish_reason = choices[0].get("finish_reason")
+                    hint = "（finish_reason=length，reasoning token 可能耗尽预算）" if finish_reason == "length" else ""
+                    raise AIServiceError(
+                        "bad_json",
+                        f"AI 返回空 content{hint}",
+                        retryable=True,
+                    )
+
                 return extract_json_object(content)
 
             except AIServiceError as exc:

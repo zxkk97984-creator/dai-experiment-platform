@@ -101,8 +101,8 @@ def test_kernel_dod_mounts_use_docker_host_paths():
         km.create_session(7, "")
 
     run_call = next(
-        call for call in mock_run.call_args_list
-        if len(call[0][0]) > 2 and call[0][0][1] == "run"
+        call_item for call_item in mock_run.call_args_list
+        if len(call_item[0][0]) > 2 and call_item[0][0][1] == "run"
     )
     argv = run_call[0][0]
     assert "/host/dai/judge-work/kernels/kernel-rec-7.json:/tmp/conn.json:ro" in argv
@@ -118,8 +118,8 @@ def test_kernel_connection_file_is_readable_by_sandbox_user(tmp_path):
         conn_path, _ = km._generate_conn_file(8)
 
     assert any(
-        call.args == (conn_path, 0o644)
-        for call in chmod.call_args_list
+        call_item.args == (conn_path, 0o644)
+        for call_item in chmod.call_args_list
     ), "连接文件必须 chmod 0644 后再挂载给非 root Kernel"
 
 

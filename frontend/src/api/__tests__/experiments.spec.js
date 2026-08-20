@@ -24,6 +24,12 @@ describe('experimentsAPI module mutations', () => {
     expect(client.post).toHaveBeenCalledWith('/experiments/modules', payload)
   })
 
+  it('initializes a legacy module notebook with POST', () => {
+    experimentsAPI.ensureModuleTemplate(42)
+
+    expect(client.post).toHaveBeenCalledWith('/experiments/modules/42/template')
+  })
+
   it('queries the student catalog with server-side controls', () => {
     const params = { q: 'Python', status: 'started', sort: 'recent_desc', page: 2, page_size: 10 }
 

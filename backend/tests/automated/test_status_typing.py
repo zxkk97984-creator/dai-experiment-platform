@@ -55,8 +55,12 @@ def test_lesson_schemas_typed():
 def test_user_schemas_typed():
     UserCreate(username="u", password="Passw0rd!", real_name="U", role="student", status="disabled")
     with pytest.raises(ValidationError):
+        UserCreate(username="u", password="Passw0rd!", real_name="U", role="legacy")
+    with pytest.raises(ValidationError):
         UserCreate(username="u", password="Passw0rd!", real_name="U", role="student", status="banned")
     UserUpdate(status="active")
+    with pytest.raises(ValidationError):
+        UserUpdate(role="legacy")
     with pytest.raises(ValidationError):
         UserUpdate(status="pending")
     with pytest.raises(ValidationError):

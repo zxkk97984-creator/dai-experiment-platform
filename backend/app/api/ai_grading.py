@@ -48,7 +48,7 @@ def _teacher_or_admin(user: User):
 @router.get("/status", response_model=AIServiceStatus)
 def ai_service_status(
     settings: Settings = Depends(get_settings),
-    _: User = Depends(require_roles("admin", "teacher", "developer")),
+    _: User = Depends(require_roles("admin", "teacher")),
 ):
     """TASK-020：AI 服务状态——前端据此显示禁用提示（enabled=开关，ready=开关+Key 齐备）。"""
     return AIServiceStatus(enabled=settings.ai_enabled, ready=settings.ai_ready)

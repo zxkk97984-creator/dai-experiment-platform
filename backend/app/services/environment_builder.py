@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import tempfile
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from app.config import Settings
 from app.models import EnvironmentVersion, PackageCatalog
@@ -273,6 +276,66 @@ def truncate_build_log(text: str, max_bytes: int) -> str:
 
 _BUILD_LEASE_SECONDS = 60
 
+_LOOPBACK_PROXY_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_PROXY_ENV_PAIRS = (
+    ("HTTP_PROXY", "http_proxy"),
+    ("HTTPS_PROXY", "https_proxy"),
+    ("ALL_PROXY", "all_proxy"),
+)
+
+
+def _proxy_uses_loopback(proxy_url: str) -> bool:
+    """判断代理是否指向宿主机 loopback 地址。
+
+    Docker build 在 Linux 上运行于独立网络命名空间，``127.0.0.1`` 指向构建
+    容器自身，而不是启动 Worker 的宿主机。无效 URL 和空值按非 loopback 处理，
+    避免改变正常的代理配置。
+    """
+    if not proxy_url:
+        return False
+    try:
+        parsed = urlsplit(proxy_url)
+        hostname = (parsed.hostname or "").lower()
+    except ValueError:
+        return False
+    return hostname in _LOOPBACK_PROXY_HOSTS
+
+
+def _docker_build_proxy_args(env: Mapping[str, str] | None = None) -> list[str]:
+    """生成 Docker build 的代理参数，修复 Linux 上的 loopback 代理不可达问题。
+
+    Docker CLI 还会从 ``~/.docker/config.json`` 注入 proxy build args。显式传入
+    同名的大小写参数，确保当前 Worker 进程发现的宿主机代理覆盖配置文件中的
+    旧值。若代理只监听宿主机 loopback，则构建阶段使用 host network；运行时
+    smoke 仍保持 ``--network none``，不扩大环境镜像的运行时网络权限。
+    """
+    source = os.environ if env is None else env
+    proxy_values: dict[str, str] = {}
+    rewrote_loopback = False
+    for upper, lower in _PROXY_ENV_PAIRS:
+        raw = source.get(upper) or source.get(lower)
+        if not raw:
+            continue
+        changed = _proxy_uses_loopback(raw)
+        rewrote_loopback = rewrote_loopback or changed
+        # host network 让 RUN 内的 127.0.0.1 指向宿主机代理；不能改成
+        # host.docker.internal，因为当前 Linux 代理只监听 127.0.0.1。
+        proxy_values[upper] = raw
+        proxy_values[lower] = raw
+
+    if not rewrote_loopback:
+        return []
+
+    raw_no_proxy = source.get("NO_PROXY") or source.get("no_proxy")
+    if raw_no_proxy:
+        proxy_values["NO_PROXY"] = raw_no_proxy
+        proxy_values["no_proxy"] = raw_no_proxy
+
+    args = ["--network=host"]
+    for key, value in proxy_values.items():
+        args.extend(["--build-arg", f"{key}={value}"])
+    return args
+
 
 def _docker_build(
     temp_tag: str,
@@ -284,6 +347,7 @@ def _docker_build(
     """docker build（argv 调用，禁止 shell）——流式日志，超时抛 BuildTimeout"""
     argv = [
         "docker", "build",
+        *_docker_build_proxy_args(),
         "-t", temp_tag,
         "-f", str(dockerfile_path),
         str(context_dir),

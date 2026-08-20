@@ -92,7 +92,7 @@ def list_exams(
     elif current_user.role == "teacher":
         query = query.join(Course, Exam.course_id == Course.id).where(Course.teacher_id == current_user.id)
     elif current_user.role != "admin":
-        # developer or any unsupported role: empty
+        # Any unsupported role: empty
         query = query.where(Exam.id == -1)
     # TASK-022：窗口函数一次取回总数，避免额外的 count 查询；
     # joinedload 预取 course，避免逐项惰性加载
@@ -1029,8 +1029,8 @@ def get_questions(exam_id: int, db: Session = Depends(get_db), current_user: Use
         course = db.get(Course, exam.course_id)
         if not course or course.teacher_id != current_user.id:
             raise api_error(403, "FORBIDDEN", "无权查看该考试题目")
-    elif current_user.role == "developer":
-        # 开发者无权查看考试题目
+    elif current_user.role not in ("admin",):
+        # Unsupported roles cannot inspect exam questions.
         raise api_error(403, "FORBIDDEN", "无权查看考试题目")
     # admin 可以查看全部
 

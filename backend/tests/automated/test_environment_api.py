@@ -345,6 +345,8 @@ def test_create_build_job_enqueues_redis(client, db_session_factory, redis_clien
     queue = redis_client.lrange("environment:build:queue", 0, -1)
     assert len(queue) == 1
     assert f'"version_id": {ver["id"]}' in queue[0]
+    with db_session_factory() as db:
+        assert db.get(EnvironmentVersion, ver["id"]).status == "queued"
 
 
 def test_create_build_available_version_rejected(client, db_session_factory, redis_client):
@@ -423,6 +425,8 @@ def test_retry_failed_build(client, db_session_factory, redis_client):
     assert new_job["status"] == "queued"
     assert new_job["attempt_number"] == 2
     assert new_job["retry_of_id"] == job["id"]
+    with db_session_factory() as db:
+        assert db.get(EnvironmentVersion, ver["id"]).status == "queued"
     # 重试也会重新入队唤醒
     queue = redis_client.lrange("environment:build:queue", 0, -1)
     assert len(queue) == 2

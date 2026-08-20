@@ -32,10 +32,23 @@ def _course_scope(db: Session, user: User) -> list[int] | None:
     return ids
 
 
+def _teacher_scope(db: Session, user: User) -> list:
+    """教师课程范围过滤条件：无课程时 in_([]) 恒假 → 零结果（fail-closed）；管理员不过滤。"""
+    course_ids = _course_scope(db, user)
+    return [Course.id.in_(course_ids)] if course_ids is not None else []
+
+
 def _experiment_stmt(db: Session, user: User):
-    course_ids = _teacher_course_ids(db, user) if user.role == "teacher" else None
-    scope = [Course.id.in_(course_ids)] if course_ids else []
-    return (
+    # 教师可见：自己课程的课时实验（lesson→chapter→course 链路）+
+    # 自己创建的实验模块（module 链路，无课程归属，course 链全 NULL）。
+    # 曾仅按 Course 过滤，模块实验提交被整体排除；管理员不过滤。
+    scope = None
+    if user.role == "teacher":
+        scope = or_(
+            Course.id.in_(_teacher_course_ids(db, user)),
+            ExperimentModule.owner_id == user.id,
+        )
+    stmt = (
         select(
             literal("experiment").label("kind"),
             ExperimentSubmission.id.label("id"),
@@ -67,8 +80,10 @@ def _experiment_stmt(db: Session, user: User):
         .outerjoin(Chapter, Chapter.id == Lesson.chapter_id)
         .outerjoin(Course, Course.id == Chapter.course_id)
         .join(User, User.id == ExperimentRecord.student_id)
-        .where(*scope)
     )
+    if scope is not None:
+        stmt = stmt.where(scope)
+    return stmt
 
 
 def _assignment_status_expr():
@@ -113,8 +128,7 @@ def _assignment_tone_expr():
 
 
 def _assignment_stmt(db: Session, user: User):
-    course_ids = _teacher_course_ids(db, user) if user.role == "teacher" else None
-    scope = [Course.id.in_(course_ids)] if course_ids else []
+    scope = _teacher_scope(db, user)
     return (
         select(
             literal("assignment").label("kind"),
@@ -161,8 +175,7 @@ def _exam_tone_expr():
 
 
 def _exam_stmt(db: Session, user: User):
-    course_ids = _teacher_course_ids(db, user) if user.role == "teacher" else None
-    scope = [Course.id.in_(course_ids)] if course_ids else []
+    scope = _teacher_scope(db, user)
     return (
         select(
             literal("exam").label("kind"),

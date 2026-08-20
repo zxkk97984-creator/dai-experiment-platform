@@ -142,7 +142,7 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); requestGuard.invalidat
         <div class="toolbar">
           <label class="searchbox" style="width: 280px;">
             <AppIcon name="search" :size="15" />
-            <input v-model="filters.q" type="search" placeholder="搜索学生姓名、账号或实验名称" />
+            <input v-model="filters.q" type="search" class="input" placeholder="搜索学生姓名、账号或实验名称" />
             <button v-if="filters.q" type="button" class="clear" aria-label="清空搜索" @click="filters.q = ''">
               <AppIcon name="close" :size="13" />
             </button>

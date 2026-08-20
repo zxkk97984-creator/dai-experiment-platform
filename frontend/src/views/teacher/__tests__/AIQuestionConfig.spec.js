@@ -138,9 +138,11 @@ describe('AIQuestionConfig 真实挂载', () => {
         requirements_text: '必须正确处理空列表\n禁止使用全局变量',
       },
     }))
+    // 点击「保存配置」成功时通知父组件刷新列表并进入下一题
+    expect(wrapper.emitted('saved')).toEqual([[9]])
   })
 
-  it('有未保存配置时先保存再生成 Rubric', async () => {
+  it('生成 Rubric 前的内部自动保存不会 emit saved', async () => {
     const wrapper = mount(AIQuestionConfig, {
       props: { kind: 'assignment', questionId: 10, expanded: true },
     })
@@ -156,6 +158,7 @@ describe('AIQuestionConfig 真实挂载', () => {
     expect(aiGradingAPI.generateRubric).toHaveBeenCalledTimes(1)
     expect(aiGradingAPI.updateConfig.mock.invocationCallOrder[0])
       .toBeLessThan(aiGradingAPI.generateRubric.mock.invocationCallOrder[0])
+    expect(wrapper.emitted('saved')).toBeUndefined()
   })
 
   it('后端拒绝重复测试组 ID 时显示真实接口错误', async () => {

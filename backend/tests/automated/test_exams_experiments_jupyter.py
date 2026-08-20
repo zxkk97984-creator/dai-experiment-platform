@@ -72,9 +72,9 @@ def test_exam_submission_and_grade_visibility(client, db_session_factory):
 
 
 def test_jupyter_entry_and_experiment_records(client, db_session_factory):
-    create_user(db_session_factory, "developer", "developer")
+    create_user(db_session_factory, "module_teacher", "teacher")
     create_user(db_session_factory, "student", "student")
-    developer_token, _ = login(client, "developer")
+    teacher_token, _ = login(client, "module_teacher")
     student_token, _ = login(client, "student")
 
     entry_response = client.get("/api/v1/jupyter/entry", headers=auth_header(student_token))
@@ -89,7 +89,7 @@ def test_jupyter_entry_and_experiment_records(client, db_session_factory):
 
     module_response = client.post(
         "/api/v1/experiments/modules",
-        headers=auth_header(developer_token),
+        headers=auth_header(teacher_token),
         json={
             "name": "Swin Transformer 可视化",
             "description": "可视化实验",

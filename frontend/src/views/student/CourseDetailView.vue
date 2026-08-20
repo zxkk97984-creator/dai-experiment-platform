@@ -554,6 +554,22 @@ onMounted(fetchAll)
   gap: 20px;
 }
 
+/* 课程详情页修复：教学班 chip 拼接长串会撑出卡片覆盖「继续学习」按钮。
+   组件保持原样，仅在此页 scoped 内用 :deep() 约束其 hero-meta 行换行且不溢出。
+   注意：scoped 内 :deep() 选择器以本页元素为作用域根，不影响其他页面。 */
+.course-detail :deep(.hero-meta) {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+.course-detail :deep(.hero-chip) {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+}
+
 .panel-title {
   margin: 0;
   font-size: var(--text-base);

@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.environments import EnvironmentSummaryRead, ImportDiagnosticRead
+from app.roles import UserRole
 from app.security import validate_password_rules
 
 # ── 输入硬上限（TASK-004） ────────────────────────────────────
@@ -93,7 +94,7 @@ class UserRead(BaseModel):
     student_no: str | None = None
     real_name: str
     department: str | None = None
-    role: str
+    role: UserRole
     status: str
 
 
@@ -111,7 +112,7 @@ class UserCreate(BaseModel):
     real_name: str
     department: str | None = None
     student_no: str | None = None
-    role: str
+    role: UserRole
     status: Literal["active", "disabled"] = "active"
 
     @field_validator("password")
@@ -125,7 +126,7 @@ class UserUpdate(BaseModel):
     real_name: str | None = None
     department: str | None = None
     student_no: str | None = None
-    role: str | None = None
+    role: UserRole | None = None
     status: Literal["active", "disabled"] | None = None
 
 
@@ -405,6 +406,8 @@ class LessonRead(BaseModel):
     title: str
     content_type: str
     content: str | None = None
+    # Notebook 编辑入口需要读取已有绑定；模板仍是服务端内部实现细节
+    template_id: int | None = None
     notebook_path: str | None = None
     video_url: str | None = None
     # 视频来源：external（外链）/ upload（本地上传）；storage_key 仅服务端使用，不返回
@@ -1125,7 +1128,8 @@ class ExperimentCellMetadata(BaseModel):
 class ExperimentSubmissionDetailRead(ExperimentSubmissionRead):
     """不可变提交快照及其展示上下文。"""
 
-    outputs_snapshot: dict = Field(default_factory=dict)
+    # 模型层允许 NULL（历史数据 outputs_snapshot 为 NULL），端点归一化为 {} 后返回
+    outputs_snapshot: dict | None = None
     cell_metadata: dict[str, ExperimentCellMetadata] = Field(default_factory=dict)
 
 
@@ -1226,6 +1230,7 @@ class ExperimentRecordCreate(BaseModel):
 from .studio import (  # noqa: E402
     StudioCell,
     StudioDraftUpdate,
+    StudioAssetRead,
     StudioImportCreate,
     StudioImportExisting,
     StudioPreviewRunRequest,

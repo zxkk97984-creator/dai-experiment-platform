@@ -203,6 +203,29 @@ def test_401_fails_immediately():
     assert call_count[0] == 1  # 一次都不重试
 
 
+def test_response_format_fallback_works_with_zero_retries():
+    """max_retries=0 时，response_format 兼容性降级仍允许再请求一次。"""
+    from app.services.ai_client import DeepSeekClient
+
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(400, json={"error": "response_format unsupported"})
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": '{"ok":true}'}}]
+        })
+
+    client = DeepSeekClient(
+        make_test_settings(ai_max_retries=0),
+        transport=httpx.MockTransport(handler),
+    )
+    result = client.chat_json([{"role": "user", "content": "x"}], operation="ai_grading")
+    assert result == {"ok": True}
+    assert calls["n"] == 2
+
+
 def test_timeout_raises_retryable():
     """超时错误可重试"""
     from app.services.ai_client import AIServiceError, DeepSeekClient
@@ -271,6 +294,30 @@ def test_invalid_json_raises():
     )
     with pytest.raises(Exception):
         client.chat_json([{"role": "user", "content": "x"}], operation="ai_grading")
+
+
+def test_reasoning_only_empty_content_raises_bad_json():
+    """reasoning 模型耗尽 max_tokens 导致 content 为空 → 可重试 bad_json。"""
+    from app.services.ai_client import AIServiceError, DeepSeekClient
+
+    def handler(request):
+        return httpx.Response(200, json={
+            "choices": [{
+                "finish_reason": "length",
+                "message": {"content": "", "reasoning_content": "思考过程"},
+            }],
+        })
+
+    client = DeepSeekClient(
+        make_test_settings(ai_max_retries=0),
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(AIServiceError) as exc_info:
+        client.chat_json([{"role": "user", "content": "x"}], operation="test_group_generation")
+
+    assert exc_info.value.code == "bad_json"
+    assert exc_info.value.retryable is True
+    assert "空 content" in str(exc_info.value)
 
 
 def test_empty_choices_raises():

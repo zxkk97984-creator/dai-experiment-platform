@@ -80,6 +80,8 @@ function save() {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px;
+  overflow-y: auto;
   background: oklch(0.2 0.01 150 / 0.3);
 }
 .modal-backdrop.create-backdrop {
@@ -87,7 +89,7 @@ function save() {
   justify-content: center;
 }
 .create-panel {
-  width: min(560px, calc(100% - 32px));
+  width: min(560px, 100%);
   max-height: calc(100vh - 48px);
   overflow: auto;
   padding: 24px;
@@ -95,6 +97,11 @@ function save() {
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--shadow-xl);
+}
+.create-form input:not([type='checkbox']):not([type='radio']),
+.create-form textarea {
+  width: 100%;
+  min-width: 0;
 }
 .create-heading {
   display: flex;
@@ -116,6 +123,7 @@ function save() {
   min-height: 42px;
   text-align: left;
 }
+.course-picker > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .placeholder { color: var(--faint); }
 .create-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 .manual-row { display: flex; gap: 10px; }
@@ -125,6 +133,7 @@ function save() {
 .course-item.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .empty-tip { text-align: center; color: var(--muted); }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid-2 > .form-group { min-width: 0; }
 .form-hint { margin: 6px 0 0; font-size: var(--text-sm); color: var(--muted); }
 @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
 </style>

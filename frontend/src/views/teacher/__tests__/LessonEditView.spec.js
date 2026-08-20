@@ -1,8 +1,13 @@
 // 课时编辑分派壳：按 content_type 分派、notebook 模板解析三态、错误态
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import LessonEditView from '../LessonEditView.vue'
+
+const lessonEditViewSource = readFileSync(resolve(process.cwd(), 'src/views/teacher/LessonEditView.vue'), 'utf8')
+const lessonEditViewStyles = lessonEditViewSource.match(/<style scoped>([\s\S]*?)<\/style>/)?.[1] || ''
 
 const routeState = vi.hoisted(() => ({
   params: { courseId: '1', lessonId: '2' },
@@ -13,6 +18,9 @@ const routerState = vi.hoisted(() => ({
   replace: vi.fn(),
 }))
 const appState = vi.hoisted(() => ({ showToast: vi.fn() }))
+const environmentsState = vi.hoisted(() => ({
+  listAvailable: vi.fn().mockResolvedValue({ data: [] }),
+}))
 
 vi.mock('vue-router', () => ({
   useRoute: () => routeState,
@@ -41,7 +49,7 @@ vi.mock('../../../api/studio.js', () => ({
 }))
 
 vi.mock('../../../api/environments.js', () => ({
-  environmentsAPI: { listAvailable: vi.fn().mockResolvedValue({ data: [] }) },
+  environmentsAPI: environmentsState,
 }))
 
 vi.mock('../../../stores/app.js', () => ({
@@ -91,6 +99,7 @@ describe('LessonEditView', () => {
     vi.clearAllMocks()
     routeState.params = { courseId: '1', lessonId: '2' }
     routeState.query = {}
+    environmentsState.listAvailable.mockResolvedValue({ data: [] })
   })
 
   it('markdown 课时分派到讲义编辑页并传 props', async () => {
@@ -132,41 +141,67 @@ describe('LessonEditView', () => {
     expect(studioAPI.listTemplates).not.toHaveBeenCalled()
   })
 
-  it('notebook 无 query 时走 listTemplates 反查模板 id', async () => {
+  it('notebook 已有关联模板时直接渲染 StudioEditor，不反查模板列表', async () => {
     coursesAPI.getChapters.mockResolvedValue(
-      { data: chapterWith({ id: 2, title: '实验簿', content_type: 'notebook' }) },
+      { data: chapterWith({ id: 2, title: '实验簿', content_type: 'notebook', template_id: 7 }) },
     )
-    studioAPI.listTemplates.mockResolvedValue({
-      data: [{ id: 7, lesson_id: 2, name: '匹配模板' }, { id: 8, lesson_id: 99 }],
-    })
     const wrapper = await mountPage()
-    expect(studioAPI.listTemplates).toHaveBeenCalledWith({})
+    expect(studioAPI.listTemplates).not.toHaveBeenCalled()
     const studio = wrapper.findComponent({ name: 'StudioEditor' })
     expect(studio.exists()).toBe(true)
     expect(studio.props('templateId')).toBe(7)
   })
 
-  it('notebook 未关联模板 → 兜底卡片 → 创建模板并进入（replace 带新 template）', async () => {
+  it('notebook 未关联模板时显示首次配置，并在选择环境后进入 Studio', async () => {
     coursesAPI.getChapters.mockResolvedValue(
       { data: chapterWith({ id: 2, title: '复制实验簿', content_type: 'notebook', content: '简介' }) },
     )
-    studioAPI.listTemplates.mockResolvedValue({ data: [] })
+    environmentsState.listAvailable.mockResolvedValue({
+      data: [{
+        environment_version_id: 12,
+        display_name: 'Python 基础',
+        version_number: 1,
+        packages: [],
+      }],
+    })
     studioAPI.createTemplate.mockResolvedValue({ data: { id: 99 } })
     const wrapper = await mountPage()
-    expect(wrapper.text()).toContain('该 Notebook 课时尚未关联模板')
-    expect(wrapper.text()).toContain('暂无可用环境，请联系管理员')
-    await wrapper.findAll('button').find((b) => b.text().includes('创建模板并进入')).trigger('click')
+    expect(wrapper.text()).toContain('首次进入 Notebook')
+    expect(wrapper.text()).toContain('请选择运行环境')
+    expect(wrapper.text()).not.toContain('尚未关联模板')
+    expect(wrapper.find('.course-form-panel').exists()).toBe(true)
+    expect(wrapper.find('.setup-card').exists()).toBe(false)
+    const importRuleLabel = wrapper.find('label[for="fallback-import-policy"]')
+    expect(importRuleLabel.exists()).toBe(true)
+    expect(importRuleLabel.text()).toBe('导入规则')
+    expect(lessonEditViewStyles).toMatch(/\.fallback-select\s*\{[\s\S]*height:\s*auto;/)
+    const enterButton = wrapper.findAll('button').find((b) => b.text() === '进入 Studio')
+    expect(enterButton.attributes('disabled')).toBeUndefined()
+    await wrapper.find('.course-form-panel').trigger('submit')
     await flushPromises()
-    // Phase 4：兜底创建携带环境字段（无可用环境时为 null + 默认策略）
+    // 自动创建内部模板并携带教师选择的环境
     expect(studioAPI.createTemplate).toHaveBeenCalledWith({
       name: '复制实验簿',
       description: '简介',
       lesson_id: 2,
-      environment_version_id: null,
+      environment_version_id: 12,
       import_policy_mode: 'unrestricted',
       allowed_imports: [],
     })
     expect(routerState.replace).toHaveBeenCalledWith({ query: { template: 99 } })
+  })
+
+  it('notebook 未关联模板且没有可用环境时禁止进入 Studio', async () => {
+    coursesAPI.getChapters.mockResolvedValue(
+      { data: chapterWith({ id: 2, title: '复制实验簿', content_type: 'notebook' }) },
+    )
+    const wrapper = await mountPage()
+    expect(wrapper.text()).toContain('暂无可用环境，请联系管理员')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+    const enterButton = wrapper.findAll('button').find((b) => b.text() === '进入 Studio')
+    expect(enterButton.attributes('disabled')).toBeDefined()
+    await wrapper.findAll('button').find((b) => b.text() === '取消').trigger('click')
+    expect(routerState.push).toHaveBeenCalledWith('/teacher/courses/1/manage')
   })
 
   it('课时不存在 → 错误卡片与返回按钮', async () => {

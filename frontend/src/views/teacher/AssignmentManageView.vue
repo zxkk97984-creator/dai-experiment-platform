@@ -342,8 +342,8 @@ onMounted(() => { fetch(); fetchCourses() })
                   <small v-if="assignment.status === 'published' && deadlineState(assignment) === 'ended'" class="deadline-ended">已截止</small>
                 </td>
                 <td class="schedule-cell">
-                  <span><em>发布</em>{{ assignment.published_at ? formatDateTime(assignment.published_at) : '未发布' }}</span>
-                  <span :class="{ 'deadline-ended': deadlineState(assignment) === 'ended' }"><em>截止</em>{{ assignment.due_at ? formatDateTime(assignment.due_at) : '长期开放' }}</span>
+                  <span><em>发布</em><time>{{ assignment.published_at ? formatDateTime(assignment.published_at) : '未发布' }}</time></span>
+                  <span :class="{ 'deadline-ended': deadlineState(assignment) === 'ended' }"><em>截止</em><time>{{ assignment.due_at ? formatDateTime(assignment.due_at) : '长期开放' }}</time></span>
                 </td>
                 <td>{{ assignment.submitted_count != null ? `${assignment.submitted_count} / ${assignment.student_count || '—'}` : '—' }}</td>
                 <td class="muted-cell">{{ formatDateTime(assignmentUpdated(assignment)) }}</td>
@@ -417,22 +417,24 @@ onMounted(() => { fetch(); fetchCourses() })
           </div>
 
           <!-- ── 环境与 import 教学策略（Phase 4：教师选择） ────────── -->
-          <div class="grid-2">
-            <div class="form-group">
-              <EnvironmentProfilePicker v-model="form.environment_version_id" show-memory label="运行环境" @loaded="onEnvLoaded" />
-              <p v-if="envOptions.length === 0" class="form-hint env-warn">暂无可用环境，请联系管理员配置后创建作业</p>
-              <p v-if="selectedEnv && form.environment_version_id" class="form-hint">
-                环境最低内存 {{ selectedEnv.minimum_memory_mb }} MB——题目的内存上限不得低于该值
-              </p>
-            </div>
-            <div class="form-group">
-              <label>导入规则</label>
-              <select v-model="importPolicy" class="import-policy-select">
-                <option value="unrestricted">不限制（学生可导入任何库）</option>
-                <option value="restricted">限定白名单（教学规则）</option>
-              </select>
-              <p class="form-hint">导入检查是教学反馈，不是安全边界；安全由运行容器隔离负责</p>
-            </div>
+          <div class="form-group">
+            <EnvironmentProfilePicker v-model="form.environment_version_id" show-memory label="运行环境" @loaded="onEnvLoaded" />
+            <p v-if="envOptions.length === 0" class="form-hint env-warn">暂无可用环境，请联系管理员配置后创建作业</p>
+            <p v-if="selectedEnv && form.environment_version_id" class="form-hint">
+              环境最低内存 {{ selectedEnv.minimum_memory_mb }} MB——题目的内存上限不得低于该值
+            </p>
+            <p v-if="selectedEnv && envImportCandidates.length" class="form-hint">
+              当前环境包含：{{ envImportCandidates.join('、') }}
+            </p>
+          </div>
+
+          <div class="form-group">
+            <label>导入规则</label>
+            <select v-model="importPolicy" class="import-policy-select">
+              <option value="unrestricted">不限制（学生可导入任何库）</option>
+              <option value="restricted">限定白名单（教学规则）</option>
+            </select>
+            <p class="form-hint">导入检查是教学反馈，不是安全边界；安全由运行容器隔离负责</p>
           </div>
 
           <div v-if="importPolicy === 'restricted'" class="form-group">
@@ -446,11 +448,11 @@ onMounted(() => { fetch(); fetchCourses() })
             <p v-else class="form-hint">当前环境未提供教学库，可留空白名单（仅允许 Python 标准库）</p>
             <p v-if="importMismatchWarning" class="form-hint env-warn">{{ importMismatchWarning }}</p>
           </div>
+        </div>
 
-          <div class="create-actions">
-            <button class="btn-ghost btn-sm" type="button" @click="closeCreateModal">取消</button>
-            <button class="btn-primary btn-sm" type="button" :disabled="!canCreate" @click="doCreate">确定</button>
-          </div>
+        <div class="create-actions">
+          <button class="btn-ghost btn-sm" type="button" @click="closeCreateModal">取消</button>
+          <button class="btn-primary btn-sm" type="button" :disabled="!canCreate" @click="doCreate">确定</button>
         </div>
       </div>
     </div>
@@ -535,10 +537,7 @@ onMounted(() => { fetch(); fetchCourses() })
 
 <style scoped>
 /* 表格在内容区内自适应，避免页面出现横向滚动 */
-.table-scroll{overflow-x:hidden}.table-scroll table{width:100%;min-width:0;table-layout:fixed}.table-scroll th,.table-scroll td{overflow:hidden;text-overflow:ellipsis}.table-scroll th:nth-child(1){width:21%}.table-scroll th:nth-child(2){width:20%}.table-scroll th:nth-child(3){width:10%}.table-scroll th:nth-child(4){width:13%}.table-scroll th:nth-child(5){width:12%}.table-scroll th:nth-child(6){width:12%}.table-scroll th:nth-child(7){width:22%}.table-scroll td{white-space:nowrap}.table-scroll td small{white-space:nowrap}.status-pill{white-space:nowrap;word-break:keep-all;display:inline-flex;min-width:max-content}.actions-cell{overflow:hidden;gap:0}.actions-cell button{padding-left:5px;padding-right:5px;font-size:12px}
 .metric-icon :deep(svg){display:block}
-@media(max-width:1150px){.table-scroll th:nth-child(4),.table-scroll td:nth-child(4),.table-scroll th:nth-child(5),.table-scroll td:nth-child(5),.table-scroll th:nth-child(6),.table-scroll td:nth-child(6){display:none}.table-scroll th:nth-child(1){width:27%}.table-scroll th:nth-child(2){width:27%}.table-scroll th:nth-child(3){width:14%}.table-scroll th:nth-child(7){width:32%}}
-@media(max-width:700px){.table-scroll{overflow-x:auto}.table-scroll table{min-width:780px}.table-scroll th:nth-child(n),.table-scroll td:nth-child(n){display:table-cell}.table-scroll th:nth-child(1){width:25%}.table-scroll th:nth-child(2){width:22%}.table-scroll th:nth-child(3){width:12%}.table-scroll th:nth-child(7){width:24%}}
 /* ═══════════════════════════════════════════════════════════════════════
    Teacher Assignment Manage — Code Studio
    page-head + create modal + skeleton table + data table
@@ -560,22 +559,38 @@ onMounted(() => { fetch(); fetchCourses() })
 }
 
 /* ── 创建弹窗表单（modal-backdrop 体系内） ─────────────────────────── */
-.form-hint { margin: 6px 0 0; font-size: var(--text-sm); color: var(--muted); }
-/* 创建弹窗主体：内容不多，不设内部滚动（避免出现多余滚动条） */
+.form-hint { margin: 6px 0 0; font-size: var(--text-sm); color: var(--muted); line-height: 1.5; }
+/* 创建弹窗主体：紧凑宽度 + 内部滚动；底部操作条固定在面板底部 */
 .create-modal-body {
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 0;
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 18px 24px 20px;
 }
-.create-modal-body .form-group { margin-bottom: var(--space-3); }
+.create-modal-body .form-group { margin-bottom: 14px; min-width: 0; }
+.create-modal-body .grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.create-modal-body input:not([type='checkbox']):not([type='radio']),
+.create-modal-body textarea { width: 100%; }
+.create-modal-body textarea { min-height: 64px; height: 64px; }
+.create-modal-body .grid-2 > .form-group { min-width: 0; }
+.create-modal-body :deep(.env-picker) { min-width: 0; }
+.create-modal-body :deep(.env-picker-select) { width: 100%; min-width: 0; }
 /* ── 环境与 import 策略（Phase 4） ─────────────────────────────── */
 .import-policy-select {
   width: 100%;
-  padding: 9px 12px;
+  height: auto;
+  min-height: 38px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control, 7px);
   background: var(--surface, var(--surface));
   color: var(--fg);
   font-family: inherit;
   font-size: var(--text-sm, 13px);
+  line-height: 1.4;
 }
 .env-warn { color: var(--warning, var(--warning)); }
 .import-candidates {
@@ -613,31 +628,57 @@ onMounted(() => { fetch(); fetchCourses() })
   cursor: pointer;
 }
 .course-picker:hover { border-color: var(--accent); }
+.course-picker > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .course-picker .placeholder { color: var(--muted); }
 .picker-chevron { flex: none; color: var(--muted); }
 
 /* ── 课程选择弹窗（modal-backdrop 体系，--modal-left 相对内容区居中） ── */
 .modal-backdrop {
   position: fixed;
-  z-index: 40;
+  z-index: 60;
   /* left 随侧栏宽度（--modal-left 由 AppLayout 提供），弹窗以内容区为基准居中 */
   inset: 0 0 0 var(--modal-left, 0);
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow-y: auto;
   background: oklch(0.2 0.01 150 / 0.25);
 }
-/* 双类选择器压过基础 .modal-backdrop 的 justify-content: flex-end */
 .modal-backdrop.create-backdrop {
   justify-content: center;
   align-items: center;
 }
 .create-panel {
-  width: min(480px, calc(100% - 32px));
+  width: min(480px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
   padding: 24px;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: var(--surface);
   box-shadow: var(--shadow-lg);
+}
+/* 创建作业弹窗：宽度按内容收敛，标题固定、表单滚动、操作条固定 */
+.create-panel.create-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(680px, 100%);
+  padding: 0;
+  overflow: hidden;
+}
+.create-modal .create-heading {
+  flex: none;
+  margin: 0;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+}
+.create-modal .create-actions {
+  flex: none;
+  margin: 0;
+  padding: 12px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
 }
 .create-heading {
   display: flex;
@@ -749,34 +790,44 @@ onMounted(() => { fetch(); fetchCourses() })
   .page-title { font-size: 24px; }
 }
 .metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px;margin-bottom:22px}.metric-card{display:flex;align-items:center;gap:18px;min-height:106px;padding:20px;border:1px solid var(--border);border-radius: var(--radius-lg);background:var(--surface);box-shadow:none}.metric-icon{display:grid;place-items:center;width:54px;height:54px;border-radius:15px}.metric-icon.blue{color:var(--accent);background:var(--accent-soft)}.metric-icon.green{color:var(--success);background:var(--success-bg)}.metric-icon.orange{color:var(--warning);background:var(--warning-bg)}.metric-icon.purple{color:var(--info);background:var(--info-bg)}.metric-card span:last-child{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}.metric-card small{width:100%;color:var(--muted);font-size:14px}.metric-card strong{color:var(--fg);font-size:27px;line-height:1}.metric-card em{color:var(--muted);font-size:13px;font-style:normal}.data-panel{overflow:hidden;border:1px solid var(--border);border-radius: var(--radius-lg);background:var(--surface);box-shadow:none}.filter-bar{display:grid;grid-template-columns:minmax(220px,1.4fr) repeat(3,minmax(150px,.8fr));gap:14px;padding:18px;border-bottom:1px solid var(--border)}.search-control{display:flex;align-items:center;gap:9px;padding:0 13px;border:1px solid var(--border);border-radius: var(--radius-md);color:var(--faint)}.search-control input{min-width:0;padding:0;border:0;box-shadow:none!important}.filter-bar select{height:44px;min-width:0}.table-scroll{overflow-x:auto}.table-scroll table{width:100%;min-width:1000px;margin:0}.table-scroll th{height:44px;background:var(--surface-subtle)}.table-scroll td{height:68px;padding:10px 16px}.table-scroll td small{display:block;margin-top:3px;color:var(--faint);font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.status-pill{display:inline-flex;padding:4px 11px;border-radius: var(--radius-full);font-size:12px;font-weight:600}.status-pill.published{color:var(--success);background:var(--success-bg)}.status-pill.draft{color:var(--warning);background:var(--warning-bg)}.status-pill.ended{color:var(--info);background:var(--info-bg)}.text-action,.publish-action,.delete-action{padding:5px 7px;border:0;background:transparent;color:var(--accent);font-size:13px;white-space:nowrap}.publish-action{color:var(--warning)}.delete-action{color:var(--danger)}.pagination-bar{display:flex;justify-content:space-between;padding:14px 18px;border-top:1px solid var(--border);color:var(--muted);font-size:13px}.active-page{display:inline-grid;place-items:center;width:30px;height:30px;border-radius: var(--radius-md);color:var(--surface);background:var(--accent)}.loading-list{display:grid;gap:1px;background:var(--border)}.loading-list .skeleton{height:68px}@media(max-width:1100px){.metric-grid{grid-template-columns:repeat(2,1fr)}.filter-bar{grid-template-columns:1fr 1fr}}@media(max-width:700px){.metric-grid{grid-template-columns:1fr 1fr;gap:10px}.filter-bar{grid-template-columns:1fr}.table-scroll table{min-width:900px}}
-/* 侧栏展开时以内容容器宽度为准，避免作业列表被固定最小宽度推出可视区 */
+/* 侧栏展开时以内容容器宽度为准，避免作业列表被固定最小宽度推出可视区。
+   teacher-management 桥接样式会把 .filter-bar 置为 flex，这里恢复 grid，
+   否则筛选 select 会以默认/100% 宽度在 flex 行中挤压或换行。 */
+body .teacher-management-page .filter-bar{display:grid}
 .data-panel{min-width:0}
 .filter-bar{min-width:0}
 .filter-bar select,.search-control{min-width:0}
-.search-control input{min-width:0}
+.filter-bar select{width:100%}
+.search-control input{flex:1 1 0;width:100%;min-width:0}
 .table-scroll{min-width:0;overflow-x:hidden}
 .table-scroll table{width:100%;min-width:0!important;table-layout:fixed}
 .table-scroll th,.table-scroll td{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.table-scroll th:nth-child(1){width:20%}.table-scroll th:nth-child(2){width:17%}.table-scroll th:nth-child(3){width:10%}.table-scroll th:nth-child(4){width:12%}.table-scroll th:nth-child(5){width:10%}.table-scroll th:nth-child(6){width:9%}.table-scroll th:nth-child(7){width:22%}
-.table-scroll td{white-space:nowrap}.table-scroll td strong,.table-scroll td small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.actions-cell{display:table-cell;vertical-align:middle;white-space:nowrap}.actions-cell button{display:inline-flex;align-items:center;flex:0 0 auto;padding:4px 5px;font-size:12px;white-space:nowrap}
-@container (max-width:1050px){.filter-bar{grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,.7fr))}.table-scroll th:nth-child(1){width:28%}.table-scroll th:nth-child(2){width:25%}.table-scroll th:nth-child(3){width:15%}.table-scroll th:nth-child(7){width:32%}.table-scroll th:nth-child(4),.table-scroll td:nth-child(4),.table-scroll th:nth-child(5),.table-scroll td:nth-child(5),.table-scroll th:nth-child(6),.table-scroll td:nth-child(6){display:none}.table-scroll td:last-child{padding-left:8px;padding-right:8px}.actions-cell button{padding:4px;font-size:12px}}
+.table-scroll th:nth-child(1){width:20%}.table-scroll th:nth-child(2){width:16%}.table-scroll th:nth-child(3){width:10%}.table-scroll th:nth-child(4){width:13%}.table-scroll th:nth-child(5){width:9%}.table-scroll th:nth-child(6){width:12%}.table-scroll th:nth-child(7){width:20%}
+.table-scroll td{white-space:nowrap}.table-scroll td strong,.table-scroll td small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.table-scroll td.muted-cell{font-family:var(--font-mono);font-size:var(--text-sm);font-variant-numeric:tabular-nums}.actions-cell{display:table-cell;vertical-align:middle;white-space:nowrap}.actions-cell button{display:inline-flex;align-items:center;flex:0 0 auto;padding:4px 5px;font-size:12px;white-space:nowrap}
+@container (max-width:1050px){.filter-bar{grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,.7fr))}.table-scroll th:nth-child(1){width:28%}.table-scroll th:nth-child(2){width:24%}.table-scroll th:nth-child(3){width:14%}.table-scroll th:nth-child(7){width:34%}.table-scroll th:nth-child(4),.table-scroll td:nth-child(4),.table-scroll th:nth-child(5),.table-scroll td:nth-child(5),.table-scroll th:nth-child(6),.table-scroll td:nth-child(6){display:none}.table-scroll td:last-child{padding-left:8px;padding-right:8px}.actions-cell button{padding:4px;font-size:12px}}
 @container (max-width:760px){.filter-bar{grid-template-columns:1fr;padding:12px}.table-scroll{overflow:visible;padding:12px;background:var(--surface-subtle)}.table-scroll table,.table-scroll tbody{display:block;width:100%;min-width:0!important}.table-scroll thead{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.table-scroll tbody{display:grid;gap:12px}.table-scroll tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:hidden;border:1px solid var(--border);border-radius: var(--radius-md);background:var(--surface)}.table-scroll td,.table-scroll td:nth-child(4),.table-scroll td:nth-child(5),.table-scroll td:nth-child(6){display:flex;width:auto;height:auto;min-height:58px;padding:10px 12px;flex-direction:column;justify-content:center;gap:5px;border-bottom:1px solid var(--border);overflow:visible;white-space:normal}.table-scroll td::before{color:var(--faint);font-size:11px;font-weight:500}.table-scroll td:nth-child(1)::before{content:'作业名称'}.table-scroll td:nth-child(2)::before{content:'所属课程 / 班级'}.table-scroll td:nth-child(3)::before{content:'状态'}.table-scroll td:nth-child(4)::before{content:'截止时间'}.table-scroll td:nth-child(5)::before{content:'提交进度'}.table-scroll td:nth-child(6)::before{content:'最近更新'}.table-scroll td:nth-child(7)::before{content:'操作'}.table-scroll td:nth-child(1),.table-scroll td:nth-child(2),.table-scroll td:nth-child(7){grid-column:1/-1}.table-scroll td:nth-child(6),.table-scroll td:nth-last-child(-n+2){border-bottom:0}.table-scroll td strong,.table-scroll td small{overflow:visible;white-space:normal}.table-scroll .actions-cell{display:flex;flex-direction:row;align-items:center;justify-content:flex-end;gap:6px}.table-scroll .actions-cell::before{margin-right:auto}.actions-cell button{padding:6px 8px}}
 
 /* 发布与截止：发布状态和时限状态分维度展示，避免把“已截止”误当发布状态 */
 .filter-bar{grid-template-columns:minmax(220px,1.35fr) repeat(4,minmax(125px,.72fr))}
 .schedule-cell{display:table-cell;vertical-align:middle;white-space:normal!important}
 .schedule-cell > span + span{margin-top:4px}
-.schedule-cell span{display:flex;align-items:center;gap:5px;font-size:12px;line-height:1.35}
-.schedule-cell em{min-width:28px;color:var(--faint);font-size:11px;font-style:normal}
+.schedule-cell span{display:flex;align-items:center;gap:5px;font-size:12px;line-height:1.35;min-width:0}
+.schedule-cell em{flex:0 0 28px;min-width:28px;color:var(--faint);font-size:11px;font-style:normal}
+.schedule-cell time{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono);font-size:11px;font-variant-numeric:tabular-nums}
 .deadline-ended{color:var(--danger)!important}
 .schedule-modal{width:min(520px,calc(100vw - 32px))}
 .schedule-modal .create-heading>div{display:flex;min-width:0;flex-direction:column;gap:3px}
 .schedule-modal .create-heading small{max-width:380px;overflow:hidden;color:var(--faint);font-size:12px;text-overflow:ellipsis;white-space:nowrap}
 .schedule-modal-body{padding:20px 22px}
+.schedule-modal-body input{width:100%}
 .schedule-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 18px}
 .schedule-summary div{padding:12px;border:1px solid var(--border);border-radius: var(--radius-md);background:var(--surface-subtle)}
 .schedule-summary dt{color:var(--faint);font-size:12px}
 .schedule-summary dd{margin:5px 0 0;color:var(--fg);font-size:14px;font-weight:600}
 @container (max-width:1050px){.filter-bar{grid-template-columns:repeat(2,minmax(0,1fr))}.search-control{grid-column:1/-1}}
+@media (max-width: 720px) {
+  .create-modal .grid-2 { grid-template-columns: 1fr; }
+}
+
 @container (max-width:760px){.filter-bar{grid-template-columns:1fr}.search-control{grid-column:auto}.table-scroll td:nth-child(4)::before{content:'时间安排'}.schedule-summary{grid-template-columns:1fr}}
 </style>

@@ -1,12 +1,11 @@
 <script setup>
 // QuestionEditView：教师端「编程题目编辑」页（IDE 风格布局重构）
 //
-// 布局：左侧导航（AppLayout 现状不动） + 中间主编辑区（纵向三大区）
-//       + 右侧 sticky 运行设置栏 + 底部 fixed 操作栏。
-// 主编辑区：① 基础信息（标题/签名/描述 Markdown） ② 学生代码模板（深色 CodeMirror）
-//           ③ 测试用例（公开样例表格 + 私有测试双模式）
+// 布局：顶部作业运行设置（环境/导入规则/发布范围） + 题目列表
+//       + 下方题目编辑主区（基础信息 → 运行参数 → 代码模板 → 测试用例 → AI 评分配置）
+// 题目统一继承作业环境与导入规则，不再提供题目级覆盖。
 // 数据契约不变：public_cases 仍为 JSON 数组、hidden_tests 仍为 pytest 代码字符串提交。
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
@@ -43,7 +42,6 @@ const publishing = ref(false)      // 发布作业进行中（防重复点击）
 const confirmPublish = ref(false)  // 发布作业确认弹窗
 const runResult = ref(null)
 const fullscreenCode = ref(false)
-const sideTab = ref('run')   // 右侧栏 tab：run | ai
 const scheduleDueLocal = ref('')
 const scheduleSaving = ref(false)
 const scheduleConfirmOpen = ref(false)
@@ -109,11 +107,6 @@ const audienceClassIds = ref([])
 const audienceWhitelistIds = ref([])
 const audienceExcludedIds = ref([])
 const audienceSaving = ref(false)
-// 题目级环境：env_mode = inherit(继承作业) | override(指定版本)
-const questionEnvMode = ref('inherit')
-const questionEnvId = ref(null)
-const questionPolicyMode = ref('inherit')  // inherit | unrestricted | restricted
-const questionAllowedImports = ref([])
 const assignmentDraft = computed(() => assignment.value?.status === 'draft')
 // TASK-020：AI 服务状态（enabled/ready）——禁用时显示治理门提示，AI 动作被服务端拒绝前先行禁用
 const aiEnabled = ref(false)
@@ -141,8 +134,8 @@ const envImportCandidates = (envId) => {
  return names
 }
 
-// 题目最终生效环境：覆盖 → 题目指定；否则继承作业默认
-const effectiveEnvId = computed(() => (questionEnvMode.value === 'override' ? questionEnvId.value : assignmentEnvId.value))
+// 所有题目统一继承作业默认环境与导入规则（不再提供题目级覆盖）
+const effectiveEnvId = computed(() => assignmentEnvId.value)
 const effectiveEnv = computed(() => envById(effectiveEnvId.value))
 const memoryWarning = computed(() => {
  if (!effectiveEnv.value) return ''
@@ -151,12 +144,10 @@ const memoryWarning = computed(() => {
  }
  return ''
 })
-// 白名单含未安装包 → 黄色警告（教学规则，不强制耦合）
-const mismatchWarning = computed(() => {
- if (questionPolicyMode.value !== 'restricted' || questionAllowedImports.value.length === 0) return ''
- const installed = new Set(envImportCandidates(effectiveEnvId.value))
- const missing = questionAllowedImports.value.filter((name) => !installed.has(name))
- return missing.length ? `注意：${missing.join('、')} 未在当前环境安装，学生运行时会提示环境配置问题` : ''
+const assignmentPolicyLabel = computed(() => {
+ if (assignmentPolicy.value !== 'restricted') return '不限制'
+ if (!assignmentAllowedImports.value.length) return '限定白名单（空）'
+ return `限定白名单：${assignmentAllowedImports.value.join('、')}`
 })
 const assignmentMismatch = computed(() => {
  if (assignmentPolicy.value !== 'restricted' || assignmentAllowedImports.value.length === 0) return ''
@@ -309,12 +300,6 @@ function toggleAssignmentImport(name) {
  else assignmentAllowedImports.value.push(name)
 }
 
-function toggleQuestionImport(name) {
- const idx = questionAllowedImports.value.indexOf(name)
- if (idx >= 0) questionAllowedImports.value.splice(idx, 1)
- else questionAllowedImports.value.push(name)
-}
-
 function resetQuestionForm() {
  form.value = {
    title: '', description: '', function_name: '', signature: '',
@@ -322,15 +307,12 @@ function resetQuestionForm() {
    time_limit_ms: 10000, memory_limit_mb: 256,
  }
  editingId.value = null
- questionEnvMode.value = 'inherit'
- questionEnvId.value = null
- questionPolicyMode.value = 'inherit'
- questionAllowedImports.value = []
 }
 
 // 添加新题目：清空表单进入编辑区
 function startNew() {
  discardAiDraftIfDirty()
+ resetAiDraft()
  resetQuestionForm()
  activeId.value = 'new'
  formKey.value++
@@ -338,9 +320,10 @@ function startNew() {
  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
-// 编辑已有题目 → 回填表单（含环境覆盖与策略）
+// 编辑已有题目 → 回填表单（环境与导入规则始终继承作业，不回填旧覆盖值）
 function openEdit(q) {
  discardAiDraftIfDirty()
+ resetAiDraft()
  editingId.value = q.id
  activeId.value = q.id
  form.value = {
@@ -349,10 +332,6 @@ function openEdit(q) {
    public_cases: JSON.stringify(q.public_cases || [], null, 2), hidden_tests: q.hidden_tests || '',
    time_limit_ms: q.time_limit_ms ?? 10000, memory_limit_mb: q.memory_limit_mb ?? 256,
  }
- questionEnvMode.value = q.environment_version_id ? 'override' : 'inherit'
- questionEnvId.value = q.environment_version_id ?? null
- questionPolicyMode.value = q.import_policy_mode || 'inherit'
- questionAllowedImports.value = [...(q.allowed_imports || [])]
  formKey.value++
  runResult.value = null
  window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -371,9 +350,10 @@ async function submitQuestion() {
    const payload = {
      ...form.value,
      public_cases: publicCases,
-     environment_version_id: questionEnvMode.value === 'override' ? questionEnvId.value : null,
-     import_policy_mode: questionPolicyMode.value,
-     allowed_imports: questionPolicyMode.value === 'restricted' ? [...questionAllowedImports.value] : [],
+     // 所有题目统一继承作业环境与导入规则，不再提交题目级覆盖值
+     environment_version_id: null,
+     import_policy_mode: 'inherit',
+     allowed_imports: [],
    }
    // 新建题：AI 草稿字段随 payload 一起提交（显式传 grading_mode，默认 legacy，
    // 不依赖后端默认 active；其余 AI 字段为 create 链路前瞻，落库仍走独立接口）
@@ -391,29 +371,26 @@ async function submitQuestion() {
    } else {
      res = await assignmentsAPI.createQuestion(route.params.id, payload)
      app.showToast('题目已创建', 'success')
-     // 新建成功后获得真实题目 id，进入编辑态（运行测试等能力可用）
-     if (res?.data?.id) {
-       // 创建链路不接收 AI 配置字段：修改过的草稿经独立接口落库到新题目
-       if (aiDraftDirty.value) {
-         try {
-           await aiGradingAPI.updateConfig('assignment', res.data.id, {
-             grading_mode: aiDraft.value.grading_mode,
-             teacher_constraints: aiDraft.value.teacher_constraints || {},
-             reference_solution: aiDraft.value.reference_solution || null,
-             test_groups: aiDraft.value.test_groups,
-             score_cap_rules: aiDraft.value.score_cap_rules,
-           })
-         } catch (e) {
-           app.showToast(`AI 配置未随题目保存：${e.response?.data?.detail?.message || e.message || '保存失败'}`, 'error')
-         }
+     // 新建成功后获得真实题目 id；修改过的 AI 草稿经独立接口落库到新题目。
+     if (res?.data?.id && aiDraftDirty.value) {
+       try {
+         await aiGradingAPI.updateConfig('assignment', res.data.id, {
+           grading_mode: aiDraft.value.grading_mode,
+           teacher_constraints: aiDraft.value.teacher_constraints || {},
+           reference_solution: aiDraft.value.reference_solution || null,
+           test_groups: aiDraft.value.test_groups,
+           score_cap_rules: aiDraft.value.score_cap_rules,
+         })
+       } catch (e) {
+         app.showToast(`AI 配置未随题目保存：${e.response?.data?.detail?.message || e.message || '保存失败'}`, 'error')
        }
-       resetAiDraft()  // 清除草稿/脏标记，AI tab 切持久化模式
-       editingId.value = res.data.id
-       activeId.value = res.data.id
      }
+     resetAiDraft()  // 草稿已随本题落库，清除后由 startNew 进入下一题
    }
    lastSavedAt.value = new Date()
-   fetch()
+   await fetch()
+   // 新题保存成功即视为「配置完一道题」：列表刷新后清空下方编辑区，准备录入下一题。
+   if (!editingId.value) startNew()
    return true
  } catch (e) {
    app.showToast(e.response?.data?.detail?.message || '保存失败', 'error')
@@ -452,10 +429,20 @@ function openPublishConfirm() {
  confirmPublish.value = true
 }
 
-// 列表行「🤖 AI 配置」按钮收敛：选中该题并打开右侧栏 AI tab（唯一编辑面）
+// 列表行「AI 配置」按钮收敛：选中该题后滚动到题目编辑区下方的 AI 评分配置
 function openAiConfig(q) {
  openEdit(q)
- sideTab.value = 'ai'
+ nextTick(() => {
+   document.getElementById('ai-config-section')
+     ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+ })
+}
+
+// AI 配置保存成功：刷新上方题目列表，并清空下方编辑区进入下一题空白表单
+async function onQuestionAiSaved() {
+ await fetch()
+ startNew()
+ app.showToast('AI 配置已保存，已进入下一题', 'success')
 }
 
 // ── 删除题目（确认弹窗；仅草稿作业可用，后端 409 兜底） ─────────────
@@ -632,10 +619,85 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
         </div>
       </section>
 
-      <!-- ── 主编辑区 + 右侧 sticky 设置栏 ───────────────────────── -->
-      <div class="qe-body">
-        <!-- 中间主编辑区：纵向三大区 -->
-        <div v-if="activeId !== null" class="qe-main">
+      <!-- ── 作业运行设置：固定在题目列表下方，切换题目时保持原位 ─────── -->
+      <aside class="qe-side">
+        <div class="qe-side-card">
+          <div class="qe-side-head">
+            <h2 class="qe-card-title">运行设置</h2>
+            <span class="qe-side-head-note">作业级配置</span>
+          </div>
+          <div class="qe-side-body">
+            <!-- 作业默认环境（draft 可编辑；发布后绑定不可变） -->
+            <div class="qe-side-sec qe-side-sec--assignment">
+              <div class="qe-side-sec-head">
+                <h3 class="qe-side-title">作业默认环境</h3>
+                <span v-if="!assignmentDraft" class="badge badge-neutral">环境已锁定</span>
+              </div>
+              <p class="qe-side-sub">所有题目默认在此环境运行；发布后绑定不可变</p>
+              <div class="form-group qe-side-assignment-env">
+                <EnvironmentProfilePicker
+                  v-model="assignmentEnvId"
+                  :disabled="!assignmentDraft"
+                  show-memory
+                  label="作业环境"
+                />
+                <p v-if="assignmentDraft && assignmentEnvId && envById(assignmentEnvId)" class="form-hint">
+                  环境最低内存 {{ envById(assignmentEnvId).minimum_memory_mb }} MB——题目内存不得低于该值
+                </p>
+              </div>
+              <div class="form-group qe-side-assignment-policy">
+                <label>作业导入规则</label>
+                <select v-model="assignmentPolicy" class="import-policy-select" :disabled="!assignmentDraft">
+                  <option value="unrestricted">不限制</option>
+                  <option value="restricted">限定白名单</option>
+                </select>
+              </div>
+              <div v-if="assignmentPolicy === 'restricted'" class="form-group qe-side-imports">
+                <label>作业允许导入（白名单）</label>
+                <div v-if="envImportCandidates(assignmentEnvId).length" class="import-candidates">
+                  <label v-for="name in envImportCandidates(assignmentEnvId)" :key="name" class="import-chip">
+                    <input type="checkbox" :disabled="!assignmentDraft" :checked="assignmentAllowedImports.includes(name)" @change="toggleAssignmentImport(name)" />
+                    {{ name }}
+                  </label>
+                </div>
+                <p v-if="assignmentMismatch" class="form-hint env-warn">{{ assignmentMismatch }}</p>
+              </div>
+              <button v-if="assignmentDraft" class="btn-primary btn-sm" @click="saveAssignmentEnv">保存作业环境设置</button>
+            </div>
+
+            <div class="qe-side-divider"></div>
+
+            <div class="qe-side-sec qe-side-sec--audience">
+              <div class="qe-side-sec-head">
+                <h3 class="qe-side-title">发布范围</h3>
+                <span v-if="!assignmentDraft" class="badge badge-neutral">已有提交后受限</span>
+              </div>
+              <p class="qe-side-sub">选择班级或学生，白名单学生无需提前选课。</p>
+              <TaskAudiencePicker
+                task-kind="assignment"
+                :task-id="route.params.id"
+                :course-id="assignment?.course_id"
+                :audience-mode="audienceMode"
+                :class-ids="audienceClassIds"
+                :whitelist-ids="audienceWhitelistIds"
+                :excluded-ids="audienceExcludedIds"
+                :disabled="!assignmentDraft"
+                @update:audience-mode="audienceMode = $event"
+                @update:class-ids="audienceClassIds = $event"
+                @update:whitelist-ids="audienceWhitelistIds = $event"
+                @update:excluded-ids="audienceExcludedIds = $event"
+                @imported="onAudienceImported"
+              />
+              <button v-if="assignmentDraft" class="btn-primary btn-sm" :disabled="audienceSaving" @click="saveAssignmentAudience">保存发布范围</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- ── 主编辑区：选择题目后显示在作业运行设置下方 ─────────────── -->
+      <div v-if="activeId !== null" class="qe-body">
+        <!-- 中间主编辑区：基础信息 → 运行参数 → 代码模板 → 测试用例 → AI 评分配置 -->
+        <div class="qe-main">
           <!-- ① 基础信息 -->
           <section class="card qe-card">
             <h2 class="qe-card-title">基础信息</h2>
@@ -655,7 +717,37 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
             </div>
           </section>
 
-          <!-- ② 学生代码模板 -->
+          <!-- ② 本题运行参数（环境与导入规则统一继承作业设置） -->
+          <section class="card qe-card qe-run-card">
+            <div class="qe-card-head">
+              <h2 class="qe-card-title">运行参数</h2>
+              <span class="qe-hint">运行环境与导入规则统一继承作业设置，无需单题重复配置</span>
+            </div>
+            <div class="qe-run-grid">
+              <div class="form-group">
+                <label>超时 (ms)</label>
+                <input v-model.number="form.time_limit_ms" type="number" min="100" />
+              </div>
+              <div class="form-group">
+                <label>内存限制 (MB)</label>
+                <input v-model.number="form.memory_limit_mb" type="number" min="64" />
+              </div>
+            </div>
+
+            <!-- 内存警告卡片（浅橙） -->
+            <div v-if="memoryWarning" class="qe-warn-card" role="alert">
+              <p class="qe-warn-text"><AppIcon name="warning" :size="14" /><span class="qe-sr-only">⚠ </span>{{ memoryWarning }}</p>
+              <p class="qe-warn-sub">当前内存低于环境最低要求，建议自动调整</p>
+              <button type="button" class="qe-warn-btn" @click="applyRecommendedMemory">使用推荐值</button>
+            </div>
+
+            <!-- 有效环境 info（浅蓝） -->
+            <p v-if="effectiveEnv" class="qe-info">
+              本题有效环境：{{ effectiveEnv.display_name }} v{{ effectiveEnv.version_number }} 最低内存 {{ effectiveEnv.minimum_memory_mb }} MB；导入规则：{{ assignmentPolicyLabel }}
+            </p>
+          </section>
+
+          <!-- ③ 学生代码模板 -->
           <section class="card qe-card">
             <div class="qe-card-head">
               <h2 class="qe-card-title">学生代码模板</h2>
@@ -671,7 +763,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
             <p class="qe-hint"><AppIcon name="drag" :size="14" />拖动右下角手柄调整编辑器高度；编辑器内部滚动，长代码不撑高页面</p>
           </section>
 
-          <!-- ③ 测试用例 -->
+          <!-- ④ 测试用例 -->
           <section class="card qe-card">
             <div class="qe-card-head">
               <h2 class="qe-card-title">测试用例</h2>
@@ -689,207 +781,43 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
               @parse-failed="app.showToast('当前 pytest 代码无法解析为可视化用例，请使用 pytest 模式', 'error')"
             />
           </section>
+
+          <!-- ⑤ AI 评分配置：位于题目编写区下方，先写题再配 AI -->
+          <section id="ai-config-section" class="card qe-card qe-ai-main">
+            <!-- 已有题目 → 持久化容器（GET/PUT/Rubric），保存后刷新列表并进入下一题 -->
+            <AIQuestionConfig
+              v-if="editingId"
+              :kind="'assignment'"
+              :question-id="Number(editingId)"
+              :expanded="true"
+              :closable="false"
+              @saved="onQuestionAiSaved"
+            />
+            <!-- 新建题目（无 id）→ 草稿模式：随「保存题目」一起提交 -->
+            <div v-else class="qe-ai-draft">
+              <div class="qe-card-head">
+                <div class="qe-side-sec-head">
+                  <h2 class="qe-card-title">AI 评分配置</h2>
+                  <span class="qe-ai-qid">新建</span>
+                </div>
+                <p class="qe-side-sub">配置评分模式与测试组，随「保存题目」一起提交；Rubric 需在保存题目后生成。</p>
+              </div>
+              <!-- Rubric 门禁前置提示：shadow/active 尚无 Rubric（后端 503 仍兜底） -->
+              <div v-if="aiDraft.grading_mode !== 'legacy'" class="qe-warn-card" role="alert">
+                <p class="qe-warn-text"><AppIcon name="warning" :size="14" /><span class="qe-sr-only">⚠ </span>当前为 {{ aiDraft.grading_mode }} 模式，尚无可发布的 Rubric，请先保存题目后生成并锁定</p>
+              </div>
+              <AiConfigForm
+                :key="'ai-draft-' + aiFormKey"
+                :model-value="aiDraft"
+                @update:model-value="onAiDraftChange"
+                @generate-test-groups="onDraftGenerateTestGroups"
+              />
+              <p v-if="aiDraftMsg" class="qe-hint" role="status">{{ aiDraftMsg }}</p>
+              <p class="qe-hint">保存题目后可生成 Rubric。</p>
+            </div>
+          </section>
         </div>
 
-        <!-- 右侧设置栏：sticky，滚动时保持可见 -->
-        <aside class="qe-side">
-          <div class="qe-side-card">
-            <div class="qe-side-tabs" role="tablist">
-              <button
-                type="button"
-                class="qe-side-tab"
-                :class="{ active: sideTab === 'run' }"
-                role="tab"
-                :aria-selected="sideTab === 'run'"
-                @click="sideTab = 'run'"
-              >运行设置</button>
-              <button
-                type="button"
-                class="qe-side-tab"
-                :class="{ active: sideTab === 'ai' }"
-                role="tab"
-                :aria-selected="sideTab === 'ai'"
-                @click="sideTab = 'ai'"
-              >AI 评分配置</button>
-            </div>
-
-            <div v-if="sideTab === 'run'" class="qe-side-body">
-              <!-- 作业默认环境（draft 可编辑；发布后绑定不可变） -->
-              <div class="qe-side-sec qe-side-sec--assignment">
-                <div class="qe-side-sec-head">
-                  <h3 class="qe-side-title">作业默认环境</h3>
-                  <span v-if="!assignmentDraft" class="badge badge-neutral">环境已锁定</span>
-                </div>
-                <p class="qe-side-sub">所有题目默认在此环境运行；发布后绑定不可变</p>
-                <div class="form-group qe-side-assignment-env">
-                  <EnvironmentProfilePicker
-                    v-model="assignmentEnvId"
-                    :disabled="!assignmentDraft"
-                    show-memory
-                    label="作业环境"
-                  />
-                  <p v-if="assignmentDraft && assignmentEnvId && envById(assignmentEnvId)" class="form-hint">
-                    环境最低内存 {{ envById(assignmentEnvId).minimum_memory_mb }} MB——题目内存不得低于该值
-                  </p>
-                </div>
-                <div class="form-group qe-side-assignment-policy">
-                  <label>作业导入规则</label>
-                  <select v-model="assignmentPolicy" class="import-policy-select" :disabled="!assignmentDraft">
-                    <option value="unrestricted">不限制</option>
-                    <option value="restricted">限定白名单</option>
-                  </select>
-                </div>
-                <div v-if="assignmentPolicy === 'restricted'" class="form-group qe-side-imports">
-                  <label>作业允许导入（白名单）</label>
-                  <div v-if="envImportCandidates(assignmentEnvId).length" class="import-candidates">
-                    <label v-for="name in envImportCandidates(assignmentEnvId)" :key="name" class="import-chip">
-                      <input type="checkbox" :disabled="!assignmentDraft" :checked="assignmentAllowedImports.includes(name)" @change="toggleAssignmentImport(name)" />
-                      {{ name }}
-                    </label>
-                  </div>
-                  <p v-if="assignmentMismatch" class="form-hint env-warn">{{ assignmentMismatch }}</p>
-                </div>
-                <button v-if="assignmentDraft" class="btn-primary btn-sm" @click="saveAssignmentEnv">保存作业环境设置</button>
-              </div>
-
-              <div class="qe-side-divider"></div>
-
-              <div class="qe-side-sec qe-side-sec--audience">
-                <div class="qe-side-sec-head">
-                  <h3 class="qe-side-title">发布范围</h3>
-                  <span v-if="!assignmentDraft" class="badge badge-neutral">已有提交后受限</span>
-                </div>
-                <p class="qe-side-sub">选择班级或学生，白名单学生无需提前选课。</p>
-                <TaskAudiencePicker
-                  task-kind="assignment"
-                  :task-id="route.params.id"
-                  :course-id="assignment?.course_id"
-                  :audience-mode="audienceMode"
-                  :class-ids="audienceClassIds"
-                  :whitelist-ids="audienceWhitelistIds"
-                  :excluded-ids="audienceExcludedIds"
-                  :disabled="!assignmentDraft"
-                  @update:audience-mode="audienceMode = $event"
-                  @update:class-ids="audienceClassIds = $event"
-                  @update:whitelist-ids="audienceWhitelistIds = $event"
-                  @update:excluded-ids="audienceExcludedIds = $event"
-                  @imported="onAudienceImported"
-                />
-                <button v-if="assignmentDraft" class="btn-primary btn-sm" :disabled="audienceSaving" @click="saveAssignmentAudience">保存发布范围</button>
-              </div>
-
-              <div class="qe-side-divider"></div>
-
-              <!-- 本题运行设置 -->
-              <div
-                v-if="activeId !== null"
-                class="qe-side-sec qe-side-sec--question"
-                :class="{ 'qe-side-sec--question-override': questionEnvMode === 'override' }"
-              >
-                <h3 class="qe-side-title">本题运行设置</h3>
-                <div class="form-group qe-side-runtime">
-                  <label>运行环境</label>
-                  <select v-model="questionEnvMode" class="import-policy-select">
-                    <option value="inherit">继承作业默认</option>
-                    <option value="override">指定环境</option>
-                  </select>
-                </div>
-                <EnvironmentProfilePicker
-                  v-if="questionEnvMode === 'override'"
-                  v-model="questionEnvId"
-                  class="qe-side-question-env"
-                  show-memory
-                  label="本题环境"
-                />
-                <div class="qe-side-grid-2">
-                  <div class="form-group">
-                    <label>超时 (ms)</label>
-                    <input v-model.number="form.time_limit_ms" type="number" />
-                  </div>
-                  <div class="form-group">
-                    <label>内存限制 (MB)</label>
-                    <input v-model.number="form.memory_limit_mb" type="number" />
-                  </div>
-                </div>
-                <div class="form-group qe-side-policy">
-                  <label>导入规则</label>
-                  <select v-model="questionPolicyMode" class="import-policy-select">
-                    <option value="inherit">继承作业规则</option>
-                    <option value="unrestricted">不限制</option>
-                    <option value="restricted">自定义白名单</option>
-                  </select>
-                </div>
-                <div v-if="questionPolicyMode === 'restricted'" class="form-group qe-side-imports">
-                  <label>本题允许导入（白名单）</label>
-                  <div v-if="envImportCandidates(effectiveEnvId).length" class="import-candidates">
-                    <label v-for="name in envImportCandidates(effectiveEnvId)" :key="name" class="import-chip">
-                      <input type="checkbox" :checked="questionAllowedImports.includes(name)" @change="toggleQuestionImport(name)" />
-                      {{ name }}
-                    </label>
-                  </div>
-                  <p v-else class="form-hint">当前环境未提供教学库，可留空白名单</p>
-                </div>
-
-                <!-- 内存警告卡片（浅橙） -->
-                <div v-if="memoryWarning" class="qe-warn-card" role="alert">
-                  <p class="qe-warn-text"><AppIcon name="warning" :size="14" /><span class="qe-sr-only">⚠ </span>{{ memoryWarning }}</p>
-                  <p class="qe-warn-sub">当前内存低于环境最低要求，建议自动调整</p>
-                  <button type="button" class="qe-warn-btn" @click="applyRecommendedMemory">使用推荐值</button>
-                </div>
-
-                <!-- 有效环境 info（浅蓝） -->
-                <p v-if="effectiveEnv" class="qe-info">
-                  本题有效环境：{{ effectiveEnv.display_name }} v{{ effectiveEnv.version_number }} 最低内存 {{ effectiveEnv.minimum_memory_mb }} MB
-                </p>
-                <p v-if="mismatchWarning" class="form-hint env-warn">{{ mismatchWarning }}</p>
-              </div>
-            </div>
-
-            <div v-else-if="sideTab === 'ai'" class="qe-side-body qe-side-body--scroll">
-              <!-- AI 评分配置：编辑已有题目 → 持久化容器（GET/PUT/Rubric） -->
-              <template v-if="editingId">
-                <div class="qe-side-sec">
-                  <div class="qe-side-sec-head">
-                    <h3 class="qe-side-title">AI 评分配置</h3>
-                    <span class="qe-ai-qid">#{{ editingId }}</span>
-                  </div>
-                  <p class="qe-side-sub">配置评分模式、功能/鲁棒性测试组、教师约束与 Rubric；发布前需完成配置。</p>
-                  <AIQuestionConfig
-                    :kind="'assignment'"
-                    :question-id="Number(editingId)"
-                    :expanded="true"
-                    @close="sideTab = 'run'"
-                  />
-                </div>
-              </template>
-              <!-- 新建题目（无 id）→ 草稿模式：可编辑全部字段，随「保存题目」一起提交 -->
-              <div v-else-if="activeId === 'new'" class="qe-ai-draft">
-                <div class="qe-side-sec">
-                  <div class="qe-side-sec-head">
-                    <h3 class="qe-side-title">AI 评分配置</h3>
-                    <span class="qe-ai-qid">新建</span>
-                  </div>
-                  <p class="qe-side-sub">配置评分模式与测试组，随「保存题目」一起提交；Rubric 需在保存题目后生成。</p>
-                  <!-- Rubric 门禁前置提示：shadow/active 尚无 Rubric（后端 503 仍兜底） -->
-                  <div v-if="aiDraft.grading_mode !== 'legacy'" class="qe-warn-card" role="alert">
-                    <p class="qe-warn-text"><AppIcon name="warning" :size="14" /><span class="qe-sr-only">⚠ </span>当前为 {{ aiDraft.grading_mode }} 模式，尚无可发布的 Rubric，请先保存题目后生成并锁定</p>
-                  </div>
-                  <AiConfigForm
-                    :key="'ai-draft-' + aiFormKey"
-                    :model-value="aiDraft"
-                    @update:model-value="onAiDraftChange"
-                    @generate-test-groups="onDraftGenerateTestGroups"
-                  />
-                  <p v-if="aiDraftMsg" class="qe-hint" role="status">{{ aiDraftMsg }}</p>
-                  <p class="qe-hint">保存题目后可生成 Rubric。</p>
-                </div>
-              </div>
-              <div v-else class="qe-ai-empty">
-                <p>请先选择或添加题目，再进行 AI 评分配置</p>
-              </div>
-            </div>
-          </div>
-        </aside>
       </div>
 
       <!-- ── 底部固定操作栏 ─────────────────────────────────────── -->
@@ -902,7 +830,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
           <div class="qe-bottom-actions">
             <button type="button" class="btn btn-sm" @click="cancel">取消</button>
             <button type="button" class="btn btn-sm btn-primary" :disabled="saving || activeId === null" @click="submitQuestion">
-              {{ saving ? '保存中...' : '保存题目' }}
+              {{ saving ? '保存中...' : (activeId === 'new' ? '保存题目并下一题' : '保存题目') }}
             </button>
           </div>
         </div>
@@ -1187,10 +1115,9 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 }
 
 .qe-side {
- width: 300px;
+ width: 100%;
  flex-shrink: 0;
- position: sticky;
- top: 24px;
+ position: static;
 }
 
 /* ── 基础信息 ───────────────────────────────────────────────────── */
@@ -1487,6 +1414,14 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
   outline-offset: 2px;
 }
 
+/* 桥接样式只给了裸 input/textarea 高度和边框，没有给宽度；此处补齐，
+   否则题目标题/签名/运行设置里的输入框会以浏览器默认宽度渲染并留白/溢出。 */
+.qe-page input:not([type='checkbox']):not([type='radio']):not([type='file']),
+.qe-page textarea {
+  width: 100%;
+  min-width: 0;
+}
+
 .qe-topbar {
   align-items: center;
   min-height: 48px;
@@ -1666,122 +1601,76 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 
 .qe-card-head { margin-bottom: 14px; }
 
-.qe-side {
-  order: -1;
-  width: 100%;
-  min-width: 0;
-  position: static;
-}
 
-.qe-side-card {
-  min-width: 0;
-  border-radius: var(--radius-card, 12px);
-  background: var(--surface);
-  overflow: hidden;
-}
-
-.qe-side-tabs {
+.qe-side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   min-height: 40px;
-  padding: 0 6px;
-  background: var(--surface);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
 }
 
-.qe-side-tab {
-  min-height: 40px;
-  padding: 8px 14px;
-  border-bottom-width: 2px;
-  font-size: 13px;
+.qe-side-head-note {
+  font-size: 11px;
+  color: var(--faint);
 }
 
-.qe-side-body:not(.qe-side-body--scroll) {
+.qe-side-body {
   display: grid;
-  grid-template-columns: minmax(0, 0.95fr) 1px minmax(0, 1.2fr);
-  gap: 16px;
+  /* 顶部配置架只保留作业级两区：作业默认环境 | 发布范围。
+     一条 .qe-side-divider 自动落入中间 1px 轨道。 */
+  grid-template-columns: minmax(0, 0.95fr) 1px minmax(0, 1.3fr);
+  gap: 14px;
   align-items: stretch;
   min-width: 0;
   padding: 12px 16px 14px;
 }
 
-.qe-side-body:not(.qe-side-body--scroll) .qe-side-sec {
-  min-width: 0;
-}
-
-.qe-side-sec--assignment,
-.qe-side-sec--question {
-  align-content: start;
+.qe-side-body .qe-side-sec {
   min-width: 0;
 }
 
 .qe-side-sec--assignment {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 7px 12px;
-}
-
-.qe-side-sec--assignment > .qe-side-sec-head,
-.qe-side-sec--assignment > .qe-side-sub,
-.qe-side-sec--assignment > .qe-side-imports {
-  grid-column: 1 / -1;
-}
-
-.qe-side-sec--assignment > .qe-side-sec-head { grid-row: 1; }
-.qe-side-sec--assignment > .qe-side-assignment-env {
   grid-column: 1;
-  grid-row: 2;
+  grid-row: 1;
 }
-.qe-side-sec--assignment > .qe-side-assignment-policy {
-  grid-column: 2;
-  grid-row: 2;
+
+.qe-side-sec--audience {
+  grid-column: 3;
+  grid-row: 1;
 }
-.qe-side-sec--assignment > .qe-side-sub {
-  grid-column: 1 / -1;
-  grid-row: 3;
+
+.qe-side-sec--assignment,
+.qe-side-sec--audience {
+  align-content: start;
+  min-width: 0;
+}
+
+/* 作业环境：整列纵向排布，避免窄列内 select 选项文字被裁切 */
+.qe-side-sec--assignment {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
 }
 
 .qe-side-sec--assignment > .form-group { margin-bottom: 0; }
+.qe-side-sec--assignment > button { align-self: flex-end; }
 
-.qe-side-sec--assignment > button {
-  grid-column: 1 / -1;
-  align-self: start;
-  justify-self: end;
-}
-
-.qe-side-sec--question {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr) minmax(0, 0.85fr) minmax(0, 1.15fr);
-  gap: 7px 12px;
+/* 发布范围：整列纵向排布，搜索行允许换行 */
+.qe-side-sec--audience {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
 }
 
-.qe-side-sec--question > .qe-side-title {
-  grid-column: 1 / -1;
-}
-
-.qe-side-sec--question > .qe-side-runtime {
-  grid-column: 2;
-  grid-row: 2;
-}
-.qe-side-sec--question > .qe-side-question-env {
-  grid-column: 1;
-  grid-row: 3;
-  min-width: 0;
-}
-.qe-side-sec--question > .qe-side-grid-2 {
-  grid-column: 2 / -1;
-  grid-row: 3;
-  align-self: start;
-}
-.qe-side-sec--question > .qe-side-policy {
-  grid-column: 1;
-  grid-row: 2;
-}
-.qe-side-sec--question:not(.qe-side-sec--question-override) > .qe-side-grid-2 {
-  grid-column: 1 / -1;
-}
-.qe-side-sec--question > .qe-side-imports,
-.qe-side-sec--question > .qe-warn-card,
-.qe-side-sec--question > .qe-info,
-.qe-side-sec--question > .env-warn { grid-column: 1 / -1; }
-.qe-side-sec--question > .form-group { margin-bottom: 0; }
+.qe-side-sec--audience > .qe-side-sub { margin-bottom: 0; }
+.qe-side-sec--audience > button { align-self: flex-end; }
+.qe-side-sec--audience :deep(.audience-picker) { min-width: 0; }
 
 .qe-side-divider {
   width: 1px;
@@ -1792,16 +1681,45 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 
 .qe-side-body .form-group { min-width: 0; }
 
-.qe-side-body--scroll {
-  max-height: none;
-  overflow: visible;
-  padding: 14px 16px 16px;
+/* 题目编辑区内的运行参数（原「本题运行设置」收敛为超时/内存两字段） */
+.qe-run-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(180px, 240px);
+  gap: 16px;
+  align-items: start;
 }
 
-.qe-side-body--scroll .qe-side-sec {
+.qe-run-grid .form-group { margin-bottom: 0; }
+
+.qe-run-card > .qe-warn-card,
+.qe-run-card > .qe-info {
+  margin-top: 12px;
+  max-width: 760px;
+}
+
+/* AI 评分配置内嵌到题目编辑区下方：去掉组件自带卡片壳，与父卡片融合 */
+.qe-ai-main :deep(.ai-config) {
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.qe-ai-main :deep(.cap-row) { flex-wrap: wrap; }
+
+.qe-ai-main .qe-ai-draft {
   min-width: 0;
 }
 
+.qe-ai-main .qe-card-head {
+  margin-bottom: 0;
+}
+
+.qe-ai-main .qe-ai-draft .qe-side-sub {
+  margin-top: 4px;
+  margin-bottom: 14px;
+}
 .qe-side-sub {
   max-width: 780px;
   margin-bottom: 0;
@@ -1810,7 +1728,7 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 }
 
 .qe-side-sec--assignment .qe-side-sub {
-  margin-bottom: 2px;
+  margin-bottom: 0;
 }
 
 .qe-side-sec--assignment .form-hint {
@@ -1886,8 +1804,8 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
   min-width: 116px;
 }
 
-@media (max-width: 980px) {
-  .qe-side-body:not(.qe-side-body--scroll) {
+@media (max-width: 1180px) {
+  .qe-side-body {
     grid-template-columns: 1fr;
     gap: 14px;
   }
@@ -1899,37 +1817,8 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
   }
 
   .qe-side-sec--assignment,
-  .qe-side-sec--question {
-    grid-template-columns: 1fr;
-  }
-
-  .qe-side-sec--assignment > button,
-  .qe-side-sec--assignment > .qe-side-assignment-env,
-  .qe-side-sec--assignment > .qe-side-assignment-policy,
-  .qe-side-sec--question > .qe-side-runtime,
-  .qe-side-sec--question > .qe-side-question-env,
-  .qe-side-sec--question > .qe-side-grid-2,
-  .qe-side-sec--question > .qe-side-policy,
-  .qe-side-sec--question > .qe-side-imports,
-  .qe-side-sec--question > .qe-warn-card,
-  .qe-side-sec--question > .qe-info,
-  .qe-side-sec--question > .env-warn {
+  .qe-side-sec--audience {
     grid-column: 1;
-  }
-
-  .qe-side-sec--question > .qe-side-runtime,
-  .qe-side-sec--question > .qe-side-question-env,
-  .qe-side-sec--question > .qe-side-grid-2,
-  .qe-side-sec--question > .qe-side-policy {
-    grid-row: auto;
-  }
-
-  .qe-side-sec--assignment > .qe-side-sec-head,
-  .qe-side-sec--assignment > .qe-side-assignment-env,
-  .qe-side-sec--assignment > .qe-side-assignment-policy,
-  .qe-side-sec--assignment > .qe-side-sub,
-  .qe-side-sec--assignment > .qe-side-imports,
-  .qe-side-sec--assignment > button {
     grid-row: auto;
   }
 }
@@ -1971,29 +1860,16 @@ onMounted(() => { fetch(); fetchEnv(); fetchAiStatus() })
 
   .qe-main > .qe-card { padding: 18px 16px; }
 
-  .qe-side-body:not(.qe-side-body--scroll),
-  .qe-side-body--scroll {
+  .qe-side-body {
     padding: 16px;
   }
 
   .qe-side { order: 1; }
 
-  .qe-side-sec--assignment,
-  .qe-side-sec--question {
+  .qe-run-grid {
     grid-template-columns: 1fr;
+    gap: 14px;
   }
-
-  .qe-side-sec--question > .qe-side-runtime,
-  .qe-side-sec--question > .qe-side-grid-2,
-  .qe-side-sec--question > .qe-side-policy,
-  .qe-side-sec--question > .qe-side-imports,
-  .qe-side-sec--question > .qe-warn-card,
-  .qe-side-sec--question > .qe-info,
-  .qe-side-sec--question > .env-warn {
-    grid-column: 1;
-  }
-
-  .qe-side-sec--question > .qe-side-grid-2 { align-self: auto; }
 
   .qe-bottom-inner { padding-inline: 12px; }
   .qe-bottom-left { display: none; }

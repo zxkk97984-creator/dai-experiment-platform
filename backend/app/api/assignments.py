@@ -170,7 +170,7 @@ def list_assignments(
         query = query.join(Course, Assignment.course_id == Course.id).where(Course.teacher_id == current_user.id)
         count_query = count_query.join(Course, Assignment.course_id == Course.id).where(Course.teacher_id == current_user.id)
     elif current_user.role != "admin":
-        # developer or any unsupported role: empty
+        # Any unsupported role: empty
         query = query.where(Assignment.id == -1)
         count_query = count_query.where(Assignment.id == -1)
     total = db.scalar(count_query) or 0

@@ -13,6 +13,7 @@ vi.mock('../../../api/experiments', () => ({
   experimentsAPI: {
     listModules: vi.fn(),
     createModule: vi.fn(),
+    ensureModuleTemplate: vi.fn(),
     updateModule: vi.fn(),
     publishModule: vi.fn(),
     unpublishModule: vi.fn(),
@@ -35,6 +36,7 @@ function makeModules(count) {
     name: `实验模块 ${index + 1}`,
     description: `描述 ${index + 1}`,
     status: 'draft',
+    template_id: index + 10,
     updated_at: '2026-08-01T08:00:00Z',
   }))
 }
@@ -48,10 +50,18 @@ async function mountPage() {
   })
 }
 
-async function openCreateModal(wrapper) {
+async function findCreateButton(wrapper) {
   const button = wrapper.findAll('button').find((item) => item.text().includes('创建实验'))
   expect(button, '页面应有「创建实验」按钮').toBeDefined()
+  return button
+}
+
+async function openCreateModal(wrapper) {
+  const button = await findCreateButton(wrapper)
   await button.trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.create-panel').exists()).toBe(true)
+  return wrapper.get('.create-panel')
 }
 
 describe('实验模块管理页 ExperimentManageView', () => {
@@ -59,46 +69,120 @@ describe('实验模块管理页 ExperimentManageView', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     experimentsAPI.listModules.mockResolvedValue({ data: { items: [] } })
+    experimentsAPI.createModule.mockResolvedValue({ data: { id: 11, template_id: 20 } })
+    experimentsAPI.ensureModuleTemplate.mockResolvedValue({ data: { id: 11, template_id: 20 } })
+    experimentsAPI.updateModule.mockResolvedValue({ data: { id: 1, template_id: 11 } })
   })
 
-  it('点击「创建实验」打开创建弹窗', async () => {
+  it('点击「创建实验」打开弹窗，填写完整后才创建并进入编辑器', async () => {
     const wrapper = await mountPage()
     await flushPromises()
 
-    await openCreateModal(wrapper)
+    const panel = await openCreateModal(wrapper)
+    expect(panel.get('.create-heading strong').text()).toBe('创建实验')
 
-    expect(wrapper.find('[role="dialog"][aria-label="创建实验"]').exists()).toBe(true)
-    expect(wrapper.find('input[placeholder="例如：Python 数据分析实验"]').exists()).toBe(true)
-  })
-
-  it('实验名称为空时提示并阻止提交', async () => {
-    const wrapper = await mountPage()
+    // 基本信息不完整时不允许创建
+    await panel.trigger('submit')
     await flushPromises()
-    await openCreateModal(wrapper)
-
-    await wrapper.find('.create-form button.btn-primary').trigger('click')
-
     expect(experimentsAPI.createModule).not.toHaveBeenCalled()
     expect(showToastMock).toHaveBeenCalledWith('请输入实验名称', 'error')
+
+    await panel.get('input[type="text"]').setValue('Python 数据分析实验')
+    await panel.trigger('submit')
+    await flushPromises()
+    expect(experimentsAPI.createModule).not.toHaveBeenCalled()
+    expect(showToastMock).toHaveBeenCalledWith('请输入实验描述', 'error')
+
+    await panel.get('textarea').setValue('完成数据清洗与可视化')
+    await panel.trigger('submit')
+    await flushPromises()
+
+    expect(experimentsAPI.createModule).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Python 数据分析实验', description: '完成数据清洗与可视化' }),
+    )
+    expect(experimentsAPI.ensureModuleTemplate).not.toHaveBeenCalled()
+    expect(pushMock).toHaveBeenCalledWith('/teacher/experiments/11/studio/20')
   })
 
-  it('确认创建后关闭弹窗并刷新列表', async () => {
-    experimentsAPI.createModule.mockResolvedValue({ data: { id: 8 } })
+  it('创建和编辑信息弹窗复用布置作业的标准表单布局', async () => {
+    experimentsAPI.listModules.mockResolvedValue({ data: { items: makeModules(1) } })
     const wrapper = await mountPage()
     await flushPromises()
-    await openCreateModal(wrapper)
 
-    await wrapper.find('input[placeholder="例如：Python 数据分析实验"]').setValue('Python 数据分析实验')
-    await wrapper.find('textarea[placeholder="实验目标和步骤说明"]').setValue('完成数据清洗与可视化')
-    await wrapper.find('.create-form button.btn-primary').trigger('click')
+    const createPanel = await openCreateModal(wrapper)
+    expect(createPanel.classes()).toContain('create-modal')
+    expect(createPanel.find('header.create-heading').exists()).toBe(true)
+    expect(createPanel.find('.create-modal-body').exists()).toBe(true)
+    expect(createPanel.find('.create-actions').exists()).toBe(true)
+
+    await createPanel.find('.create-close').trigger('click')
+    await wrapper.get('[data-action="edit-info"]').trigger('click')
     await flushPromises()
 
-    expect(experimentsAPI.createModule).toHaveBeenCalledWith({
-      name: 'Python 数据分析实验',
-      description: '完成数据清洗与可视化',
-    })
-    expect(wrapper.find('[role="dialog"][aria-label="创建实验"]').exists()).toBe(false)
-    expect(experimentsAPI.listModules).toHaveBeenCalledTimes(2)
+    const editPanel = wrapper.get('.create-panel')
+    expect(editPanel.classes()).toContain('create-modal')
+    expect(editPanel.find('header.create-heading').exists()).toBe(true)
+    expect(editPanel.find('.create-modal-body').exists()).toBe(true)
+    expect(editPanel.find('.create-actions').exists()).toBe(true)
+  })
+
+  it('点击「编辑模块」直接进入已有实验编辑器', async () => {
+    experimentsAPI.listModules.mockResolvedValue({ data: { items: makeModules(3) } })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    await wrapper.findAll('[data-action="edit-module"]')[1].trigger('click')
+    await flushPromises()
+
+    expect(experimentsAPI.updateModule).not.toHaveBeenCalled()
+    expect(experimentsAPI.ensureModuleTemplate).not.toHaveBeenCalled()
+    expect(pushMock).toHaveBeenCalledWith('/teacher/experiments/2/studio/11')
+  })
+
+  it('点击实验名称同样直接进入编辑器', async () => {
+    experimentsAPI.listModules.mockResolvedValue({ data: { items: makeModules(3) } })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-action="open-module"]').trigger('click')
+    await flushPromises()
+
+    expect(pushMock).toHaveBeenCalledWith('/teacher/experiments/1/studio/10')
+  })
+
+  it('编辑信息弹窗可保存修改并刷新列表', async () => {
+    experimentsAPI.listModules.mockResolvedValue({ data: { items: makeModules(1) } })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-action="edit-info"]').trigger('click')
+    await flushPromises()
+
+    const panel = wrapper.get('.create-panel')
+    await panel.get('input[type="text"]').setValue('改名后的实验')
+    const saveButton = wrapper.findAll('button').find((item) => item.text().includes('保存信息'))
+    expect(saveButton).toBeDefined()
+    await saveButton.trigger('click')
+    await flushPromises()
+
+    expect(experimentsAPI.updateModule).toHaveBeenCalledWith(1, expect.objectContaining({ name: '改名后的实验' }))
+    expect(showToastMock).toHaveBeenCalledWith('保存成功', 'success')
+    expect(wrapper.find('.create-panel').exists()).toBe(false)
+  })
+
+  it('编辑没有 Notebook 的历史模块时自动初始化并进入编辑器', async () => {
+    const modules = makeModules(1)
+    modules[0].template_id = null
+    experimentsAPI.listModules.mockResolvedValue({ data: { items: modules } })
+    experimentsAPI.ensureModuleTemplate.mockResolvedValue({ data: { id: 1, template_id: 33 } })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-action="edit-module"]').trigger('click')
+    await flushPromises()
+
+    expect(experimentsAPI.ensureModuleTemplate).toHaveBeenCalledWith(1)
+    expect(pushMock).toHaveBeenCalledWith('/teacher/experiments/1/studio/33')
   })
 
   it('12 个模块分两页展示：第 1 页 10 行，点「第 2 页」后 2 行', async () => {
@@ -113,25 +197,6 @@ describe('实验模块管理页 ExperimentManageView', () => {
     expect(wrapper.findAll('tbody tr')).toHaveLength(2)
   })
 
-  it('点击「编辑模块」回填表单并保存修改', async () => {
-    experimentsAPI.listModules.mockResolvedValue({ data: { items: makeModules(3) } })
-    experimentsAPI.updateModule.mockResolvedValue({ data: { id: 1 } })
-    const wrapper = await mountPage()
-    await flushPromises()
-
-    await wrapper.findAll('[data-action="edit-module"]')[0].trigger('click')
-    expect(wrapper.find('[role="dialog"]').text()).toContain('编辑实验')
-    expect(wrapper.find('[name="module-name"]').element.value).toBe('实验模块 1')
-
-    await wrapper.get('[name="module-name"]').setValue('新名称')
-    await wrapper.get('[data-action="save-module"]').trigger('click')
-    await flushPromises()
-
-    expect(experimentsAPI.updateModule).toHaveBeenCalledWith(1, expect.objectContaining({ name: '新名称' }))
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
-    expect(experimentsAPI.listModules).toHaveBeenCalledTimes(2)
-  })
-
   it('草稿模块点击「发布」调用 publishModule 并刷新', async () => {
     experimentsAPI.listModules.mockResolvedValue({ data: { items: makeModules(1) } })
     experimentsAPI.publishModule.mockResolvedValue({ data: { id: 1, status: 'published' } })
@@ -142,7 +207,6 @@ describe('实验模块管理页 ExperimentManageView', () => {
     await flushPromises()
 
     expect(experimentsAPI.publishModule).toHaveBeenCalledWith(1)
-    expect(experimentsAPI.updateModule).not.toHaveBeenCalled()
     expect(showToastMock).toHaveBeenCalledWith('已发布', 'success')
   })
 
@@ -159,14 +223,5 @@ describe('实验模块管理页 ExperimentManageView', () => {
 
     expect(experimentsAPI.unpublishModule).toHaveBeenCalledWith(1)
     expect(showToastMock).toHaveBeenCalledWith('已下架', 'success')
-  })
-
-  it('创建表单不再包含入口 URL 字段', async () => {
-    const wrapper = await mountPage()
-    await flushPromises()
-    await openCreateModal(wrapper)
-
-    expect(wrapper.find('[name="module-entry-url"]').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('入口 URL')
   })
 })

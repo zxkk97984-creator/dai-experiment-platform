@@ -561,8 +561,6 @@ def test_dashboard_role_isolation(client, db_session_factory):
     _build_graph(db_session_factory)
     student_token, _ = login(client, "dash-student")
     teacher_token, _ = login(client, "dash-teacher-a")
-    create_user(db_session_factory, "dash-dev", "developer")
-    dev_token, _ = login(client, "dash-dev")
 
     assert (
         client.get("/api/v1/dashboard/teacher", headers=auth_header(student_token)).status_code
@@ -570,13 +568,5 @@ def test_dashboard_role_isolation(client, db_session_factory):
     )
     assert (
         client.get("/api/v1/dashboard/student", headers=auth_header(teacher_token)).status_code
-        == 403
-    )
-    assert (
-        client.get("/api/v1/dashboard/student", headers=auth_header(dev_token)).status_code
-        == 403
-    )
-    assert (
-        client.get("/api/v1/dashboard/teacher", headers=auth_header(dev_token)).status_code
         == 403
     )

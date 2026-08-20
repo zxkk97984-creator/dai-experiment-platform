@@ -178,6 +178,87 @@ def test_unified_submissions_filters_and_scopes(client, db_session_factory):
     assert other_body["total"] == 0
 
 
+def test_unified_submissions_includes_module_experiments(client, db_session_factory):
+    """回归：统一提交中心的「实验」板块必须包含模块实验（module 链路）提交。
+
+    曾按 Course.teacher_id 过滤实验提交，模块实验记录 lesson_id 为 NULL、
+    course 链为空，被整体排除——与 /experiments/submissions 同源的可见性缺陷。
+    """
+    g = _seed(db_session_factory)
+    from app.models import (
+        ExperimentModule, ExperimentRecord, ExperimentSubmission,
+        NotebookTemplate, NotebookTemplateVersion,
+    )
+
+    with db_session_factory() as db:
+        tpl = NotebookTemplate(name="模块实验模板", status="published", owner_id=g["teacher"].id)
+        db.add(tpl)
+        db.flush()
+        ver = NotebookTemplateVersion(
+            template_id=tpl.id, version_number=1, sha256="y" * 64,
+            cells=[], cell_order=[], notebook_metadata={}, published_by_id=g["teacher"].id,
+        )
+        db.add(ver)
+        db.flush()
+        tpl.current_version_id = ver.id
+        module = ExperimentModule(
+            name="CNN 模块实验", status="published",
+            owner_id=g["teacher"].id, template_id=tpl.id,
+        )
+        db.add(module)
+        db.flush()
+        record = ExperimentRecord(
+            module_id=module.id, template_version_id=ver.id,
+            student_id=g["student"].id, status="graded",
+            submitted_at=NOW - timedelta(minutes=10),
+        )
+        db.add(record)
+        db.flush()
+        db.add(ExperimentSubmission(
+            record_id=record.id, attempt_number=1, client_request_id="wb-exp-mod-1",
+            cells_snapshot={}, score=92.0, submitted_at=NOW - timedelta(minutes=10),
+        ))
+        db.commit()
+        module_id = module.id
+
+    token, _ = login(client, "wb-teacher")
+    headers = auth_header(token)
+
+    # 教师 A：实验板块应同时包含课时实验与模块实验
+    body = client.get("/api/v1/submissions/unified", params={"kind": "experiment"}, headers=headers).json()
+    assert body["total"] == 2, f"实验板块应含课时+模块两条提交，实际 {body['total']}"
+    assert any(row["entry_title"] == "CNN 模块实验" for row in body["items"])
+
+    # 按模块 entry 筛选能命中模块提交，且跳转路由为实验提交详情。
+    # 注：entry_id 为课时/模块共用数字命名空间（既有设计，全新库自增 id 会重叠），
+    # 此处只断言模块行可见，不断言精确总数。
+    module_only = client.get(
+        "/api/v1/submissions/unified",
+        params={"kind": "experiment", "entry_id": module_id},
+        headers=headers,
+    ).json()
+    module_row = next(
+        (row for row in module_only["items"] if row["entry_title"] == "CNN 模块实验"),
+        None,
+    )
+    assert module_row is not None
+    assert module_row["route"] == f"/teacher/submissions/{module_row['id']}"
+
+    # 筛选项包含模块实验入口
+    full = client.get("/api/v1/submissions/unified", headers=headers).json()
+    entries = full["filter_options"]["entries"]
+    assert any(e["id"] == module_id and e["kind"] == "experiment" for e in entries)
+
+    # 教师 B 不可见教师 A 的模块实验提交
+    other_token, _ = login(client, "wb-other")
+    other_body = client.get(
+        "/api/v1/submissions/unified", params={"kind": "experiment"},
+        headers=auth_header(other_token),
+    ).json()
+    assert all(row["entry_title"] != "CNN 模块实验" for row in other_body["items"])
+    assert other_body["total"] == 0
+
+
 def test_global_search_is_role_scoped(client, db_session_factory):
     _seed(db_session_factory)
     token, _ = login(client, "wb-teacher")

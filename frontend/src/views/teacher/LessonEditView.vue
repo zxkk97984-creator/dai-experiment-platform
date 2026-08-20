@@ -1,11 +1,12 @@
 <script setup>
 // 课时编辑分派壳：加载课时 → 按 content_type 渲染对应编辑器。
 // URL 唯一（/teacher/courses/:courseId/lessons/:lessonId/edit），刷新可恢复，不复制四份路由表。
-// notebook 额外解析模板 id：query.template 优先 → listTemplates 反查 → 兜底创建模板。
+// notebook 模板 id：query.template 优先 → 课时自身 template_id → 首次进入时初始化。
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
+import CourseFormModal from '../../components/teacher/CourseFormModal.vue'
 import StudioEditor from '../../components/notebook/StudioEditor.vue'
 import EnvironmentProfilePicker from '../../components/common/EnvironmentProfilePicker.vue'
 import LessonMarkdownEditor from './LessonMarkdownEditor.vue'
@@ -27,13 +28,13 @@ const loading = ref(true)
 const loadError = ref('')
 const lesson = ref(null)
 
-// notebook 模板解析：resolvingTemplate 解析中；templateId 命中；noTemplate 兜底
+// notebook 模板解析：resolvingTemplate 解析中；templateId 命中；noTemplate 首次初始化
 const resolvingTemplate = ref(false)
 const templateId = ref(null)
 const noTemplate = ref(false)
 const creatingTemplate = ref(false)
 
-// ── Phase 4：兜底创建的环境选择（避免静默创建错误环境） ─────────
+// ── 首次进入的环境选择（避免静默创建错误环境） ──────────────────
 const fallbackEnvOptions = ref([])
 const fallbackEnvId = ref(null)
 const fallbackPolicy = ref('unrestricted')
@@ -102,8 +103,8 @@ async function loadLesson() {
   }
 }
 
-/** notebook 模板 id 解析：query → listTemplates 反查 → 兜底卡片 */
-async function resolveTemplate(ls) {
+/** notebook 模板 id 解析：query → 课时自身字段 → 首次初始化 */
+function resolveTemplate(ls) {
   resolvingTemplate.value = true
   try {
     // 1. 创建链路刚建的模板：query.template 数字有效直接使用
@@ -112,27 +113,23 @@ async function resolveTemplate(ls) {
       templateId.value = Number(queryId)
       return
     }
-    // 2. 反查模板列表（StudioTemplateRead 含 lesson_id，无需改后端）
-    const res = await studioAPI.listTemplates({})
-    const list = Array.isArray(res) ? res : (res.data || [])
-    const match = list.find((t) => String(t.lesson_id) === String(ls.id))
-    if (match) {
-      templateId.value = match.id
+    // 2. 课时返回的 template_id 是绑定关系的唯一来源，直接进入 Studio
+    if (ls.template_id) {
+      templateId.value = Number(ls.template_id)
       return
     }
-    // 3. 未命中（典型场景：复制课时重建但未绑模板）→ 兜底卡片
+    // 3. 历史孤立课时：首次进入时选择环境并自动完成初始化
     noTemplate.value = true
   } catch (err) {
-    noTemplate.value = true
     console.error('[LessonEditView] 解析模板失败', err)
   } finally {
     resolvingTemplate.value = false
   }
 }
 
-/** 兜底卡片：创建模板并进入（同路由 replace 追加 ?template，供刷新恢复） */
+/** 首次初始化并进入 Studio（同路由 replace 追加 ?template，供刷新恢复） */
 async function createTemplateAndEnter() {
-  if (creatingTemplate.value || !lesson.value) return
+  if (creatingTemplate.value || !lesson.value || !fallbackEnvId.value) return
   creatingTemplate.value = true
   try {
     const res = await studioAPI.createTemplate({
@@ -150,8 +147,8 @@ async function createTemplateAndEnter() {
     noTemplate.value = false
     router.replace({ query: { ...route.query, template: template.id } })
   } catch (err) {
-    app.showToast('创建模板失败', 'error')
-    console.error('[LessonEditView] 创建模板失败', err)
+    app.showToast('进入 Studio 失败', 'error')
+    console.error('[LessonEditView] 初始化 Notebook 失败', err)
   } finally {
     creatingTemplate.value = false
   }
@@ -184,10 +181,17 @@ onMounted(loadLesson)
         <div v-for="i in 3" :key="i" class="skeleton skeleton-line"></div>
       </div>
 
-      <!-- notebook 未关联模板 → 兜底卡片（Phase 4：选择环境后创建，避免静默错误环境） -->
-      <div v-else-if="noTemplate" class="error-card">
-        <h2>该 Notebook 课时尚未关联模板</h2>
-        <p>创建模板后可进入 Studio 编辑实验内容，请选择运行环境。</p>
+      <!-- 历史 Notebook 首次进入：在当前页面弹窗选择环境并自动初始化 -->
+      <CourseFormModal
+        v-else-if="noTemplate"
+        title="首次进入 Notebook"
+        description="请选择运行环境，完成后即可进入 Studio。"
+        title-id="notebook-setup-title"
+        body-class="notebook-setup-body"
+        :busy="creatingTemplate"
+        @close="goBack"
+        @submit="createTemplateAndEnter"
+      >
         <div class="fallback-env">
           <EnvironmentProfilePicker
             v-model="fallbackEnvId"
@@ -196,13 +200,13 @@ onMounted(loadLesson)
             @loaded="onFallbackEnvLoaded"
           />
           <p v-if="!fallbackEnvOptions.length" class="fallback-hint env-warn">暂无可用环境，请联系管理员</p>
-          <label class="fallback-field">
-            <span>导入规则</span>
-            <select v-model="fallbackPolicy" class="fallback-select">
+          <div class="fallback-field">
+            <label class="fallback-field-label" for="fallback-import-policy">导入规则</label>
+            <select id="fallback-import-policy" v-model="fallbackPolicy" class="fallback-select">
               <option value="unrestricted">不限制</option>
               <option value="restricted">限定白名单</option>
             </select>
-          </label>
+          </div>
           <div v-if="fallbackPolicy === 'restricted'" class="fallback-chips">
             <label v-for="name in fallbackImportCandidates" :key="name" class="fallback-chip">
               <input type="checkbox" :checked="fallbackAllowedImports.includes(name)" @change="toggleFallbackImport(name)" />
@@ -212,13 +216,13 @@ onMounted(loadLesson)
           </div>
           <p v-if="fallbackMismatch" class="fallback-hint env-warn">{{ fallbackMismatch }}</p>
         </div>
-        <div class="fallback-actions">
-          <button class="btn-secondary" type="button" @click="goBack">返回</button>
-          <button class="btn-primary" type="button" :disabled="creatingTemplate" @click="createTemplateAndEnter">
-            <AppIcon name="plus" :size="16" /> 创建模板并进入
+        <template #actions>
+          <button class="btn btn-ghost" type="button" :disabled="creatingTemplate" @click="goBack">取消</button>
+          <button class="btn btn-primary" type="submit" :disabled="creatingTemplate || !fallbackEnvId">
+            <AppIcon name="arrow-right" :size="16" /> 进入 Studio
           </button>
-        </div>
-      </div>
+        </template>
+      </CourseFormModal>
 
       <!-- 分派：四类编辑器 -->
       <LessonMarkdownEditor
@@ -269,27 +273,37 @@ onMounted(loadLesson)
   border-radius: var(--radius-lg);
   background: var(--surface);
 }
-.error-card h2 { margin: 0 0 8px; font-size: 18px; color: var(--fg); }
-.error-card p { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
-.fallback-actions { display: flex; justify-content: center; gap: 8px; }
-/* ── Phase 4：兜底创建环境选择 ─────────────────────────────────── */
+/* ── 首次进入环境选择 ───────────────────────────────────────────── */
 .fallback-env {
   max-width: 420px;
+  width: 100%;
   margin: 0 auto 20px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   text-align: left;
 }
-.fallback-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.fallback-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; line-height: var(--lh-body, 1.55); color: var(--muted); }
+.fallback-field-label {
+  display: block;
+  padding-top: var(--space-1);
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: var(--lh-body, 1.55);
+}
 .fallback-select {
-  padding: 9px 12px;
+  width: 100%;
+  height: auto;
+  min-height: 38px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control, 7px);
   background: var(--surface);
   color: var(--fg);
   font-family: inherit;
   font-size: var(--text-sm, 13px);
+  line-height: 1.4;
 }
 .fallback-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .fallback-chip {

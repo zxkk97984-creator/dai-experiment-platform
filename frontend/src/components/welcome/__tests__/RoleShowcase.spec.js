@@ -9,7 +9,7 @@ describe('RoleShowcase', () => {
     expect(wrapper.text()).toContain('为每一位参与者设计')
   })
 
-  it('renders all 4 role cards', () => {
+  it('renders all supported role cards', () => {
     const wrapper = mount(RoleShowcase)
     const cards = wrapper.findAll('.role-card')
     expect(cards.length).toBe(roles.length)

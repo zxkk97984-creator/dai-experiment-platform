@@ -11,6 +11,9 @@ const routerState = vi.hoisted(() => ({
   leaveHook: null,
 }))
 const appState = vi.hoisted(() => ({ showToast: vi.fn() }))
+const environmentsState = vi.hoisted(() => ({
+  listAvailable: vi.fn().mockResolvedValue({ data: [] }),
+}))
 
 // 可变 store：测试中直接修改 dirty/conflict 等字段
 const storeState = vi.hoisted(() => ({
@@ -66,7 +69,7 @@ vi.mock('../../../stores/app.js', () => ({
 
 // Phase 4：环境 API mock——避免真实 client.js → router 依赖链
 vi.mock('../../../api/environments.js', () => ({
-  environmentsAPI: { listAvailable: vi.fn().mockResolvedValue({ data: [] }) },
+  environmentsAPI: environmentsState,
 }))
 
 const CellStubs = {
@@ -93,7 +96,10 @@ describe('StudioEditor', () => {
     routerState.leaveHook = null
     storeState.dirty = false
     storeState.conflict = false
+    storeState.name = '测试模板'
+    storeState.environmentVersionId = null
     storeState.open.mockResolvedValue()
+    environmentsState.listAvailable.mockResolvedValue({ data: [] })
   })
 
   afterEach(() => {
@@ -201,6 +207,30 @@ describe('StudioEditor', () => {
       await flushPromises()
       expect(routerState.back).not.toHaveBeenCalled()
       expect(storeState.destroy).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('发布确认', () => {
+    it('优先显示实验标题，并将环境与可用库作为辅助信息', async () => {
+      storeState.name = '基础环境：排序与查找'
+      storeState.environmentVersionId = 7
+      environmentsState.listAvailable.mockResolvedValue({
+        data: [{
+          environment_version_id: 7,
+          display_name: 'Python 基础',
+          version_number: 1,
+          packages: [{ pip_name: 'pytest' }],
+        }],
+      })
+
+      const wrapper = await mountEditor()
+      await wrapper.findAll('button').find((button) => button.text() === '发布').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('本次将发布：基础环境：排序与查找')
+      expect(wrapper.text()).toContain('运行环境：Python 基础 v1')
+      expect(wrapper.text()).toContain('可用库：pytest')
+      expect(wrapper.text()).not.toContain('本次将发布：Python 基础 v1')
     })
   })
 

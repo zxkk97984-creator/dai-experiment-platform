@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { studioAPI } from '../api/studio.js'
+import { experimentsAPI } from '../api/experiments.js'
 import { useAppStore } from './app.js'
 
 export const useStudioStore = defineStore('studio', () => {
@@ -266,7 +267,23 @@ export const useStudioStore = defineStore('studio', () => {
       const res = await studioAPI.publish(templateId.value)
       status.value = 'published'
       currentVersionId.value = res.data.id
-      app.showToast(`已发布版本 ${res.data.version_number}`, 'success')
+      // 实验模板：模板版本发布成功后，显式发布绑定的实验模块。
+      // 模块状态变更只能走 /experiments/modules/{id}/publish（后端发布门禁保留），
+      // 通用 studio_service.publish_template 不做模块联动。
+      if (moduleId.value == null) {
+        app.showToast(`已发布版本 ${res.data.version_number}`, 'success')
+        return res.data
+      }
+      try {
+        await experimentsAPI.publishModule(moduleId.value)
+        app.showToast('实验发布成功', 'success')
+      } catch (e) {
+        // 部分成功：模板版本已发布、模块仍为草稿。明确报错，避免假成功提示；
+        // 模块发布可在实验列表页重试（此时模板版本已就绪，门禁可通过）。
+        const detail = e.response?.data?.detail?.message || '实验发布失败'
+        error.value = { code: 'MODULE_PUBLISH_FAILED', message: detail }
+        app.showToast(`模板版本已发布，但实验发布失败：${detail}，请返回实验列表重试`, 'error')
+      }
       return res.data
     } catch (e) {
       error.value = { code: 'PUBLISH_FAILED', message: e.response?.data?.detail?.message || '发布失败' }

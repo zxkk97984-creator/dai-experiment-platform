@@ -87,13 +87,16 @@ defineExpose({ fetchOptions })
 }
 .env-picker-select {
   width: 100%;
-  padding: 9px 12px;
+  height: auto;
+  min-height: 38px;
+  padding: 8px 12px;
   border: 1px solid var(--border, var(--border));
   border-radius: var(--radius-control, 7px);
   background: var(--surface, var(--surface));
   color: var(--fg);
   font-family: inherit;
   font-size: var(--text-sm, 13px);
+  line-height: 1.4;
 }
 .env-picker-select:disabled {
   background: var(--surface-raised, var(--surface-subtle));

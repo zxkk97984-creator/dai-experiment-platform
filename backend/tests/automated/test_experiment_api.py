@@ -1,4 +1,8 @@
 """实验 API 测试 — v5 统一模型后的验收测试"""
+from sqlalchemy import select
+
+from app.models import ExperimentModule, NotebookTemplate
+
 from conftest import auth_header, create_course_db, create_user, login, seed_basic_environment
 
 
@@ -14,7 +18,7 @@ def _seed_student_catalog(db_session_factory):
         NotebookTemplateVersion,
     )
 
-    developer = create_user(db_session_factory, "catalog_developer", "developer")
+    owner = create_user(db_session_factory, "catalog_owner", "teacher")
     student = create_user(db_session_factory, "catalog_student", "student")
     other_student = create_user(db_session_factory, "catalog_other", "student")
 
@@ -22,7 +26,7 @@ def _seed_student_catalog(db_session_factory):
         template = NotebookTemplate(
             name="Catalog template",
             status="published",
-            owner_id=developer.id,
+            owner_id=owner.id,
         )
         db.add(template)
         db.flush()
@@ -31,17 +35,17 @@ def _seed_student_catalog(db_session_factory):
             version_number=1,
             sha256="catalog-v1",
             cells=[],
-            published_by_id=developer.id,
+            published_by_id=owner.id,
         )
         db.add(version)
         db.flush()
 
         modules = [
-            ExperimentModule(name="01 Python 入门", status="published", owner_id=developer.id),
-            ExperimentModule(name="02 NumPy 基础", status="published", owner_id=developer.id),
-            ExperimentModule(name="03 可视化", status="published", owner_id=developer.id),
-            ExperimentModule(name="04 数据清洗", status="published", owner_id=developer.id),
-            ExperimentModule(name="隐藏草稿", status="draft", owner_id=developer.id),
+            ExperimentModule(name="01 Python 入门", status="published", owner_id=owner.id),
+            ExperimentModule(name="02 NumPy 基础", status="published", owner_id=owner.id),
+            ExperimentModule(name="03 可视化", status="published", owner_id=owner.id),
+            ExperimentModule(name="04 数据清洗", status="published", owner_id=owner.id),
+            ExperimentModule(name="隐藏草稿", status="draft", owner_id=owner.id),
         ]
         db.add_all(modules)
         db.flush()
@@ -145,11 +149,11 @@ def test_student_catalog_rejects_non_student_roles(client, db_session_factory):
 
 
 def test_teacher_can_create_and_update_own_module_only(client, db_session_factory):
-    """教师可以创建模块，但不能修改其他开发者的模块"""
-    create_user(db_session_factory, "teacher_module", "teacher")
-    create_user(db_session_factory, "developer_module", "developer")
+    """教师创建模块时同时获得一个可编辑的空白 Notebook。"""
+    teacher = create_user(db_session_factory, "teacher_module", "teacher")
+    create_user(db_session_factory, "teacher_module_other", "teacher")
     teacher_tok, _ = login(client, "teacher_module")
-    developer_tok, _ = login(client, "developer_module")
+    other_teacher_tok, _ = login(client, "teacher_module_other")
 
     own = client.post(
         "/api/v1/experiments/modules",
@@ -157,21 +161,41 @@ def test_teacher_can_create_and_update_own_module_only(client, db_session_factor
         json={"name": "教师实验模块", "description": "教师创建"},
     )
     assert own.status_code == 201, own.text
+    assert own.json()["template_id"] is not None
+
+    with db_session_factory() as db:
+        module = db.get(ExperimentModule, own.json()["id"])
+        template = db.get(NotebookTemplate, own.json()["template_id"])
+        assert module.template_id == template.id
+        assert module.owner_id == teacher.id
+        assert template.owner_id == teacher.id
+        assert template.draft_cells == []
+        assert db.scalar(
+            select(ExperimentModule).where(
+                ExperimentModule.template_id == template.id
+            )
+        ).id == module.id
 
     own_update = client.post(
         f"/api/v1/experiments/modules/{own.json()['id']}/publish",
         headers=auth_header(teacher_tok),
     )
-    # 未绑定模板 → 发布被模板就绪门禁拒绝
+    # 空白模板尚未发布版本 → 仍不能直接发布模块
     assert own_update.status_code == 422, own_update.text
-    assert own_update.json()["detail"]["code"] == "MODULE_TEMPLATE_REQUIRED"
+    assert own_update.json()["detail"]["code"] == "MODULE_TEMPLATE_NOT_READY"
 
     other = client.post(
         "/api/v1/experiments/modules",
-        headers=auth_header(developer_tok),
-        json={"name": "开发者实验模块"},
+        headers=auth_header(other_teacher_tok),
+        json={"name": "其他教师实验模块"},
     )
     assert other.status_code == 201, other.text
+
+    listed = client.get(
+        "/api/v1/experiments/modules",
+        headers=auth_header(teacher_tok),
+    )
+    assert [item["id"] for item in listed.json()["items"]] == [own.json()["id"]]
 
     other_update = client.patch(
         f"/api/v1/experiments/modules/{other.json()['id']}",
@@ -181,11 +205,59 @@ def test_teacher_can_create_and_update_own_module_only(client, db_session_factor
     assert other_update.status_code == 403
 
 
+def test_admin_cannot_create_experiment_module(client, db_session_factory):
+    create_user(db_session_factory, "module_admin", "admin")
+    admin_token, _ = login(client, "module_admin")
+
+    response = client.post(
+        "/api/v1/experiments/modules",
+        headers=auth_header(admin_token),
+        json={"name": "管理员不应创建的模块"},
+    )
+
+    assert response.status_code == 403, response.text
+
+
+def test_teacher_can_initialize_legacy_module_without_template(
+    client, db_session_factory
+):
+    """历史孤立模块首次编辑时自动补齐空白 Notebook，且操作幂等。"""
+    teacher = create_user(db_session_factory, "legacy_module_teacher", "teacher")
+    teacher_token, _ = login(client, "legacy_module_teacher")
+
+    with db_session_factory() as db:
+        module = ExperimentModule(
+            name="历史孤立实验",
+            description="需要恢复编辑器",
+            owner_id=teacher.id,
+            status="draft",
+        )
+        db.add(module)
+        db.commit()
+        db.refresh(module)
+        module_id = module.id
+
+    first = client.post(
+        f"/api/v1/experiments/modules/{module_id}/template",
+        headers=auth_header(teacher_token),
+    )
+    assert first.status_code == 200, first.text
+    template_id = first.json()["template_id"]
+    assert template_id is not None
+
+    second = client.post(
+        f"/api/v1/experiments/modules/{module_id}/template",
+        headers=auth_header(teacher_token),
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["template_id"] == template_id
+
+
 def test_student_cannot_read_draft_module(client, db_session_factory):
     """学生不能查看 draft 状态的实验模块"""
-    create_user(db_session_factory, "developer1", "developer")
+    create_user(db_session_factory, "teacher1", "teacher")
     create_user(db_session_factory, "student2", "student")
-    d_tok, _ = login(client, "developer1")
+    d_tok, _ = login(client, "teacher1")
     s_tok, _ = login(client, "student2")
 
     m = client.post("/api/v1/experiments/modules", headers=auth_header(d_tok), json={
@@ -202,8 +274,8 @@ def test_student_cannot_read_draft_module(client, db_session_factory):
 
 def test_module_publish_requires_template_ready(client, db_session_factory):
     """模块发布走专用端点；PATCH 不再能改 status"""
-    create_user(db_session_factory, "developer2", "developer")
-    d_tok, _ = login(client, "developer2")
+    create_user(db_session_factory, "teacher2", "teacher")
+    d_tok, _ = login(client, "teacher2")
 
     m = client.post("/api/v1/experiments/modules", headers=auth_header(d_tok), json={
         "name": "To Publish", "status": "draft",
@@ -216,10 +288,10 @@ def test_module_publish_requires_template_ready(client, db_session_factory):
     })
     assert r.status_code == 422, r.text
 
-    # 未绑定模板 → publish 端点被模板就绪门禁拒绝
+    # 创建教师模块会自动绑定空白模板；模板尚无已发布版本时不能发布
     r = client.post(f"/api/v1/experiments/modules/{mid}/publish", headers=auth_header(d_tok))
     assert r.status_code == 422, r.text
-    assert r.json()["detail"]["code"] == "MODULE_TEMPLATE_REQUIRED"
+    assert r.json()["detail"]["code"] == "MODULE_TEMPLATE_NOT_READY"
 
 
 def test_notebooks_deprecation_header(client, db_session_factory):
@@ -333,3 +405,57 @@ def test_p0_4_teacher_submission_isolation(client, db_session_factory):
     assert r_b.status_code == 200
     items_b = r_b.json()["items"]
     assert len(items_b) == 0, f"教师 B 不应看到其他教师的提交，但看到了 {len(items_b)} 条"
+
+
+def test_p0_4b_teacher_sees_own_module_submissions(client, db_session_factory):
+    """回归：教师能看到自己实验模块（module 链路）的提交，其他教师不可见。
+
+    曾按 Course.teacher_id 过滤教师可见提交，模块实验的 lesson_id 为 NULL、
+    course 链路为空，所有模块实验提交被排除，教师端提交列表恒为空。
+    """
+    create_user(db_session_factory, "t_mod_a", "teacher")
+    create_user(db_session_factory, "t_mod_b", "teacher")
+    create_user(db_session_factory, "s_mod_a", "student")
+    t_a_tok, _ = login(client, "t_mod_a")
+    t_b_tok, _ = login(client, "t_mod_b")
+    s_a_tok, _ = login(client, "s_mod_a")
+
+    # 教师 A 创建实验模块（系统自动创建 Notebook 模板并绑定）
+    mod = client.post("/api/v1/experiments/modules", headers=auth_header(t_a_tok),
+                      json={"name": "模块A", "description": "desc"})
+    assert mod.status_code == 201, mod.text
+    mod_id = mod.json()["id"]
+    tpl_id = mod.json()["template_id"]
+    assert tpl_id, "创建模块应自动生成模板"
+
+    # 发布模板版本 → 发布模块（与真实教师操作一致）
+    pub_tpl = client.post(f"/api/v1/studio/templates/{tpl_id}/publish",
+                          headers=auth_header(t_a_tok))
+    assert pub_tpl.status_code == 201, pub_tpl.text
+    pub_mod = client.post(f"/api/v1/experiments/modules/{mod_id}/publish",
+                          headers=auth_header(t_a_tok))
+    assert pub_mod.status_code == 200, pub_mod.text
+
+    # 学生 A 创建模块实验记录并提交
+    rec = client.post(f"/api/v1/experiments/records/ensure-for-module/{mod_id}",
+                      headers=auth_header(s_a_tok))
+    assert rec.status_code == 200, rec.text
+    rid = rec.json()["id"]
+    sub = client.post(f"/api/v1/experiments/records/{rid}/submit",
+                      headers=auth_header(s_a_tok),
+                      json={"client_request_id": "00000000-0000-0000-0000-000000000099"})
+    assert sub.status_code == 201, sub.text
+    sub_id = sub.json()["id"]
+
+    # 教师 A 应能看到自己模块的提交
+    r_a = client.get("/api/v1/experiments/submissions", headers=auth_header(t_a_tok))
+    assert r_a.status_code == 200
+    items_a = r_a.json()["items"]
+    assert any(it["id"] == sub_id for it in items_a), \
+        "教师 A 应能看到自己实验模块的提交"
+
+    # 教师 B 不应看到教师 A 模块的提交
+    r_b = client.get("/api/v1/experiments/submissions", headers=auth_header(t_b_tok))
+    assert r_b.status_code == 200
+    assert all(it["id"] != sub_id for it in r_b.json()["items"]), \
+        "教师 B 不应看到其他教师模块的提交"

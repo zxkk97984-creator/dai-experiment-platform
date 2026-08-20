@@ -12,7 +12,7 @@ import { useAppStore } from '../../stores/app.js'
 
 const props = defineProps({
   templateId: { type: [Number, String], required: true },
-  /** 返回路径；不传时回退浏览器历史（开发者端兼容行为） */
+  /** 返回路径；不传时回退浏览器历史（Studio 返回路径兼容行为） */
   backTo: { type: [String, Object], default: null },
 })
 const router = useRouter()
@@ -52,13 +52,13 @@ const envMismatch = computed(() => {
   const missing = envDraftAllowed.value.filter((name) => !installed.has(name))
   return missing.length ? `注意：${missing.join('、')} 未在当前环境安装` : ''
 })
-// 发布确认信息：环境名称 vN + 包摘要
+// 发布确认信息：实验标题为主，环境与包摘要作为辅助信息
 const publishSummary = computed(() => {
   const env = envOptions.value.find((o) => o.environment_version_id === store.environmentVersionId) || null
-  if (!env) return { title: '未选择环境', packages: [] }
   return {
-    title: `${env.display_name} v${env.version_number}`,
-    packages: (env.packages || []).map((p) => p.pip_name),
+    title: store.name || '未命名模板',
+    environment: env ? `${env.display_name} v${env.version_number}` : '',
+    packages: env ? (env.packages || []).map((p) => p.pip_name) : [],
   }
 })
 
@@ -605,11 +605,11 @@ function handleMarkdownEdit(cellId) {
       </div>
     </div>
 
-    <!-- 发布确认（Phase 4：显示本次将发布的环境版本与包摘要） -->
+    <!-- 发布确认：显示实验标题，并附带本次使用的环境与包摘要 -->
     <ConfirmDialog
       v-if="showPublishDialog"
       title="确认发布？"
-      :message="`本次将发布：${publishSummary.title}${publishSummary.packages.length ? `\n可用库：${publishSummary.packages.join(' · ')}` : ''}`"
+      :message="`本次将发布：${publishSummary.title}${publishSummary.environment ? `；运行环境：${publishSummary.environment}` : ''}${publishSummary.packages.length ? `；可用库：${publishSummary.packages.join(' · ')}` : ''}`"
       confirm-text="发布"
       cancel-text="取消"
       :busy="publishBusy"

@@ -123,7 +123,8 @@ async function mountPage() {
         AppLayout: { template: '<div><slot /></div>' },
         AIQuestionConfig: {
           name: 'AIQuestionConfig',
-          props: ['kind', 'questionId', 'expanded'],
+          props: ['kind', 'questionId', 'expanded', 'closable'],
+          emits: ['saved'],
           template: '<div class="ai-config-stub" />',
         },
       },
@@ -162,6 +163,30 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('作业默认环境')
     expect(wrapper.text()).toContain('环境最低内存 256 MB')
+  })
+
+  it('作业环境配置紧跟题目列表，选择题目后仍保持在该位置', async () => {
+    assignmentsAPI.getQuestions.mockResolvedValue({
+      data: {
+        items: [{
+          id: 55, assignment_id: 7, title: '旧题', function_name: 'old', hidden_tests: '',
+          time_limit_ms: 10000, memory_limit_mb: 512, grading_mode: 'legacy',
+        }],
+      },
+    })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    const listCard = wrapper.find('.qe-list-card').element
+    const sideElement = wrapper.find('.qe-side').element
+    expect(listCard.nextElementSibling).toBe(sideElement)
+
+    await wrapper.find('.qe-list-actions button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.qe-side').element).toBe(sideElement)
+    expect(wrapper.find('.qe-list-card').element.nextElementSibling).toBe(sideElement)
+    expect(wrapper.find('.qe-side').text()).toContain('作业默认环境')
   })
 
   it('已发布作业的环境卡禁用且显示提示', async () => {
@@ -264,32 +289,28 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     expect(appStore.showToast).toHaveBeenCalledWith('请填写标题和函数名', 'error')
   })
 
-  it('题目覆盖环境 + 自定义白名单：payload 携带指定版本与策略', async () => {
+  it('题目级运行设置已移除：不再提供环境/导入规则覆盖，统一继承作业', async () => {
     assignmentsAPI.createQuestion.mockResolvedValue({})
     const wrapper = await mountPage()
     await flushPromises()
-    await startNewQuestion(wrapper, '覆盖题')
+    await startNewQuestion(wrapper, '继承题')
 
-    // 覆盖环境 → 选 data（22）
-    // 页面共 3 个 .import-policy-select：[0] 作业导入规则、[1] 题目环境模式、[2] 题目导入规则
-    await wrapper.findAll('.import-policy-select')[1].setValue('override')
-    await flushPromises()
-    const envSelect = wrapper.findAll('.env-picker-select').at(-1)
-    await envSelect.setValue('22')
-    await flushPromises()
-    // 自定义白名单 → 勾选 numpy
-    await wrapper.findAll('.import-policy-select')[2].setValue('restricted')
-    await flushPromises()
-    await wrapper.find('.import-chip input').setValue(true)
-    await flushPromises()
+    // 顶部作业配置架只保留作业默认环境 + 发布范围，没有「本题运行设置」
+    expect(wrapper.find('.qe-side').text()).not.toContain('本题运行设置')
+    expect(wrapper.find('.qe-side').text()).not.toContain('指定环境')
+    expect(wrapper.find('.qe-side').text()).not.toContain('自定义白名单')
+    // 超时/内存收敛到题目编辑区的「运行参数」卡
+    expect(wrapper.find('.qe-run-card').exists()).toBe(true)
+    expect(wrapper.find('.qe-run-card').text()).toContain('超时 (ms)')
+    expect(wrapper.find('.qe-run-card').text()).toContain('内存限制 (MB)')
 
     await clickBtn(wrapper, '保存题目')
     await flushPromises()
 
     expect(assignmentsAPI.createQuestion).toHaveBeenCalledWith('7', expect.objectContaining({
-      environment_version_id: 22,
-      import_policy_mode: 'restricted',
-      allowed_imports: ['numpy'],
+      environment_version_id: null,
+      import_policy_mode: 'inherit',
+      allowed_imports: [],
     }))
   })
 
@@ -333,9 +354,10 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
 
     expect(assignmentsAPI.updateQuestion).toHaveBeenCalledWith('7', 55, expect.objectContaining({
       title: '新题',
-      environment_version_id: 22,
-      import_policy_mode: 'restricted',
-      allowed_imports: ['numpy'],
+      // 题目级覆盖入口已移除：编辑保存时也统一回写为继承作业
+      environment_version_id: null,
+      import_policy_mode: 'inherit',
+      allowed_imports: [],
     }))
   })
 
@@ -443,7 +465,22 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     const wrapper = await mountPage()
     await flushPromises()
     await startNewQuestion(wrapper, '运行题')
+    // 保存后会刷新列表并清空为下一题；先让刷新接口返回刚创建的题目
+    assignmentsAPI.getQuestions.mockResolvedValue({
+      data: {
+        items: [{
+          id: 99, assignment_id: 7, title: '运行题', function_name: 'add', hidden_tests: '',
+          time_limit_ms: 10000, memory_limit_mb: 256, grading_mode: 'legacy',
+          environment_version_id: null, import_policy_mode: 'inherit', allowed_imports: [],
+        }],
+      },
+    })
     await clickBtn(wrapper, '保存题目')
+    await flushPromises()
+
+    // 保存后自动进入下一题空白表单；从上方列表重新打开刚创建的题目
+    expect(wrapper.find('.qe-list-title').text()).toContain('运行题')
+    await wrapper.find('.qe-list-actions button').trigger('click')
     await flushPromises()
 
     await clickBtn(wrapper, '▶ 运行测试')
@@ -467,20 +504,22 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     expect(wrapper.find('.qe-code .cm-editor').exists()).toBe(true)
   })
 
-  // ══ 右侧栏：发布设置 → AI 评分配置 ════════════════════════════════
-  it('右侧栏两个 tab：运行设置 | AI 评分配置（发布设置已移除）', async () => {
+  // ══ 作业级设置架 + 题目编辑区下方 AI 评分配置 ═══════════════════════
+  it('顶部只保留作业级运行设置，AI 评分配置不再作为 tab', async () => {
     const wrapper = await mountPage()
     await flushPromises()
-    expect(wrapper.text()).toContain('运行设置')
-    expect(wrapper.text()).toContain('AI 评分配置')
-    expect(wrapper.text()).not.toContain('发布设置')
-    expect(wrapper.text()).not.toContain('前往作业管理')
+    expect(wrapper.find('.qe-side-head').text()).toContain('运行设置')
+    expect(wrapper.find('.qe-side-tab').exists()).toBe(false)
+    expect(wrapper.find('.qe-side').text()).not.toContain('AI 评分配置')
+    expect(wrapper.find('.qe-side').text()).not.toContain('发布设置')
+    expect(wrapper.find('.qe-side').text()).not.toContain('前往作业管理')
+    // 无题目时自动进入新题编辑态，AI 配置卡直接位于题目编辑区下方
+    expect(wrapper.find('#ai-config-section').exists()).toBe(true)
+    expect(wrapper.find('#ai-config-section').text()).toContain('AI 评分配置')
   })
 
-  it('新建题目（无 id）时 AI 评分配置 tab 直接渲染草稿表单，可编辑', async () => {
+  it('新建题目（无 id）时 AI 评分配置直接渲染在题目下方，草稿可编辑', async () => {
     const wrapper = await mountPage()
-    await flushPromises()
-    await clickBtn(wrapper, 'AI 评分配置')
     await flushPromises()
     // 不再显示「请先保存题目后再配置 AI 评分」
     expect(wrapper.text()).not.toContain('请先保存题目后再配置 AI 评分')
@@ -499,8 +538,6 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
   it('草稿模式点击「AI 生成测试组」提示先保存题目（无 questionId 不请求）', async () => {
     const wrapper = await mountPage()
     await flushPromises()
-    await clickBtn(wrapper, 'AI 评分配置')
-    await flushPromises()
     const draft = wrapper.find('.qe-ai-draft')
     const genBtn = draft.findAll('button').find((b) => b.text().includes('AI 生成测试组'))
     await genBtn.trigger('click')
@@ -511,8 +548,6 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
 
   it('新建题草稿选 shadow/active 时显示 Rubric 门禁前置提示', async () => {
     const wrapper = await mountPage()
-    await flushPromises()
-    await clickBtn(wrapper, 'AI 评分配置')
     await flushPromises()
     // legacy 默认无提示
     expect(wrapper.find('.qe-ai-draft .qe-warn-card').exists()).toBe(false)
@@ -528,8 +563,6 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     const wrapper = await mountPage()
     await flushPromises()
     await startNewQuestion(wrapper, '门禁题')
-    await clickBtn(wrapper, 'AI 评分配置')
-    await flushPromises()
     await wrapper.find('.qe-ai-draft select').setValue('shadow')
     await clickBtn(wrapper, '发布作业')
     await flushPromises()
@@ -539,7 +572,7 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     expect(wrapper.text()).toContain('若 Rubric 未生成并锁定，发布将被后端拒绝')
   })
 
-  it('编辑已有题目时 AI 评分配置 tab 内嵌 AIQuestionConfig（kind=assignment）', async () => {
+  it('编辑已有题目时 AI 评分配置位于主编辑区，内嵌 AIQuestionConfig（kind=assignment）', async () => {
     assignmentsAPI.getQuestions.mockResolvedValue({
       data: {
         items: [{
@@ -553,13 +586,16 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     await flushPromises()
     await wrapper.find('.qe-list-actions button').trigger('click')  // 列表「编辑」按钮
     await flushPromises()
-    await clickBtn(wrapper, 'AI 评分配置')
-    await flushPromises()
     const cfg = wrapper.findComponent({ name: 'AIQuestionConfig' })
     expect(cfg.exists()).toBe(true)
     expect(cfg.props('kind')).toBe('assignment')
     expect(cfg.props('questionId')).toBe(55)
     expect(cfg.props('expanded')).toBe(true)
+    // 内嵌在题目编辑区时关闭「收起」按钮
+    expect(cfg.props('closable')).toBe(false)
+    // 只挂载在题目编辑区，不在顶部作业设置架
+    expect(wrapper.find('#ai-config-section .ai-config-stub').exists()).toBe(true)
+    expect(wrapper.find('.qe-side .ai-config-stub').exists()).toBe(false)
   })
 
   it('新建题保存时 AI 草稿字段随 payload 提交（新建默认显式传 legacy）', async () => {
@@ -567,8 +603,6 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     const wrapper = await mountPage()
     await flushPromises()
     await startNewQuestion(wrapper, 'AI 草稿题')
-    await clickBtn(wrapper, 'AI 评分配置')
-    await flushPromises()
 
     const draft = wrapper.find('.qe-ai-draft')
     await draft.find('select').setValue('shadow')
@@ -593,7 +627,7 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     }))
   })
 
-  it('新建题未碰 AI tab 时保存，payload 显式传 legacy（不依赖后端默认 active）', async () => {
+  it('新建题未碰 AI 配置时保存，payload 显式传 legacy（不依赖后端默认 active）', async () => {
     assignmentsAPI.createQuestion.mockResolvedValue({ data: { id: 99 } })
     const wrapper = await mountPage()
     await flushPromises()
@@ -608,23 +642,33 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     }))
   })
 
-  it('创建成功拿到 id 后 AI tab 切持久化模式，修改过的草稿经 PUT 落库', async () => {
+  it('创建成功后列表刷新并清空为下一题；修改过的 AI 草稿经 PUT 落库', async () => {
     assignmentsAPI.createQuestion.mockResolvedValue({ data: { id: 99 } })
     const wrapper = await mountPage()
     await flushPromises()
     await startNewQuestion(wrapper, '持久化题')
-    await clickBtn(wrapper, 'AI 评分配置')
-    await flushPromises()
     await wrapper.find('.qe-ai-draft select').setValue('shadow')
 
+    // 保存后的刷新接口返回刚创建的题目，用于验证列表已更新
+    assignmentsAPI.getQuestions.mockResolvedValue({
+      data: {
+        items: [{
+          id: 99, assignment_id: 7, title: '持久化题', function_name: 'add', hidden_tests: '',
+          time_limit_ms: 10000, memory_limit_mb: 256, grading_mode: 'shadow',
+          environment_version_id: null, import_policy_mode: 'inherit', allowed_imports: [],
+        }],
+      },
+    })
     await clickBtn(wrapper, '保存题目')
     await flushPromises()
     // 草稿经独立接口落库到新题目（create 链路不接收 AI 字段）
     expect(aiGradingAPI.updateConfig).toHaveBeenCalledWith('assignment', 99, expect.objectContaining({ grading_mode: 'shadow' }))
-    // AI tab 切持久化模式：AIQuestionConfig 挂载且指向新 id
-    const cfg = wrapper.findComponent({ name: 'AIQuestionConfig' })
-    expect(cfg.exists()).toBe(true)
-    expect(cfg.props('questionId')).toBe(99)
+    // 列表刷新后展示刚创建的题目，且下方自动重置为新题草稿（默认 legacy）
+    expect(wrapper.find('.qe-list-title').text()).toContain('持久化题')
+    expect(wrapper.find('.qe-ai-draft').exists()).toBe(true)
+    expect(wrapper.find('.qe-ai-draft select').element.value).toBe('legacy')
+    expect(wrapper.findComponent({ name: 'AIQuestionConfig' }).exists()).toBe(false)
+    expect(appStore.showToast).not.toHaveBeenCalledWith(expect.stringContaining('已丢弃'), 'error')
   })
 
   it('草稿模式教师要求仅含空白时提交空 dict', async () => {
@@ -632,8 +676,6 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     const wrapper = await mountPage()
     await flushPromises()
     await startNewQuestion(wrapper, '空约束题')
-    await clickBtn(wrapper, 'AI 评分配置')
-    await flushPromises()
     await wrapper.find('.qe-ai-draft [data-testid="teacher-constraints-input"]').setValue('  \n  ')
     await clickBtn(wrapper, '保存题目')
     await flushPromises()
@@ -655,8 +697,6 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     const wrapper = await mountPage()
     await flushPromises()
     await startNewQuestion(wrapper, '草稿切题')
-    await clickBtn(wrapper, 'AI 评分配置')
-    await flushPromises()
     await wrapper.find('.qe-ai-draft select').setValue('shadow')
 
     await wrapper.find('.qe-list-actions button').trigger('click')  // 切换到已有题
@@ -665,12 +705,11 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
 
     // 再次新建：草稿已重置为默认 legacy
     await clickBtn(wrapper, '添加题目')
-    await clickBtn(wrapper, 'AI 评分配置')
     await flushPromises()
     expect(wrapper.find('.qe-ai-draft select').element.value).toBe('legacy')
   })
 
-  it('列表行「AI 配置」收敛：选中该题并打开右侧 AI tab（无双实例）', async () => {
+  it('列表行「AI 配置」收敛：选中该题并滚动到题目编辑区下方的 AI 配置（无双实例）', async () => {
     assignmentsAPI.getQuestions.mockResolvedValue({
       data: {
         items: [{
@@ -684,12 +723,38 @@ describe('题目编辑页 QuestionEditView（IDE 布局重构）', () => {
     await flushPromises()
     await clickBtn(wrapper, 'AI 配置')
     await flushPromises()
-    // 该题被选中（编辑态）且右侧栏切到 AI tab
+    // 该题被选中（编辑态），AIQuestionConfig 只挂载在题目编辑区下方
     expect(wrapper.find('.qe-list-row--active').exists()).toBe(true)
-    expect(wrapper.find('.qe-side-tab.active').text()).toContain('AI 评分配置')
-    // 列表行内不再挂载 AIQuestionConfig，仅右侧栏一个实例
+    // 列表行内不再挂载 AIQuestionConfig，仅题目编辑区一个实例
     expect(wrapper.find('.qe-list-row .ai-config-stub').exists()).toBe(false)
-    expect(wrapper.find('.qe-side .ai-config-stub').exists()).toBe(true)
+    expect(wrapper.find('#ai-config-section .ai-config-stub').exists()).toBe(true)
+    expect(wrapper.find('.qe-side .ai-config-stub').exists()).toBe(false)
+  })
+
+  it('已有题 AI 配置保存成功：刷新上方列表并清空下方进入下一题', async () => {
+    assignmentsAPI.getQuestions.mockResolvedValue({
+      data: {
+        items: [{
+          id: 55, assignment_id: 7, title: '旧题', function_name: 'old', hidden_tests: '',
+          time_limit_ms: 10000, memory_limit_mb: 512, grading_mode: 'legacy',
+          environment_version_id: null, import_policy_mode: 'inherit', allowed_imports: [],
+        }],
+      },
+    })
+    const wrapper = await mountPage()
+    await flushPromises()
+    await wrapper.find('.qe-list-actions button').trigger('click')
+    await flushPromises()
+    const cfg = wrapper.findComponent({ name: 'AIQuestionConfig' })
+    expect(cfg.exists()).toBe(true)
+
+    cfg.vm.$emit('saved', 55)
+    await flushPromises()
+    // 触发列表刷新 + 清空为下一题空白表单
+    expect(assignmentsAPI.getQuestions.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(wrapper.find('.qe-ai-draft').exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'AIQuestionConfig' }).exists()).toBe(false)
+    expect(appStore.showToast).toHaveBeenCalledWith('AI 配置已保存，已进入下一题', 'success')
   })
 
   // ══ 右上角「🚀 发布作业」 ═════════════════════════════════════════

@@ -84,12 +84,10 @@ const PAGE_TITLES = {
   AdminExperimentSubmissionDetail: '提交详情',
   AdminAIGrading: 'AI 评分复核',
   AdminAIGradingDetail: 'AI 评分详情',
-  DeveloperTemplates: '实验模板',
-  DeveloperStudio: '实验模板',
 }
 
 const rootLabel = computed(() => {
-  const map = { student: '学习', teacher: '教学', admin: '管理', developer: '开发' }
+  const map = { student: '学习', teacher: '教学', admin: '管理' }
   return map[route.value.path.split('/')[1]] || 'DAI'
 })
 

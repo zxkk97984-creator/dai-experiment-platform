@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import ast
 import re
+import shutil
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -91,7 +93,7 @@ def generate_test_groups(
     for attempt in range(2):
         messages = build_test_group_messages(snapshot, fix_issues=(issues or None))
         try:
-            # TASK-028：test_group_generation 预算 3000 completion tokens
+            # TASK-028：test_group_generation 预算 12000 max_tokens（含 reasoning token）
             payload = client.chat_json(messages, operation="test_group_generation")
         except AIServiceError as exc:
             if exc.code == "bad_json":
@@ -222,55 +224,72 @@ def preflight_groups(
     """
     from app.worker.judge_worker import _run_docker_pytest, run_test_groups
 
-    workdir = Path(workdir)
-    host = Path(host_workdir) if host_workdir else workdir
+    workdir = Path(workdir).resolve()
+    host = Path(host_workdir).resolve() if host_workdir else workdir
     issues: list[str] = []
 
-    if reference_solution and reference_solution.strip():
-        result = run_test_groups(
-            workdir, host, reference_solution,
-            [g.model_dump() for g in groups],
-            settings, timeout_seconds, memory_limit_mb,
+    # Docker 挂载的是 host_workdir。若 host_workdir 与写入目录不同（生产 DoD 配置），
+    # 必须把预检文件写到 host_workdir 下，否则容器内会看不到 test_group.py。
+    try:
+        host.mkdir(parents=True, exist_ok=True)
+        run_dir = (
+            Path(tempfile.mkdtemp(prefix="dai-testgen-preflight-", dir=host))
+            if host != workdir else workdir
         )
-        for err in result["system_errors"]:
-            if "Docker 执行异常" in err:
+    except OSError as exc:
+        raise PreflightUnavailableError(
+            f"判题工作目录不可写，无法完成测试组预检: {exc}"
+        ) from exc
+
+    try:
+        if reference_solution and reference_solution.strip():
+            result = run_test_groups(
+                run_dir, run_dir, reference_solution,
+                [g.model_dump() for g in groups],
+                settings, timeout_seconds, memory_limit_mb,
+            )
+            for err in result["system_errors"]:
+                if "Docker 执行异常" in err:
+                    raise PreflightUnavailableError(
+                        "判题服务不可用（Docker 未就绪），无法完成测试组预检"
+                    )
+                issues.append(err)
+            for gid, counts in result["results"].items():
+                if counts["passed"] <= 0 or counts["failed"] > 0 or counts["errors"] > 0:
+                    issues.append(
+                        f"测试组 {gid} 未通过参考答案预检"
+                        f"（passed={counts['passed']}, failed={counts['failed']}, "
+                        f"errors={counts['errors']}）"
+                    )
+            return issues
+
+        # 无参考答案：pytest --collect-only 检查各组可收集性
+        # 先写占位 user_code.py（空模块即可）：测试内容会自动补 `from user_code import *`，
+        # 与判题路径（judge_worker.run_test_groups）一致，否则 collection 阶段 import 失败。
+        (run_dir / "user_code.py").write_text("", encoding="utf-8")
+        for group in groups:
+            test_content = group.tests
+            if "import user_code" not in test_content and "from user_code" not in test_content:
+                test_content = f"from user_code import *\n\n{test_content}"
+            (run_dir / "test_group.py").write_text(test_content, encoding="utf-8")
+            try:
+                stdout, stderr, returncode, _ = _run_docker_pytest(
+                    run_dir, settings, timeout_seconds, memory_limit_mb,
+                    test_filename="test_group.py", host_workdir=run_dir,
+                    extra_args=["--collect-only"],
+                )
+            except FileNotFoundError:
                 raise PreflightUnavailableError(
                     "判题服务不可用（Docker 未就绪），无法完成测试组预检"
                 )
-            issues.append(err)
-        for gid, counts in result["results"].items():
-            if counts["passed"] <= 0 or counts["failed"] > 0 or counts["errors"] > 0:
-                issues.append(
-                    f"测试组 {gid} 未通过参考答案预检"
-                    f"（passed={counts['passed']}, failed={counts['failed']}, "
-                    f"errors={counts['errors']}）"
-                )
+            if returncode != 0:
+                tail = (stderr or stdout).strip().splitlines()[-1] if (stderr or stdout).strip() else "无输出"
+                issues.append(f"测试组 {group.id} 无法被 pytest 收集: {tail[:200]}")
+
         return issues
-
-    # 无参考答案：pytest --collect-only 检查各组可收集性
-    # 先写占位 user_code.py（空模块即可）：测试内容会自动补 `from user_code import *`，
-    # 与判题路径（judge_worker.run_test_groups）一致，否则 collection 阶段 import 失败。
-    (workdir / "user_code.py").write_text("", encoding="utf-8")
-    for group in groups:
-        test_content = group.tests
-        if "import user_code" not in test_content and "from user_code" not in test_content:
-            test_content = f"from user_code import *\n\n{test_content}"
-        (workdir / "test_group.py").write_text(test_content, encoding="utf-8")
-        try:
-            stdout, stderr, returncode, _ = _run_docker_pytest(
-                workdir, settings, timeout_seconds, memory_limit_mb,
-                test_filename="test_group.py", host_workdir=host,
-                extra_args=["--collect-only"],
-            )
-        except FileNotFoundError:
-            raise PreflightUnavailableError(
-                "判题服务不可用（Docker 未就绪），无法完成测试组预检"
-            )
-        if returncode != 0:
-            tail = (stderr or stdout).strip().splitlines()[-1] if (stderr or stdout).strip() else "无输出"
-            issues.append(f"测试组 {group.id} 无法被 pytest 收集: {tail[:200]}")
-
-    return issues
+    finally:
+        if run_dir != workdir:
+            shutil.rmtree(run_dir, ignore_errors=True)
 
 
 # ── 内部辅助 ──

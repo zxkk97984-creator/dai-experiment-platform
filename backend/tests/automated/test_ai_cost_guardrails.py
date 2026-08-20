@@ -1,6 +1,6 @@
 """TASK-028（F-22/F-23）：AI 输出与成本护栏。
 
-- 各操作 completion 预算（评分 1500 / Rubric 2000 / 测试组 3000），未知操作 fail-closed
+- 各操作 completion 预算（评分 1500 / Rubric 2000 / 测试组 12000），未知操作 fail-closed
 - usage/延迟/重试指标入结构化日志；usage 缺失不阻断；日志绝不出现学生原文
 - 高成本生成限流在 Redis 故障时 fail-closed 返回 503（F-23）
 - httpx 客户端不读环境代理变量（socks 代理注入不破坏出站调用）
@@ -44,7 +44,7 @@ def _ok_response(**usage):
     [
         ("ai_grading", 1500),
         ("rubric_generation", 2000),
-        ("test_group_generation", 3000),
+        ("test_group_generation", 12000),
     ],
 )
 def test_operation_budget_sent_as_max_tokens(operation, expected):
@@ -60,6 +60,33 @@ def test_operation_budget_sent_as_max_tokens(operation, expected):
     client = DeepSeekClient(_make_settings(), transport=httpx.MockTransport(handler))
     client.chat_json([{"role": "user", "content": "x"}], operation=operation)
     assert seen["body"]["max_tokens"] == expected
+
+
+def test_group_generation_uses_extended_timeout_without_model_retries():
+    """测试组生成：单次 120s 超时，模型层不重试（业务层负责修复生成）。"""
+    from app.services.ai_client import AIServiceError, DeepSeekClient
+
+    seen = {}
+
+    def handler(request):
+        seen["timeout"] = request.extensions.get("timeout")
+        seen.setdefault("calls", 0)
+        seen["calls"] += 1
+        raise httpx.TimeoutException("slow")
+
+    client = DeepSeekClient(
+        _make_settings(
+            ai_test_group_timeout_seconds=120,
+            ai_test_group_max_retries=0,
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(AIServiceError) as exc_info:
+        client.chat_json([{"role": "user", "content": "x"}], operation="test_group_generation")
+
+    assert exc_info.value.code == "timeout"
+    assert seen["calls"] == 1
+    assert seen["timeout"] == {"connect": 120.0, "read": 120.0, "write": 120.0, "pool": 120.0}
 
 
 def test_unknown_operation_fails_closed():

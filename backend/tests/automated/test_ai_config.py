@@ -44,6 +44,29 @@ def test_ai_timeout_in_range():
         Settings(_env_file=None, ai_timeout_seconds=200)
 
 
+def test_ai_test_group_generation_timeout_defaults():
+    """测试组生成默认超时 120s、模型层重试 0 次（同步请求预算）"""
+    settings = Settings(_env_file=None)
+    assert settings.ai_test_group_timeout_seconds == 120.0
+    assert settings.ai_test_group_max_retries == 0
+
+
+def test_ai_test_group_timeout_in_range():
+    """测试组生成超时范围 1-300 秒"""
+    with pytest.raises(Exception):
+        Settings(_env_file=None, ai_test_group_timeout_seconds=0)
+    with pytest.raises(Exception):
+        Settings(_env_file=None, ai_test_group_timeout_seconds=301)
+
+
+def test_ai_test_group_max_retries_in_range():
+    """测试组生成模型层重试范围 0-3"""
+    with pytest.raises(Exception):
+        Settings(_env_file=None, ai_test_group_max_retries=-1)
+    with pytest.raises(Exception):
+        Settings(_env_file=None, ai_test_group_max_retries=4)
+
+
 def test_ai_max_retries_in_range():
     """重试次数必须在 0-8 范围内"""
     with pytest.raises(Exception):

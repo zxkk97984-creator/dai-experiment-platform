@@ -36,7 +36,6 @@ export const useAuthStore = defineStore('auth', () => {
   const isAdmin = computed(() => role.value === 'admin')
   const isTeacher = computed(() => role.value === 'teacher')
   const isStudent = computed(() => role.value === 'student')
-  const isDeveloper = computed(() => role.value === 'developer')
 
   function setAccessToken(token) {
     accessToken.value = token
@@ -126,7 +125,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     accessToken, user, isRefreshing, sessionGeneration,
-    isAuthenticated, role, isAdmin, isTeacher, isStudent, isDeveloper,
+    isAuthenticated, role, isAdmin, isTeacher, isStudent,
     setAccessToken, setUser, login, tryRestoreSession, fetchMe, logout,
   }
 })

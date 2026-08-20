@@ -2,7 +2,6 @@ export const ROLE_MAP = {
   student: { label: '学生', color: 'info' },
   teacher: { label: '教师', color: 'success' },
   admin: { label: '管理员', color: 'warning' },
-  developer: { label: '开发者', color: 'info' },
 }
 
 export const USER_STATUS_MAP = {

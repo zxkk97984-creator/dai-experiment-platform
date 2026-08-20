@@ -16,7 +16,7 @@ def visible_conditions(user: User):
     - admin：全部公告
     - teacher：全局 + 自己任课的课程
     - student：全局 + 已选课的课程
-    - 其他角色（developer 等）：不匹配任何公告
+    - 其他角色：不匹配任何公告
     """
     global_visible = Announcement.scope == "global"
     if user.role == "admin":

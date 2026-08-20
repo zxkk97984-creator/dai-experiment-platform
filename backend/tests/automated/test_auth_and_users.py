@@ -66,3 +66,40 @@ def test_student_cannot_create_users(client, db_session_factory):
 
     assert response.status_code == 403
     assert response.json()["detail"]["code"] == "FORBIDDEN"
+
+
+def test_admin_can_only_assign_supported_user_roles(client, db_session_factory):
+    create_user(db_session_factory, "roles-admin", "admin")
+    access_token, _ = login(client, "roles-admin")
+    headers = auth_header(access_token)
+
+    create_response = client.post(
+        "/api/v1/users",
+        headers=headers,
+        json={
+            "username": "legacy-role-user",
+            "password": "Passw0rd!",
+            "real_name": "Legacy Role",
+            "role": "legacy",
+        },
+    )
+    assert create_response.status_code == 422, create_response.text
+
+    target = create_user(db_session_factory, "roles-target", "student")
+    update_response = client.patch(
+        f"/api/v1/users/{target.id}",
+        headers=headers,
+        json={"role": "legacy"},
+    )
+    assert update_response.status_code == 422, update_response.text
+
+
+def test_unsupported_database_role_cannot_login(client, db_session_factory):
+    create_user(db_session_factory, "legacy-role-login", "legacy")
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "legacy-role-login", "password": "Passw0rd!"},
+    )
+
+    assert response.status_code == 403, response.text
+    assert response.json()["detail"]["code"] == "ROLE_NOT_SUPPORTED"

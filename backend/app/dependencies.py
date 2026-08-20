@@ -9,6 +9,7 @@ from .config import Settings, get_settings
 from .database import get_db_session
 from .errors import api_error
 from .models import User
+from .roles import is_supported_role
 from .security import decode_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -66,6 +67,8 @@ def get_current_user(
     user = db.get(User, int(user_id)) if user_id else None
     if not user or user.status != "active":
         raise api_error(401, "USER_NOT_ACTIVE", "用户不存在或已禁用")
+    if not is_supported_role(user.role):
+        raise api_error(403, "ROLE_NOT_SUPPORTED", "账号角色不受支持，请联系管理员")
     token_sv = payload.get("sv")
     if token_sv is None or int(token_sv) != user.session_version:
         raise api_error(401, "SESSION_REVOKED", "会话已失效，请重新登录")

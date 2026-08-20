@@ -212,6 +212,7 @@ def create_build_job(
         created_by_id=actor_id,
     )
     db.add(job)
+    version.status = "queued"
     db.commit()
     db.refresh(job)
     return job
@@ -451,6 +452,7 @@ def retry_build_job(
         created_by_id=actor_id,
     )
     db.add(new_job)
+    version.status = "queued"
     db.commit()
     db.refresh(new_job)
     try:

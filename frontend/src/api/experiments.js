@@ -51,6 +51,7 @@ export const experimentsAPI = {
   },
   getModule(id) { return client.get(`/experiments/modules/${id}`) },
   createModule(payload) { return client.post('/experiments/modules', payload) },
+  ensureModuleTemplate(id) { return client.post(`/experiments/modules/${id}/template`) },
   updateModule(id, payload) { return client.patch(`/experiments/modules/${id}`, payload) },
   /** 发布模块（后端校验模板就绪）；状态变更只能走 publish/unpublish */
   publishModule(id) { return client.post(`/experiments/modules/${id}/publish`) },

@@ -120,7 +120,7 @@ onMounted(load)
           <div class="panel-body">
             <label class="searchbox" style="width: 100%; margin-bottom: 12px;">
               <AppIcon name="search" :size="15" />
-              <input v-model="query" type="search" placeholder="搜索姓名、学号或账号" />
+              <input v-model="query" type="search" class="input" placeholder="搜索姓名、学号或账号" />
               <button v-if="query" type="button" class="clear" aria-label="清空搜索" @click="query = ''">
                 <AppIcon name="close" :size="13" />
               </button>

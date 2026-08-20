@@ -44,7 +44,9 @@ from app.schemas import (
     StudentExperimentCatalogSummary,
     StudentExperimentModuleRead,
 )
+from app.schemas.studio import StudioTemplateCreate
 from app.services.kernel_manager import get_kernel_manager
+from app.services import studio_service
 
 router = APIRouter(prefix="/experiments", tags=["experiments"])
 
@@ -153,7 +155,7 @@ def list_modules(
     query = select(ExperimentModule)
     if current_user.role == "student":
         query = query.where(ExperimentModule.status == "published")
-    elif current_user.role == "developer":
+    elif current_user.role == "teacher":
         query = query.where(ExperimentModule.owner_id == current_user.id)
     modules = db.scalars(query.order_by(ExperimentModule.id)).all()
     return PaginatedResponse(
@@ -264,11 +266,56 @@ def list_student_module_catalog(
 def create_module(
     payload: ExperimentModuleCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("admin", "teacher", "developer")),
+    current_user: User = Depends(require_roles("teacher")),
 ):
-    module = ExperimentModule(**payload.model_dump(), owner_id=current_user.id)
-    db.add(module)
-    db.commit()
+    if current_user.role == "teacher" and payload.template_id is not None:
+        raise api_error(
+            422,
+            "MODULE_TEMPLATE_MANAGED",
+            "教师实验的 Notebook 模板由系统自动创建",
+        )
+
+    try:
+        module = ExperimentModule(
+            **payload.model_dump(),
+            owner_id=current_user.id,
+        )
+        db.add(module)
+        db.flush()
+
+        if current_user.role == "teacher":
+            studio_service.create_template_record(
+                db,
+                StudioTemplateCreate(
+                    name=module.name,
+                    description=module.description,
+                    module_id=module.id,
+                ),
+                current_user,
+            )
+
+        db.commit()
+        db.refresh(module)
+        return module
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.post("/modules/{module_id}/template", response_model=ExperimentModuleRead)
+def ensure_module_template(
+    module_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("teacher")),
+):
+    """为历史孤立模块幂等初始化空白 Notebook 草稿。"""
+    module = db.get(ExperimentModule, module_id)
+    if not module:
+        raise api_error(404, "EXPERIMENT_MODULE_NOT_FOUND", "实验模块不存在")
+    if module.owner_id != current_user.id:
+        raise api_error(403, "FORBIDDEN", "只能初始化自己创建的实验模块")
+
+    studio_service.ensure_module_template(db, module, current_user)
     db.refresh(module)
     return module
 
@@ -284,13 +331,6 @@ def get_module(
         raise api_error(404, "EXPERIMENT_MODULE_NOT_FOUND", "实验模块不存在")
     if current_user.role == "student" and module.status != "published":
         raise api_error(403, "FORBIDDEN", "无权查看未发布的实验模块")
-    # Developer 只能查看自己的草稿/下架模块；他人已发布模块作为共享元数据可见
-    if (
-        current_user.role == "developer"
-        and module.owner_id != current_user.id
-        and module.status != "published"
-    ):
-        raise api_error(403, "FORBIDDEN", "无权查看其他开发者的未发布实验模块")
     return module
 
 
@@ -299,13 +339,13 @@ def patch_module(
     module_id: int,
     payload: ExperimentModuleUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("admin", "teacher", "developer")),
+    current_user: User = Depends(require_roles("admin", "teacher")),
 ):
     """更新模块元数据：强类型 Schema，status 不可修改，未知字段拒绝。"""
     module = db.get(ExperimentModule, module_id)
     if not module:
         raise api_error(404, "EXPERIMENT_MODULE_NOT_FOUND", "实验模块不存在")
-    if current_user.role in ("teacher", "developer") and module.owner_id != current_user.id:
+    if current_user.role == "teacher" and module.owner_id != current_user.id:
         raise api_error(403, "FORBIDDEN", "无权管理其他用户创建的实验模块")
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(module, key, value)
@@ -327,13 +367,13 @@ def _ensure_module_publishable(module: ExperimentModule, db: Session) -> None:
 def publish_module(
     module_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("admin", "teacher", "developer")),
+    current_user: User = Depends(require_roles("admin", "teacher")),
 ):
     """发布模块：要求模板就绪；状态变更只能通过本端点。"""
     module = db.get(ExperimentModule, module_id)
     if not module:
         raise api_error(404, "EXPERIMENT_MODULE_NOT_FOUND", "实验模块不存在")
-    if current_user.role in ("teacher", "developer") and module.owner_id != current_user.id:
+    if current_user.role == "teacher" and module.owner_id != current_user.id:
         raise api_error(403, "FORBIDDEN", "无权管理其他用户创建的实验模块")
     _ensure_module_publishable(module, db)
     module.status = "published"
@@ -346,13 +386,13 @@ def publish_module(
 def unpublish_module(
     module_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("admin", "teacher", "developer")),
+    current_user: User = Depends(require_roles("admin", "teacher")),
 ):
     """取消发布：published → draft，学生端立即不可见。"""
     module = db.get(ExperimentModule, module_id)
     if not module:
         raise api_error(404, "EXPERIMENT_MODULE_NOT_FOUND", "实验模块不存在")
-    if current_user.role in ("teacher", "developer") and module.owner_id != current_user.id:
+    if current_user.role == "teacher" and module.owner_id != current_user.id:
         raise api_error(403, "FORBIDDEN", "无权管理其他用户创建的实验模块")
     if module.status != "published":
         raise api_error(409, "MODULE_NOT_PUBLISHED", "仅已发布的模块可取消发布")
@@ -970,10 +1010,18 @@ def _apply_submission_visibility(query, current_user: User):
     if current_user.role == "student":
         return query.where(ExperimentRecord.student_id == current_user.id)
     if current_user.role == "teacher":
-        return query.where(Course.teacher_id == current_user.id)
-    if current_user.role == "developer":
-        return query.where(ExperimentModule.owner_id == current_user.id)
-    return query
+        # 教师可见两类提交：自己课程的课时实验（lesson→chapter→course 链路）、
+        # 自己创建的实验模块（module 链路，owner_id 归属）。
+        # 模块实验的 lesson_id 为 NULL，仅按 Course.teacher_id 过滤会被全部排除。
+        return query.where(or_(
+            Course.teacher_id == current_user.id,
+            ExperimentModule.owner_id == current_user.id,
+        ))
+    if current_user.role == "admin":
+        return query
+    # get_current_user rejects unsupported persisted roles; keep this helper
+    # fail-closed as an additional guard for direct/unit-level callers.
+    return query.where(ExperimentRecord.id == -1)
 
 
 @router.get("/submissions", response_model=ExperimentSubmissionListRead)
@@ -993,7 +1041,6 @@ def list_submissions(
     权限：
     - 学生：仅自己的提交
     - 教师：仅自己课程（通过 lesson→chapter→course）的提交
-    - 开发者：仅自己模块的提交
     - 管理员：全部
     """
     page, page_size = pagination.page, pagination.page_size
@@ -1181,6 +1228,24 @@ def list_submissions(
     )
 
 
+def _teacher_owns_record(db: Session, record: ExperimentRecord, user: User) -> bool:
+    """教师对实验记录的归属校验：课时走 lesson→chapter→course 链路，模块走 owner_id。
+
+    模块实验记录 lesson_id 为 NULL、无课程归属，必须走模块所有者判断，
+    否则教师永远无法查看/评分自己模块的提交（与提交列表可见性同源缺陷）。
+    """
+    if record.lesson_id:
+        lesson = db.get(Lesson, record.lesson_id)
+        return bool(
+            lesson and lesson.chapter and lesson.chapter.course
+            and lesson.chapter.course.teacher_id == user.id
+        )
+    if record.module_id:
+        module = db.get(ExperimentModule, record.module_id)
+        return bool(module and module.owner_id == user.id)
+    return False
+
+
 @router.get("/submissions/{submission_id}", response_model=ExperimentSubmissionDetailRead)
 def get_submission(
     submission_id: int,
@@ -1201,23 +1266,18 @@ def get_submission(
         if record.student_id != current_user.id:
             raise api_error(403, "FORBIDDEN", "无权查看该提交")
     elif current_user.role == "teacher":
-        # 检查课程归属
-        if record.lesson_id:
-            lesson = db.get(Lesson, record.lesson_id)
-            if lesson and lesson.chapter and lesson.chapter.course:
-                if lesson.chapter.course.teacher_id != current_user.id:
-                    raise api_error(403, "FORBIDDEN", "无权查看该提交")
-            else:
-                raise api_error(403, "FORBIDDEN", "无权查看该提交")
-        else:
+        if not _teacher_owns_record(db, record, current_user):
             raise api_error(403, "FORBIDDEN", "无权查看该提交")
-    elif current_user.role == "developer":
-        if record.module_id:
-            module = db.get(ExperimentModule, record.module_id)
-            if not module or module.owner_id != current_user.id:
-                raise api_error(403, "FORBIDDEN", "无权查看该提交")
-        else:
-            raise api_error(403, "FORBIDDEN", "无权查看该提交")
+    elif current_user.role == "admin":
+        pass
+    else:
+        raise api_error(403, "FORBIDDEN", "无权查看该提交")
+
+    # 快照结构归一化：历史种子数据曾存为 {"cells": {cell_id: source}}，
+    # API 提交为扁平 {cell_id: source}；统一解包为扁平结构再下发。
+    snapshot = submission.cells_snapshot or {}
+    if isinstance(snapshot, dict) and "cells" in snapshot and isinstance(snapshot.get("cells"), dict):
+        snapshot = snapshot["cells"]
 
     version = db.get(NotebookTemplateVersion, record.template_version_id)
     metadata = {}
@@ -1228,10 +1288,11 @@ def get_submission(
                 order=cell.get("order", index),
             )
             for index, cell in enumerate(version.cells)
-            if cell["id"] in submission.cells_snapshot
+            if cell["id"] in snapshot
         }
 
     detail = ExperimentSubmissionDetailRead.model_validate(submission)
+    detail.cells_snapshot = snapshot
     detail.outputs_snapshot = submission.outputs_snapshot or {}
     detail.cell_metadata = metadata
     student = db.get(User, record.student_id)
@@ -1265,7 +1326,7 @@ def review_submission(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """教师/开发者/管理员对实验提交评分和反馈"""
+    """教师/管理员对实验提交评分和反馈"""
     # 校验：至少提供 score 或 feedback 之一
     if payload.score is None and payload.feedback is None:
         raise api_error(422, "EMPTY_REVIEW", "至少需要提供评分或反馈")
@@ -1280,19 +1341,9 @@ def review_submission(
     if not record:
         raise api_error(404, "RECORD_NOT_FOUND", "实验记录不存在")
 
-    # 权限：教师→自己课程，开发者→自己模块，管理员→全部
+    # 权限：教师→自己课程的课时实验或自己创建的实验模块，管理员→全部
     if current_user.role == "teacher":
-        if not record.lesson_id:
-            raise api_error(403, "FORBIDDEN", "无权评分该提交")
-        lesson = db.get(Lesson, record.lesson_id)
-        if not (lesson and lesson.chapter and lesson.chapter.course
-                and lesson.chapter.course.teacher_id == current_user.id):
-            raise api_error(403, "FORBIDDEN", "无权评分该提交")
-    elif current_user.role == "developer":
-        if not record.module_id:
-            raise api_error(403, "FORBIDDEN", "无权评分该提交")
-        module = db.get(ExperimentModule, record.module_id)
-        if not module or module.owner_id != current_user.id:
+        if not _teacher_owns_record(db, record, current_user):
             raise api_error(403, "FORBIDDEN", "无权评分该提交")
     elif current_user.role not in ("admin",):
         raise api_error(403, "FORBIDDEN", "无权评分")

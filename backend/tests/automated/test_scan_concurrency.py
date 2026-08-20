@@ -66,7 +66,6 @@ class TestConcurrentJudgeRecovery:
     """两个实例并发 requeue_stale_jobs：同一 stale job 一轮最多一次推送"""
 
     def test_stale_queued_repushed_once(self, db_session_factory):
-        from unittest.mock import MagicMock, patch
         sid = _setup_stale_queued_submission(db_session_factory)
 
         # 入队并让 queued_at 超时
@@ -144,7 +143,6 @@ class TestAIFinalizeOnReviewRequired:
 
     def test_fail_ai_grade_review_required_triggers_parent(self, db_session_factory):
         """fail_ai_grade 达上限转 review_required → 父级当场转 review_required"""
-        from unittest.mock import MagicMock
         from app.services.ai_grading_queue import fail_ai_grade
 
         ctx = self._seed_active_exam_codegrade(db_session_factory)
@@ -167,7 +165,6 @@ class TestAIFinalizeOnReviewRequired:
 
     def test_worker_failure_triggers_parent_review_required(self, db_session_factory):
         """worker 处理不可恢复失败 → fail_ai_grade 终态 → 父级当场 review_required"""
-        from unittest.mock import MagicMock
         from app.services.ai_client import AIServiceError
         from app.worker.judge_worker import process_ai_grade
 
@@ -194,7 +191,6 @@ class TestConcurrentAIRecovery:
     """两个实例并发 recover_stale_ai_grades：running 恢复最多一次 rpush"""
 
     def test_stale_running_recovered_once(self, db_session_factory):
-        from unittest.mock import MagicMock
         from app.services.ai_grading_queue import recover_stale_ai_grades
 
         cg_id = _setup_stale_running_ai_grade(db_session_factory)

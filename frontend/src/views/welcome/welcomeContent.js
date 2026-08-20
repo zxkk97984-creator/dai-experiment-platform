@@ -131,7 +131,7 @@ export const learningSteps = [
   },
 ]
 
-/** Role scenes — four user perspectives */
+/** Role scenes — three user perspectives */
 export const roles = [
   {
     id: 'student',
@@ -153,13 +153,6 @@ export const roles = [
     subtitle: 'Platform Control',
     desc: '用户管理、权限配置、系统监控，保障平台安全稳定运行。',
     highlights: ['用户管理', '权限控制', '系统监控', '数据报表'],
-  },
-  {
-    id: 'developer',
-    title: '开发者',
-    subtitle: 'Extend & Integrate',
-    desc: '开放 API、判题沙箱、插件扩展，构建你的定制化教学工具链。',
-    highlights: ['开放 API', '判题沙箱', '插件系统', '自定义模板'],
   },
 ]
 

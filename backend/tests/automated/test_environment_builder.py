@@ -26,6 +26,7 @@ from app.services.environment_builder import (
     BuildFailure,
     BuildTimeout,
     _SMOKE_SCRIPT,
+    _docker_build_proxy_args,
     canonical_build_spec,
     redact_build_log,
     render_dockerfile,
@@ -203,6 +204,23 @@ def test_dockerfile_pytorch_cpu_uses_builtin_index(db_session_factory, test_sett
     assert '--index-url https://download.pytorch.org/whl/cpu "torch==2.6.0+cpu"' in dockerfile
 
 
+def test_docker_build_rewrites_loopback_proxy_for_linux_build_container():
+    """宿主机代理的 loopback 地址不能直接传入 Linux Docker build 容器。"""
+    args = _docker_build_proxy_args({
+        "http_proxy": "http://127.0.0.1:7890",
+        "https_proxy": "http://localhost:7890",
+        "all_proxy": "socks://[::1]:7890",
+        "no_proxy": "localhost,127.0.0.1",
+    })
+
+    assert "--network=host" in args
+    build_args = [value for index, value in enumerate(args) if args[index - 1] == "--build-arg"]
+    assert "HTTP_PROXY=http://127.0.0.1:7890" in build_args
+    assert "HTTPS_PROXY=http://localhost:7890" in build_args
+    assert "ALL_PROXY=socks://[::1]:7890" in build_args
+    assert any(value.startswith("NO_PROXY=") and "127.0.0.1" in value for value in build_args)
+
+
 # ═══════════════════════════════════════════════════════════════
 # 日志脱敏与截断
 # ═══════════════════════════════════════════════════════════════
@@ -287,6 +305,8 @@ def test_claim_build_job_conditional_update(db_session_factory):
         assert worker.claim_build_job(db, job.id, "worker-1", now) is True
         assert job.status == "building"
         assert job.worker_id == "worker-1"
+        db.refresh(ver)
+        assert ver.status == "building"
         # 并发抢占：已被 claim 的任务返回 False
         assert worker.claim_build_job(db, job.id, "worker-2", now) is False
         assert job.status == "building"
@@ -296,6 +316,9 @@ def test_build_success_writes_digest_and_available(db_session_factory, test_sett
     with db_session_factory() as db:
         _, ver, _ = _setup_env(db)
         job = _make_job(db, ver.id)
+        job.error_code = "BUILD_FAILED"
+        job.error_message = "历史失败信息不应残留"
+        db.commit()
         now = utc_now()
         assert worker.claim_build_job(db, job.id, "worker-1", now)
 
@@ -310,6 +333,8 @@ def test_build_success_writes_digest_and_available(db_session_factory, test_sett
         db.refresh(job)
         db.refresh(ver)
         assert job.status == "succeeded"
+        assert job.error_code is None
+        assert job.error_message is None
         assert job.finished_at is not None
         assert ver.status == "available"
         assert ver.image_digest == FAKE_DIGEST
@@ -320,7 +345,7 @@ def test_build_success_writes_digest_and_available(db_session_factory, test_sett
         mock_tag.assert_called_once()
 
 
-def test_build_failure_keeps_version_draft(db_session_factory, test_settings):
+def test_build_failure_marks_version_failed(db_session_factory, test_settings):
     with db_session_factory() as db:
         _, ver, _ = _setup_env(db)
         job = _make_job(db, ver.id)
@@ -336,7 +361,7 @@ def test_build_failure_keeps_version_draft(db_session_factory, test_settings):
         assert job.status == "failed"
         assert job.error_code == "BUILD_FAILED"
         assert "pip install 失败" in job.error_message
-        assert ver.status == "draft"  # 失败不修改旧版本
+        assert ver.status == "failed"
         assert ver.image_digest is None
 
 
@@ -394,9 +419,47 @@ def test_worker_crash_beyond_timeout_timed_out(db_session_factory, test_settings
 
         stats = worker.recover_stale_builds(db, test_settings, now)
         db.refresh(job)
+        db.refresh(ver)
         assert job.status == "timed_out"
         assert job.error_code == "BUILD_TIMEOUT"
+        assert ver.status == "failed"
         assert stats["timed_out"] == 1
+
+
+def test_reconcile_queued_builds_requeues_missing_message_and_marks_orphaned_version_failed(
+    db_session_factory, test_settings, redis_client,
+):
+    """Worker 启动时以 DB 为事实源恢复丢失的 Redis 唤醒消息，并收敛旧失败状态。"""
+    with db_session_factory() as db:
+        prof = _make_profile(db)
+        queued_version = _make_version(db, prof.id, id_=1, status="queued")
+        queued_job = _make_job(db, queued_version.id, id_=1, status="queued")
+        orphaned_version = _make_version(db, prof.id, id_=2, status="queued", version_number=2)
+        failed_job = _make_job(db, orphaned_version.id, id_=2, status="failed")
+        failed_job.error_code = "BUILD_FAILED"
+        failed_job.finished_at = utc_now()
+        available_version = _make_version(db, prof.id, id_=3, status="available", version_number=3)
+        available_version.image_digest = FAKE_DIGEST
+        succeeded_job = _make_job(db, available_version.id, id_=3, status="succeeded")
+        succeeded_job.error_code = "BUILD_FAILED"
+        succeeded_job.error_message = "历史脏错误"
+        db.commit()
+
+        stats = worker.reconcile_build_state(db, test_settings, redis_client=redis_client)
+
+        db.refresh(queued_job)
+        db.refresh(orphaned_version)
+        db.refresh(succeeded_job)
+        assert queued_job.status == "queued"
+        assert orphaned_version.status == "failed"
+        assert succeeded_job.error_code is None
+        assert succeeded_job.error_message is None
+        assert stats["requeued"] == 1
+        assert stats["versions_failed"] == 1
+        assert stats["errors_cleared"] == 1
+        message = redis_client.lindex(test_settings.env_build_queue_name, 0)
+        assert message is not None
+        assert json.loads(message)["version_id"] == queued_version.id
 
 
 def test_build_log_redacted_and_truncated_in_job(db_session_factory, test_settings):

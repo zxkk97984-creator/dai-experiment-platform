@@ -2,7 +2,7 @@
   <div class="ai-config" v-if="expanded">
     <div class="ai-config-header">
       <h4>AI 评分配置</h4>
-      <button class="btn-sm" @click="$emit('close')">收起</button>
+      <button v-if="closable" class="btn-sm" @click="$emit('close')">收起</button>
     </div>
 
     <div v-if="loading" class="loading">加载中...</div>
@@ -60,8 +60,8 @@
 
       <!-- 保存 -->
       <div class="actions">
-        <button class="btn-primary" :disabled="saving || !dirty" @click="save">
-          {{ saving ? '保存中...' : '保存配置' }}
+        <button class="btn-primary" :disabled="saving || !dirty" @click="saveAndNotify">
+          {{ saving ? '保存中...' : (closable ? '保存配置' : '保存配置并下一题') }}
         </button>
         <span v-if="saveMsg" :class="saveOk ? 'success' : 'error'">{{ saveMsg }}</span>
       </div>
@@ -82,9 +82,11 @@ const props = defineProps({
   kind: { type: String, required: true },  // 'assignment' | 'exam'
   questionId: { type: Number, required: true },
   expanded: { type: Boolean, default: false },
+  /** 内嵌在题目编辑区下方时关闭「收起」按钮（右侧抽屉式使用场景才需要收起） */
+  closable: { type: Boolean, default: true },
 })
 
-defineEmits(['close'])
+const emit = defineEmits(['close', 'saved'])
 
 const config = ref({ grading_mode: 'active', teacher_constraints: {}, reference_solution: null, test_groups: [], score_cap_rules: [] })
 const loading = ref(false)
@@ -162,6 +164,13 @@ async function save() {
   } catch (e) {
     saveOk.value = false; saveMsg.value = e.response?.data?.detail?.message || e.message || '保存失败'
   } finally { saving.value = false }
+}
+
+// 「保存配置」按钮专用：落库成功后通知父组件刷新列表并进入下一题。
+// Rubric 生成前的内部自动保存不通知父组件，避免把教师从当前题弹走。
+async function saveAndNotify() {
+  await save()
+  if (saveOk.value) emit('saved', props.questionId)
 }
 
 async function generateRubricAction() {

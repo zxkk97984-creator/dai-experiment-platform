@@ -46,15 +46,6 @@ const menuItems = computed(() => {
     { path: '/admin/environments',  label: '环境档位', sub: 'Environments', icon: 'experiment', key: 'environments' },
     { path: '/admin/ai-grading',    label: 'AI 评分复核', sub: 'AI Grading', icon: 'brain',      key: 'ai-grading' },
   ]
-  if (auth.isDeveloper) return [
-    {
-      path: '/developer/templates',
-      label: '实验模板',
-      sub: 'Templates',
-      icon: 'experiment',
-      key: 'templates',
-    },
-  ]
   return [home('/student'), ...base]
 })
 
@@ -76,14 +67,13 @@ const navGroups = computed(() => {
       { label: '系统', items: pick(['environments']) },
     ]
   }
-  if (auth.isDeveloper) return [{ label: '开发', items }]
   return [{ label: '学习', items }]
 })
 
 const displayName = computed(() => auth.user?.real_name || auth.user?.username || '同学')
 const avatarText = computed(() => displayName.value.trim().slice(0, 1))
 const roleText = computed(() => {
-  const map = { student: '学生', teacher: '教师', admin: '管理员', developer: '开发者' }
+  const map = { student: '学生', teacher: '教师', admin: '管理员' }
   const role = map[auth.role] || auth.role || ''
   if (auth.role === 'teacher' && auth.user?.department) return `${role} · ${auth.user.department}`
   return role

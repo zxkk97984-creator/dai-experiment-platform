@@ -1,7 +1,7 @@
 from datetime import date
 
 from app.models import CourseEnrollment, User
-from tests.automated.conftest import auth_header, create_user, login
+from conftest import auth_header, create_user, login
 
 
 API = "/api/v1"

@@ -1,9 +1,9 @@
 """环境构建 Worker（Phase 1）——单进程单任务，DB 是任务事实源，Redis list 只负责唤醒。
 
 状态机：
-    queued → building → succeeded
-                      ↘ failed
-                      ↘ timed_out
+    draft → queued → building → succeeded
+                              ↘ failed
+                              ↘ timed_out
 
 执行流程：
 1. 条件更新 claim 构建任务（UPDATE ... WHERE status='queued'，rowcount 防并发抢占）
@@ -50,11 +50,20 @@ logger = logging.getLogger("dai.worker.env_build")
 LEASE_SECONDS = 60
 
 
+def _mark_version_failed(db, version_id: int) -> None:
+    """把当前未可用版本收敛到 failed，不回退已发布版本。"""
+    version = db.get(EnvironmentVersion, version_id)
+    if version is not None and version.status not in ("available", "inactive"):
+        version.status = "failed"
+
+
 def _fail(db, job: EnvironmentBuildJob, status: str, exc: BuildFailure, now) -> str:
+    _mark_version_failed(db, job.environment_version_id)
     job.status = status
     job.error_code = exc.code
     job.error_message = str(exc)[:500]
     job.finished_at = now
+    job.lease_until = None
     db.commit()
     return status
 
@@ -75,12 +84,16 @@ def claim_build_job(db, job_id: int, owner_id: str, now) -> bool:
             lease_until=now + timedelta(seconds=LEASE_SECONDS),
         )
     )
-    db.commit()
     if result.rowcount != 1:
+        db.rollback()
         return False
     job = db.get(EnvironmentBuildJob, job_id)
     if job is not None:
         db.refresh(job)  # update 语句不同步已加载对象，刷新使调用方可见 building 状态
+        version = db.get(EnvironmentVersion, job.environment_version_id)
+        if version is not None and version.status not in ("available", "inactive"):
+            version.status = "building"
+    db.commit()
     return True
 
 
@@ -144,6 +157,9 @@ def process_build(
     version.resolved_packages = result.resolved_packages
     version.available_at = now
     job.status = "succeeded"
+    job.error_code = None
+    job.error_message = None
+    job.lease_until = None
     job.finished_at = now
     db.commit()
     logger.info("环境 %s v%s 构建成功: %s", spec.profile_slug, version.version_number, result.image_digest)
@@ -179,21 +195,101 @@ def recover_stale_builds(db, settings: Settings, now, redis_client=None) -> dict
     for job in stale:
         started = as_utc(job.started_at)
         if started is not None and (now - started).total_seconds() > settings.env_build_timeout_seconds:
+            _mark_version_failed(db, job.environment_version_id)
             job.status = "timed_out"
             job.error_code = "BUILD_TIMEOUT"
             job.error_message = "构建超过时限"
+            job.lease_until = None
             job.finished_at = now
             stats["timed_out"] += 1
         else:
             job.status = "queued"
             job.worker_id = None
             job.lease_until = None
+            version = db.get(EnvironmentVersion, job.environment_version_id)
+            if version is not None and version.status not in ("available", "inactive"):
+                version.status = "queued"
             stats["requeued"] += 1
             if redis_client is not None:
-                redis_client.rpush(
-                    settings.env_build_queue_name,
-                    _json.dumps({"type": "env_build", "version_id": job.environment_version_id}),
-                )
+                _enqueue_build_wakeup(redis_client, settings, job.environment_version_id)
+    db.commit()
+    return stats
+
+
+def _enqueue_build_wakeup(redis_client, settings: Settings, version_id: int) -> bool:
+    """向 Redis 推送一次版本唤醒消息；已有同版本消息时避免重复。"""
+    if redis_client is None:
+        return False
+    try:
+        for raw_data in redis_client.lrange(settings.env_build_queue_name, 0, -1):
+            try:
+                payload = _json.loads(raw_data)
+            except Exception:  # noqa: BLE001 - 坏消息不应阻止当前任务唤醒
+                continue
+            if payload.get("version_id") == version_id:
+                return False
+        redis_client.rpush(
+            settings.env_build_queue_name,
+            _json.dumps({"type": "env_build", "version_id": version_id}),
+        )
+        return True
+    except Exception:  # noqa: BLE001 - DB 状态保留 queued，后续对账继续尝试
+        logger.warning("无法唤醒环境构建任务 version_id=%s", version_id, exc_info=True)
+        return False
+
+
+def reconcile_build_state(db, settings: Settings, redis_client=None) -> dict:
+    """以 DB 任务事实源修复 Redis 丢消息和版本状态漂移。
+
+    Worker 重启或 Redis 短暂不可用后，queued 任务可能没有唤醒消息；同时旧版
+    Worker 在失败时只更新 job，导致 version 永久停在 queued。本函数只把已有
+    任务重新唤醒，或把已有失败终态同步到 version，不伪造 succeeded/available。
+    """
+    stats = {"requeued": 0, "versions_failed": 0, "errors_cleared": 0}
+
+    succeeded_jobs = db.scalars(
+        select(EnvironmentBuildJob).where(
+            EnvironmentBuildJob.status == "succeeded",
+            (EnvironmentBuildJob.error_code.is_not(None) | EnvironmentBuildJob.error_message.is_not(None)),
+        )
+    ).all()
+    for job in succeeded_jobs:
+        version = db.get(EnvironmentVersion, job.environment_version_id)
+        if version is not None and version.status == "available" and version.image_digest:
+            job.error_code = None
+            job.error_message = None
+            stats["errors_cleared"] += 1
+
+    queued_jobs = db.scalars(
+        select(EnvironmentBuildJob).where(EnvironmentBuildJob.status == "queued")
+    ).all()
+    for job in queued_jobs:
+        if _enqueue_build_wakeup(redis_client, settings, job.environment_version_id):
+            stats["requeued"] += 1
+
+    queued_versions = db.scalars(
+        select(EnvironmentVersion).where(EnvironmentVersion.status == "queued")
+    ).all()
+    for version in queued_versions:
+        active_job = db.scalar(
+            select(EnvironmentBuildJob.id)
+            .where(
+                EnvironmentBuildJob.environment_version_id == version.id,
+                EnvironmentBuildJob.status.in_(["queued", "building"]),
+            )
+            .limit(1)
+        )
+        if active_job is not None:
+            continue
+        latest_job = db.scalar(
+            select(EnvironmentBuildJob)
+            .where(EnvironmentBuildJob.environment_version_id == version.id)
+            .order_by(EnvironmentBuildJob.created_at.desc(), EnvironmentBuildJob.id.desc())
+            .limit(1)
+        )
+        if latest_job is not None and latest_job.status in ("failed", "timed_out"):
+            version.status = "failed"
+            stats["versions_failed"] += 1
     db.commit()
     return stats
 
@@ -249,14 +345,20 @@ def run_worker_loop() -> None:
     owner_id = f"env-builder:{socket.gethostname()}:{os.getpid()}"
     logger.info("环境构建 Worker 启动，队列: %s，owner=%s", settings.env_build_queue_name, owner_id)
 
+    with SessionLocal() as db:
+        startup_stats = reconcile_build_state(db, settings, redis_client=redis_client)
+        if any(startup_stats.values()):
+            logger.info("构建启动对账: %s", startup_stats)
+
     last_recovery = time.monotonic()
     while True:
         try:
             with SessionLocal() as db:
                 if time.monotonic() - last_recovery > 60:
                     stats = recover_stale_builds(db, settings, utc_now(), redis_client=redis_client)
-                    if any(stats.values()):
-                        logger.info("构建崩溃恢复: %s", stats)
+                    reconcile_stats = reconcile_build_state(db, settings, redis_client=redis_client)
+                    if any(stats.values()) or any(reconcile_stats.values()):
+                        logger.info("构建崩溃恢复: %s，对账: %s", stats, reconcile_stats)
                     last_recovery = time.monotonic()
                 run_once(db, redis_client, settings, owner_id)
         except Exception:  # noqa: BLE001

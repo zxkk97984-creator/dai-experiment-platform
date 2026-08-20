@@ -5,13 +5,13 @@ from sqlalchemy.orm import Session
 from app.dependencies import get_current_user, get_db, require_roles, PaginationParams, pagination
 from app.errors import api_error
 from app.models import User, UserPreference
+from app.roles import VALID_ROLES
 from app.schemas import PaginatedResponse, PasswordUpdate, StatusUpdate, UserCreate, UserRead, UserUpdate
 from app.schemas.preferences import UserPreferencesRead, UserPreferencesUpdate
 from app.security import hash_password, validate_password_rules, verify_password
 
 router = APIRouter(prefix="/users", tags=["users"])
 
-VALID_ROLES = {"student", "teacher", "admin", "developer"}
 VALID_STATUSES = {"active", "disabled"}
 
 
@@ -155,6 +155,8 @@ def update_user(
     if not user:
         raise api_error(404, "USER_NOT_FOUND", "用户不存在")
     updates = payload.model_dump(exclude_unset=True)
+    if "role" in updates and updates["role"] not in VALID_ROLES:
+        raise api_error(422, "INVALID_ROLE", "角色无效")
     if "role" in updates and current_user.role != "admin":
         raise api_error(403, "FORBIDDEN", "只有管理员可以修改角色")
     if "student_no" in updates:

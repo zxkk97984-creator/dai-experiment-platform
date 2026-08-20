@@ -28,7 +28,8 @@ const cells = computed(() => {
     const meta = cellMap[id] || {}
     return {
       id,
-      source: source || '',
+      // 防御：历史数据可能嵌套为 {"cells": {...}}，source 非字符串时置空，避免渲染崩溃
+      source: typeof source === 'string' ? (source || '') : '',
       type: meta.type || 'code',
       order: meta.order ?? index,
       outputs: outputs[id] || null,
@@ -198,7 +199,7 @@ onMounted(load)
 .status-pill.pending { border-color: var(--warning-bg); background: var(--warning-bg); color: var(--warning); }
 .status-pill.graded { border-color: var(--success-bg); background: var(--success-bg); color: var(--success); }
 
-.workspace-grid { display: grid; grid-template-columns: minmax(0, 1.28fr) minmax(340px, .72fr); align-items: start; gap: 18px; }
+.workspace-grid { display: grid; grid-template-columns: minmax(0, 1.04fr) minmax(400px, .96fr); align-items: start; gap: 18px; }
 .snapshot-panel, .review-panel { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: none; }
 .panel-head { min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 18px; border-bottom: 1px solid var(--border); }
 .panel-head h2 { margin: 0 0 3px; color: var(--fg); font-size: 15px; }
@@ -209,7 +210,7 @@ onMounted(load)
 .snapshot-footer { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; }
 .snapshot-footer button { padding: 5px 8px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--accent); font-size: 11px; cursor: pointer; }
 
-.review-panel { position: sticky; top: 16px; overflow: hidden; }
+/* .review-panel 布局与吸顶行为由 SubmissionReviewPanel 组件内部管理 */
 .current-status { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; }
 .score-row { padding: 18px; border-bottom: 1px solid var(--border); }
 .score-row > label, .feedback-field > span { display: block; margin-bottom: 8px; color: var(--fg); font-size: 12px; font-weight: 600; }

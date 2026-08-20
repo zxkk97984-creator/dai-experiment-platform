@@ -334,8 +334,8 @@ onMounted(async () => {
                 class="course-row-link"
                 @click="go(course.route)"
               >
-                <span class="course-row-title">{{ course.title }}</span>
-                <span class="course-row-meta">{{ courseMeta(course) }}</span>
+                <span class="course-row-title" :title="course.title">{{ course.title }}</span>
+                <span class="course-row-meta" :title="courseMeta(course)">{{ courseMeta(course) }}</span>
               </button>
             </div>
           </DashboardAsyncState>
@@ -409,12 +409,16 @@ onMounted(async () => {
   min-width: 0; padding: 14px 16px;
   border: 1px solid var(--border); border-radius: var(--radius-md);
   background: var(--surface-subtle); text-align: left;
+  overflow: hidden; /* 安全网：文本子项永不出卡片边界 */
   transition: border-color 0.12s ease, background 0.12s ease;
 }
 .course-row-link:hover { border-color: var(--accent); background: var(--accent-faint); }
-.course-row-title { font-size: var(--text-md); font-weight: 500; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 这两个是 flex 列子项：默认 min-width:auto 会按 nowrap 最小内容撑开，
+   导致文字溢出卡片并覆盖相邻卡片。必须 min-width:0 + width:100% 才能让
+   overflow:hidden / text-overflow:ellipsis 真正以卡片宽度裁切并显示省略号。 */
+.course-row-title { min-width: 0; width: 100%; font-size: var(--text-md); font-weight: 500; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .course-row-link:hover .course-row-title { color: var(--accent); }
-.course-row-meta { font-size: var(--text-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.course-row-meta { min-width: 0; width: 100%; font-size: var(--text-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 1024px) {
   .dash-grid { grid-template-columns: 1fr; }

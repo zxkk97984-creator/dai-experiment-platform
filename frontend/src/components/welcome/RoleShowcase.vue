@@ -12,7 +12,7 @@ defineEmits(['login'])
       <header class="roles-header">
         <p class="roles-eyebrow">角色场景</p>
         <h2 class="roles-title">为每一位参与者设计</h2>
-        <p class="roles-sub">学生、教师、管理员和开发者，各自拥有专属的工作界面与交互流程。</p>
+        <p class="roles-sub">学生、教师和管理员，各自拥有专属的工作界面与交互流程。</p>
       </header>
 
       <div class="roles-grid">
@@ -25,7 +25,6 @@ defineEmits(['login'])
             'role-card--student': scene.id === 'student',
             'role-card--teacher': scene.id === 'teacher',
             'role-card--admin': scene.id === 'admin',
-            'role-card--developer': scene.id === 'developer',
           }"
           @mouseenter="activeScene = i"
           @mouseleave="activeScene = null"
@@ -126,10 +125,9 @@ defineEmits(['login'])
   transition: all 0.35s ease;
 }
 
-.role-card--student { grid-column: span 7; }
-.role-card--teacher { grid-column: span 5; }
-.role-card--admin { grid-column: span 5; }
-.role-card--developer { grid-column: span 7; }
+.role-card--student,
+.role-card--teacher,
+.role-card--admin { grid-column: span 4; }
 
 .role-card:hover,
 .role-card.hovered {
@@ -147,8 +145,6 @@ defineEmits(['login'])
 .role-card--admin:hover,
 .role-card--admin.hovered { border-color: var(--success); }
 
-.role-card--developer:hover,
-.role-card--developer.hovered { border-color: var(--accent); }
 
 .role-chrome {
   display: flex;
@@ -295,7 +291,6 @@ defineEmits(['login'])
 .role-card--student::after { background: var(--accent); }
 .role-card--teacher::after { background: var(--info); }
 .role-card--admin::after { background: var(--success); }
-.role-card--developer::after { background: var(--accent); }
 .role-card:hover::after,
 .role-card.hovered::after {
   width: 50%;
@@ -352,9 +347,8 @@ defineEmits(['login'])
     grid-template-columns: repeat(6, 1fr);
   }
   .role-card--student,
-  .role-card--developer { grid-column: span 4; }
   .role-card--teacher,
-  .role-card--admin { grid-column: span 2; }
+  .role-card--admin { grid-column: span 3; }
 }
 
 @media (max-width: 768px) {
@@ -366,8 +360,7 @@ defineEmits(['login'])
   }
   .role-card--student,
   .role-card--teacher,
-  .role-card--admin,
-  .role-card--developer { grid-column: span 1; }
+  .role-card--admin { grid-column: span 1; }
   .cta-section {
     padding: 40px 24px;
     margin-top: 48px;

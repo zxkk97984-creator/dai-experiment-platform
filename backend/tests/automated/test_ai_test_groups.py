@@ -466,6 +466,40 @@ def test_preflight_collection_writes_user_code_placeholder(tmp_path, monkeypatch
     assert issues == []
 
 
+def test_preflight_collection_writes_to_docker_host_workdir(tmp_path, monkeypatch):
+    """host_workdir 与写入目录不同（生产 DoD）时，预检文件必须写到 Docker 可见目录。"""
+    from pathlib import Path as P
+
+    from app.services.test_group_generator import preflight_groups
+
+    workdir = tmp_path / "private-workdir"
+    host = tmp_path / "docker-visible"
+    workdir.mkdir()
+    host.mkdir()
+    seen = {}
+
+    def fake_docker(workdir_arg, settings, timeout_seconds, memory_limit_mb,
+                    test_filename="test_group.py", host_workdir=None,
+                    extra_args=None, image_ref=None):
+        seen["workdir"] = workdir_arg
+        seen["host_workdir"] = host_workdir
+        assert (P(host_workdir) / "test_group.py").exists()
+        assert (P(host_workdir) / "user_code.py").exists()
+        return "collected 2 items", "", 0, 100
+
+    monkeypatch.setattr("app.worker.judge_worker._run_docker_pytest", fake_docker)
+    issues = preflight_groups(
+        _groups_for_preflight(), None, workdir, host,
+        make_settings(), 5, 256,
+    )
+    assert issues == []
+    # 预检目录建在 Docker 可见目录下，而不是私有 workdir
+    assert P(seen["host_workdir"]).is_relative_to(host)
+    assert P(seen["host_workdir"]).is_relative_to(workdir) is False
+    # 临时预检目录已清理
+    assert list(host.iterdir()) == []
+
+
 def test_preflight_collection_failed(tmp_path, monkeypatch):
     """无参考答案：collection 失败 → issues"""
     from app.services.test_group_generator import preflight_groups

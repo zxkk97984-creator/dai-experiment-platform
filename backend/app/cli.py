@@ -79,7 +79,6 @@ def seed_demo(reset: bool, reference_date: str | None, skip_env_check: bool, for
         print("\n固定演示账号（默认密码 Demo1234!，DAI_DEMO_PASSWORD 可覆盖）：")
         print("  管理端: demo_admin")
         print("  教师端: teacher_zhang / teacher_chen / teacher_zhao")
-        print("  开发者: demo_developer")
         print("  学生端: demo_student_elite / demo_student_average /")
         print("          demo_student_struggling / demo_student_new")
         print("  背景学生: student_24621601_01 .. student_24621606_10")

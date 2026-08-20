@@ -8,20 +8,12 @@ import { statusBadge, PUBLISH_STATUS_MAP } from '../../utils/status.js'
 const app = useAppStore()
 const modules = ref([])
 const loading = ref(true)
-const showCreate = ref(false)
-const form = ref({ name: '', description: '' })
 
 async function fetch() {
   loading.value = true
   try { const res = await experimentsAPI.listModules(); modules.value = res.data.items || res.data }
   catch { app.showToast('加载失败', 'error') }
   finally { loading.value = false }
-}
-
-async function handleCreate() {
-  if (!form.value.name) return
-  try { await experimentsAPI.createModule(form.value); app.showToast('创建成功', 'success'); showCreate.value = false; form.value = { name: '', description: '' }; fetch() }
-  catch (e) { app.showToast(e.response?.data?.detail?.message || '创建失败', 'error') }
 }
 
 async function handleUpdate(m) {
@@ -51,20 +43,7 @@ onMounted(fetch)
           <h1 class="page-title">实验模块管理</h1>
           <p class="page-sub">配置与维护实验模块、镜像与数据集</p>
         </div>
-        <div class="page-meta">
-          <button class="btn-primary" @click="showCreate = !showCreate">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-            {{ showCreate ? '取消' : '创建模块' }}
-          </button>
-        </div>
       </header>
-
-      <!-- ── Create Form ───────────────────────────────────────────────── -->
-      <div v-if="showCreate" class="card create-form">
-        <div class="form-group"><label>模块名称</label><input v-model="form.name" placeholder="输入模块名称" /></div>
-        <div class="form-group"><label>描述</label><textarea v-model="form.description" rows="2" placeholder="模块描述"></textarea></div>
-        <button class="btn-primary" @click="handleCreate">确认创建</button>
-      </div>
 
       <!-- ── Loading ────────────────────────────────────────────────────── -->
       <div v-if="loading" class="card table-card">
@@ -129,13 +108,6 @@ onMounted(fetch)
 .page-sub {
   font-size: var(--text-sm); color: var(--muted); margin: 0;
 }
-
-/* ── Create Form ───────────────────────────────────────────────────── */
-.create-form {
-  padding: 24px;
-  display: flex; flex-direction: column; gap: 4px;
-}
-.create-form .form-group { margin-bottom: var(--space-3); }
 
 /* ── Table card ────────────────────────────────────────────────────── */
 .table-card {

@@ -79,12 +79,11 @@
 | 章节课时管理 | `/teacher/courses/:id/manage` | courses chapters/lessons/whitelist/cover/studio | 🔶 |
 | 课时编辑 / Studio | `/teacher/courses/:id/lessons/:id/edit`、`.../studio/:lid` | courses lessons、studio | 🔶 |
 
-### 3.5 管理端 / 开发者 / 公共页
+### 3.5 管理端 / 公共页
 
 | 页面 | Route | API | 状态 |
 | --- | --- | --- | --- |
 | Admin 概览 / 用户 / 教务 / 环境 | `/admin*` | users/academics/environments | 🔶 |
-| Developer 模板 | `/developer/templates` | studio templates | 🔶 |
 | 登录 / 欢迎 | `/login`、`/welcome` | `POST /auth/login` | 🔶（无 App Shell，视觉待迁移） |
 
 ## 4. 迁移顺序
@@ -93,7 +92,7 @@
 2. ✅ 第一批代表页
 3. 🔜 第二批：学生课程 / 任务 / 提交 / 反馈 / 实验
 4. 🔜 第三批：教师作业 / 考试 / 章节课时 / 提交详情
-5. 🔜 第四批：Admin / Developer / 登录欢迎
+5. 🔜 第四批：Admin / 登录欢迎
 6. 最后：删除 `teacher-management.css` 桥接、旧 token 别名、无引用 scoped 样式；复跑全量验证。
 
 ## 5. 验证基线（当前）

@@ -136,7 +136,6 @@ cd backend
 | 管理员 | `demo_admin` |
 | 教师 | `teacher_zhang` / `teacher_chen` / `teacher_zhao` |
 | 学生 | `demo_student_elite` / `demo_student_average` / `demo_student_struggling` / `demo_student_new` |
-| 开发者 | `demo_developer` |
 
 详细说明（前置条件 / 故事线 / 数据规模 / 验证结果）见 [docs/demo-data.md](docs/demo-data.md)。
 
@@ -207,7 +206,10 @@ cd backend
                                     ↓
                            Worker 消费判题（与普通作业共用进程）
                                     ↓
-                          全部答案 completed → 生成 ExamGrade
+                          全部答案 completed → finalize_if_ready 汇总并生成 ExamGrade
+
+Demo seed 会在直接构造历史时间线并完成 CodeGrade 后执行同样的可发布条件汇总；
+存在 review_required、system_error 或无分数答案时不会按 0 分生成成绩。
 ```
 
 ### 判题队列可靠性
@@ -459,7 +461,6 @@ Notebook 前端现统一使用 Studio 和 Experiment 链路；旧版前端 Noteb
 | 学生 `student` | 学生首页 Dashboard（`/student`，含课程列表入口） | 选课、学习课时、提交作业、参加考试、进入实验 |
 | 教师 `teacher` | 工作台 | 课程/作业/实验/考试管理、统一提交评分、AI 复核、成绩统计、班级与学员、运行环境、设置 |
 | 管理员 `admin` | 用户管理 | 创建用户、管理全部资源 |
-| 开发者 `developer` | 模板管理 | 管理 Notebook 模板和实验模块 |
 
 ---
 

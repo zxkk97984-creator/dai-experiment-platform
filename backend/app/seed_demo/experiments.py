@@ -258,7 +258,7 @@ def create_experiment_records(
                         record_id=record.id,
                         attempt_number=1,
                         client_request_id=f"demo-{record.id}-1",
-                        cells_snapshot={"cells": cells_sources},
+                        cells_snapshot=dict(cells_sources),
                         submitted_at=submitted,
                     )
                     db.add(sub)

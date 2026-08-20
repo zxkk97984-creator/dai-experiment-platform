@@ -32,6 +32,9 @@ const routes = [
   { path: '/teacher/exams/:id/grades/:submissionId', name: 'TeacherGradeDetail', component: () => import('../views/teacher/GradeDetailView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/exams/:id/edit', name: 'TeacherExamQuestionEdit', component: () => import('../views/teacher/ExamQuestionEditView.vue'), meta: { role: 'teacher' } },
  { path: '/teacher/experiments', name: 'TeacherExperiments', component: () => import('../views/teacher/ExperimentManageView.vue'), meta: { role: 'teacher' } },
+  { path: '/teacher/experiments/create', redirect: '/teacher/experiments' },
+  { path: '/teacher/experiments/:id/edit', redirect: '/teacher/experiments' },
+  { path: '/teacher/experiments/:id/studio/:lid', name: 'TeacherExperimentModuleStudio', component: () => import('../views/teacher/ExperimentModuleStudioView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/submissions', name: 'TeacherExperimentSubmissions', component: () => import('../views/teacher/ExperimentSubmissionsView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/submissions/unified', name: 'TeacherUnifiedSubmissions', component: () => import('../views/teacher/UnifiedSubmissionsView.vue'), meta: { role: 'teacher' } },
   { path: '/teacher/submissions/:id', name: 'TeacherExperimentSubmissionDetail', component: () => import('../views/teacher/ExperimentSubmissionDetailView.vue'), meta: { role: 'teacher' } },
@@ -63,10 +66,6 @@ const routes = [
   { path: '/admin/judge-submissions/:id', name: 'AdminJudgeSubmissionDetail', component: () => import('../views/teacher/JudgeSubmissionDetailView.vue'), meta: { role: 'admin' } },
   { path: '/admin/ai-grading', name: 'AdminAIGrading', component: () => import('../views/teacher/AIGradingReviewView.vue'), meta: { role: 'admin' } },
   { path: '/admin/ai-grading/:id', name: 'AdminAIGradingDetail', component: () => import('../views/teacher/AIGradingReviewDetailView.vue'), meta: { role: 'admin' } },
-
-  // Developer
-  { path: '/developer/templates', name: 'DeveloperTemplates', component: () => import('../views/developer/TemplateManageView.vue'), meta: { role: 'developer' } },
-  { path: '/developer/studio/:id', name: 'DeveloperStudio', component: () => import('../views/developer/StudioView.vue'), meta: { role: 'developer' } },
 
   { path: '/', redirect: '/welcome' },
   { path: '/:pathMatch(.*)*', redirect: '/welcome' },

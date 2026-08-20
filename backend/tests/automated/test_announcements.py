@@ -253,19 +253,15 @@ def test_global_notice_visible_to_student(client, db_session_factory):
     assert read.status_code == 204
 
 
-def test_developer_cannot_read_any_announcement(client, db_session_factory):
-    """不支持的角色（developer）不匹配任何公告：标记全局公告已读返回 404"""
-    admin = create_user(db_session_factory, "dev-admin", "admin")
-    developer = create_user(db_session_factory, "dev-user", "developer")
-    token, _ = login(client, "dev-admin")
-    resp = _publish_global(client, auth_header(token))
-    notice_id = resp.json()["id"]
-
-    dev_token, _ = login(client, "dev-user")
-    read = client.post(
-        f"/api/v1/announcements/{notice_id}/read", headers=auth_header(dev_token)
+def test_unsupported_persisted_role_cannot_login(client, db_session_factory):
+    """历史非法角色不能通过认证进入任何业务流程。"""
+    create_user(db_session_factory, "legacy-role-user", "legacy")
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "legacy-role-user", "password": "Passw0rd!"},
     )
-    assert read.status_code == 404
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "ROLE_NOT_SUPPORTED"
 
 
 def test_expired_notice_hidden(client, db_session_factory):

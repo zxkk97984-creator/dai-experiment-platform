@@ -4,7 +4,6 @@ export const ROLE_HOME = Object.freeze({
   student: '/student',
   teacher: '/teacher',
   admin: '/admin/users',
-  developer: '/developer/templates',
 })
 
 export function homeForRole(role) {

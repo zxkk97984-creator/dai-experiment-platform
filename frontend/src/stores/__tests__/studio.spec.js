@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   previewInterrupt: vi.fn(),
   previewReset: vi.fn(),
   publish: vi.fn(),
+  publishModule: vi.fn(),
   getVersions: vi.fn(),
   getVersion: vi.fn(),
   exportDraft: vi.fn(),
@@ -21,7 +22,12 @@ vi.mock('../../api/studio.js', () => ({
   studioAPI: mocks,
 }))
 
+vi.mock('../../api/experiments.js', () => ({
+  experimentsAPI: { publishModule: mocks.publishModule },
+}))
+
 import { useStudioStore } from '../studio.js'
+import { useAppStore } from '../app.js'
 
 const codeCell = (overrides = {}) => ({
   id: 'cell-abc12345',
@@ -398,5 +404,87 @@ describe('useStudioStore Phase 4 草稿环境绑定', () => {
     expect(store.importPolicyMode).toBe('restricted')
     expect(store.allowedImports).toEqual(['numpy'])
     expect(store.dirty).toBe(true)
+  })
+})
+
+describe('useStudioStore publish（实验模块联动发布）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+  })
+
+  it('课时模板（未绑定模块）：仅发布模板版本，提示已发布版本', async () => {
+    const store = useStudioStore()
+    store.templateId = 64
+    store.moduleId = null
+    store.dirty = false
+    mocks.publish.mockResolvedValue({ data: { id: 9, version_number: 3 } })
+    const app = useAppStore()
+
+    const result = await store.publish()
+
+    expect(mocks.publish).toHaveBeenCalledWith(64)
+    expect(mocks.publishModule).not.toHaveBeenCalled()
+    expect(app.toastMessage).toBe('已发布版本 3')
+    expect(app.toastType).toBe('success')
+    expect(result).toEqual({ id: 9, version_number: 3 })
+    expect(store.status).toBe('published')
+  })
+
+  it('实验模板：模板版本发布成功后显式发布模块，提示实验发布成功', async () => {
+    const store = useStudioStore()
+    store.templateId = 64
+    store.moduleId = 62
+    store.dirty = false
+    mocks.publish.mockResolvedValue({ data: { id: 9, version_number: 1 } })
+    mocks.publishModule.mockResolvedValue({ data: { id: 62, status: 'published' } })
+    const app = useAppStore()
+
+    await store.publish()
+
+    expect(mocks.publish).toHaveBeenCalledTimes(1)
+    expect(mocks.publish).toHaveBeenCalledWith(64)
+    expect(mocks.publishModule).toHaveBeenCalledTimes(1)
+    expect(mocks.publishModule).toHaveBeenCalledWith(62)
+    expect(app.toastMessage).toBe('实验发布成功')
+    expect(app.toastType).toBe('success')
+  })
+
+  it('模块发布失败（部分成功）：不提示成功，明确报错，返回版本数据', async () => {
+    const store = useStudioStore()
+    store.templateId = 64
+    store.moduleId = 62
+    store.dirty = false
+    mocks.publish.mockResolvedValue({ data: { id: 9, version_number: 2 } })
+    mocks.publishModule.mockRejectedValue({
+      response: { data: { detail: { message: '模板不存在或尚未发布版本' } } },
+    })
+    const app = useAppStore()
+
+    const result = await store.publish()
+
+    expect(mocks.publishModule).toHaveBeenCalledWith(62)
+    // 避免假成功：绝不能出现成功提示
+    expect(app.toastMessage).not.toBe('实验发布成功')
+    expect(app.toastType).toBe('error')
+    expect(app.toastMessage).toContain('实验发布失败')
+    expect(app.toastMessage).toContain('模板不存在或尚未发布版本')
+    // 模板版本已发布是真实状态：返回版本数据（弹窗关闭），模块发布可回列表重试
+    expect(result).toEqual({ id: 9, version_number: 2 })
+  })
+
+  it('模板发布失败：不调用模块发布，返回 null', async () => {
+    const store = useStudioStore()
+    store.templateId = 64
+    store.moduleId = 62
+    store.dirty = false
+    mocks.publish.mockRejectedValue({
+      response: { data: { detail: { message: '发布失败' } } },
+    })
+
+    const result = await store.publish()
+
+    expect(result).toBeNull()
+    expect(mocks.publishModule).not.toHaveBeenCalled()
   })
 })
