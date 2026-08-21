@@ -10,12 +10,14 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.errors import api_error
 from app.models import (
     EnvironmentBuildJob,
+    EnvironmentDraft,
     EnvironmentProfile,
     EnvironmentVersion,
     PackageCatalog,
@@ -219,7 +221,11 @@ def create_profile_version(
             package_catalog_id=package_id,
             display_order=order,
         ))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise api_error(409, "VERSION_NUMBER_CONFLICT", "环境版本号发生并发冲突，请刷新后重试") from exc
     db.refresh(version)
     return version
 
@@ -418,20 +424,39 @@ def create_profile(
         created_by_id=actor_id,
     )
     db.add(profile)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise api_error(409, "PROFILE_SLUG_CONFLICT", "档位 slug 已存在") from exc
     db.refresh(profile)
     return profile
 
 
 def update_profile(db: Session, profile_id: int, patch: dict) -> EnvironmentProfile:
     """更新档位——仅展示名/描述/状态；slug 不可变。"""
-    profile = db.get(EnvironmentProfile, profile_id)
+    profile = db.execute(
+        select(EnvironmentProfile).where(EnvironmentProfile.id == profile_id).with_for_update()
+    ).scalar_one_or_none()
     if profile is None:
         raise api_error(404, "NOT_FOUND", "环境档位不存在")
+    draft = db.execute(
+        select(EnvironmentDraft).where(EnvironmentDraft.profile_id == profile_id).with_for_update()
+    ).scalar_one_or_none()
+    active_job = db.get(EnvironmentBuildJob, draft.active_build_job_id) if draft and draft.active_build_job_id else None
+    if draft is not None and (
+        draft.state == "building"
+        or (active_job is not None and active_job.status in {"queued", "building"})
+    ):
+        raise api_error(409, "DRAFT_BUILD_ACTIVE", "构建进行中，暂不能修改环境")
     for field in ("display_name", "description", "status"):
-        if patch.get(field) is not None:
+        if field in patch:
             setattr(profile, field, patch[field])
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise api_error(409, "PROFILE_UPDATE_CONFLICT", "环境更新冲突，请刷新后重试") from exc
     db.refresh(profile)
     return profile
 
@@ -598,8 +623,8 @@ def validate_publish_gate(
 def resolve_run_image_ref(db: Session, version_id: int) -> str:
     """运行链路解析不可变镜像引用——必须 available 且 image_digest 非空。
 
-    返回 version.image_digest（单机为本地 image ID `sha256:...`；配置 Registry 后
-    为 `repository@sha256:...`），运行容器直接以该值作为镜像参数启动，
+    返回 version.image_digest（V2 为可拉取的 `repository@sha256:...`；Legacy
+    存量可保留本地 image ID），运行容器直接以该值作为镜像参数启动，
     禁止回退到 `dai-env-<slug>:vN` 标签（计划 2.3 Digest 语义）。
     版本缺失 / 未构建 / 档位停用 → ENVIRONMENT_IMAGE_MISSING（fail closed，不扣分）。
     """

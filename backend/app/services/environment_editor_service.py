@@ -14,6 +14,7 @@ import secrets
 from collections.abc import Mapping
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -230,7 +231,11 @@ def create_profile_with_draft(
         updated_by_id=actor_id,
     )
     db.add(draft)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise _error(409, "PROFILE_SLUG_CONFLICT", "环境 slug 已存在") from exc
     db.refresh(profile)
     db.refresh(draft)
     return profile, draft
@@ -598,7 +603,11 @@ def start_draft_build(
     job = _new_build_attempt(
         db, version=version, draft=draft, actor_id=actor_id, settings=settings
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise _error(409, "VERSION_NUMBER_CONFLICT", "环境版本号发生并发冲突，请刷新后重试") from exc
     db.refresh(version)
     db.refresh(job)
     return version, job

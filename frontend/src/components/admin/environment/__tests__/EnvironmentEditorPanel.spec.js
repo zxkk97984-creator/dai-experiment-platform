@@ -99,4 +99,48 @@ describe('EnvironmentEditorPanel', () => {
     const buildButton = wrapper.findAll('button').find((button) => button.text() === '构建并解析')
     expect(buildButton.attributes('disabled')).toBeDefined()
   })
+
+  it('keeps build disabled when the backend worker heartbeat is missing', async () => {
+    environmentsAPI.getBuildReadiness.mockResolvedValue({
+      data: { ready: false, checks: { worker: { status: 'unavailable', message: 'Worker 未就绪' } } },
+    })
+    environmentsAPI.getProfile.mockResolvedValue({
+      data: {
+        ...JSON.parse(JSON.stringify(detail)),
+        draft: {
+          ...JSON.parse(JSON.stringify(detail.draft)),
+          capabilities: { ...detail.draft.capabilities, can_build: true },
+        },
+      },
+    })
+    const wrapper = await mountEditor()
+    const buildButton = wrapper.findAll('button').find((button) => button.text() === '构建并解析')
+    expect(buildButton.attributes('disabled')).toBeDefined()
+  })
+
+  it('shows the structured error code for a failed build', async () => {
+    environmentsAPI.getProfile.mockResolvedValue({
+      data: {
+        ...JSON.parse(JSON.stringify(detail)),
+        draft: {
+          ...JSON.parse(JSON.stringify(detail.draft)),
+          candidate_version_id: 2,
+          state: 'failed',
+        },
+        versions: [{ id: 2, version_number: 2, status: 'failed', python_version: '3.12' }],
+        recent_build: {
+          id: 9,
+          environment_version_id: 2,
+          status: 'failed',
+          phase: 'done',
+          attempt_number: 1,
+          error_code: 'PIP_PACKAGE_NOT_FOUND',
+          error_detail: { stderr: 'No matching distribution found' },
+          capabilities: { can_retry: false },
+        },
+      },
+    })
+    const wrapper = await mountEditor()
+    expect(wrapper.text()).toContain('错误码：PIP_PACKAGE_NOT_FOUND')
+  })
 })

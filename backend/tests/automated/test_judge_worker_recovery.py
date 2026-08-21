@@ -533,11 +533,13 @@ def test_mock_settings_do_not_create_magicmock_workdirs(db_session_factory):
 def test_process_exam_answer_unknown_exception_triggers_fail_job(db_session_factory):
     """process_exam_answer 内部未知异常（非 Docker 路径） → fail_job 退回 pending"""
     from app.worker.judge_worker import process_exam_answer
-    from app.config import get_settings
+    from app.config import Settings
     import fakeredis
 
     aid = _setup_exam_answer(db_session_factory)
-    settings = get_settings()
+    # backend/.env points production-like runs at the shared judge directory;
+    # this test specifically covers the TemporaryDirectory fallback branch.
+    settings = Settings(judge_work_dir="", judge_host_work_dir="")
 
     with db_session_factory() as db:
         enqueue_job(db, job_type="exam", object_id=aid)

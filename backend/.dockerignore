@@ -9,6 +9,7 @@ lesson_content/
 
 # pytest 临时文件
 .pytest-tmp
+.pytest-temp-root
 .pt-tmp
 .pt*
 .pytest_cache

@@ -10,23 +10,26 @@
 2. 生成 job 专属临时 tag（不覆盖已发布标签）
 3. 流式读取构建日志（subprocess argv，禁止 shell），逐行脱敏入库 + 刷新 lease
 4. 构建超时（> DAI_ENV_BUILD_TIMEOUT_SECONDS）→ timed_out
-5. 构建成功后离线 smoke（import + pip freeze）→ 捕获 image ID digest
-6. 事务内写入 digest、冻结 resolved package manifest、版本转 available
-7. 仅全部验证完成后添加正式 dai-env-<slug>:vN 标签
+5. V2 构建成功后在无网络、非 root 容器中 smoke（import + pip check + runner），并校验 Registry digest
+6. 事务内写入可拉取 digest、冻结 resolved package manifest、版本转 available
+7. V2 只在远端 digest push/pull 校验通过后保留正式 Registry tag；Legacy 继续使用兼容标签路径
 8. 失败不修改旧 current available 版本；显式重试由管理 API（Phase 2）创建新 job 并关联 retry_of_id
 """
 from __future__ import annotations
 
 import json as _json
-import logging
 import os
+import logging
 import secrets
 import socket
+import shutil
+import subprocess
 import threading
 import time
 from datetime import timedelta
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 
 from app.config import Settings, get_settings
 from app.database import SessionLocal, sessionmaker_for_engine
@@ -48,10 +51,17 @@ from app.services.environment_builder_v2 import (
     V2BuildResult,
     V2BuildTimeout,
     canonical_v2_manifest,
+    canonical_lock_sha256,
     build_config_fingerprint,
     execute_v2_build,
+    is_pullable_registry_reference,
 )
 from app.services.environment_candidates import refresh_apt_candidate_cache
+from app.services.environment_builder_health import (
+    clear_heartbeat,
+    heartbeat_interval_seconds,
+    publish_heartbeat,
+)
 from app.services.environment_service import get_packages_for_version
 from app.services.environment_spec import SUPPORTED_PYTHON_VERSIONS
 from app.services.time_utils import as_utc, utc_now
@@ -61,6 +71,29 @@ logger = logging.getLogger("dai.worker.env_build")
 # lease 时长：Worker 崩溃后其他实例可接管；总构建时长上限来自 settings.env_build_timeout_seconds
 LEASE_SECONDS = 60
 APT_CACHE_REFRESH_SECONDS = 6 * 60 * 60
+
+
+def _docker_daemon_ready(settings: Settings) -> tuple[bool, str]:
+    """Check the daemon the builder will actually use, not just the CLI."""
+
+    if shutil.which("docker") is None:
+        return False, "Worker 未发现 Docker CLI"
+    try:
+        from app.services.environment_builder_v2 import _subprocess_env
+
+        result = subprocess.run(
+            ["docker", "info", "--format", "{{.ServerVersion}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            env=_subprocess_env(settings),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"Docker daemon 检查失败: {type(exc).__name__}"
+    if result.returncode != 0:
+        return False, "Docker daemon 不可用"
+    return True, "Docker daemon 可用"
 
 
 class LeaseLost(RuntimeError):
@@ -201,6 +234,7 @@ def _cleanup_temp_image(temp_tag: str | None) -> None:
             capture_output=True,
             text=True,
             timeout=30,
+            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
         )
     except Exception:  # noqa: BLE001 - cleanup must not hide the lease result
         logger.warning("无法清理临时环境镜像 %s", temp_tag, exc_info=True)
@@ -532,6 +566,56 @@ def process_v2_build(
                     code="BUILD_VALIDATION_FAILED",
                     detail={"expected": version.manifest_sha256, "actual": manifest["manifest_sha256"]},
                 )
+
+            persisted_lock = None
+            if isinstance(version.resolution_lock, dict):
+                persisted_lock = version.resolution_lock.get("python_lock")
+                if not isinstance(persisted_lock, list) or not persisted_lock:
+                    raise V2BuildFailure(
+                        "环境版本的 pip lock 格式无效",
+                        code="PIP_RESOLUTION_FAILED",
+                        detail={"phase": "resolving_python"},
+                    )
+                actual_lock_sha256 = canonical_lock_sha256(persisted_lock)
+                if actual_lock_sha256 != version.resolution_lock_sha256:
+                    raise V2BuildFailure(
+                        "环境版本的 pip lock 哈希不一致",
+                        code="PIP_RESOLUTION_FAILED",
+                        detail={
+                            "expected": version.resolution_lock_sha256,
+                            "actual": actual_lock_sha256,
+                        },
+                    )
+
+            def persist_resolution_lock(lock, lock_sha256):
+                lease.assert_owned()
+                if canonical_lock_sha256(lock) != lock_sha256:
+                    raise V2BuildFailure(
+                        "Worker 收到的 pip lock 哈希不一致",
+                        code="PIP_RESOLUTION_FAILED",
+                        detail={"phase": "resolving_python"},
+                    )
+                lock_update = db.execute(
+                    update(EnvironmentBuildJob)
+                    .where(
+                        EnvironmentBuildJob.id == job.id,
+                        EnvironmentBuildJob.status == "building",
+                        EnvironmentBuildJob.worker_id == owner_id,
+                        EnvironmentBuildJob.lease_token == lease_token,
+                    )
+                    .values(heartbeat_at=utc_now())
+                )
+                if lock_update.rowcount != 1:
+                    db.rollback()
+                    raise LeaseLost()
+                version.resolution_lock = {
+                    "schema_version": 1,
+                    "python_lock": lock,
+                    "system_packages": version.requested_spec.get("system_packages", []),
+                }
+                version.resolution_lock_sha256 = lock_sha256
+                db.commit()
+
             result: V2BuildResult = execute_v2_build(
                 manifest,
                 settings,
@@ -542,8 +626,16 @@ def process_v2_build(
                 lease_check=lease.assert_owned,
                 register_process=lease.register_process,
                 unregister_process=lease.unregister_process,
+                pip_lock=persisted_lock,
+                on_resolution_lock=persist_resolution_lock,
             )
             lease.assert_owned()
+            if not is_pullable_registry_reference(result.image_digest):
+                raise V2BuildFailure(
+                    "V2 构建未返回可拉取的 Registry digest",
+                    code="BUILD_SERVICE_UNAVAILABLE",
+                    detail={"phase": "finalizing"},
+                )
     except LeaseLost:
         _cleanup_temp_image(temp_tag)
         return "lease_lost"
@@ -595,6 +687,7 @@ def process_v2_build(
         _cleanup_temp_image(temp_tag)
         return "lease_lost"
     version.status = "available"
+    version.image_tag = result.image_tag
     version.image_digest = result.image_digest
     version.dockerfile_sha256 = result.dockerfile_sha256
     version.resolved_spec = result.resolved_spec
@@ -606,7 +699,25 @@ def process_v2_build(
     if draft is not None and draft.candidate_version_id == version.id and draft.active_build_job_id == job.id:
         draft.active_build_job_id = None
         draft.state = "ready"
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        return _fail_v2(
+            db,
+            job,
+            "failed",
+            V2BuildFailure(
+                "构建产物最终落库失败",
+                code="BUILD_FINALIZATION_FAILED",
+                detail={"phase": "finalizing", "error": str(exc)[:300]},
+            ),
+            now,
+            owner_id=owner_id,
+            lease_token=lease_token,
+            temp_tag=temp_tag,
+        )
+    _cleanup_temp_image(temp_tag)
     logger.info("V2 环境 %s v%s 构建成功: %s", profile.slug, version.version_number, result.image_digest)
     return "succeeded"
 
@@ -804,7 +915,7 @@ def reconcile_build_state(db, settings: Settings, redis_client=None) -> dict:
         )
         if latest_job is not None and latest_job.status in ("failed", "timed_out"):
             version.status = "failed"
-            if job.build_mode == "v2":
+            if latest_job.build_mode == "v2":
                 _mark_v2_draft_failed(db, version.id, latest_job.id)
             stats["versions_failed"] += 1
     db.commit()
@@ -862,7 +973,13 @@ def run_once(db, redis_client, settings: Settings, owner_id: str) -> bool:
 
 
 def run_worker_loop() -> None:
-    """主循环：单进程单任务；每 60 秒做一次崩溃恢复扫描。"""
+    """主循环：单进程单任务；每 60 秒做一次崩溃恢复扫描。
+
+    Startup reconciliation and the Docker daemon probe are deliberately part
+    of the retry loop.  A transient MySQL/Redis/Docker failure therefore
+    cannot leave a stale "healthy" signal behind, and the API will keep the
+    build gate closed until the worker recovers.
+    """
     import redis as _redis
 
     settings = get_settings()
@@ -870,17 +987,36 @@ def run_worker_loop() -> None:
     owner_id = f"env-builder:{socket.gethostname()}:{os.getpid()}"
     logger.info("环境构建 Worker 启动，队列: %s，owner=%s", settings.env_build_queue_name, owner_id)
 
-    with SessionLocal() as db:
-        startup_stats = reconcile_build_state(db, settings, redis_client=redis_client)
-        if any(startup_stats.values()):
-            logger.info("构建启动对账: %s", startup_stats)
-
-    last_recovery = time.monotonic()
-    last_apt_refresh = time.monotonic()
+    ready = False
+    last_heartbeat = 0.0
+    last_recovery = 0.0
+    last_apt_refresh = 0.0
+    heartbeat_interval = heartbeat_interval_seconds(settings)
     while True:
         try:
+            now = time.monotonic()
+            if not ready:
+                # Reconciliation is safe to repeat: the DB remains the source
+                # of truth and Redis only receives missing wake-up messages.
+                with SessionLocal() as db:
+                    startup_stats = reconcile_build_state(
+                        db, settings, redis_client=redis_client
+                    )
+                if any(startup_stats.values()):
+                    logger.info("构建启动对账: %s", startup_stats)
+                docker_ok, docker_message = _docker_daemon_ready(settings)
+                if not docker_ok:
+                    raise RuntimeError(docker_message)
+                publish_heartbeat(redis_client, settings, owner_id=owner_id)
+                last_heartbeat = now
+                last_recovery = now
+                last_apt_refresh = now
+                ready = True
+                logger.info("环境构建 Worker 已就绪: %s", docker_message)
+
             with SessionLocal() as db:
-                if time.monotonic() - last_recovery > 60:
+                now = time.monotonic()
+                if now - last_recovery > 60:
                     stats = recover_stale_builds(db, settings, utc_now(), redis_client=redis_client)
                     reconcile_stats = reconcile_build_state(db, settings, redis_client=redis_client)
                     if any(stats.values()) or any(reconcile_stats.values()):
@@ -888,12 +1024,24 @@ def run_worker_loop() -> None:
                     last_recovery = time.monotonic()
                 if (
                     settings.environment_editor_v2_enabled
-                    and time.monotonic() - last_apt_refresh > APT_CACHE_REFRESH_SECONDS
+                    and now - last_apt_refresh > APT_CACHE_REFRESH_SECONDS
                 ):
                     _refresh_apt_caches(settings, redis_client)
                     last_apt_refresh = time.monotonic()
                 run_once(db, redis_client, settings, owner_id)
+
+            # Renew only after the whole loop iteration succeeded.  This
+            # prevents a broken DB/Redis/Docker path from extending readiness.
+            if time.monotonic() - last_heartbeat >= heartbeat_interval:
+                docker_ok, docker_message = _docker_daemon_ready(settings)
+                if not docker_ok:
+                    raise RuntimeError(docker_message)
+                publish_heartbeat(redis_client, settings, owner_id=owner_id)
+                last_heartbeat = time.monotonic()
         except Exception:  # noqa: BLE001
+            if ready:
+                clear_heartbeat(redis_client, settings, owner_id=owner_id)
+            ready = False
             logger.exception("环境构建主循环异常")
             time.sleep(1)
 

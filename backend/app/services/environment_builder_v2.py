@@ -45,19 +45,52 @@ class V2BuildTimeout(V2BuildFailure):
 
 
 @dataclass(frozen=True)
+class PublishedImage:
+    reference: str
+    tag: str
+    digest: str
+    size_bytes: int
+
+
+@dataclass(frozen=True)
 class V2BuildResult:
     image_digest: str
     image_size_bytes: int
     resolved_spec: dict
     result_summary: dict
     dockerfile_sha256: str
+    image_tag: str | None = None
 
 
 _IMAGE_DIGEST_RE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
+_REGISTRY_REF_RE = re.compile(r"^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$")
+_REGISTRY_REPOSITORY_RE = re.compile(
+    r"^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?"
+    r"(?:/[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)*$"
+)
 _APT_SAFE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]*$")
 _PIP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _PROXY_LOOPBACK_RE = re.compile(r"^https?://(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?(?:/|$)", re.I)
 _APT_SOURCE_RE = re.compile(r"^deb(?:-src)?(?:\s|\[).+$")
+_APT_SNAPSHOT_HOST = "snapshot.debian.org"
+
+
+def is_pullable_registry_reference(value: str | None) -> bool:
+    if not value or not _REGISTRY_REF_RE.fullmatch(value):
+        return False
+    repository, digest = value.rsplit("@", 1)
+    return bool(
+        is_valid_registry_repository(repository)
+        and digest.startswith("sha256:")
+    )
+
+
+def is_valid_registry_repository(value: str | None) -> bool:
+    return bool(
+        value
+        and _REGISTRY_REPOSITORY_RE.fullmatch(value)
+        and all(part not in {".", ".."} for part in value.split("/"))
+    )
 
 
 def _canonical_json(value: Any) -> str:
@@ -92,8 +125,20 @@ def build_config_fingerprint(python_version: str, settings: Settings) -> str:
         ),
         "build_network_mode": settings.env_build_network_mode,
         "explicit_proxy": bool(settings.env_build_http_proxy),
+        "registry_repository": settings.env_registry_repository,
     }
     return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def canonical_lock_sha256(pip_lock: list[dict]) -> str:
+    """Hash the normalized pip lock that becomes the immutable build input."""
+
+    normalized = []
+    for entry in pip_lock:
+        name, version, hashes = _validate_lock_entry(entry)
+        normalized.append({"name": name, "version": version, "hashes": hashes})
+    normalized.sort(key=lambda item: (item["name"], item["version"], item["hashes"]))
+    return hashlib.sha256(_canonical_json(normalized).encode("utf-8")).hexdigest()
 
 
 def canonical_v2_manifest(
@@ -171,6 +216,7 @@ def build_pip_lock_from_report(report: dict) -> list[dict]:
     if not isinstance(report, dict) or not isinstance(report.get("install"), list):
         raise V2BuildFailure("pip installation report 格式无效", code="PIP_RESOLUTION_FAILED")
     lock = []
+    seen_names = set()
     for item in report["install"]:
         if not isinstance(item, dict):
             raise V2BuildFailure("pip installation report 条目无效", code="PIP_RESOLUTION_FAILED")
@@ -185,9 +231,13 @@ def build_pip_lock_from_report(report: dict) -> list[dict]:
                 detail={"report_item": item.get("metadata", {})},
             )
         try:
+            normalized_name = normalize_pip_name(str(metadata["name"]))
+            if normalized_name in seen_names:
+                raise ValueError(f"duplicate distribution: {normalized_name}")
+            seen_names.add(normalized_name)
             lock.append(
                 {
-                    "name": normalize_pip_name(str(metadata["name"])),
+                    "name": normalized_name,
                     "version": validate_locked_version(str(metadata["version"])),
                     "hashes": [_hash_value(str(hashes["sha256"]))],
                 }
@@ -236,6 +286,41 @@ def _safe_apt_sources(sources: list[str] | None) -> list[str]:
         source = source.strip()
         if not _APT_SOURCE_RE.fullmatch(source):
             raise V2BuildFailure("Debian 快照源配置无效", code="BUILD_SERVICE_UNAVAILABLE")
+        try:
+            parts = shlex.split(source, comments=False, posix=True)
+        except ValueError as exc:
+            raise V2BuildFailure("Debian 快照源配置无效", code="BUILD_SERVICE_UNAVAILABLE") from exc
+        if len(parts) < 4 or parts[0] not in {"deb", "deb-src"}:
+            raise V2BuildFailure("Debian 快照源配置无效", code="BUILD_SERVICE_UNAVAILABLE")
+        uri_index = 1
+        if parts[uri_index].startswith("["):
+            options = parts[uri_index].strip("[]").split()
+            if not options or any(
+                option.lower().startswith(("trusted=", "signed-by=", "auth-conf="))
+                for option in options
+            ):
+                raise V2BuildFailure(
+                    "Debian 快照源不允许 trusted、凭据或自定义签名配置",
+                    code="BUILD_SERVICE_UNAVAILABLE",
+                )
+            if any(option.lower() != "check-valid-until=no" for option in options):
+                raise V2BuildFailure("Debian 快照源选项不受平台允许", code="BUILD_SERVICE_UNAVAILABLE")
+            uri_index += 1
+        parsed = urlsplit(parts[uri_index])
+        if (
+            parsed.scheme not in {"http", "https"}
+            or parsed.hostname != _APT_SNAPSHOT_HOST
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or ".." in parsed.path.split("/")
+            or not parsed.path.startswith("/archive/")
+        ):
+            raise V2BuildFailure(
+                "Debian 快照源必须是平台固定的 snapshot.debian.org archive 路径",
+                code="BUILD_SERVICE_UNAVAILABLE",
+            )
         clean.append(source)
     return clean
 
@@ -278,17 +363,19 @@ def render_v2_dockerfile(
         "ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1",
     ]
     if apt_lines:
+        apt_prefix = "RUN "
         if safe_apt_sources:
-            lines.append(
-                "RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* && printf '%s\\n' "
+            apt_prefix += (
+                "rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* && printf '%s\\n' "
                 + " ".join(shlex.quote(source) for source in safe_apt_sources)
-                + " > /etc/apt/sources.list.d/dai-snapshot.list"
+                + " > /etc/apt/sources.list.d/dai-snapshot.list && "
             )
-        lines += [
-            "RUN apt-get update && apt-get install -y --no-install-recommends \\",
-            "    " + " \\\n    ".join(apt_lines),
-            "RUN rm -rf /var/lib/apt/lists/*",
-        ]
+        lines.append(
+            apt_prefix
+            + "apt-get update && apt-get install -y --no-install-recommends \\\n    "
+            + " \\\n    ".join(apt_lines)
+            + " && rm -rf /var/lib/apt/lists/* /etc/apt/sources.list.d/dai-snapshot.list"
+        )
     lines += [
         "COPY pip.lock /opt/dai/pip.lock",
         f"RUN python -m pip install --no-cache-dir{pip_index_option} --require-hashes -r /opt/dai/pip.lock",
@@ -301,10 +388,140 @@ def render_v2_dockerfile(
     return "\n".join(lines) + "\n"
 
 
+_REGISTRY_CONFIG_ALLOWED_KEYS = {"auths"}
+_REGISTRY_AUTH_ALLOWED_KEYS = {"auth", "identitytoken"}
+
+
+def _load_registry_docker_config(settings: Settings, *, required: bool = False) -> dict:
+    """Load and reduce the operator-provided Docker config Secret.
+
+    Docker supports credential helpers, ``credsStore`` and a ``proxies``
+    block in config.json.  None of those are safe inputs for this worker:
+    helpers may execute arbitrary host binaries and proxies can silently
+    reintroduce a loopback route into build containers.  Only standard base64
+    ``auth``/``identitytoken`` entries are copied into the isolated config.
+    """
+
+    path = Path(getattr(settings, "env_registry_docker_config", "/run/secrets/config.json"))
+    allow_anonymous = bool(getattr(settings, "env_registry_allow_anonymous", False))
+    if not path.is_file():
+        if required and not allow_anonymous:
+            raise V2BuildFailure(
+                "Registry Docker config Secret 未挂载",
+                code="BUILD_SERVICE_UNAVAILABLE",
+                detail={"phase": "preflight", "dependency": "registry_auth"},
+            )
+        return {"auths": {}}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise V2BuildFailure(
+            "Registry Docker config Secret 无法读取",
+            code="BUILD_SERVICE_UNAVAILABLE",
+            detail={"phase": "preflight", "dependency": "registry_auth"},
+        ) from exc
+    if not isinstance(raw, dict):
+        raise V2BuildFailure(
+            "Registry Docker config Secret 格式无效",
+            code="BUILD_SERVICE_UNAVAILABLE",
+            detail={"phase": "preflight", "dependency": "registry_auth"},
+        )
+    forbidden = set(raw) - _REGISTRY_CONFIG_ALLOWED_KEYS
+    if forbidden:
+        raise V2BuildFailure(
+            "Registry Docker config 只允许 auths，不允许凭据助手或代理配置",
+            code="BUILD_SERVICE_UNAVAILABLE",
+            detail={"phase": "preflight", "dependency": "registry_auth"},
+        )
+    auths = raw.get("auths", {})
+    if not isinstance(auths, dict):
+        raise V2BuildFailure(
+            "Registry Docker config auths 格式无效",
+            code="BUILD_SERVICE_UNAVAILABLE",
+            detail={"phase": "preflight", "dependency": "registry_auth"},
+        )
+    sanitized: dict[str, dict[str, str]] = {}
+    for registry, entry in auths.items():
+        if not isinstance(registry, str) or not registry.strip() or not isinstance(entry, dict):
+            raise V2BuildFailure(
+                "Registry Docker config auths 条目无效",
+                code="BUILD_SERVICE_UNAVAILABLE",
+                detail={"phase": "preflight", "dependency": "registry_auth"},
+            )
+        unsupported = set(entry) - _REGISTRY_AUTH_ALLOWED_KEYS
+        if unsupported:
+            raise V2BuildFailure(
+                "Registry Docker config auths 只允许 auth 或 identitytoken",
+                code="BUILD_SERVICE_UNAVAILABLE",
+                detail={"phase": "preflight", "dependency": "registry_auth"},
+            )
+        values = {
+            key: value
+            for key, value in entry.items()
+            if key in _REGISTRY_AUTH_ALLOWED_KEYS and isinstance(value, str) and value
+        }
+        if values:
+            sanitized[registry] = values
+    if required and not allow_anonymous and not sanitized:
+        raise V2BuildFailure(
+            "Registry Docker config Secret 未提供可用 auths",
+            code="BUILD_SERVICE_UNAVAILABLE",
+            detail={"phase": "preflight", "dependency": "registry_auth"},
+        )
+    return {"auths": sanitized}
+
+
+def registry_auth_check(settings: Settings) -> dict[str, str]:
+    """Return a readiness-safe status without exposing credential material."""
+
+    try:
+        config = _load_registry_docker_config(settings, required=True)
+    except V2BuildFailure as exc:
+        return {
+            "status": "misconfigured",
+            "code": "REGISTRY_AUTH_REQUIRED",
+            "message": str(exc),
+        }
+    if getattr(settings, "env_registry_allow_anonymous", False):
+        return {
+            "status": "configured",
+            "message": "已显式允许匿名 Registry 访问",
+        }
+    return {
+        "status": "configured",
+        "message": f"Registry 只读认证 Secret 已挂载（{len(config['auths'])} 个 Registry）",
+    }
+
+
+def _write_isolated_docker_config(settings: Settings) -> str:
+    """Copy only safe auths into a private temporary Docker config directory."""
+
+    config = _load_registry_docker_config(settings, required=False)
+    config_dir = Path("/tmp/dai-v2-docker-config")
+    config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    config_file = config_dir / "config.json"
+    config_file.write_text(
+        json.dumps(config, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    try:
+        os.chmod(config_file, 0o600)
+    except OSError:
+        pass
+    return str(config_dir)
+
+
 def _subprocess_env(settings: Settings) -> dict[str, str]:
     """Only pass a minimal environment to Docker; never inherit host proxies."""
 
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+    # Docker CLI can also inject ``~/.docker/config.json``'s ``proxies`` block
+    # into containers.  Use an isolated config directory so clearing process
+    # environment variables is sufficient to prevent the historical loopback
+    # proxy from reappearing through the CLI configuration.
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "DOCKER_CONFIG": _write_isolated_docker_config(settings),
+    }
     if settings.env_build_http_proxy:
         env["HTTP_PROXY"] = settings.env_build_http_proxy
         env["HTTPS_PROXY"] = settings.env_build_http_proxy
@@ -339,13 +556,26 @@ def _run_capture(
     """Run a Docker helper while allowing an expired lease to kill it."""
 
     if lease_check is None and register_process is None and unregister_process is None:
-        return subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=env,
-        )
+        try:
+            return subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=env,
+            )
+        except subprocess.TimeoutExpired as exc:
+            _cleanup_named_container(command, env)
+            raise V2BuildTimeout("Docker 子进程超过构建时限") from exc
+        except OSError as exc:
+            raise V2BuildFailure(
+                "Docker 子进程无法启动",
+                code="BUILD_SERVICE_UNAVAILABLE",
+                detail={"command": command[:3], "error": str(exc)[:300]},
+            ) from exc
+        except BaseException:
+            _cleanup_named_container(command, env)
+            raise
 
     process = subprocess.Popen(
         command,
@@ -362,6 +592,7 @@ def _run_capture(
         except subprocess.TimeoutExpired:
             process.kill()
             stdout, stderr = process.communicate()
+            _cleanup_named_container(command, env)
             raise V2BuildTimeout("Docker 子进程超过构建时限")
     finally:
         if unregister_process is not None:
@@ -369,6 +600,26 @@ def _run_capture(
     if lease_check is not None:
         lease_check()
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+def _cleanup_named_container(command: list[str], env: dict[str, str] | None = None) -> None:
+    """Stop a daemon-side ``docker run`` child after the CLI has timed out."""
+
+    try:
+        name_index = command.index("--name")
+        container_name = command[name_index + 1]
+    except (ValueError, IndexError):
+        return
+    try:
+        subprocess.run(
+            ["docker", "rm", "-f", container_name],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 def _validate_build_proxy(proxy: str | None) -> None:
@@ -389,6 +640,22 @@ def _validate_build_proxy(proxy: str | None) -> None:
 def _validate_preflight(manifest: dict, settings: Settings) -> None:
     if shutil.which("docker") is None:
         raise V2BuildFailure("Worker 未发现 Docker", code="BUILD_SERVICE_UNAVAILABLE")
+    repository = settings.env_registry_repository
+    if not is_valid_registry_repository(repository):
+        raise V2BuildFailure(
+            "V2 构建必须配置合法的 Registry repository",
+            code="BUILD_SERVICE_UNAVAILABLE",
+            detail={"phase": "preflight", "dependency": "registry"},
+        )
+    _load_registry_docker_config(settings, required=True)
+    platform_names = {normalize_pip_name(name) for name in settings.env_platform_python_packages}
+    missing_platform = {name for name in ("ipykernel", "pytest") if name not in platform_names}
+    if missing_platform:
+        raise V2BuildFailure(
+            "平台固定依赖缺失，不能构建环境镜像",
+            code="BUILD_SERVICE_UNAVAILABLE",
+            detail={"phase": "preflight", "missing_platform_packages": sorted(missing_platform)},
+        )
     proxy = settings.env_build_http_proxy or ""
     _validate_build_proxy(proxy)
     if _PROXY_LOOPBACK_RE.match(proxy) and settings.env_build_network_mode != "host":
@@ -453,6 +720,7 @@ def _resolve_in_base_image(
     for item in manifest["requested_spec"]["system_packages"]:
         apt_args.append(shlex.quote(item["name"] if item["version"] is None else f"{item['name']}={item['version']}"))
     apt_script = ""
+    container_name = f"dai-v2-resolve-{manifest['manifest_sha256'][:20]}"
     if apt_args:
         sources = _safe_apt_sources(settings.env_apt_snapshot_sources.get(manifest["python_version"]))
         source_script = (
@@ -464,7 +732,7 @@ def _resolve_in_base_image(
             source_script
             + "apt-get update && apt-get install -y --no-install-recommends "
             + " ".join(apt_args)
-            + " && rm -rf /var/lib/apt/lists/* && "
+            + " && rm -rf /var/lib/apt/lists/* /etc/apt/sources.list.d/dai-snapshot.list && "
         )
     script = (
         apt_script
@@ -483,8 +751,32 @@ def _resolve_in_base_image(
                 "docker",
                 "run",
                 "--rm",
+                "--name",
+                container_name,
                 "--network",
                 _docker_network_arg(settings),
+                "--cpus",
+                str(settings.env_build_cpu_limit),
+                "--memory",
+                f"{settings.env_build_memory_mb}m",
+                "--pids-limit",
+                str(settings.env_build_pids_limit),
+                "--cap-drop",
+                "ALL",
+                # apt 在 root 解析阶段仍需切换到 _apt 并维护缓存目录；
+                # 只恢复这些能力，最终验证容器继续保持 drop-all。
+                "--cap-add",
+                "CHOWN",
+                "--cap-add",
+                "SETUID",
+                "--cap-add",
+                "SETGID",
+                "--cap-add",
+                "DAC_OVERRIDE",
+                "--security-opt",
+                "no-new-privileges",
+                "--tmpfs",
+                "/tmp:rw,nosuid,nodev,size=512m",
                 *_docker_proxy_args(settings),
                 manifest["base_image_ref"],
                 "sh",
@@ -498,12 +790,24 @@ def _resolve_in_base_image(
             unregister_process=unregister_process,
         )
     except V2BuildTimeout as exc:
+        _cleanup_named_container(["docker", "run", "--name", container_name], _subprocess_env(settings))
         raise V2BuildTimeout("依赖解析超过构建时限", detail={"phase": "resolving"}) from exc
     if result.returncode != 0:
         stderr = result.stderr or ""
-        if "No matching distribution" in stderr or "Could not find a version" in stderr:
+        lowered = stderr.lower()
+        source_failure_markers = (
+            "could not connect",
+            "connection refused",
+            "temporary failure resolving",
+            "failed to fetch",
+            "network is unreachable",
+            "proxyerror",
+        )
+        if any(marker in lowered for marker in source_failure_markers):
+            error_code = "BUILD_SERVICE_UNAVAILABLE"
+        elif "No matching distribution" in stderr or "Could not find a version" in stderr:
             error_code = "PIP_PACKAGE_NOT_FOUND"
-        elif "ResolutionImpossible" in stderr or "conflict" in stderr.lower():
+        elif "ResolutionImpossible" in stderr or "conflict" in lowered:
             error_code = "DEPENDENCY_CONFLICT"
         elif "E: Unable to locate package" in stderr:
             error_code = "APT_PACKAGE_NOT_FOUND"
@@ -532,6 +836,8 @@ def _run_docker_build(
         "docker",
         "build",
         f"--network={_docker_network_arg(settings)}",
+        "--ulimit",
+        f"nproc={settings.env_build_pids_limit}:{settings.env_build_pids_limit}",
         "-t",
         tag,
         "-f",
@@ -559,6 +865,16 @@ def _run_docker_build(
             unregister_process=unregister_process,
         )
     except V2BuildTimeout as exc:
+        try:
+            subprocess.run(
+                ["docker", "image", "rm", "--force", tag],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=_subprocess_env(settings),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
         raise V2BuildTimeout("Docker 构建超过构建时限", detail={"phase": "building"}) from exc
     if result.returncode != 0:
         raise V2BuildFailure("Docker 镜像构建失败", code="BUILD_FAILED", detail={"stderr": result.stderr[-1000:]})
@@ -656,7 +972,16 @@ print("DAI_VALIDATION_BASE64=" + base64.b64encode(json.dumps(payload).encode()).
 """
     try:
         result = _run_capture(
-            ["docker", "run", "--rm", "--network", "none", "--user", "1000:1000", tag, "python", "-c", script],
+            [
+                "docker", "run", "--rm", "--name", f"dai-v2-validate-{manifest['manifest_sha256'][:20]}",
+                "--network", "none", "--user", "1000:1000",
+                "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m",
+                "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+                "--pids-limit", str(settings.env_build_pids_limit),
+                "--memory", f"{settings.env_build_memory_mb}m",
+                "--cpus", str(settings.env_build_cpu_limit),
+                tag, "python", "-c", script,
+            ],
             timeout=timeout,
             env=_subprocess_env(settings),
             lease_check=lease_check,
@@ -703,6 +1028,107 @@ print("DAI_VALIDATION_BASE64=" + base64.b64encode(json.dumps(payload).encode()).
     return validation, digest, size
 
 
+def _publish_image_to_registry(
+    local_tag: str,
+    manifest: dict,
+    settings: Settings,
+    timeout: int,
+    *,
+    lease_check=None,
+    register_process=None,
+    unregister_process=None,
+) -> PublishedImage:
+    """Push and pull-verify the immutable Registry reference.
+
+    ``image_digest`` is intentionally the pullable ``repository@sha256``
+    reference, never a node-local Docker image ID.  A push, digest discovery,
+    pull, or inspect failure aborts the build before the Version can become
+    available.
+    """
+
+    repository = settings.env_registry_repository
+    if not is_valid_registry_repository(repository):
+        raise V2BuildFailure(
+            "V2 构建必须配置合法的 Registry repository",
+            code="BUILD_SERVICE_UNAVAILABLE",
+            detail={"phase": "finalizing", "dependency": "registry"},
+        )
+    tag = f"{repository}:v2-{manifest['manifest_sha256']}"
+
+    def run(command: list[str], *, seconds: int):
+        result = _run_capture(
+            command,
+            timeout=seconds,
+            env=_subprocess_env(settings),
+            lease_check=lease_check,
+            register_process=register_process,
+            unregister_process=unregister_process,
+        )
+        if result.returncode != 0:
+            raise V2BuildFailure(
+                "Registry 镜像操作失败",
+                code="BUILD_SERVICE_UNAVAILABLE",
+                detail={"phase": "finalizing", "command": command[:3], "stderr": (result.stderr or "")[-1000:]},
+            )
+        return result
+
+    try:
+        run(["docker", "tag", local_tag, tag], seconds=60)
+        run(["docker", "push", tag], seconds=timeout)
+        inspected = run(
+            ["docker", "image", "inspect", tag, "--format", "{{json .}}"],
+            seconds=60,
+        )
+        info = json.loads(inspected.stdout)
+        repo_digests = info.get("RepoDigests") or []
+        matching = [
+            str(value)
+            for value in repo_digests
+            if str(value).startswith(repository + "@")
+        ]
+        if not matching:
+            raise V2BuildFailure(
+                "Registry 未返回镜像 digest",
+                code="BUILD_SERVICE_UNAVAILABLE",
+                detail={"phase": "finalizing", "repository": repository},
+            )
+        reference = matching[0]
+        if not _REGISTRY_REF_RE.fullmatch(reference):
+            raise V2BuildFailure(
+                "Registry 返回的镜像 digest 格式无效",
+                code="BUILD_SERVICE_UNAVAILABLE",
+                detail={"phase": "finalizing", "repository": repository},
+            )
+        digest = reference.rsplit("@", 1)[1]
+        run(["docker", "pull", reference], seconds=timeout)
+        pulled = run(
+            ["docker", "image", "inspect", reference, "--format", "{{json .}}"],
+            seconds=60,
+        )
+        pulled_info = json.loads(pulled.stdout)
+        pulled_digests = {str(value) for value in pulled_info.get("RepoDigests") or []}
+        if reference not in pulled_digests:
+            raise V2BuildFailure(
+                "Registry digest 拉取后校验不一致",
+                code="BUILD_VALIDATION_FAILED",
+                detail={"expected": reference, "actual": sorted(pulled_digests)},
+            )
+        size = int(pulled_info.get("Size", 0))
+        if size > settings.env_build_max_image_bytes:
+            raise V2BuildFailure(
+                "Registry 镜像超过平台大小限制",
+                code="BUILD_VALIDATION_FAILED",
+                detail={"size_bytes": size},
+            )
+        return PublishedImage(reference=reference, tag=tag, digest=digest, size_bytes=size)
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise V2BuildFailure(
+            "Registry 镜像 inspect 结果无效",
+            code="BUILD_SERVICE_UNAVAILABLE",
+            detail={"phase": "finalizing", "repository": repository},
+        ) from exc
+
+
 def execute_v2_build(
     manifest: dict,
     settings: Settings,
@@ -714,6 +1140,8 @@ def execute_v2_build(
     lease_check=None,
     register_process=None,
     unregister_process=None,
+    pip_lock: list[dict] | None = None,
+    on_resolution_lock=None,
 ) -> V2BuildResult:
     """Resolve, build, and validate one V2 immutable version."""
 
@@ -728,15 +1156,24 @@ def execute_v2_build(
     _validate_preflight(manifest, settings)
     mark_phase("resolving_system")
     mark_phase("resolving_python")
-    report = _resolve_in_base_image(
-        manifest,
-        settings,
-        timeout,
-        lease_check=lease_check,
-        register_process=register_process,
-        unregister_process=unregister_process,
-    )
-    pip_lock = build_pip_lock_from_report(report)
+    if pip_lock is None:
+        report = _resolve_in_base_image(
+            manifest,
+            settings,
+            timeout,
+            lease_check=lease_check,
+            register_process=register_process,
+            unregister_process=unregister_process,
+        )
+        pip_lock = build_pip_lock_from_report(report)
+        if on_resolution_lock is not None:
+            on_resolution_lock(pip_lock, canonical_lock_sha256(pip_lock))
+    else:
+        pip_lock = [
+            {"name": name, "version": version, "hashes": hashes}
+            for name, version, hashes in (_validate_lock_entry(entry) for entry in pip_lock)
+        ]
+        pip_lock.sort(key=lambda item: (item["name"], item["version"]))
     resolved_versions = {
         str(item["name"]).lower().replace("_", "-"): item["version"] for item in pip_lock
     }
@@ -758,6 +1195,22 @@ def execute_v2_build(
                     [],
                 ),
             }
+        )
+    required_distributions = {
+        normalize_pip_name(name) for name in settings.env_platform_python_packages
+    }
+    required_distributions.update(
+        normalize_pip_name(item["name"])
+        for item in manifest["requested_spec"]["python_packages"]
+    )
+    if not required_distributions.issubset(resolved_versions):
+        raise V2BuildFailure(
+            "pip 解析结果缺少请求或平台固定依赖",
+            code="PIP_RESOLUTION_FAILED",
+            detail={
+                "phase": "resolving_python",
+                "missing_packages": sorted(required_distributions - resolved_versions.keys()),
+            },
         )
     dockerfile = render_v2_dockerfile(
         manifest,
@@ -794,9 +1247,20 @@ def execute_v2_build(
             register_process=register_process,
             unregister_process=unregister_process,
         )
-    mark_phase("finalizing")
-    lock_payload = {"python_lock": pip_lock, "system_packages": manifest["requested_spec"]["system_packages"]}
-    lock_sha256 = hashlib.sha256(_canonical_json(lock_payload).encode("utf-8")).hexdigest()
+        mark_phase("finalizing")
+        published = _publish_image_to_registry(
+            tag,
+            manifest,
+            settings,
+            timeout,
+            lease_check=lease_check,
+            register_process=register_process,
+            unregister_process=unregister_process,
+        )
+    # The persisted resolver lock is the exact pip lock used by the final
+    # --require-hashes installation.  Keep the same canonical hash in the
+    # resolved report so a retry can prove that it used identical input.
+    lock_sha256 = canonical_lock_sha256(pip_lock)
     resolved_spec = {
         "schema_version": 1,
         "resolution_quality": "resolved",
@@ -817,17 +1281,24 @@ def execute_v2_build(
         "platform_runner_sha256": hashlib.sha256(runner_source.encode("utf-8")).hexdigest(),
         "pip_source_key": manifest["pip_source_key"],
         "apt_snapshot_key": manifest["apt_snapshot_key"],
-        "image_digest": digest,
-        "image_size_bytes": size,
+        "image_digest": published.reference,
+        "image_local_id": digest,
+        "image_size_bytes": published.size_bytes,
         "lock_sha256": lock_sha256,
         "warnings": validation.get("warnings", []),
+        "registry": {
+            "reference": published.reference,
+            "tag": published.tag,
+            "digest": published.digest,
+            "verified": True,
+        },
     }
     return V2BuildResult(
-        image_digest=digest,
-        image_size_bytes=size,
+        image_digest=published.reference,
+        image_size_bytes=published.size_bytes,
         resolved_spec=resolved_spec,
         result_summary={
-            "image_size_bytes": size,
+            "image_size_bytes": published.size_bytes,
             "warnings": validation.get("warnings", []),
             "lock_sha256": lock_sha256,
             "imports": validation.get("imports", []),
@@ -835,6 +1306,13 @@ def execute_v2_build(
             "apt": validation.get("apt", []),
             "direct_apt": validation.get("direct_apt", []),
             "platform_runner": validation.get("platform_runner"),
+            "registry": {
+                "reference": published.reference,
+                "tag": published.tag,
+                "digest": published.digest,
+                "verified": True,
+            },
         },
         dockerfile_sha256=hashlib.sha256(dockerfile.encode("utf-8")).hexdigest(),
+        image_tag=published.tag,
     )

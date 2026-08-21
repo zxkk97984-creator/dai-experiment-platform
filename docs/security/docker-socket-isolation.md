@@ -1,7 +1,9 @@
 # Docker Socket 主机隔离与远程 Runner 触发条件（TASK-031 / F-19）
 
-> 决策记录（ADR）。状态：**风险接受待部署方签字**（§6 待办）；
+> 决策记录（ADR）。状态：**代码侧已实现，风险接受待部署方签字**（§6 待办）；
 > 代码侧事实（Socket 持有者、学生容器隔离基线）已由测试与验证脚本守护。
+
+本文件中的“待部署方验证”不是业务功能缺失，而是必须在真实部署主机完成的基础设施验收。受限开发沙箱没有 Docker socket 权限时，不能据此推断生产主机的 daemon 状态，也不能据此宣称真实镜像构建/Registry 推送已经完成。
 
 ## 1. 决策
 
@@ -79,6 +81,19 @@
   沙箱参数静态断言（CI 常绿门禁）；
 - `scripts/verify_host_isolation.sh`：部署主机现场验证——Socket 持有者、
   Docker API 未对网络开放、沙箱基线；输出报告，告警退出码 1。
+
+部署方上线前至少应在实际 Compose 主机执行：
+
+```bash
+docker info
+docker compose -f docker-compose.prod.yml config --quiet
+ss -lnt | grep -E ':(2375|2376)\b' && echo '拒绝：Docker TCP API 不应监听' || true
+```
+
+`docker info` 的 `permission denied` 应通过 rootful Docker 的受控用户组或 rootless
+Docker 的正确 socket 路径解决；不要将 `/var/run/docker.sock` 改为 `0666`，也不要
+为了让构建通过而开放未保护的 TCP Docker API。`environment-builder` 能够成功构建、
+推送并按 digest 回拉 Registry 镜像，才算环境 V2 的部署验收通过。
 
 演练记录（2026-08-14，本机 Docker daemon）：
 - 脚本 5 项断言全部通过（含本机 2375/2376 无监听）；

@@ -344,6 +344,7 @@ class EnvironmentBuildRead(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     created_at: datetime | None = None
+    queue_wakeup_pending: bool = False
 
 
 class EnvironmentBuildLogRead(BaseModel):
@@ -564,6 +565,7 @@ class EnvironmentBuildEditorRead(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     created_at: datetime | None = None
+    queue_wakeup_pending: bool = False
     capabilities: EnvironmentCapabilities = Field(default_factory=EnvironmentCapabilities)
 
 

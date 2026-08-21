@@ -14,6 +14,29 @@ pytestmark = pytest.mark.no_auto_env_seed
 API = "/api/v1/environments"
 
 
+def _configure_healthy_builder(test_settings, redis_client, *, heartbeat=True):
+    """Model the services that are present in the V2 API integration tests."""
+
+    test_settings.env_registry_repository = "registry.example/dai-env"
+    test_settings.env_registry_allow_anonymous = True
+    test_settings.env_python_base_images = {
+        version: f"python:{version}-slim-bookworm@sha256:{'0' * 64}"
+        for version in ("3.10", "3.11", "3.12")
+    }
+    test_settings.env_apt_snapshot_sources = {
+        version: [
+            "deb http://snapshot.debian.org/archive/debian/20260801T000000Z bookworm main"
+        ]
+        for version in ("3.10", "3.11", "3.12")
+    }
+    if heartbeat:
+        redis_client.set(
+            test_settings.env_builder_heartbeat_key,
+            '{"owner_id":"test-builder","updated_at":1}',
+            ex=test_settings.env_builder_heartbeat_ttl_seconds,
+        )
+
+
 def _admin(client, db_session_factory, test_settings, username="v2-api-admin"):
     test_settings.environment_editor_v2_enabled = True
     create_user(db_session_factory, username, "admin")
@@ -72,6 +95,7 @@ def test_draft_save_revision_conflict_and_editor_options(client, db_session_fact
 
 
 def test_build_is_not_teacher_selectable_until_publish(client, db_session_factory, test_settings, redis_client):
+    _configure_healthy_builder(test_settings, redis_client)
     headers = _admin(client, db_session_factory, test_settings, "v2-api-admin-build")
     created = client.post(
         f"{API}/profiles",
@@ -117,6 +141,43 @@ def test_build_is_not_teacher_selectable_until_publish(client, db_session_factor
     assert after.json()[0]["environment_version_id"] == version.id
     assert "image_digest" not in after.json()[0]
     assert "system_packages" in after.json()[0]
+
+
+def test_build_readiness_reports_worker_heartbeat_and_build_gate(
+    client, db_session_factory, test_settings, redis_client
+):
+    _configure_healthy_builder(test_settings, redis_client, heartbeat=False)
+    headers = _admin(client, db_session_factory, test_settings, "v2-api-admin-readiness")
+
+    missing = client.get(f"{API}/build-readiness", headers=headers)
+    assert missing.status_code == 200
+    assert missing.json()["ready"] is False
+    assert missing.json()["checks"]["worker"]["code"] == "BUILD_WORKER_NOT_READY"
+
+    _configure_healthy_builder(test_settings, redis_client, heartbeat=True)
+    ready = client.get(f"{API}/build-readiness", headers=headers)
+    assert ready.status_code == 200
+    assert ready.json()["ready"] is True
+    assert ready.json()["checks"]["worker"]["status"] == "healthy"
+
+
+def test_draft_build_does_not_create_job_without_worker_heartbeat(
+    client, db_session_factory, test_settings, redis_client
+):
+    _configure_healthy_builder(test_settings, redis_client, heartbeat=False)
+    headers = _admin(client, db_session_factory, test_settings, "v2-api-admin-no-worker")
+    created = client.post(
+        f"{API}/profiles",
+        headers=headers,
+        json={"display_name": "No Worker", "slug": "no-worker"},
+    ).json()
+
+    blocked = client.post(f"{API}/profiles/{created['id']}/draft/builds", headers=headers)
+    assert blocked.status_code == 503
+    assert blocked.json()["detail"]["code"] == "BUILD_SERVICE_UNAVAILABLE"
+    assert "worker" in blocked.json()["detail"]["fields"]["checks"]
+    with db_session_factory() as db:
+        assert db.scalars(select(EnvironmentBuildJob)).all() == []
 
 
 def test_publish_requires_expected_current_version_field(client, db_session_factory, test_settings):

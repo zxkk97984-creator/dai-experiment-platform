@@ -18,6 +18,11 @@ const detail = ref(null)
 const loadingDetail = ref(false)
 const saving = ref(false)
 const building = ref(false)
+const publishing = ref(false)
+const rollingBackId = ref(null)
+const retrying = ref(false)
+const archiving = ref(false)
+const abandoning = ref(false)
 const errorMessage = ref('')
 const fieldErrors = ref([])
 const conflict = ref(null)
@@ -29,6 +34,9 @@ const createForm = reactive({ display_name: '', description: '' })
 const profileForm = reactive({ display_name: '', description: '' })
 const localSnapshot = ref(null)
 let pollTimer = null
+let detailRequestSequence = 0
+let detailAbortController = null
+let pollInFlight = false
 
 const draftForm = reactive({
   revision: 1,
@@ -60,7 +68,16 @@ const profileDirty = computed(() => Boolean(currentProfile.value) && (
   profileForm.display_name !== (currentProfile.value.display_name || '')
   || profileForm.description !== (currentProfile.value.description || '')
 ))
-const hasBuildableDraft = computed(() => Boolean(draft.value) && !dirty.value && !profileDirty.value && capabilities.value.can_build)
+// A local clean draft is not enough: the API must also report a live builder
+// heartbeat.  Keeping this gate closed while readiness is loading/unknown
+// avoids creating jobs that no worker can consume.
+const hasBuildableDraft = computed(() => (
+  Boolean(draft.value)
+  && readiness.value?.ready === true
+  && !dirty.value
+  && !profileDirty.value
+  && capabilities.value.can_build
+))
 const candidateVersion = computed(() => (currentProfile.value?.versions || []).find((version) => version.id === draft.value?.candidate_version_id))
 const errorDetailText = computed(() => {
   const detailError = currentProfile.value?.recent_build?.error_detail
@@ -115,10 +132,14 @@ function showApiError(error, fallback = '操作失败') {
 async function loadDetail(id = selectedId.value) {
   if (!id) return
   selectedId.value = id
+  const sequence = ++detailRequestSequence
+  detailAbortController?.abort()
+  detailAbortController = new AbortController()
   loadingDetail.value = true
   clearError()
   try {
-    const res = await environmentsAPI.getProfile(id)
+    const res = await environmentsAPI.getProfile(id, { signal: detailAbortController.signal })
+    if (sequence !== detailRequestSequence || selectedId.value !== id) return
     detail.value = res.data
     profileForm.display_name = detail.value?.display_name || ''
     profileForm.description = detail.value?.description || ''
@@ -126,9 +147,11 @@ async function loadDetail(id = selectedId.value) {
     showLog.value = false
     logText.value = ''
   } catch (error) {
+    if (error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError') return
+    if (sequence !== detailRequestSequence || selectedId.value !== id) return
     showApiError(error, '无法加载环境详情')
   } finally {
-    loadingDetail.value = false
+    if (sequence === detailRequestSequence) loadingDetail.value = false
   }
 }
 
@@ -265,7 +288,8 @@ async function createDraft() {
 }
 
 async function abandonDraft() {
-  if (!draft.value || !capabilities.value.can_abandon_draft) return
+  if (!draft.value || !capabilities.value.can_abandon_draft || abandoning.value) return
+  abandoning.value = true
   clearError()
   try {
     await environmentsAPI.abandonDraft(selectedId.value, draft.value.revision)
@@ -274,14 +298,22 @@ async function abandonDraft() {
     await loadDetail(selectedId.value)
   } catch (error) {
     showApiError(error, '放弃草稿失败')
+  } finally {
+    abandoning.value = false
   }
 }
 
 async function refreshDetail() {
   if (!selectedId.value) return
-  await loadDetail(selectedId.value)
-  const state = detail.value?.draft?.state
-  if (state !== 'building') stopPolling()
+  if (pollInFlight) return
+  pollInFlight = true
+  try {
+    await loadDetail(selectedId.value)
+    const state = detail.value?.draft?.state
+    if (state !== 'building') stopPolling()
+  } finally {
+    pollInFlight = false
+  }
 }
 
 async function build() {
@@ -302,7 +334,8 @@ async function build() {
 
 async function publish() {
   const candidate = detail.value?.draft?.candidate_version_id
-  if (!candidate || !capabilities.value.can_publish) return
+  if (!candidate || !capabilities.value.can_publish || publishing.value) return
+  publishing.value = true
   try {
     await environmentsAPI.publish(selectedId.value, {
       environment_version_id: candidate,
@@ -313,11 +346,15 @@ async function publish() {
     await loadDetail(selectedId.value)
   } catch (error) {
     showApiError(error, '发布失败')
+  } finally {
+    publishing.value = false
+    await refreshDetail()
   }
 }
 
 async function rollback(version) {
-  if (!version?.published || version.current || !capabilities.value.can_rollback) return
+  if (!version?.published || version.current || !capabilities.value.can_rollback || rollingBackId.value !== null) return
+  rollingBackId.value = version.id
   try {
     await environmentsAPI.publish(selectedId.value, {
       environment_version_id: version.id,
@@ -328,12 +365,16 @@ async function rollback(version) {
     await loadDetail(selectedId.value)
   } catch (error) {
     showApiError(error, '回滚失败')
+  } finally {
+    rollingBackId.value = null
+    await refreshDetail()
   }
 }
 
 async function retry() {
   const job = detail.value?.recent_build
-  if (!job?.capabilities?.can_retry) return
+  if (!job?.capabilities?.can_retry || retrying.value) return
+  retrying.value = true
   try {
     await environmentsAPI.retryBuild(job.id)
     app.showToast('已重新入队', 'success')
@@ -341,6 +382,9 @@ async function retry() {
     startPolling()
   } catch (error) {
     showApiError(error, '重试失败')
+  } finally {
+    retrying.value = false
+    await refreshDetail()
   }
 }
 
@@ -360,12 +404,17 @@ async function loadLog() {
 }
 
 async function setProfileStatus(active) {
+  if (archiving.value) return
+  archiving.value = true
   try {
     await environmentsAPI.updateProfile(selectedId.value, { status: active ? 'active' : 'inactive' })
     emit('refresh')
     await loadDetail(selectedId.value)
   } catch (error) {
     showApiError(error, active ? '恢复失败' : '归档失败')
+  } finally {
+    archiving.value = false
+    await refreshDetail()
   }
 }
 
@@ -439,12 +488,17 @@ onMounted(async () => {
     // arrives through this watcher in the template-level effect below.
   }
 })
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(() => {
+  stopPolling()
+  detailRequestSequence += 1
+  detailAbortController?.abort()
+})
 
 // Expose a small imperative hook for the list click handlers without adding a
 // second state store; Vue's template can call this local function directly.
 function selectProfile(profile) {
   if (profile.id === selectedId.value && detail.value) return
+  stopPolling()
   detail.value = null
   loadDetail(profile.id)
 }
@@ -534,9 +588,9 @@ function selectProfile(profile) {
               <h3 id="editor-title">{{ currentProfile.display_name }}</h3>
             </div>
             <div class="button-row">
-              <button v-if="draft" class="btn-ghost btn-sm" type="button" :disabled="!capabilities.can_abandon_draft" @click="abandonDraft">放弃草稿</button>
-              <button v-if="currentProfile.status === 'active'" class="btn-ghost btn-sm" type="button" :disabled="!capabilities.can_archive" @click="setProfileStatus(false)">归档</button>
-              <button v-else class="btn-ghost btn-sm" type="button" :disabled="!capabilities.can_restore" @click="setProfileStatus(true)">恢复</button>
+              <button v-if="draft" class="btn-ghost btn-sm" type="button" :disabled="!capabilities.can_abandon_draft || abandoning" @click="abandonDraft">{{ abandoning ? '处理中…' : '放弃草稿' }}</button>
+              <button v-if="currentProfile.status === 'active'" class="btn-ghost btn-sm" type="button" :disabled="!capabilities.can_archive || archiving" @click="setProfileStatus(false)">{{ archiving ? '处理中…' : '归档' }}</button>
+              <button v-else class="btn-ghost btn-sm" type="button" :disabled="!capabilities.can_restore || archiving" @click="setProfileStatus(true)">{{ archiving ? '处理中…' : '恢复' }}</button>
             </div>
           </div>
 
@@ -657,6 +711,9 @@ function selectProfile(profile) {
               <div class="section-head"><h4>构建报告</h4><span class="badge" :class="'badge-' + statusBadge(VERSION_STATUS_MAP, candidateVersion?.status || 'available').color">{{ draft.state }}</span></div>
               <p v-if="draft.state === 'building'" class="muted">Worker 正在解析依赖和验证镜像，编辑区已锁定。</p>
               <p v-else-if="draft.state === 'failed'" class="text-danger">构建失败，请查看构建任务日志或修改草稿后重新构建。</p>
+              <p v-if="detail.recent_build?.error_code" class="build-error-code text-danger">
+                错误码：<code>{{ detail.recent_build.error_code }}</code>
+              </p>
               <p v-else-if="draft.state === 'ready'" class="muted">候选版本已构建成功。确认报告后才会成为教师可选版本。</p>
               <p v-if="candidateVersion?.diff" class="muted diff-summary">
                 相对来源版本：Python {{ candidateVersion.diff.python_version?.from || '新建' }} → {{ candidateVersion.diff.python_version?.to }}；
@@ -671,8 +728,8 @@ function selectProfile(profile) {
               <pre v-if="errorDetailText" class="build-error-detail">{{ errorDetailText }}</pre>
               <button v-if="detail.recent_build" class="btn-ghost btn-sm" type="button" :disabled="logLoading" @click="loadLog">{{ logLoading ? '加载日志…' : (showLog ? '刷新日志' : '查看日志') }}</button>
               <pre v-if="showLog" class="build-log">{{ logText || '暂无日志' }}</pre>
-              <button v-if="capabilities.can_retry" class="btn-ghost" type="button" @click="retry">重试最近一次构建</button>
-              <button v-if="capabilities.can_publish" class="btn-primary" type="button" @click="publish">确认发布候选版本</button>
+              <button v-if="capabilities.can_retry" class="btn-ghost" type="button" :disabled="retrying" @click="retry">{{ retrying ? '重试提交中…' : '重试最近一次构建' }}</button>
+              <button v-if="capabilities.can_publish" class="btn-primary" type="button" :disabled="publishing" @click="publish">{{ publishing ? '发布中…' : '确认发布候选版本' }}</button>
             </section>
 
           </div>
@@ -689,7 +746,7 @@ function selectProfile(profile) {
               <small v-if="version.diff" class="muted">{{ diffCount(version.diff, 'python_packages') + diffCount(version.diff, 'system_packages') }} 项依赖变化</small>
               <span v-if="version.current" class="badge badge-success">当前</span>
               <span v-else-if="version.published" class="badge badge-neutral">曾发布</span>
-              <button v-if="version.published && !version.current" class="btn-ghost btn-sm" type="button" :disabled="!capabilities.can_rollback" @click="rollback(version)">回滚</button>
+              <button v-if="version.published && !version.current" class="btn-ghost btn-sm" type="button" :disabled="!capabilities.can_rollback || rollingBackId !== null" @click="rollback(version)">{{ rollingBackId === version.id ? '回滚中…' : '回滚' }}</button>
             </div>
           </section>
         </template>

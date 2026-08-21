@@ -2,6 +2,8 @@
 
 面向人工智能课程的一站式在线实验平台。支持课程学习、在线编程实验、作业与考试自动判题、AI 辅助评分、Notebook 交互式实验、多档运行环境、课程封面与课时视频上传，以及教师工作台聚合待办、统一提交中心、全局搜索、站内通知、用户偏好与 CSV 名单导入。
 
+> **环境管理 V2 状态（2026-08-21）**：管理员环境编辑器、草稿/版本、包校验、异步构建、发布/回滚和教师端版本选择已经实现；本地自动化门禁通过。生产上线还必须在真实部署机完成 Docker daemon、Registry 凭证、镜像构建/推送/回拉和迁移启动验收，不能把当前受限开发沙箱的 Docker 权限错误当作业务代码已经完成生产验证。
+
 ---
 
 ## 快速开始
@@ -114,6 +116,25 @@ npm run dev
 - 前端页面：<http://localhost:5173>
 - Swagger 文档：<http://localhost:8000/docs>
 - 健康检查：<http://localhost:8000/api/v1/health/ready>
+
+## 环境管理 V2（管理员自定义环境）
+
+管理员可以先创建环境 Profile，再在草稿中选择 Python 版本、Python 包和 Debian 包，保存并提交构建。构建通过后由管理员发布；教师新建作业只看到当前发布版本，已绑定的作业、提交和 Notebook 继续固定使用原来的不可变版本。修改环境不会覆盖旧版本，而是从草稿生成新的版本，适合按课程或作业维护多套类似 conda 的环境。
+
+```text
+创建环境 → 编辑包和版本 → 保存草稿 → Docker 构建/验证
+        → 查看构建报告 → 发布 v1 → 教师选择 v1
+        → 修改草稿 → 构建并发布 v2（旧作业仍使用 v1）
+```
+
+当前边界：
+
+- 代码实现和自动化测试已完成：后端 `1267 passed, 3 skipped`，前端 `859 passed`，并通过前端检查、生产构建和 `git diff --check`。
+- 构建 Worker 需要访问部署机的 Docker daemon；它不是普通 Python 进程，必须能通过 Docker socket 执行真实镜像构建。
+- V2 生产构建默认要求推送到 Registry，并回拉同一个 digest 后才允许版本进入 `available`；真实凭证只能通过 Docker Secret/Secret Manager 注入，不能提交到 Git。
+- 在没有 Docker daemon 或没有 Registry 的开发环境中，可以运行 API/前端和自动化测试，但不能宣称完成真实镜像构建与生产发布验收。
+
+详细的迁移顺序、Registry Secret、构建排障和回滚规则见 [`docs/environment-profiles.md`](docs/environment-profiles.md)；Docker socket 的主机隔离要求见 [`docs/security/docker-socket-isolation.md`](docs/security/docker-socket-isolation.md)。
 
 ---
 
@@ -276,6 +297,8 @@ npm run dev
 
 ## Docker Compose 生产部署
 
+生产部署不是在 API 容器里“模拟” Docker。部署机必须运行 Docker daemon，Compose 的 `api`、`worker` 和 `environment-builder` 按职责挂载本机 Docker socket；其中 `environment-builder` 负责真实环境镜像构建，`api/worker` 负责运行判题和 Notebook 容器。Docker socket 是主机上的 Unix 通信文件，不是 Registry，也不是镜像本身。生产主机的 daemon、socket 权限和专用主机要求见 [`docs/security/docker-socket-isolation.md`](docs/security/docker-socket-isolation.md)。
+
 ```bash
 # 环境变量（必填；缺任何一项 compose 都会在启动前校验失败）
 export DAI_SECRET_KEY=<至少16字符的唯一密钥>
@@ -285,6 +308,14 @@ export DAI_DB_ROOT_PASSWORD=<数据库 root 密码>
 export DAI_JUDGE_HOST_WORK_DIR=/opt/dai/judge-work   # 宿主机判题工作目录绝对路径
 export DAI_ENV_BASE_IMAGE=python:3.12-slim@sha256:<真实digest>  # 环境构建基础镜像，必须带 digest
 
+# 启用环境编辑器 V2 时再填写以下配置；V2 默认关闭
+export DAI_ENVIRONMENT_EDITOR_V2_ENABLED=false
+export DAI_ENV_REGISTRY_REPOSITORY=registry.example/dai-env
+export DAI_ENV_REGISTRY_DOCKER_CONFIG_FILE=/etc/dai/registry-docker-config.json
+export DAI_ENV_REGISTRY_ALLOW_ANONYMOUS=false
+# V2 开启时必须将 3.10/3.11/3.12 都配置为带 @sha256: 的基础镜像
+# export DAI_ENV_PYTHON_BASE_IMAGES='{"3.10":"python:3.10-slim-bookworm@sha256:<64位hex>","3.11":"python:3.11-slim-bookworm@sha256:<64位hex>","3.12":"python:3.12-slim-bookworm@sha256:<64位hex>"}'
+
 # 启动全栈
 docker compose -f docker-compose.prod.yml up -d
 
@@ -292,6 +323,33 @@ docker compose -f docker-compose.prod.yml up -d
 curl http://localhost:8080/api/v1/health/ready
 # → {"status":"ready","checks":{"mysql":"ok","redis":"ok"}}
 ```
+
+### V2 真实构建与 Registry 验收（必须在部署机执行）
+
+下面的检查不能在没有 Docker socket 的受限沙箱中替代完成。先确认部署机本身可访问 daemon，再检查 Compose 渲染和 Registry Secret：
+
+```bash
+# 1. Docker CLI 能否连接部署机 daemon；permission denied 表示主机权限/daemon 问题
+docker info
+
+# 2. Compose 配置、Secret 文件和必填变量是否完整
+docker compose -f docker-compose.prod.yml config --quiet
+
+# 3. Registry Secret 只放在部署机，禁止提交真实凭据
+test -r "$DAI_ENV_REGISTRY_DOCKER_CONFIG_FILE"
+stat -c '%a %U:%G %n' "$DAI_ENV_REGISTRY_DOCKER_CONFIG_FILE"  # Linux 上至少应为 root-owned、不可被普通用户写入
+
+# 4. 按 docs/environment-profiles.md 的分阶段顺序迁移并启动
+docker compose -f docker-compose.prod.yml up -d mysql redis
+docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade b4c5d6e7f890
+# 准备并验证 basic 真实 digest 后再执行：
+docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade head
+docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs --tail=200 environment-builder
+```
+
+在管理员页面创建一个测试 Profile，加入一个轻量 Python/apt 包并点击“构建”。只有当 `environment-builder` 完成构建、推送 Registry、按 digest 回拉并将版本置为 `available`，这条链路才算真实通过。随后用教师账号确认新作业只显示当前发布版本，并确认旧作业仍绑定旧 digest。详细验收表和失败处理见 [`docs/environment-profiles.md`](docs/environment-profiles.md) 的“部署机、Docker daemon 与 Registry 验收”章节。
 
 ### DoD 判题配置
 
@@ -307,6 +365,8 @@ volumes:
 ```
 
 ## 数据库迁移与回滚
+
+环境管理 V2 的迁移不是普通的“一次 `upgrade head`”：全新库或缺少 basic 真实镜像 digest 时，迁移会主动停止，防止历史业务绑定落到不可运行的环境。请先阅读 [`docs/environment-profiles.md`](docs/environment-profiles.md) 的 V2 分阶段 runbook，按“迁移控制面 → 准备并验证 basic digest → `upgrade head` → 启动 API/Worker”执行；生产默认只允许 forward-only，不要用 downgrade 代替回滚。
 
 ### 升级
 
@@ -371,10 +431,9 @@ set PYTEST_DEBUG_TEMPROOT=%LOCALAPPDATA%\Temp\dai-pytest-tmp
 .venv\Scripts\python.exe -m pytest tests\automated -q -p no:cacheprovider
 ```
 
-当前基线：**1042 项通过、3 项跳过、0 项失败**（2026-08-15，SQLite 外键开启下
-实测，Python 3.12；清理内测/验收种子测试后）。精确数字以 CI
-`backend-test-sqlite` 门禁为准。
-MySQL 门禁（`backend-test-mysql`）与 SQLite 同套件跑双库，双库 0 失败才算过。
+当前环境管理 V2 收口验收：**1267 项通过、3 项跳过、0 项失败**（2026-08-21，SQLite
+外键开启，Python 3.12）。精确数字以 CI `backend-test-sqlite` 门禁为准；MySQL
+门禁（`backend-test-mysql`）与 SQLite 同套件跑双库，双库 0 失败才算过。
 
 ### 前端测试与构建
 
@@ -384,8 +443,9 @@ npm test
 npm run build
 ```
 
-当前基线：**825 项测试全部通过**（2026-08-15），生产构建成功；测试已改为
-时区无关断言，UTC 机器（CI）与本地时区均可通过。精确数字以 CI `frontend-test` 门禁为准。
+当前环境管理 V2 收口验收：**859 项测试全部通过**（2026-08-21），生产构建成功；
+测试已改为时区无关断言，UTC 机器（CI）与本地时区均可通过。精确数字以 CI
+`frontend-test` 门禁为准。
 
 ### 仓库清理边界
 
@@ -502,6 +562,14 @@ DAI_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ### Docker 未启动
 
 确保 Docker Desktop 在运行，任务栏应有 Docker 图标。Windows 下可能需要以管理员身份运行。
+
+### `docker info` 报 `permission denied while trying to connect to /var/run/docker.sock`
+
+这是部署机 Docker daemon/socket 的访问权限问题，不是环境包解析或管理员 API 的业务错误。先在部署机确认 daemon 正常，再让运行 Compose 的用户或服务获得受控的 socket 访问权限（Linux rootful Docker 通常通过 `docker` 用户组，rootless Docker 使用对应的 rootless socket）。不要用 `chmod 666 /var/run/docker.sock` 绕过权限；这会把 Docker daemon 的主机级控制权暴露给所有本地用户。V2 构建 Worker 在 socket 不可用时会保持未就绪，管理员构建请求会被拒绝。
+
+### 环境版本一直无法构建或 Registry 推送失败
+
+检查 `docker compose -f docker-compose.prod.yml logs environment-builder`，并依次确认：`docker info` 成功、`DAI_ENV_REGISTRY_REPOSITORY` 指向可写仓库、`DAI_ENV_REGISTRY_DOCKER_CONFIG_FILE` 是部署机上的只读 `config.json`、基础镜像和 Python 版本均使用允许的 digest。Registry Secret 只能包含 `auths`（或 `identitytoken`），不能把真实凭据放入 `.env`、README 或 Git。构建 readiness 为 false 时先修复 Worker heartbeat/Registry 检查，再重试草稿构建。
 
 ### 8000 端口被占用（后端起不来）
 

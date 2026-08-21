@@ -161,13 +161,13 @@ def test_version_unique_profile_number(db_session_factory):
             _make_version(db, prof.id, id=2, version_number=1)
 
 
-def test_version_image_digest_unique(db_session_factory):
+def test_version_image_digest_can_be_reused_across_profiles(db_session_factory):
     with db_session_factory() as db:
         prof = _make_profile(db)
         digest = "sha256:" + "a" * 64
         _make_version(db, prof.id, id=1, version_number=1, image_digest=digest)
-        with pytest_raises_integrity(db):
-            _make_version(db, prof.id, id=2, version_number=2, image_digest=digest)
+        _make_version(db, prof.id, id=2, version_number=2, image_digest=digest)
+        db.commit()
 
 
 # ═══════════════════════════════════════════════════════════════

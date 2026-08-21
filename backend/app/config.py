@@ -7,6 +7,12 @@ from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+_REGISTRY_REPOSITORY_RE = re.compile(
+    r"^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?"
+    r"(?:/[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)*$"
+)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -136,6 +142,19 @@ class Settings(BaseSettings):
 
         if self.environment_editor_v2_enabled:
             supported = {"3.10", "3.11", "3.12"}
+            if not self.env_registry_repository or not _REGISTRY_REPOSITORY_RE.fullmatch(
+                self.env_registry_repository
+            ) or any(part in {".", ".."} for part in self.env_registry_repository.split("/")):
+                errors.append(
+                    "DAI_ENV_REGISTRY_REPOSITORY 未设置或格式无效，V2 必须使用可拉取的 Registry 镜像"
+                )
+            if not self.env_registry_allow_anonymous and not Path(
+                self.env_registry_docker_config
+            ).is_file():
+                errors.append(
+                    "DAI_ENV_REGISTRY_DOCKER_CONFIG 未挂载有效 Docker config.json；"
+                    "如 Registry 允许匿名访问，请显式设置 DAI_ENV_REGISTRY_ALLOW_ANONYMOUS=true"
+                )
             if set(self.env_python_base_images) != supported:
                 errors.append(
                     "DAI_ENV_PYTHON_BASE_IMAGES 必须恰好配置 3.10、3.11、3.12"
@@ -181,6 +200,14 @@ class Settings(BaseSettings):
     env_build_queue_name: str = "environment:build:queue"
     env_build_timeout_seconds: int = Field(default=3600, ge=60, le=86400)
     env_image_repository: str = "dai-env"
+    # V2 的正式产物仓库。为空时开发配置仍可加载，但真实 V2 构建会在
+    # preflight 阶段 fail-closed；生产配置在启动时直接拒绝。
+    env_registry_repository: str | None = None
+    # 标准 Docker config.json 的只读 Secret 挂载点。配置文件只允许包含
+    # auths，禁止 credsStore/credHelpers/proxies，避免把宿主配置带入构建。
+    env_registry_docker_config: str = "/run/secrets/config.json"
+    # 仅开发/明确的公开 Registry 可打开；生产默认要求 Secret。
+    env_registry_allow_anonymous: bool = False
     env_base_image: str = "python:3.12-slim"
     env_build_log_max_bytes: int = Field(default=60 * 1024, ge=1024, le=1024 * 1024)
     # 本地开发：pip 镜像源（国内网络直连 PyPI 不稳定；构建环境镜像时注入 --index-url）
@@ -203,9 +230,18 @@ class Settings(BaseSettings):
     env_platform_bundle_version: str = "v1"
     env_build_network_mode: Literal["default", "host"] = "default"
     env_build_http_proxy: str | None = None
+    env_build_cpu_limit: float = Field(default=2.0, gt=0, le=16)
+    env_build_memory_mb: int = Field(default=4096, ge=512, le=65536)
+    env_build_pids_limit: int = Field(default=512, ge=64, le=32768)
+    # Worker readiness is a short-lived Redis lease.  The API never assumes
+    # that a running container means the asynchronous builder can consume a
+    # job; it requires this key to be refreshed by a healthy worker.
+    env_builder_heartbeat_key: str = "environment:v2:builder:heartbeat"
+    env_builder_heartbeat_ttl_seconds: int = Field(default=30, ge=5, le=300)
+    env_builder_heartbeat_interval_seconds: int = Field(default=10, ge=1, le=120)
     env_apt_deny_patterns: list[str] = Field(
         default_factory=lambda: [
-            r"^(docker|containerd|podman)(?:-.*)?$",
+            r"^(docker|docker\.io|docker-ce|docker-ce-cli|moby-engine|containerd|containerd\.io|cri-o|podman|runc)(?:-.*)?$",
             r"^(systemd|sysvinit|openrc)(?:-.*)?$",
             r"^(sudo|doas|policykit-1)(?:-.*)?$",
             r"^(openssh-server|dropbear)(?:-.*)?$",

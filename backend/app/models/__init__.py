@@ -1307,14 +1307,14 @@ class EnvironmentProfile(TimestampMixin, Base):
         # Profile.current_version_id 与 EnvironmentVersion.profile_id 形成循环
         # 外键；迁移中同样在表创建后单独建立此约束。
         ForeignKeyConstraint(
-            ["current_version_id"],
-            ["environment_versions.id"],
+            ["id", "current_version_id"],
+            ["environment_versions.profile_id", "environment_versions.id"],
             use_alter=True,
-            name="fk_env_profiles_current_version",
+            name="fk_env_profiles_current_version_profile",
         ),
     )
 
-    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True)
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
     slug: Mapped[str] = mapped_column(String(80), nullable=False)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -1344,8 +1344,7 @@ class EnvironmentVersion(TimestampMixin, Base):
     __tablename__ = "environment_versions"
     __table_args__ = (
         UniqueConstraint("profile_id", "version_number", name="uq_env_version_per_profile"),
-        UniqueConstraint("image_tag", name="uq_env_version_image_tag"),
-        UniqueConstraint("image_digest", name="uq_env_version_image_digest"),
+        UniqueConstraint("profile_id", "id", name="uq_env_version_profile_id"),
         Index("ix_env_versions_profile_id", "profile_id"),
         Index("ix_env_versions_status", "status"),
     )
@@ -1378,6 +1377,8 @@ class EnvironmentVersion(TimestampMixin, Base):
         default=lambda: {"schema_version": 1, "python_packages": [], "system_packages": []},
     )
     resolved_spec: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    resolution_lock: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    resolution_lock_sha256: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
     # Phase 1 compatibility field; V2 reads resolved_spec first and falls back
     # to this field for historical rows.
     resolved_packages: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -1474,6 +1475,16 @@ class EnvironmentDraft(TimestampMixin, Base):
 
     __tablename__ = "environment_drafts"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["profile_id", "source_version_id"],
+            ["environment_versions.profile_id", "environment_versions.id"],
+            name="fk_env_drafts_source_version_profile",
+        ),
+        ForeignKeyConstraint(
+            ["profile_id", "candidate_version_id"],
+            ["environment_versions.profile_id", "environment_versions.id"],
+            name="fk_env_drafts_candidate_version_profile",
+        ),
         CheckConstraint(
             "state IN ('editing', 'building', 'ready', 'failed')",
             name="ck_env_drafts_state",
@@ -1486,10 +1497,10 @@ class EnvironmentDraft(TimestampMixin, Base):
         BigInteger, ForeignKey("environment_profiles.id", ondelete="CASCADE"), primary_key=True
     )
     source_version_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("environment_versions.id"), nullable=True
+        BigInteger, nullable=True
     )
     candidate_version_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("environment_versions.id"), nullable=True
+        BigInteger, nullable=True
     )
     active_build_job_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("environment_build_jobs.id"), nullable=True
@@ -1533,6 +1544,18 @@ class EnvironmentPublication(TimestampMixin, Base):
 
     __tablename__ = "environment_publications"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["profile_id", "version_id"],
+            ["environment_versions.profile_id", "environment_versions.id"],
+            name="fk_env_publications_version_profile",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["profile_id", "previous_version_id"],
+            ["environment_versions.profile_id", "environment_versions.id"],
+            name="fk_env_publications_previous_version_profile",
+            ondelete="RESTRICT",
+        ),
         CheckConstraint(
             "action IN ('publish', 'rollback', 'migration_baseline')",
             name="ck_env_publications_action",
@@ -1546,10 +1569,10 @@ class EnvironmentPublication(TimestampMixin, Base):
         BigInteger, ForeignKey("environment_profiles.id", ondelete="RESTRICT"), nullable=False
     )
     version_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("environment_versions.id", ondelete="RESTRICT"), nullable=False
+        BigInteger, nullable=False
     )
     previous_version_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("environment_versions.id", ondelete="RESTRICT"), nullable=True
+        BigInteger, nullable=True
     )
     action: Mapped[str] = mapped_column(String(24), nullable=False)
     published_by_id: Mapped[int | None] = mapped_column(

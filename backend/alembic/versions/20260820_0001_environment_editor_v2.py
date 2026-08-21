@@ -281,6 +281,7 @@ def _backfill_data() -> None:
 
     version_rows = list(bind.execute(sa.select(versions).order_by(versions.c.id)))
     version_ids = {int(row.id) for row in version_rows}
+    version_by_id = {int(row.id): row for row in version_rows}
     package_specs = _legacy_package_specs(bind, version_ids)
 
     for row in version_rows:
@@ -295,9 +296,6 @@ def _backfill_data() -> None:
         }
         if row.status == "available" and row.image_digest:
             values["resolved_spec"] = _legacy_resolved_spec(row, requested["python_packages"])
-            published_at = row.available_at or row.created_at or datetime.now(timezone.utc)
-            values["first_published_at"] = published_at
-            values["first_published_by_id"] = row.created_by_id
         bind.execute(versions.update().where(versions.c.id == row.id).values(**values))
 
     phase_by_status = {
@@ -331,6 +329,24 @@ def _backfill_data() -> None:
             .values(current_version_id=version_id)
         )
         bind.execute(
+            versions.update()
+            .where(versions.c.id == version_id)
+            .values(
+                first_published_at=next(
+                    (
+                        row.available_at or row.created_at
+                        for row in version_rows
+                        if int(row.id) == version_id
+                    ),
+                    datetime.now(timezone.utc),
+                ),
+                first_published_by_id=next(
+                    (row.created_by_id for row in version_rows if int(row.id) == version_id),
+                    None,
+                ),
+            )
+        )
+        bind.execute(
             publications.insert().values(
                 profile_id=profile_id,
                 version_id=version_id,
@@ -340,11 +356,51 @@ def _backfill_data() -> None:
             )
         )
 
+    # A legacy available image is not automatically treated as published just
+    # because it exists.  Preserve a historical publication marker only when
+    # an existing business row proves that the version was actually bound.
+    # This prevents an arbitrary old available candidate from becoming a
+    # rollback target after migration.
+    inspector = sa.inspect(bind)
+    binding_tables = [
+        "assignments",
+        "judge_questions",
+        "submissions",
+        "notebook_templates",
+        "notebook_template_versions",
+        "experiment_records",
+    ]
+    bound_version_ids: set[int] = set()
+    for table_name in binding_tables:
+        if table_name not in inspector.get_table_names():
+            continue
+        columns = {column["name"] for column in inspector.get_columns(table_name)}
+        if "environment_version_id" not in columns:
+            continue
+        binding_table = sa.table(table_name, sa.column("environment_version_id"))
+        rows = bind.execute(
+            sa.select(binding_table.c.environment_version_id)
+            .where(binding_table.c.environment_version_id.is_not(None))
+            .distinct()
+        )
+        bound_version_ids.update(int(row[0]) for row in rows if row[0] is not None)
+    for version_id in sorted(bound_version_ids):
+        row = version_by_id.get(version_id)
+        if row is None or row.status != "available" or not row.image_digest:
+            continue
+        bind.execute(
+            versions.update()
+            .where(versions.c.id == version_id, versions.c.first_published_at.is_(None))
+            .values(
+                first_published_at=row.available_at or row.created_at or datetime.now(timezone.utc),
+                first_published_by_id=row.created_by_id,
+            )
+        )
+
     # Existing profiles did not have drafts.  Create an editable draft from
     # the chosen current version, while retaining the exact resolved package
     # versions so opening the editor does not silently upgrade a dependency.
     profile_rows = list(bind.execute(sa.select(profiles.c.id, profiles.c.current_version_id)))
-    version_by_id = {int(row.id): row for row in version_rows}
     for profile in profile_rows:
         if profile.current_version_id is None:
             bind.execute(

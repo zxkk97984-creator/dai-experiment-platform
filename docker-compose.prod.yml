@@ -1,3 +1,10 @@
+secrets:
+  # The default file is deliberately auths-only and contains no credential.
+  # Production should point DAI_ENV_REGISTRY_DOCKER_CONFIG_FILE at a
+  # root-owned, read-only Docker config Secret on the host.
+  dai_env_registry_docker_config:
+    file: ${DAI_ENV_REGISTRY_DOCKER_CONFIG_FILE:-./deploy/registry-docker-config.example.json}
+
 services:
   mysql:
     image: mysql:8.0
@@ -34,8 +41,9 @@ services:
       timeout: 5s
       retries: 5
 
-  # 一次性迁移执行者：同一镜像运行 alembic upgrade head，成功后 API 才启动。
-  # 失败时 API 不会启动（depends_on service_completed_successfully）。
+  # 一次性迁移执行者：同一镜像运行 alembic upgrade head，成功后 API/Worker 才启动。
+  # 失败时 API、Judge Worker、environment-builder 都不会启动
+  #（depends_on service_completed_successfully）。
   # 注意：迁移链在 b4c5d6e7f890 后要求 basic 环境已有 available 版本
   # （seed-environments + 构建完成），全新部署需按部署文档执行中间步骤后重跑本服务。
   migrate:
@@ -48,12 +56,30 @@ services:
       DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
       DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
       DAI_ENV_BASE_IMAGE: "${DAI_ENV_BASE_IMAGE:?DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的 python:3.12-slim 引用}"
+      DAI_ENVIRONMENT_EDITOR_V2_ENABLED: ${DAI_ENVIRONMENT_EDITOR_V2_ENABLED:-false}
+      DAI_ENV_REGISTRY_REPOSITORY: ${DAI_ENV_REGISTRY_REPOSITORY:-}
+      DAI_ENV_REGISTRY_DOCKER_CONFIG: /run/secrets/config.json
+      DAI_ENV_REGISTRY_ALLOW_ANONYMOUS: ${DAI_ENV_REGISTRY_ALLOW_ANONYMOUS:-false}
+      DAI_ENV_PYTHON_BASE_IMAGES: '${DAI_ENV_PYTHON_BASE_IMAGES:-{"3.10":"python:3.10-slim-bookworm","3.11":"python:3.11-slim-bookworm","3.12":"python:3.12-slim-bookworm"}}'
+      DAI_ENV_PIP_INDEX_URL: ${DAI_ENV_PIP_INDEX_URL:-}
+      DAI_ENV_APT_SNAPSHOT_SOURCES: '${DAI_ENV_APT_SNAPSHOT_SOURCES:-{}}'
+      DAI_ENV_PLATFORM_PYTHON_PACKAGES: '${DAI_ENV_PLATFORM_PYTHON_PACKAGES:-{"ipykernel":"6.29.5","pytest":"8.3.4"}}'
+      DAI_ENV_PLATFORM_BUNDLE_VERSION: ${DAI_ENV_PLATFORM_BUNDLE_VERSION:-v1}
+      DAI_ENV_BUILD_NETWORK_MODE: ${DAI_ENV_BUILD_NETWORK_MODE:-default}
+      DAI_ENV_BUILD_HTTP_PROXY: ${DAI_ENV_BUILD_HTTP_PROXY:-}
+      DAI_ENV_BUILD_CPU_LIMIT: ${DAI_ENV_BUILD_CPU_LIMIT:-2}
+      DAI_ENV_BUILD_MEMORY_MB: ${DAI_ENV_BUILD_MEMORY_MB:-4096}
+      DAI_ENV_BUILD_PIDS_LIMIT: ${DAI_ENV_BUILD_PIDS_LIMIT:-512}
+      DAI_ENV_BUILD_MAX_IMAGE_BYTES: ${DAI_ENV_BUILD_MAX_IMAGE_BYTES:-21474836480}
       DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须是宿主机判题目录的绝对路径}
     depends_on:
       mysql:
         condition: service_healthy
     networks:
       - internal
+    secrets:
+      - source: dai_env_registry_docker_config
+        target: config.json
     volumes:
       - ./backend/alembic/versions:/app/alembic/versions:ro
       - ./scripts/seed-basic-environment-mysql.py:/scripts/seed-basic-environment-mysql.py:ro
@@ -92,6 +118,25 @@ services:
       DAI_TRUSTED_PROXY: ${DAI_TRUSTED_PROXY:-true}
       # 环境档位基础镜像——生产校验强制带 @sha256: digest（config.py 拒绝可变标签）
       DAI_ENV_BASE_IMAGE: "${DAI_ENV_BASE_IMAGE:?DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的 python:3.12-slim 引用}"
+      DAI_ENVIRONMENT_EDITOR_V2_ENABLED: ${DAI_ENVIRONMENT_EDITOR_V2_ENABLED:-false}
+      DAI_ENV_REGISTRY_REPOSITORY: ${DAI_ENV_REGISTRY_REPOSITORY:-}
+      DAI_ENV_REGISTRY_DOCKER_CONFIG: /run/secrets/config.json
+      DAI_ENV_REGISTRY_ALLOW_ANONYMOUS: ${DAI_ENV_REGISTRY_ALLOW_ANONYMOUS:-false}
+      DOCKER_CONFIG: /run/secrets
+      DAI_ENV_PYTHON_BASE_IMAGES: '${DAI_ENV_PYTHON_BASE_IMAGES:-{"3.10":"python:3.10-slim-bookworm","3.11":"python:3.11-slim-bookworm","3.12":"python:3.12-slim-bookworm"}}'
+      DAI_ENV_PIP_INDEX_URL: ${DAI_ENV_PIP_INDEX_URL:-}
+      DAI_ENV_APT_SNAPSHOT_SOURCES: '${DAI_ENV_APT_SNAPSHOT_SOURCES:-{}}'
+      DAI_ENV_PLATFORM_PYTHON_PACKAGES: '${DAI_ENV_PLATFORM_PYTHON_PACKAGES:-{"ipykernel":"6.29.5","pytest":"8.3.4"}}'
+      DAI_ENV_PLATFORM_BUNDLE_VERSION: ${DAI_ENV_PLATFORM_BUNDLE_VERSION:-v1}
+      DAI_ENV_BUILD_NETWORK_MODE: ${DAI_ENV_BUILD_NETWORK_MODE:-default}
+      DAI_ENV_BUILD_HTTP_PROXY: ${DAI_ENV_BUILD_HTTP_PROXY:-}
+      DAI_ENV_BUILD_CPU_LIMIT: ${DAI_ENV_BUILD_CPU_LIMIT:-2}
+      DAI_ENV_BUILD_MEMORY_MB: ${DAI_ENV_BUILD_MEMORY_MB:-4096}
+      DAI_ENV_BUILD_PIDS_LIMIT: ${DAI_ENV_BUILD_PIDS_LIMIT:-512}
+      DAI_ENV_BUILD_MAX_IMAGE_BYTES: ${DAI_ENV_BUILD_MAX_IMAGE_BYTES:-21474836480}
+      DAI_ENV_BUILDER_HEARTBEAT_KEY: ${DAI_ENV_BUILDER_HEARTBEAT_KEY:-environment:v2:builder:heartbeat}
+      DAI_ENV_BUILDER_HEARTBEAT_TTL_SECONDS: ${DAI_ENV_BUILDER_HEARTBEAT_TTL_SECONDS:-30}
+      DAI_ENV_BUILDER_HEARTBEAT_INTERVAL_SECONDS: ${DAI_ENV_BUILDER_HEARTBEAT_INTERVAL_SECONDS:-10}
       DAI_STUDIO_STORAGE_DIR: /app/storage/studio
       DAI_JUDGE_WORK_DIR: /judge-work
       # 宿主机侧判题工作目录绝对路径——Worker 将此路径传给 Docker daemon 做 bind mount
@@ -123,6 +168,9 @@ services:
         condition: service_completed_successfully
     networks:
       - internal
+    secrets:
+      - source: dai_env_registry_docker_config
+        target: config.json
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - "${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须设置}:/judge-work"
@@ -142,6 +190,25 @@ services:
       DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
       DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
       DAI_ENV_BASE_IMAGE: "${DAI_ENV_BASE_IMAGE:?DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的 python:3.12-slim 引用}"
+      DAI_ENVIRONMENT_EDITOR_V2_ENABLED: ${DAI_ENVIRONMENT_EDITOR_V2_ENABLED:-false}
+      DAI_ENV_REGISTRY_REPOSITORY: ${DAI_ENV_REGISTRY_REPOSITORY:-}
+      DAI_ENV_REGISTRY_DOCKER_CONFIG: /run/secrets/config.json
+      DAI_ENV_REGISTRY_ALLOW_ANONYMOUS: ${DAI_ENV_REGISTRY_ALLOW_ANONYMOUS:-false}
+      DOCKER_CONFIG: /run/secrets
+      DAI_ENV_PYTHON_BASE_IMAGES: '${DAI_ENV_PYTHON_BASE_IMAGES:-{"3.10":"python:3.10-slim-bookworm","3.11":"python:3.11-slim-bookworm","3.12":"python:3.12-slim-bookworm"}}'
+      DAI_ENV_PIP_INDEX_URL: ${DAI_ENV_PIP_INDEX_URL:-}
+      DAI_ENV_APT_SNAPSHOT_SOURCES: '${DAI_ENV_APT_SNAPSHOT_SOURCES:-{}}'
+      DAI_ENV_PLATFORM_PYTHON_PACKAGES: '${DAI_ENV_PLATFORM_PYTHON_PACKAGES:-{"ipykernel":"6.29.5","pytest":"8.3.4"}}'
+      DAI_ENV_PLATFORM_BUNDLE_VERSION: ${DAI_ENV_PLATFORM_BUNDLE_VERSION:-v1}
+      DAI_ENV_BUILD_NETWORK_MODE: ${DAI_ENV_BUILD_NETWORK_MODE:-default}
+      DAI_ENV_BUILD_HTTP_PROXY: ${DAI_ENV_BUILD_HTTP_PROXY:-}
+      DAI_ENV_BUILD_CPU_LIMIT: ${DAI_ENV_BUILD_CPU_LIMIT:-2}
+      DAI_ENV_BUILD_MEMORY_MB: ${DAI_ENV_BUILD_MEMORY_MB:-4096}
+      DAI_ENV_BUILD_PIDS_LIMIT: ${DAI_ENV_BUILD_PIDS_LIMIT:-512}
+      DAI_ENV_BUILD_MAX_IMAGE_BYTES: ${DAI_ENV_BUILD_MAX_IMAGE_BYTES:-21474836480}
+      DAI_ENV_BUILDER_HEARTBEAT_KEY: ${DAI_ENV_BUILDER_HEARTBEAT_KEY:-environment:v2:builder:heartbeat}
+      DAI_ENV_BUILDER_HEARTBEAT_TTL_SECONDS: ${DAI_ENV_BUILDER_HEARTBEAT_TTL_SECONDS:-30}
+      DAI_ENV_BUILDER_HEARTBEAT_INTERVAL_SECONDS: ${DAI_ENV_BUILDER_HEARTBEAT_INTERVAL_SECONDS:-10}
       DAI_STUDIO_STORAGE_DIR: /app/storage/studio
       DAI_JUDGE_WORK_DIR: /judge-work
       DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须是宿主机判题目录的绝对路径}
@@ -161,8 +228,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - internal
+    secrets:
+      - source: dai_env_registry_docker_config
+        target: config.json
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - "${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须设置}:/judge-work"
@@ -175,6 +247,17 @@ services:
     build: ./backend
     restart: unless-stopped
     command: python -m app.worker.environment_builder_worker
+    # 构建 Worker 必须连接 Docker socket，但自身不需要额外 Linux capability。
+    # Docker daemon 侧仍需配合 rootless/隔离 BuildKit 做更强的宿主机边界控制。
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: ${DAI_ENV_BUILD_CPU_LIMIT:-2}
+    mem_limit: ${DAI_ENV_BUILD_MEMORY_MB:-4096}m
+    pids_limit: ${DAI_ENV_BUILD_PIDS_LIMIT:-512}
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=512m
     environment:
       DAI_ENVIRONMENT: ${DAI_ENVIRONMENT:-production}
       DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
@@ -186,14 +269,37 @@ services:
       DAI_ENV_BUILD_QUEUE_NAME: ${DAI_ENV_BUILD_QUEUE_NAME:-environment:build:queue}
       DAI_ENV_BUILD_TIMEOUT_SECONDS: ${DAI_ENV_BUILD_TIMEOUT_SECONDS:-3600}
       DAI_ENV_IMAGE_REPOSITORY: ${DAI_ENV_IMAGE_REPOSITORY:-dai-env}
+      DAI_ENVIRONMENT_EDITOR_V2_ENABLED: ${DAI_ENVIRONMENT_EDITOR_V2_ENABLED:-false}
+      DAI_ENV_REGISTRY_REPOSITORY: ${DAI_ENV_REGISTRY_REPOSITORY:-}
+      DAI_ENV_PYTHON_BASE_IMAGES: '${DAI_ENV_PYTHON_BASE_IMAGES:-{"3.10":"python:3.10-slim-bookworm","3.11":"python:3.11-slim-bookworm","3.12":"python:3.12-slim-bookworm"}}'
+      DAI_ENV_PIP_INDEX_URL: ${DAI_ENV_PIP_INDEX_URL:-}
+      DAI_ENV_APT_SNAPSHOT_SOURCES: '${DAI_ENV_APT_SNAPSHOT_SOURCES:-{}}'
+      DAI_ENV_PLATFORM_PYTHON_PACKAGES: '${DAI_ENV_PLATFORM_PYTHON_PACKAGES:-{"ipykernel":"6.29.5","pytest":"8.3.4"}}'
+      DAI_ENV_PLATFORM_BUNDLE_VERSION: ${DAI_ENV_PLATFORM_BUNDLE_VERSION:-v1}
+      DAI_ENV_BUILD_NETWORK_MODE: ${DAI_ENV_BUILD_NETWORK_MODE:-default}
+      DAI_ENV_BUILD_HTTP_PROXY: ${DAI_ENV_BUILD_HTTP_PROXY:-}
+      DAI_ENV_BUILD_CPU_LIMIT: ${DAI_ENV_BUILD_CPU_LIMIT:-2}
+      DAI_ENV_BUILD_MEMORY_MB: ${DAI_ENV_BUILD_MEMORY_MB:-4096}
+      DAI_ENV_BUILD_PIDS_LIMIT: ${DAI_ENV_BUILD_PIDS_LIMIT:-512}
+      DAI_ENV_BUILD_MAX_IMAGE_BYTES: ${DAI_ENV_BUILD_MAX_IMAGE_BYTES:-21474836480}
       DAI_ENV_BUILD_LOG_MAX_BYTES: ${DAI_ENV_BUILD_LOG_MAX_BYTES:-61440}
+      DAI_ENV_BUILDER_HEARTBEAT_KEY: ${DAI_ENV_BUILDER_HEARTBEAT_KEY:-environment:v2:builder:heartbeat}
+      DAI_ENV_BUILDER_HEARTBEAT_TTL_SECONDS: ${DAI_ENV_BUILDER_HEARTBEAT_TTL_SECONDS:-30}
+      DAI_ENV_BUILDER_HEARTBEAT_INTERVAL_SECONDS: ${DAI_ENV_BUILDER_HEARTBEAT_INTERVAL_SECONDS:-10}
+      DAI_ENV_REGISTRY_DOCKER_CONFIG: /run/secrets/config.json
+      DAI_ENV_REGISTRY_ALLOW_ANONYMOUS: ${DAI_ENV_REGISTRY_ALLOW_ANONYMOUS:-false}
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - internal
+    secrets:
+      - source: dai_env_registry_docker_config
+        target: config.json
     volumes:
       # 只挂载 Docker socket——构建镜像由宿主机 daemon 执行；不挂载学生工作目录
       - /var/run/docker.sock:/var/run/docker.sock

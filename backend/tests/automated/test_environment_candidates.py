@@ -28,6 +28,21 @@ class _Response:
         return None
 
 
+class _JsonResponse:
+    status_code = 200
+    headers = {"content-type": "application/vnd.pypi.simple.v1+json"}
+    text = ""
+
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        return None
+
+
 def test_simple_api_candidate_search_returns_versions_without_source_url(monkeypatch):
     calls = []
 
@@ -54,6 +69,55 @@ def test_candidate_search_rejects_credential_bearing_source(monkeypatch):
             query="numpy",
             python_version="3.12",
             index_url="https://user:secret@example/simple",
+        )
+
+
+def test_json_simple_api_parses_sdist_and_filters_python_incompatible_wheels(monkeypatch):
+    response = _JsonResponse(
+        {
+            "files": [
+                {"filename": "demo_pkg-1.2.3.tar.gz", "requires-python": ">=3.10"},
+                {"filename": "demo_pkg-1.2.4-py3-none-any.whl", "requires-python": ">=3.13"},
+                {"filename": "demo_pkg-1.2.5-cp311-cp311-manylinux_2_17_x86_64.whl"},
+                {"filename": "demo_pkg-1.2.6-cp312-cp312-manylinux_2_17_x86_64.whl"},
+            ]
+        }
+    )
+    monkeypatch.setattr("app.services.environment_candidates.httpx.get", lambda *a, **k: response)
+    result = search_pip_candidates(
+        query="demo_pkg",
+        python_version="3.12",
+        index_url="https://packages.example/simple",
+    )
+    assert result["versions"] == ["1.2.6", "1.2.3"]
+    assert result["compatible"] is True
+
+
+def test_candidate_search_passes_explicit_proxy_without_trusting_process_environment(monkeypatch):
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        return _JsonResponse({"files": []})
+
+    monkeypatch.setattr("app.services.environment_candidates.httpx.get", fake_get)
+    search_pip_candidates(
+        query="numpy",
+        python_version="3.12",
+        index_url="https://packages.example/simple",
+        proxy_url="http://proxy.example:8080",
+    )
+    assert calls[0][1]["proxy"] == "http://proxy.example:8080"
+    assert calls[0][1]["trust_env"] is False
+
+
+def test_candidate_search_rejects_credential_bearing_proxy():
+    with pytest.raises(ValueError, match="凭据"):
+        search_pip_candidates(
+            query="numpy",
+            python_version="3.12",
+            index_url="https://packages.example/simple",
+            proxy_url="http://user:secret@proxy.example:8080",
         )
 
 
@@ -100,7 +164,7 @@ def test_apt_candidate_timeout_removes_daemon_container(monkeypatch):
 
     class _Settings:
         env_python_base_images = {"3.11": "python@sha256:" + "a" * 64}
-        env_apt_snapshot_sources = {"3.11": ["deb http://snapshot.example/debian trixie main"]}
+        env_apt_snapshot_sources = {"3.11": ["deb http://snapshot.debian.org/archive/debian/20260801T000000Z trixie main"]}
         env_apt_deny_patterns = []
         env_build_network_mode = "default"
         env_build_http_proxy = None

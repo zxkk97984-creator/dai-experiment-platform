@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# CI e2e 专用：构建 basic 环境镜像并回写 image_digest
-# （等价 environment-builder 单次构建；seed-basic-environment-mysql.py 只写入占位 digest）。
+# CI e2e 专用：构建 basic 环境镜像并回写 image_digest。
+# 分阶段迁移的生产 bootstrap 必须使用真实、已 smoke 的 digest；
+# seed-basic-environment-mysql.py 的占位值只允许 disposable smoke。
 #
 # 前置：compose 栈（mysql 已起）+ 空库两步迁移（迁移 A → seed → head）已完成。
 # 用法：在仓库根执行  bash scripts/build-basic-environment-ci.sh

@@ -504,6 +504,9 @@ def _upgrade_head_seeded(env):
 def test_migration_downgrade_one_step_then_upgrade_head(tmp_path):
     """downgrade -1 再 upgrade head"""
     env = _alembic_env(tmp_path, "step.db")
+    # V2 migrations are forward-only by default.  This test deliberately
+    # exercises the reversible path on a disposable SQLite database.
+    env["DAI_ALLOW_ENVIRONMENT_V2_DOWNGRADE"] = "true"
 
     _upgrade_head_seeded(env)
 

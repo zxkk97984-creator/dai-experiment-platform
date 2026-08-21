@@ -325,6 +325,7 @@ def _alembic_env(tmp_path, db_name: str) -> dict:
     db_path = tmp_path / db_name
     env = dict(__import__("os").environ)
     env["DAI_DATABASE_URL"] = f"sqlite:///{db_path}"
+    env["DAI_ALLOW_ENVIRONMENT_V2_DOWNGRADE"] = "true"
     # 确保 backend/ 在路径上以便 alembic/env.py 能 from app.config import
     env["PYTHONPATH"] = str(BACKEND_ROOT)
     return env

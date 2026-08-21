@@ -33,8 +33,8 @@ export const environmentsAPI = {
   updateProfile(id, data) {
     return client.patch(`/environments/profiles/${id}`, data)
   },
-  getProfile(id) {
-    return client.get(`/environments/profiles/${id}`)
+  getProfile(id, config = {}) {
+    return client.get(`/environments/profiles/${id}`, config)
   },
   createDraft(id) {
     return client.post(`/environments/profiles/${id}/draft`)

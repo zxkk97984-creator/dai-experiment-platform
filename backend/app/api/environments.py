@@ -87,6 +87,12 @@ from app.services.environment_editor_service import (
     teacher_option_for_version,
 )
 from app.services.environment_candidates import get_cached_apt_candidate, search_pip_candidates
+from app.services.environment_builder_health import read_heartbeat
+from app.services.environment_builder_v2 import (
+    _safe_apt_sources,
+    is_valid_registry_repository,
+    registry_auth_check,
+)
 from app.services.import_policy import normalize_pip_name
 from app.services.environment_spec import (
     DEFAULT_MEMORY_MB,
@@ -289,7 +295,9 @@ def _v2_draft_read(db: Session, profile: EnvironmentProfile, draft) -> Environme
     )
 
 
-def _v2_build_read(db: Session, job: EnvironmentBuildJob) -> EnvironmentBuildEditorRead:
+def _v2_build_read(
+    db: Session, job: EnvironmentBuildJob, *, queue_wakeup_pending: bool = False
+) -> EnvironmentBuildEditorRead:
     version = db.get(EnvironmentVersion, job.environment_version_id)
     profile = db.get(EnvironmentProfile, version.profile_id) if version else None
     return EnvironmentBuildEditorRead(
@@ -317,6 +325,7 @@ def _v2_build_read(db: Session, job: EnvironmentBuildJob) -> EnvironmentBuildEdi
         capabilities=_v2_capabilities(db, profile, db.get(EnvironmentDraft, profile.id))
         if profile
         else EnvironmentCapabilities(),
+        queue_wakeup_pending=queue_wakeup_pending,
     )
 
 
@@ -520,15 +529,7 @@ def patch_profile(
     """更新档位——展示名/描述/状态；slug 不可变。"""
     patch = body.model_dump(exclude_unset=True)
     if settings.environment_editor_v2_enabled:
-        if "status" in patch:
-            profile = archive_profile(db, profile_id, active=patch["status"] == "active")
-            patch.pop("status", None)
-        else:
-            profile = db.get(EnvironmentProfile, profile_id)
-            if profile is None:
-                raise api_error(404, "NOT_FOUND", "环境不存在")
-        if patch:
-            profile = update_profile(db, profile_id, patch)
+        profile = update_profile(db, profile_id, patch)
         draft = db.get(EnvironmentDraft, profile_id)
         return EnvironmentProfileEditorRead(
             id=profile.id,
@@ -668,9 +669,12 @@ def post_draft_build(
     current_user: PackageCatalog = _admin_only(),
 ):
     _require_v2(settings)
+    # Do not create a queued job that cannot be consumed.  The worker's
+    # heartbeat is intentionally checked before the DB state transition.
+    _require_build_readiness(settings, redis_client)
     _, job = start_draft_build(db, profile_id, actor_id=current_user.id, settings=settings)
-    _enqueue_or_503(redis_client, job, settings)
-    return _v2_build_read(db, job)
+    enqueued = _enqueue_or_503(redis_client, job, settings, pending_ok=True)
+    return _v2_build_read(db, job, queue_wakeup_pending=not enqueued)
 
 
 @router.get("/profiles/{profile_id}/versions", response_model=None)
@@ -767,13 +771,9 @@ def get_editor_options(
     )
 
 
-@router.get("/build-readiness", response_model=BuildReadinessRead)
-def get_build_readiness(
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-    current_user: PackageCatalog = _admin_only(),
-):
-    _require_v2(settings)
+def _build_readiness(settings: Settings, redis_client) -> BuildReadinessRead:
+    """Return the same build gate used by the UI and build mutations."""
+
     checks: dict[str, dict] = {}
     docker_ok = shutil.which("docker") is not None
     checks["docker"] = {
@@ -788,6 +788,12 @@ def get_build_readiness(
         "status": "configured" if image_ok else "misconfigured",
         "message": "已配置三个带 digest 的 Python 基础镜像" if image_ok else "基础镜像必须全部固定到 digest",
     }
+    registry_ok = is_valid_registry_repository(settings.env_registry_repository)
+    checks["registry"] = {
+        "status": "configured" if registry_ok else "misconfigured",
+        "message": "正式镜像 Registry 已配置" if registry_ok else "V2 构建必须配置可拉取的 Registry repository",
+    }
+    checks["registry_auth"] = registry_auth_check(settings)
     proxy = settings.env_build_http_proxy or ""
     loopback_proxy = bool(re.match(r"^https?://(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?", proxy))
     proxy_ok = not loopback_proxy or settings.env_build_network_mode == "host"
@@ -796,10 +802,8 @@ def get_build_readiness(
         "code": None if proxy_ok else "BUILD_PROXY_UNREACHABLE",
         "message": "显式构建代理配置可用" if proxy_ok else "回环代理不能从默认 Docker 网络访问",
     }
-    checks["worker"] = {
-        "status": "unknown",
-        "message": "Worker 心跳由后台任务更新；数据库补偿扫描仍可接管排队任务",
-    }
+    worker_check = read_heartbeat(redis_client, settings)
+    checks["worker"] = worker_check
     pip_source_ok = not settings.env_pip_index_url or bool(
         re.fullmatch(r"https?://[^\s/@]+(?:/[^\s]*)?", settings.env_pip_index_url)
     )
@@ -807,11 +811,15 @@ def get_build_readiness(
         "status": "configured" if pip_source_ok else "misconfigured",
         "message": "Python 包源已配置" if pip_source_ok else "Python 包源 URL 无效或包含凭据",
     }
-    apt_source_ok = all(
-        isinstance(settings.env_apt_snapshot_sources.get(version), list)
-        and bool(settings.env_apt_snapshot_sources.get(version))
-        for version in SUPPORTED_PYTHON_VERSIONS
-    )
+    apt_source_ok = True
+    for version in SUPPORTED_PYTHON_VERSIONS:
+        sources = settings.env_apt_snapshot_sources.get(version)
+        try:
+            _safe_apt_sources(sources)
+        except Exception:
+            apt_source_ok = False
+        if not isinstance(sources, list) or not sources:
+            apt_source_ok = False
     checks["apt_source"] = {
         "status": "configured" if apt_source_ok else "unconfigured",
         "message": "三个 Python 基础镜像均有 Debian 快照源"
@@ -819,9 +827,46 @@ def get_build_readiness(
         else "尚未配置 Debian 快照源；系统包构建会被阻止",
     }
     return BuildReadinessRead(
-        ready=docker_ok and image_ok and proxy_ok and pip_source_ok and apt_source_ok,
+        ready=(
+            docker_ok
+            and image_ok
+            and registry_ok
+            and checks["registry_auth"].get("status") == "configured"
+            and proxy_ok
+            and pip_source_ok
+            and apt_source_ok
+            and worker_check.get("status") == "healthy"
+        ),
         checks=checks,
     )
+
+
+def _require_build_readiness(settings: Settings, redis_client) -> BuildReadinessRead:
+    readiness = _build_readiness(settings, redis_client)
+    if readiness.ready:
+        return readiness
+    failed_checks = {
+        key: value
+        for key, value in readiness.checks.items()
+        if value.get("status") not in {"healthy", "configured"}
+    }
+    raise api_error(
+        503,
+        "BUILD_SERVICE_UNAVAILABLE",
+        "环境构建服务尚未就绪，请稍后重试",
+        fields={"checks": failed_checks},
+        retryable=True,
+    )
+
+
+@router.get("/build-readiness", response_model=BuildReadinessRead)
+def get_build_readiness(
+    settings: Settings = Depends(get_settings),
+    redis_client=Depends(get_redis_client),
+    current_user: PackageCatalog = _admin_only(),
+):
+    _require_v2(settings)
+    return _build_readiness(settings, redis_client)
 
 
 @router.get("/package-candidates", response_model=list[PackageCandidateRead])
@@ -872,6 +917,7 @@ def get_package_candidates(
                 query=normalized,
                 python_version=python_version,
                 index_url=settings.env_pip_index_url,
+                proxy_url=settings.env_build_http_proxy,
             )
         except ValueError as exc:
             raise api_error(503, "BUILD_SERVICE_UNAVAILABLE", str(exc), retryable=True) from exc
@@ -932,12 +978,17 @@ def get_package_candidates(
 # ═══════════════════════════════════════════════════════════════
 
 
-def _enqueue_or_503(redis_client, job: EnvironmentBuildJob, settings: Settings) -> None:
-    """Redis list 只负责唤醒——入队失败不丢任务（DB queued 保留），返回队列不可用。"""
+def _enqueue_or_503(
+    redis_client, job: EnvironmentBuildJob, settings: Settings, *, pending_ok: bool = False
+) -> bool:
+    """Redis only wakes a DB-backed job; failed wakeup remains visible to the UI."""
     try:
         enqueue_build_redis(redis_client, job, settings)
+        return True
     except Exception:
-        raise api_error(503, "BUILD_QUEUE_UNAVAILABLE", "构建队列暂不可用，请稍后重试")
+        if not pending_ok:
+            raise api_error(503, "BUILD_QUEUE_UNAVAILABLE", "构建队列暂不可用，请稍后重试")
+        return False
 
 
 @router.post("/versions/{version_id}/builds", response_model=EnvironmentBuildRead, status_code=201)
@@ -951,8 +1002,10 @@ def post_build(
     """为版本触发构建——available 不可重建；已有进行中任务不重复创建。"""
     _reject_legacy_write(settings)
     job = create_build_job(db, version_id, actor_id=current_user.id)
-    _enqueue_or_503(redis_client, job, settings)
-    return job
+    enqueued = _enqueue_or_503(redis_client, job, settings)
+    return EnvironmentBuildRead.model_validate(job).model_copy(
+        update={"queue_wakeup_pending": not enqueued}
+    )
 
 
 @router.get("/builds", response_model=None)
@@ -1055,11 +1108,12 @@ def post_build_retry(
 ):
     """重试失败/超时构建——创建新尝试（attempt+1、retry_of_id 关联）并入队。"""
     if settings.environment_editor_v2_enabled:
+        _require_build_readiness(settings, redis_client)
         _, new_job = retry_draft_build(
             db, job_id, actor_id=current_user.id, settings=settings
         )
-        _enqueue_or_503(redis_client, new_job, settings)
-        return _v2_build_read(db, new_job)
+        enqueued = _enqueue_or_503(redis_client, new_job, settings, pending_ok=True)
+        return _v2_build_read(db, new_job, queue_wakeup_pending=not enqueued)
     return retry_build_job(db, job_id, actor_id=current_user.id, settings=settings, redis_client=redis_client)
 
 

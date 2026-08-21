@@ -16,6 +16,10 @@ from html.parser import HTMLParser
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.utils import InvalidSdistFilename, InvalidWheelFilename
+from packaging.utils import parse_sdist_filename, parse_wheel_filename
+from packaging.version import InvalidVersion, Version
 
 from app.services.import_policy import normalize_pip_name
 from app.services.environment_spec import validate_apt_name
@@ -169,25 +173,82 @@ def refresh_apt_candidate_cache(
     return len(records)
 
 
+def _python_requirement_allows(requires_python: str | None, python_version: str) -> bool:
+    if not requires_python:
+        return True
+    try:
+        return SpecifierSet(requires_python).contains(Version(python_version), prereleases=True)
+    except (InvalidSpecifier, InvalidVersion, TypeError):
+        # Invalid upstream metadata must not be advertised as installable.
+        return False
+
+
+def _wheel_supports_python(tags, python_version: str) -> bool:
+    minor = python_version.replace(".", "")
+    accepted = {"py3", f"py{minor}", f"cp{minor}", f"pp{minor}"}
+    return any(
+        str(tag.interpreter).lower() in accepted
+        or str(tag.interpreter).lower().startswith(f"cp{minor}")
+        or str(tag.interpreter).lower().startswith(f"pp{minor}")
+        for tag in tags
+    )
+
+
+def _parse_distribution_filename(
+    filename: str,
+    project: str,
+    python_version: str,
+    requires_python: str | None = None,
+) -> tuple[str, bool] | None:
+    """Return a normalized version and Python compatibility for a file."""
+
+    try:
+        name, version, _build, tags = parse_wheel_filename(filename)
+        if normalize_pip_name(str(name)) != project:
+            return None
+        compatible = _wheel_supports_python(tags, python_version) and _python_requirement_allows(
+            requires_python, python_version
+        )
+        return str(version), compatible
+    except (InvalidWheelFilename, ValueError):
+        pass
+    try:
+        name, version = parse_sdist_filename(filename)
+        if normalize_pip_name(str(name)) != project:
+            return None
+        return str(version), _python_requirement_allows(requires_python, python_version)
+    except (InvalidSdistFilename, ValueError):
+        return None
+
+
 class _SimpleVersionParser(HTMLParser):
-    def __init__(self, project: str):
+    def __init__(self, project: str, python_version: str):
         super().__init__()
         self.project = project
-        self.versions: set[str] = set()
+        self.python_version = python_version
+        self.versions: dict[str, bool] = {}
+        self.saw_project_file = False
 
     def handle_starttag(self, tag: str, attrs):
         if tag.lower() != "a":
             return
-        href = dict(attrs).get("href", "")
+        attributes = dict(attrs)
+        href = attributes.get("href", "")
         if "#" in href:
             href = href.split("#", 1)[0]
-        value = href.rstrip("/").rsplit("/", 1)[-1]
-        prefix = f"{self.project}-"
-        if value.startswith(prefix):
-            remainder = re.sub(r"\.(?:tar\.gz|zip|whl)$", "", value[len(prefix) :])
-            candidate = remainder.split("-", 1)[0]
-            if re.fullmatch(r"[0-9][A-Za-z0-9.!+~_]*", candidate):
-                self.versions.add(candidate)
+        filename = href.rstrip("/").rsplit("/", 1)[-1]
+        parsed = _parse_distribution_filename(
+            filename,
+            self.project,
+            self.python_version,
+            attributes.get("data-requires-python"),
+        )
+        if parsed is None:
+            return
+        self.saw_project_file = True
+        version, compatible = parsed
+        if compatible:
+            self.versions[version] = True
 
 
 def _safe_index_url(index_url: str | None) -> str:
@@ -201,6 +262,22 @@ def _safe_index_url(index_url: str | None) -> str:
     if parsed.username is not None or parsed.password is not None:
         raise ValueError("Python 包源不能在 URL 中携带凭据")
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
+
+
+def _safe_proxy_url(proxy_url: str | None) -> str | None:
+    if not proxy_url:
+        return None
+    value = proxy_url.strip()
+    parsed = urlsplit(value)
+    if (
+        any(character.isspace() for character in value)
+        or parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise ValueError("Python 包源代理配置无效或包含凭据")
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
 
 
 def _version_sort_key(value: str):
@@ -219,6 +296,7 @@ def search_pip_candidates(
     python_version: str,
     index_url: str | None,
     timeout_seconds: float = 3.0,
+    proxy_url: str | None = None,
 ) -> dict:
     """Search one exact PEP 503 project name.
 
@@ -229,11 +307,14 @@ def search_pip_candidates(
 
     normalized = normalize_pip_name(query)
     source = _safe_index_url(index_url)
+    proxy = _safe_proxy_url(proxy_url)
     response = httpx.get(
         f"{source}/{normalized}/",
         headers={"Accept": "text/html, application/vnd.pypi.simple.v1+json"},
         timeout=timeout_seconds,
         follow_redirects=True,
+        proxy=proxy,
+        trust_env=False,
     )
     if response.status_code == 404:
         return {
@@ -246,30 +327,49 @@ def search_pip_candidates(
         }
     response.raise_for_status()
 
-    versions: set[str] = set()
+    versions: dict[str, bool] = {}
+    saw_project_file = False
     content_type = response.headers.get("content-type", "").lower()
     if "json" in content_type:
         try:
             payload = response.json()
+            if not isinstance(payload, dict):
+                raise ValueError("Simple API JSON 根对象无效")
             for file in payload.get("files", []):
+                if not isinstance(file, dict):
+                    continue
                 filename = str(file.get("filename", ""))
-                # Simple JSON file names are parsed conservatively; the final
-                # pip resolver still decides wheel/Python compatibility.
-                stem = filename.rsplit("-", 4)
-                if len(stem) >= 5:
-                    versions.add(stem[1])
+                parsed = _parse_distribution_filename(
+                    filename,
+                    normalized,
+                    python_version,
+                    file.get("requires-python") or file.get("requires_python"),
+                )
+                if parsed is None:
+                    continue
+                saw_project_file = True
+                version, compatible = parsed
+                # A yanked release is not a useful candidate for a new
+                # environment unless no non-yanked file exists; leave that
+                # policy to pip and simply omit yanked files from the picker.
+                if file.get("yanked"):
+                    continue
+                if compatible:
+                    versions[version] = True
         except (TypeError, ValueError, json.JSONDecodeError):
             versions.clear()
-    if not versions:
-        parser = _SimpleVersionParser(normalized)
+            saw_project_file = False
+    if not versions and "json" not in content_type:
+        parser = _SimpleVersionParser(normalized, python_version)
         parser.feed(response.text)
         versions = parser.versions
+        saw_project_file = parser.saw_project_file
 
     return {
         "manager": "pip",
         "name": normalized,
         "versions": sorted(versions, key=_version_sort_key, reverse=True),
-        "compatible": None,
+        "compatible": bool(versions) if saw_project_file else None,
         "denied": False,
         "indexing": False,
     }

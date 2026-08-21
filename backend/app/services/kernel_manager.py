@@ -135,7 +135,21 @@ class KernelManager:
         os.makedirs(tmp_dir, exist_ok=True)
         conn_path = os.path.join(tmp_dir, f"kernel-rec-{record_id}.json")
         key = secrets.token_hex(24).encode("ascii")
-        write_connection_file(conn_path, ip="0.0.0.0", key=key)
+        # Kernel containers use ``--network none`` and do not publish ports, so
+        # every container has its own network namespace.  Supplying the ports
+        # explicitly avoids jupyter_client opening host sockets merely to
+        # discover free ports.  That probe is both unnecessary here and fails
+        # in restricted workers where socket creation is denied.
+        write_connection_file(
+            conn_path,
+            ip="0.0.0.0",
+            key=key,
+            shell_port=20001,
+            iopub_port=20002,
+            stdin_port=20003,
+            control_port=20004,
+            hb_port=20005,
+        )
         with open(conn_path) as f:
             conn_info = json.load(f)
         conn_info["ip"] = "0.0.0.0"

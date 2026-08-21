@@ -20,6 +20,12 @@ OLD_MIGRATION_PATH = (
 MIGRATION_PATH = (
     BACKEND_DIR / "alembic" / "versions" / "20260820_0001_environment_editor_v2.py"
 )
+OWNERSHIP_MIGRATION_PATH = (
+    BACKEND_DIR / "alembic" / "versions" / "20260820_0002_environment_build_ownership.py"
+)
+LOCK_MIGRATION_PATH = (
+    BACKEND_DIR / "alembic" / "versions" / "20260820_0003_environment_registry_lock.py"
+)
 
 
 def _load(path: Path, module_name: str):
@@ -188,8 +194,10 @@ def test_upgrade_backfills_current_version_publication_and_legacy_specs(engine):
         resolved_spec = json.loads(versions[1].resolved_spec)
         assert requested_spec["python_packages"][0]["version"] == "2.1.3"
         assert resolved_spec["resolution_quality"] == "legacy_inferred"
-        assert versions[1].first_published_at is not None
-        assert versions[1].first_published_by_id == 1
+        assert versions[1].first_published_at is None
+        assert versions[1].first_published_by_id is None
+        assert versions[2].first_published_at is not None
+        assert versions[2].first_published_by_id == 1
         assert versions[3].first_published_at is None
 
         publication = conn.execute(
@@ -202,6 +210,41 @@ def test_upgrade_backfills_current_version_publication_and_legacy_specs(engine):
 
         phases = dict(conn.execute(sa.text("SELECT id, phase FROM environment_build_jobs")).all())
         assert phases == {10: "done", 11: "done"}
+
+
+def test_lock_migration_adds_same_profile_constraints_and_guarded_downgrade(
+    engine, monkeypatch
+):
+    _seed_legacy_database(engine)
+    _run(engine, _load(MIGRATION_PATH, "environment_editor_v2_v3_schema"), "upgrade")
+    _run(engine, _load(OWNERSHIP_MIGRATION_PATH, "environment_editor_v2_v3_ownership"), "upgrade")
+    lock_migration = _load(LOCK_MIGRATION_PATH, "environment_editor_v2_v3_lock")
+    _run(engine, lock_migration, "upgrade")
+
+    inspector = sa.inspect(engine)
+    version_columns = {column["name"] for column in inspector.get_columns("environment_versions")}
+    assert {"resolution_lock", "resolution_lock_sha256"}.issubset(version_columns)
+    uniques = inspector.get_unique_constraints("environment_versions")
+    assert any(
+        set(unique["column_names"]) == {"profile_id", "id"} for unique in uniques
+    )
+    profile_fks = inspector.get_foreign_keys("environment_profiles")
+    assert any(
+        fk["constrained_columns"] == ["id", "current_version_id"]
+        for fk in profile_fks
+    )
+
+    monkeypatch.delenv("DAI_ALLOW_ENVIRONMENT_V2_DOWNGRADE", raising=False)
+    with pytest.raises(RuntimeError, match="forward-only"):
+        _run(engine, lock_migration, "downgrade")
+
+    monkeypatch.setenv("DAI_ALLOW_ENVIRONMENT_V2_DOWNGRADE", "true")
+    _run(engine, lock_migration, "downgrade")
+    old_columns = {
+        column["name"] for column in sa.inspect(engine).get_columns("environment_versions")
+    }
+    assert "resolution_lock" not in old_columns
+    _run(engine, lock_migration, "upgrade")
 
 
 def test_downgrade_removes_only_v2_schema(engine):
