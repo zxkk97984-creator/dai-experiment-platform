@@ -1,6 +1,6 @@
 <script setup>
-// 任务中心：作业 + 考试 + 实验聚合为统一任务表格。
-// 全部数据来自既有 API（allSettled，单来源失败不整页报错）；
+// 学生作业列表：只展示作业，不与考试、实验混合为统一任务表格。
+// 作业与课程来自既有 API；课程加载失败时仍保留作业列表。
 // 状态、筛选、排序走 studentUi 纯函数，零伪造日期。
 
 import { computed, onMounted, reactive, ref, watch } from 'vue'
@@ -8,13 +8,12 @@ import { useRouter } from 'vue-router'
 
 import AppLayout from '../../components/layout/AppLayout.vue'
 import DashboardAsyncState from '../../components/dashboard/DashboardAsyncState.vue'
+import AppIcon from '../../components/ui/AppIcon.vue'
 import UiStatusPill from '../../components/ui/UiStatusPill.vue'
 import StudentPagination from '../../components/student/StudentPagination.vue'
 import { assignmentsAPI } from '../../api/assignments.js'
-import { examsAPI } from '../../api/exams.js'
-import { experimentsAPI } from '../../api/experiments.js'
 import { coursesAPI } from '../../api/courses.js'
-import { normalizeAssignmentTask, normalizeExamTask, normalizeExperimentTask, taskStatus } from '../../utils/studentUi.js'
+import { normalizeAssignmentTask, taskStatus } from '../../utils/studentUi.js'
 
 const router = useRouter()
 
@@ -26,20 +25,16 @@ const error = ref(false)
 const page = ref(1)
 const pageSize = 10
 
-const filters = reactive({ status: 'all', courseId: '', kind: '', time: 'all', sort: 'due' })
+const filters = reactive({ status: 'all', courseId: '', query: '', time: 'all', sort: 'due' })
 
 const timeFmt = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-const kindLabel = { assignment: '作业', exam: '考试', experiment: '实验' }
-
 const now = () => new Date()
 
-async function loadAll() {
+async function loadAssignments() {
   loading.value = true
   error.value = false
-  const [aRes, eRes, xRes, cRes] = await Promise.allSettled([
+  const [aRes, cRes] = await Promise.allSettled([
     assignmentsAPI.list(),
-    examsAPI.list(),
-    experimentsAPI.listRecords(),
     coursesAPI.list(),
   ])
   const courses = cRes.status === 'fulfilled' ? (cRes.value.data?.items || cRes.value.data || []) : []
@@ -52,21 +47,9 @@ async function loadAll() {
       flat.push(normalizeAssignmentTask(item, courseMap.value, t))
     }
   }
-  if (eRes.status === 'fulfilled') {
-    for (const item of eRes.value.data?.items || eRes.value.data || []) {
-      flat.push(normalizeExamTask(item, courseMap.value, t))
-    }
-  }
-  if (xRes.status === 'fulfilled') {
-    for (const item of xRes.value.data?.items || xRes.value.data || []) {
-      flat.push(normalizeExperimentTask(item, courseMap.value, t))
-    }
-  }
-  // 无法生成合法路由的任务直接丢弃，不渲染死链接
+  // 无法生成合法路由的作业直接丢弃，不渲染死链接
   tasks.value = flat.filter((task) => task.route)
-  if (aRes.status !== 'fulfilled' && eRes.status !== 'fulfilled' && xRes.status !== 'fulfilled') {
-    error.value = true
-  }
+  error.value = aRes.status !== 'fulfilled'
   loading.value = false
 }
 
@@ -82,7 +65,7 @@ const statusCounts = computed(() => {
   return counts
 })
 
-/** 未提交任务中最早的未来截止（真实最近截止） */
+/** 未提交作业中最早的未来截止（真实最近截止） */
 const nearestDeadline = computed(() => {
   const t = now()
   const ts = tasks.value
@@ -97,7 +80,8 @@ const filteredTasks = computed(() => {
   const t = now()
   if (filters.status !== 'all') list = list.filter((task) => taskStatus(task, t) === filters.status)
   if (filters.courseId) list = list.filter((task) => String(task.courseId) === filters.courseId)
-  if (filters.kind) list = list.filter((task) => task.kind === filters.kind)
+  const query = filters.query.trim().toLowerCase()
+  if (query) list = list.filter((task) => task.title.toLowerCase().includes(query))
   if (filters.time === 'today') {
     const start = new Date()
     start.setHours(0, 0, 0, 0)
@@ -147,7 +131,7 @@ function statusTone(task) {
 function resetFilters() {
   filters.status = 'all'
   filters.courseId = ''
-  filters.kind = ''
+  filters.query = ''
   filters.time = 'all'
   filters.sort = 'due'
 }
@@ -174,7 +158,7 @@ watch(pageCount, (count) => {
   if (page.value > count) page.value = count
 })
 
-onMounted(loadAll)
+onMounted(loadAssignments)
 </script>
 
 <template>
@@ -182,19 +166,19 @@ onMounted(loadAll)
     <div class="page">
       <section class="page-head">
         <div class="ph-title">
-          <p class="eyebrow">学习 / 任务</p>
-          <h1>任务中心</h1>
+          <p class="eyebrow">学习 / 作业</p>
+          <h1>作业</h1>
           <p class="lead">
-            <span class="task-count">{{ statusCounts.all }}</span> 项开放任务
+            <span class="assignment-count">{{ statusCounts.all }}</span> 项作业
             <template v-if="nearestDeadline"> · 最近截止 <span class="nearest-deadline">{{ formatTime(nearestDeadline) }}</span></template>
           </p>
         </div>
       </section>
 
-      <div class="tabs" role="tablist" aria-label="任务状态">
+      <div class="tabs" role="tablist" aria-label="作业状态">
         <button
           v-for="tab in [
-            { key: 'all', label: '全部任务' },
+            { key: 'all', label: '全部作业' },
             { key: 'pending', label: '待办' },
             { key: 'overdue', label: '逾期' },
             { key: 'submitted', label: '已完成' },
@@ -212,20 +196,25 @@ onMounted(loadAll)
         </button>
       </div>
 
-      <section class="table-wrap">
+      <section class="table-wrap" aria-label="作业列表">
         <div class="toolbar">
+          <label class="searchbox assignment-search" :class="{ 'has-value': filters.query }">
+            <AppIcon name="search" :size="15" />
+            <input
+              v-model="filters.query"
+              type="search"
+              class="input assignment-search-input"
+              placeholder="搜索作业名称"
+              aria-label="搜索作业名称"
+            />
+            <button v-if="filters.query" type="button" class="clear" aria-label="清空作业搜索" @click="filters.query = ''">
+              <AppIcon name="close" :size="13" />
+            </button>
+          </label>
           <label class="select" style="width: 150px;">
             <select v-model="filters.courseId" class="filter-course" aria-label="按课程筛选">
               <option value="">全部课程</option>
               <option v-for="c in courseOptions" :key="c.id" :value="c.id">{{ c.title }}</option>
-            </select>
-          </label>
-          <label class="select" style="width: 130px;">
-            <select v-model="filters.kind" class="filter-kind" aria-label="按类型筛选">
-              <option value="">全部类型</option>
-              <option value="assignment">作业</option>
-              <option value="exam">考试</option>
-              <option value="experiment">实验</option>
             </select>
           </label>
           <label class="select" style="width: 140px;">
@@ -247,7 +236,7 @@ onMounted(loadAll)
         </div>
 
         <div class="task-catalog-heading">
-          <h2>全部任务</h2>
+          <h2>全部作业</h2>
           <span>共 {{ filteredTasks.length }} 个</span>
         </div>
 
@@ -255,17 +244,16 @@ onMounted(loadAll)
           :loading="loading"
           :error="error"
           :empty="filteredTasks.length === 0"
-          empty-title="暂无任务"
-          empty-body="没有符合条件的任务"
-          @retry="loadAll"
+          empty-title="暂无作业"
+          empty-body="没有符合条件的作业"
+          @retry="loadAssignments"
         >
           <div class="table-scroll">
             <table class="ds-table task-table">
               <thead>
                 <tr>
-                  <th>任务名称</th>
+                  <th>作业名称</th>
                   <th>所属课程</th>
-                  <th>类型</th>
                   <th>状态</th>
                   <th>截止时间</th>
                   <th class="col-actions">操作</th>
@@ -273,9 +261,8 @@ onMounted(loadAll)
               </thead>
               <tbody>
                 <tr v-for="task in paginatedTasks" :key="task.kind + '-' + task.id">
-                  <td data-label="任务名称"><span class="cell-main task-name" :title="task.title">{{ task.title }}</span></td>
+                  <td data-label="作业名称"><span class="cell-main task-name" :title="task.title">{{ task.title }}</span></td>
                   <td data-label="所属课程" class="cell-ellipsis">{{ task.courseTitle || '—' }}</td>
-                  <td data-label="类型">{{ kindLabel[task.kind] || task.kind }}</td>
                   <td data-label="状态"><UiStatusPill :tone="statusTone(task)" :label="statusText(task)" /></td>
                   <td data-label="截止时间" class="meta">{{ task.dueAt ? formatTime(task.dueAt) : '—' }}</td>
                   <td data-label="操作" class="col-actions"><button type="button" class="btn btn-ghost btn-sm task-action" @click="go(task.route)">进入</button></td>
@@ -285,7 +272,7 @@ onMounted(loadAll)
           </div>
 
           <div class="task-pagination">
-            <StudentPagination :current-page="page" :page-count="pageCount" :total="filteredTasks.length" :page-size="pageSize" aria-label="任务分页" @change="goToPage" />
+            <StudentPagination :current-page="page" :page-count="pageCount" :total="filteredTasks.length" :page-size="pageSize" aria-label="作业分页" @change="goToPage" />
           </div>
         </DashboardAsyncState>
       </section>
@@ -298,8 +285,13 @@ onMounted(loadAll)
 .task-catalog-heading { display: flex; align-items: baseline; gap: 10px; margin: 12px 0 4px; }
 .task-catalog-heading h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--fg); }
 .task-catalog-heading span { color: var(--muted); font-size: var(--text-base); }
+.assignment-search { flex: 0 1 280px; max-width: 100%; }
 .task-name { max-width: 320px; }
 .task-action { color: var(--accent); }
 .task-action:hover { color: var(--accent); background: var(--accent-soft); }
 .task-pagination { border-top: 1px solid var(--border); }
+
+@media (max-width: 560px) {
+  .assignment-search { flex-basis: 100%; }
+}
 </style>

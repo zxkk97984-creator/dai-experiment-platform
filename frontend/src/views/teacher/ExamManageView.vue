@@ -101,7 +101,7 @@ onMounted(() => { fetchExams(); fetchCourses() })
 
       <section class="table-wrap data-panel">
         <div class="toolbar filter-bar">
-          <label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索考试名称或课程" @input="resetPage" /></label>
+          <label class="searchbox" :class="{ 'has-value': query }" style="width: 260px;"><AppIcon name="search" :size="15" /><input v-model="query" type="search" class="input" placeholder="搜索考试名称或课程" aria-label="搜索考试名称或课程" @input="resetPage" /><button v-if="query" type="button" class="clear" aria-label="清空搜索" @click="query = ''; resetPage()"><AppIcon name="close" :size="13" /></button></label>
           <select v-model="statusFilter" aria-label="状态筛选" @change="resetPage"><option value="all">状态：全部</option><option value="published">已发布</option><option value="draft">草稿</option><option value="ended">已结束</option></select>
           <select v-model="courseFilter" aria-label="课程筛选" @change="resetPage"><option value="all">课程：全部课程</option><option v-for="course in courses" :key="course.id" :value="String(course.id)">{{ course.title }}</option></select>
           <select v-model="sortOrder" aria-label="排序"><option value="updated">排序：最近更新</option><option value="title">排序：考试名称</option></select>

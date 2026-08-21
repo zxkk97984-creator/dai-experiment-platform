@@ -49,6 +49,37 @@ def test_admin_can_create_user_and_logout_blacklists_token(client, db_session_fa
     assert blocked_response.json()["detail"]["code"] == "TOKEN_REVOKED"
 
 
+def test_admin_user_list_exactly_matches_username_student_no_or_real_name(client, db_session_factory):
+    create_user(db_session_factory, "search-admin", "admin")
+    create_user(db_session_factory, "search-username", "teacher", real_name="其他用户")
+    create_user(db_session_factory, "search-student", "student", real_name="李四")
+    create_user(db_session_factory, "search-name", "student", real_name="张三")
+
+    with db_session_factory() as db:
+        from sqlalchemy import select
+        from app.models import User
+
+        student = db.scalar(select(User).where(User.username == "search-student"))
+        student.student_no = "20260001"
+        db.commit()
+
+    access_token, _ = login(client, "search-admin")
+    headers = auth_header(access_token)
+
+    for query, expected_username in (
+        ("search-username", "search-username"),
+        ("20260001", "search-student"),
+        ("张三", "search-name"),
+    ):
+        response = client.get("/api/v1/users", headers=headers, params={"q": query})
+        assert response.status_code == 200, response.text
+        assert [item["username"] for item in response.json()["items"]] == [expected_username]
+
+    partial_response = client.get("/api/v1/users", headers=headers, params={"q": "search-stu"})
+    assert partial_response.status_code == 200
+    assert partial_response.json()["items"] == []
+
+
 def test_student_cannot_create_users(client, db_session_factory):
     create_user(db_session_factory, "student", "student")
     access_token, _ = login(client, "student")

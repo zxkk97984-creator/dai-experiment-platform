@@ -6,6 +6,7 @@ vi.mock('../../../../api/environments.js', () => ({
     getEditorOptions: vi.fn(),
     getBuildReadiness: vi.fn(),
     getProfile: vi.fn(),
+    createProfile: vi.fn(),
     saveDraft: vi.fn(),
     buildDraft: vi.fn(),
     publish: vi.fn(),
@@ -61,6 +62,7 @@ beforeEach(() => {
   })
   environmentsAPI.getBuildReadiness.mockResolvedValue({ data: { ready: true, checks: {} } })
   environmentsAPI.getProfile.mockResolvedValue({ data: JSON.parse(JSON.stringify(detail)) })
+  environmentsAPI.createProfile.mockResolvedValue({ data: { id: 2 } })
   environmentsAPI.saveDraft.mockResolvedValue({
     data: { ...JSON.parse(JSON.stringify(detail.draft)), revision: 2 },
   })
@@ -73,6 +75,66 @@ async function mountEditor() {
 }
 
 describe('EnvironmentEditorPanel', () => {
+  it('opens the new environment form in a dialog while keeping the original fields', async () => {
+    const wrapper = await mountEditor()
+    const openButton = wrapper.find('.v2-toolbar button')
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    await openButton.trigger('click')
+
+    const dialog = wrapper.find('[role="dialog"]')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.attributes('aria-labelledby')).toBe('create-env-title')
+    expect(dialog.find('h2#create-env-title').text()).toBe('新建环境')
+    expect(dialog.find('#v2-display-name').exists()).toBe(true)
+    expect(dialog.find('#v2-description').exists()).toBe(true)
+    expect(dialog.text()).toContain('创建并编辑')
+    expect(wrapper.find('.create-card').exists()).toBe(false)
+
+    await dialog.find('button[aria-label="关闭"]').trigger('click')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+  })
+
+  it('submits the original fields from the dialog and closes after creation', async () => {
+    const wrapper = await mountEditor()
+    await wrapper.find('.v2-toolbar button').trigger('click')
+    const dialog = wrapper.find('[role="dialog"]')
+
+    await dialog.find('#v2-display-name').setValue('  新建数据环境  ')
+    await dialog.find('#v2-description').setValue('  用于数据分析作业  ')
+    await dialog.trigger('submit')
+    await flushPromises()
+
+    expect(environmentsAPI.createProfile).toHaveBeenCalledWith({
+      display_name: '新建数据环境',
+      description: '用于数据分析作业',
+      slug: null,
+    })
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+  })
+
+  it('keeps the dialog open and shows the duplicate-name error inside it', async () => {
+    environmentsAPI.createProfile.mockRejectedValue({
+      response: {
+        data: {
+          detail: {
+            code: 'PROFILE_DISPLAY_NAME_CONFLICT',
+            message: '环境名称已存在，请使用其他名称',
+          },
+        },
+      },
+    })
+    const wrapper = await mountEditor()
+    await wrapper.find('.v2-toolbar button').trigger('click')
+    const dialog = wrapper.find('[role="dialog"]')
+    await dialog.find('#v2-display-name').setValue('重复环境')
+    await dialog.trigger('submit')
+    await flushPromises()
+
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.find('[role="alert"]').text()).toContain('环境名称已存在，请使用其他名称')
+  })
+
   it('loads a draft, adds a package, and saves with its revision', async () => {
     const wrapper = await mountEditor()
     expect(wrapper.text()).toContain('数据分析环境')

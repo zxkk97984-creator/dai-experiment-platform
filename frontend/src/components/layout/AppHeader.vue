@@ -18,6 +18,17 @@ const route = computed(() => router.currentRoute?.value || { path: '/', name: ''
 const app = useAppStore()
 const auth = useAuthStore()
 
+const props = defineProps({
+  variant: {
+    type: String,
+    default: 'default',
+  },
+})
+
+const isStudentWorkspace = computed(() => props.variant === 'student-workspace')
+const isTeacherWorkspace = computed(() => props.variant === 'teacher-workspace')
+const isWorkspace = computed(() => isStudentWorkspace.value || isTeacherWorkspace.value)
+
 const open = ref(false)
 const searchText = ref('')
 const searchOpen = ref(false)
@@ -31,6 +42,7 @@ const triggerEl = ref(null)
 const menuEl = ref(null)
 
 const displayName = computed(() => auth.user?.real_name || auth.user?.username || '同学')
+const avatarText = computed(() => displayName.value.trim().slice(0, 1))
 const roleBadge = computed(() => statusBadge(ROLE_MAP, auth.role))
 
 const PAGE_TITLES = {
@@ -208,7 +220,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <header class="header" @keydown="onKeydown">
+  <header
+    class="header"
+    :class="{
+      'student-workspace-header': isStudentWorkspace,
+      'teacher-workspace-header': isTeacherWorkspace,
+      'workspace-header': isWorkspace,
+    }"
+    @keydown="onKeydown"
+  >
     <button
       type="button"
       class="btn btn-ghost btn-icon menu-btn"
@@ -227,11 +247,11 @@ onBeforeUnmount(() => {
     <div class="grow"></div>
 
     <div ref="searchEl" class="header-search-wrap">
-      <label class="header-search">
+      <label class="header-search" :class="{ 'workspace-control': isWorkspace }">
         <AppIcon name="search" :size="15" aria-hidden="true" />
         <input
           v-model="searchText"
-          placeholder="全局搜索：课程 / 作业 / 学生 / 提交"
+          :placeholder="isStudentWorkspace ? '搜索课程、作业、考试' : isTeacherWorkspace ? '搜索课程、作业、学生、提交' : '全局搜索：课程 / 作业 / 学生 / 提交'"
           aria-label="全局搜索"
           @keydown.enter.prevent="submitSearch"
           @focus="onSearchFocus"
@@ -261,7 +281,14 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <button type="button" class="btn btn-ghost btn-icon notify-btn" aria-label="通知" title="通知" @click="router.push(auth.role === 'student' ? '/student' : auth.role === 'admin' ? '/admin' : '/teacher/notifications')">
+    <button
+      type="button"
+      class="btn btn-ghost btn-icon notify-btn"
+      :class="{ 'workspace-control': isWorkspace }"
+      aria-label="通知"
+      title="通知"
+      @click="router.push(auth.role === 'student' ? '/student' : auth.role === 'admin' ? '/admin' : '/teacher/notifications')"
+    >
       <AppIcon name="notification" :size="17" />
       <span v-if="unreadCount > 0" class="notify-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
     </button>
@@ -272,13 +299,15 @@ onBeforeUnmount(() => {
           ref="triggerEl"
           type="button"
           class="user-trigger"
+          :class="{ 'workspace-control': isWorkspace }"
           :aria-expanded="open"
           aria-haspopup="menu"
           @click="toggle"
         >
           <span class="user-name">{{ displayName }}</span>
           <span class="user-avatar" aria-hidden="true">
-            <AppIcon name="user" :size="17" />
+            <span v-if="isWorkspace">{{ avatarText }}</span>
+            <AppIcon v-else name="user" :size="17" />
           </span>
           <span class="user-chevron" aria-hidden="true">
             <AppIcon name="chevron-down" :size="15" />
@@ -437,4 +466,140 @@ onBeforeUnmount(() => {
 .search-result-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .search-result-main strong { font-size: var(--text-md); font-weight: 500; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .search-result-main small { color: var(--muted); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.workspace-header {
+  min-height: 72px;
+  height: 72px;
+  gap: 8px;
+  padding: 12px 28px;
+  background: color-mix(in oklch, var(--bg) 91%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.workspace-header .crumb {
+  gap: 9px;
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+
+.workspace-header .header-search {
+  width: min(340px, 30vw);
+  min-width: min(340px, 30vw);
+  max-width: none;
+  height: 44px;
+  gap: 10px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.workspace-header .header-search:hover,
+.workspace-header .header-search:focus-within {
+  border-color: var(--fg);
+  background: var(--bg);
+}
+
+.workspace-header .header-search input {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 13px;
+}
+
+.workspace-header .header-search kbd {
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.workspace-header .notify-btn {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+}
+
+.workspace-header .notify-btn:hover {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.workspace-header .user-trigger {
+  min-height: 44px;
+  height: 44px;
+  gap: 9px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--radius-md);
+}
+
+.workspace-header .user-avatar {
+  order: -1;
+  width: 34px;
+  height: 34px;
+  background: color-mix(in oklch, var(--fg) 7%, transparent);
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.workspace-header .user-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+@media (max-width: 920px) {
+  .workspace-header {
+    padding-inline: 18px;
+  }
+
+  .workspace-header .menu-btn {
+    display: inline-flex;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .workspace-header .crumb {
+    display: none;
+  }
+
+  .workspace-header .header-search-wrap {
+    margin-left: auto;
+  }
+
+  .workspace-header .header-search {
+    display: flex;
+    width: 44px;
+    min-width: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .workspace-header .header-search input,
+  .workspace-header .header-search kbd {
+    display: none;
+  }
+
+  .workspace-header .user-name {
+    display: inline;
+  }
+}
+
+@media (max-width: 680px) {
+  .workspace-header .user-trigger {
+    width: 44px;
+    padding: 0;
+    justify-content: center;
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .workspace-header .user-name,
+  .workspace-header .user-chevron {
+    display: none;
+  }
+}
 </style>

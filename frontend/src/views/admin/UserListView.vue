@@ -1,7 +1,8 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AppLayout from '../../components/layout/AppLayout.vue'
+import AppIcon from '../../components/ui/AppIcon.vue'
 import { usersAPI } from '../../api/users.js'
 import { useAppStore } from '../../stores/app.js'
 import { statusBadge, ROLE_MAP, USER_STATUS_MAP } from '../../utils/status.js'
@@ -12,17 +13,40 @@ const users = ref([])
 const loading = ref(true)
 const total = ref(0)
 const page = ref(1)
-const filters = ref({ role: '', status: '' })
+const filters = ref({ query: '', role: '', status: '' })
+let searchTimer
+
+function requestParams() {
+  return {
+    page: page.value,
+    page_size: 20,
+    q: filters.value.query.trim() || undefined,
+    role: filters.value.role || undefined,
+    status_filter: filters.value.status || undefined,
+  }
+}
 
 async function fetch() {
   loading.value = true
   try {
-    const res = await usersAPI.list({ page: page.value, page_size: 20, ...filters.value })
+    const res = await usersAPI.list(requestParams())
     users.value = res.data.items; total.value = res.data.total
   }
   catch { app.showToast('加载失败', 'error') }
   finally { loading.value = false }
 }
+
+function resetAndFetch() {
+  page.value = 1
+  fetch()
+}
+
+watch(() => filters.value.query, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(resetAndFetch, 250)
+})
+
+onBeforeUnmount(() => clearTimeout(searchTimer))
 
 async function toggleStatus(u) {
   const newStatus = u.status === 'active' ? 'disabled' : 'active'
@@ -52,13 +76,26 @@ onMounted(fetch)
 
       <!-- ── Filters ───────────────────────────────────────────────────── -->
       <div class="filter-bar">
-        <select v-model="filters.role" @change="page=1;fetch()">
+        <label class="searchbox user-searchbox" :class="{ 'has-value': filters.query }">
+          <AppIcon name="search" :size="15" />
+          <input
+            v-model="filters.query"
+            type="search"
+            class="input"
+            placeholder="按用户名、学号或姓名精准搜索"
+            aria-label="搜索用户名、学号或姓名"
+          />
+          <button v-if="filters.query" type="button" class="clear" aria-label="清空搜索" @click="filters.query = ''">
+            <AppIcon name="close" :size="13" />
+          </button>
+        </label>
+        <select v-model="filters.role" @change="resetAndFetch">
           <option value="">全部角色</option>
           <option value="student">学生</option>
           <option value="teacher">教师</option>
           <option value="admin">管理员</option>
         </select>
-        <select v-model="filters.status" @change="page=1;fetch()">
+        <select v-model="filters.status" @change="resetAndFetch">
           <option value="">全部状态</option>
           <option value="active">正常</option>
           <option value="disabled">已禁用</option>
@@ -165,6 +202,11 @@ onMounted(fetch)
 .filter-bar {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
 }
+.user-searchbox {
+  width: 280px;
+  max-width: 100%;
+}
+.user-searchbox .input { width: 100%; }
 .filter-bar select {
   min-width: 120px;
 }
@@ -250,6 +292,7 @@ onMounted(fetch)
   .page-head { flex-direction: column; }
   .page-title { font-size: 24px; }
   .filter-bar { flex-direction: column; align-items: stretch; }
+  .user-searchbox { width: 100%; }
   .filter-count { margin-left: 0; }
 }
 </style>

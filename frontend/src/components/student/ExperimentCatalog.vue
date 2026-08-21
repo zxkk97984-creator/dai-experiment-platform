@@ -2,6 +2,7 @@
 /** 学生实验目录展示组件：状态 tab、搜索排序、表格与分页。数据与请求全部由父组件驱动。 */
 import { computed } from 'vue'
 import UiStatusPill from '../ui/UiStatusPill.vue'
+import AppIcon from '../ui/AppIcon.vue'
 import StudentPagination from './StudentPagination.vue'
 import { formatDateTime } from '../../utils/format.js'
 import { EXPERIMENT_STATUS_MAP, statusBadge } from '../../utils/status.js'
@@ -60,13 +61,12 @@ function actionLabel(value) {
       </div>
 
       <div class="catalog-tools">
-        <label class="search-box">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="11" cy="11" r="7"></circle>
-            <path d="m20 20-3.7-3.7"></path>
-          </svg>
-          <span class="sr-only">搜索实验模块</span>
-          <input :value="query" type="search" placeholder="搜索实验模块名称" @input="emit('update:query', $event.target.value)" />
+        <label class="searchbox" :class="{ 'has-value': query }" style="width: 260px;">
+          <AppIcon name="search" :size="15" />
+          <input :value="query" type="search" class="input" placeholder="搜索实验模块名称" aria-label="搜索实验模块名称" @input="emit('update:query', $event.target.value)" />
+          <button v-if="query" type="button" class="clear" aria-label="清空实验搜索" @click="emit('update:query', '')">
+            <AppIcon name="close" :size="13" />
+          </button>
         </label>
         <label class="sort-select">
           <span class="sr-only">实验排序</span>
@@ -214,7 +214,6 @@ function actionLabel(value) {
   gap: 10px;
 }
 
-.search-box,
 .sort-select {
   display: flex;
   align-items: center;
@@ -225,19 +224,11 @@ function actionLabel(value) {
   transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 
-.search-box:focus-within,
 .sort-select:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.search-box {
-  width: 250px;
-  padding: 0 11px;
-  gap: 8px;
-}
-
-.search-box svg,
 .sort-select svg {
   width: 16px;
   height: 16px;
@@ -249,7 +240,6 @@ function actionLabel(value) {
   stroke-linejoin: round;
 }
 
-.search-box input,
 .sort-select select {
   width: 100%;
   height: 100%;
@@ -264,7 +254,6 @@ function actionLabel(value) {
   box-shadow: none;
 }
 
-.search-box input:focus,
 .sort-select select:focus { box-shadow: none; }
 
 .sort-select {
@@ -481,7 +470,7 @@ function actionLabel(value) {
   .catalog-toolbar { padding-inline: 12px; }
   .status-tabs { gap: 22px; }
   .catalog-tools { align-items: stretch; flex-direction: column; }
-  .search-box, .sort-select { width: 100%; }
+  .catalog-toolbar .searchbox, .sort-select { width: 100% !important; }
   .table-shell { overflow: visible; border: 0; background: transparent; box-shadow: none; }
   .catalog-table, .catalog-table tbody { display: block; }
   .catalog-table thead { display: none; }
@@ -530,7 +519,7 @@ function actionLabel(value) {
 
 @media (prefers-reduced-motion: reduce) {
   .catalog-table tbody tr,
-  .search-box,
+  .searchbox,
   .sort-select { transition: none; }
 }
 </style>

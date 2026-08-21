@@ -16,12 +16,12 @@ vi.mock('vue-router', async (importOriginal) => {
 })
 
 describe('AppHeader 用户菜单', () => {
-  function mountAs(role = 'student', realName = '测试学生') {
+  function mountAs(role = 'student', realName = '测试学生', props = {}) {
     const pinia = createPinia()
     setActivePinia(pinia)
     const auth = useAuthStore()
     auth.setUser({ id: 1, username: 'student_alice', real_name: realName, role })
-    return { wrapper: mount(AppHeader, { global: { plugins: [pinia] }, attachTo: document.body }), auth }
+    return { wrapper: mount(AppHeader, { props, global: { plugins: [pinia] }, attachTo: document.body }), auth }
   }
 
   beforeEach(() => {
@@ -38,6 +38,28 @@ describe('AppHeader 用户菜单', () => {
     expect(wrapper.find('.user-avatar svg').exists()).toBe(true)
     // 下箭头 chevron
     expect(wrapper.find('.user-trigger svg').exists()).toBe(true)
+  })
+
+  it('学生工作台变体使用专属搜索提示、44px 控件标记与首字头像', () => {
+    const { wrapper } = mountAs('student', '林书瑶', { variant: 'student-workspace' })
+
+    expect(wrapper.get('.header').classes()).toContain('student-workspace-header')
+    expect(wrapper.get('.header-search input').attributes('placeholder')).toBe('搜索课程、作业、考试')
+    expect(wrapper.get('.header-search').classes()).toContain('workspace-control')
+    expect(wrapper.get('.notify-btn').classes()).toContain('workspace-control')
+    expect(wrapper.get('.user-trigger').classes()).toContain('workspace-control')
+    expect(wrapper.get('.user-avatar').text()).toBe('林')
+    expect(wrapper.find('.user-avatar svg').exists()).toBe(false)
+  })
+
+  it('教师工作台变体使用教师搜索提示、工作台控件与首字头像', () => {
+    const { wrapper } = mountAs('teacher', '张明远', { variant: 'teacher-workspace' })
+
+    expect(wrapper.get('.header').classes()).toContain('teacher-workspace-header')
+    expect(wrapper.get('.header-search input').attributes('placeholder')).toBe('搜索课程、作业、学生、提交')
+    expect(wrapper.get('.header-search').classes()).toContain('workspace-control')
+    expect(wrapper.get('.user-avatar').text()).toBe('张')
+    expect(wrapper.find('.user-avatar svg').exists()).toBe(false)
   })
 
   it('点击触发器打开键盘可访问菜单', async () => {

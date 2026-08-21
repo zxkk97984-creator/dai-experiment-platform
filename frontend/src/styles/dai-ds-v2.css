@@ -331,7 +331,9 @@ p { text-wrap: pretty; }
 .searchbox { position: relative; display: inline-flex; align-items: center; }
 .searchbox > svg { position: absolute; left: 10px; width: 15px; height: 15px; color: var(--faint); pointer-events: none; }
 .searchbox .input { padding-left: 32px; }
-.searchbox .clear { position: absolute; right: 6px; width: 20px; height: 20px; border: 0; background: transparent; color: var(--faint); display: none; place-items: center; border-radius: var(--radius-sm); }
+.searchbox:has(.clear) input[type='search'] { -webkit-appearance: none; appearance: none; }
+.searchbox:has(.clear) input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; display: none; }
+.searchbox .clear { position: absolute; right: 6px; width: 20px; height: 20px; min-height: 0; flex: none; padding: 0; border: 0; background: transparent; color: var(--faint); display: none; place-items: center; border-radius: var(--radius-sm); }
 .searchbox .clear:hover { background: var(--surface-sunken); color: var(--fg); }
 .searchbox.has-value .clear { display: grid; }
 

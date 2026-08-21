@@ -155,7 +155,7 @@ onMounted(fetchCourses)
             {{ tab.label }}
           </button>
         </div>
-        <label class="searchbox search-box" style="width: 260px;">
+        <label class="searchbox search-box" :class="{ 'has-value': query }" style="width: 260px;">
           <AppIcon name="search" :size="15" />
           <input
             v-model="query"
@@ -164,6 +164,9 @@ onMounted(fetchCourses)
             placeholder="搜索课程"
             aria-label="搜索课程"
           />
+          <button v-if="query" type="button" class="clear" aria-label="清空课程搜索" @click="query = ''">
+            <AppIcon name="close" :size="13" />
+          </button>
         </label>
       </div>
 
@@ -237,7 +240,7 @@ onMounted(fetchCourses)
 .course-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
 .course-tabs { flex: 1; }
 .search-box { flex: none; }
-.search-input { width: 100%; height: 30px; border: 0; box-shadow: none !important; }
+.search-input { width: 100%; }
 
 .course-list { display: flex; flex-direction: column; gap: 12px; }
 .course-row {

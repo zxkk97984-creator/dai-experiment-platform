@@ -17,9 +17,11 @@ vi.mock('vue-router', async (importOriginal) => {
 
 const teacherMock = vi.hoisted(() => ({ teacher: vi.fn() }))
 const announcementsMock = vi.hoisted(() => ({ create: vi.fn(), markRead: vi.fn() }))
+const academicsMock = vi.hoisted(() => ({ listTerms: vi.fn() }))
 
 vi.mock('../../../api/dashboard.js', () => ({ dashboardAPI: teacherMock }))
 vi.mock('../../../api/announcements.js', () => ({ announcementsAPI: announcementsMock }))
+vi.mock('../../../api/academics.js', () => ({ academicsAPI: academicsMock }))
 
 import DashboardView from '../DashboardView.vue'
 
@@ -102,7 +104,12 @@ function mountView() {
   return mount(DashboardView, {
     global: {
       plugins: [pinia],
-      stubs: { AppLayout: { template: '<main><slot /></main>' } },
+      stubs: {
+        AppLayout: {
+          props: ['variant'],
+          template: '<main class="layout-stub" :data-variant="variant"><slot /></main>',
+        },
+      },
     },
     // attachTo document.body：焦点恢复断言需要组件在 jsdom DOM 中
     attachTo: document.body,
@@ -113,6 +120,20 @@ beforeEach(() => {
   localStorage.clear()
   vi.clearAllMocks()
   teacherMock.teacher.mockReset()
+  academicsMock.listTerms.mockReset()
+  academicsMock.listTerms.mockResolvedValue({
+    data: {
+      items: [
+        {
+          id: 9,
+          name: '2026-2027 学年第一学期（秋季）',
+          status: 'active',
+          start_date: '2026-08-01',
+          end_date: '2027-01-31',
+        },
+      ],
+    },
+  })
   announcementsMock.create.mockReset()
   announcementsMock.markRead.mockReset()
 })
@@ -123,6 +144,17 @@ describe('教师首页 DashboardView', () => {
     mountView()
     await flushPromises()
     expect(teacherMock.teacher).toHaveBeenCalledTimes(1)
+    expect(academicsMock.listTerms).toHaveBeenCalledWith({ page: 1, page_size: 100 })
+  })
+
+  it('使用教师工作台外壳，并只读展示教务系统当前学期', async () => {
+    teacherMock.teacher.mockResolvedValue({ data: dashboardData() })
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.get('.layout-stub').attributes('data-variant')).toBe('teacher-workspace')
+    expect(wrapper.get('.current-term').text()).toContain('2026-2027 学年第一学期（秋季）')
+    expect(wrapper.find('.current-term select').exists()).toBe(false)
   })
 
   it('展示真实摘要与工作队列，旧硬编码时间线消失', async () => {
@@ -161,6 +193,21 @@ describe('教师首页 DashboardView', () => {
     expect(wrapper.text()).toContain('最近提交')
     expect(wrapper.text()).toContain('张同学')
     expect(wrapper.text()).toContain('2026011201')
+  })
+
+  it('最近提交严格只显示接口返回的前 10 条', async () => {
+    const recentSubmissions = Array.from({ length: 12 }, (_, index) => ({
+      ...dashboardData().recent_submissions[0],
+      id: index + 1,
+      student_name: `学生${index + 1}`,
+    }))
+    teacherMock.teacher.mockResolvedValue({ data: dashboardData({ recent_submissions: recentSubmissions }) })
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.findAll('.recent-table tbody tr')).toHaveLength(10)
+    expect(wrapper.text()).toContain('学生10')
+    expect(wrapper.text()).not.toContain('学生11')
   })
 
   it('发布公告：提交精确 payload 后视图刷新并展示新公告', async () => {

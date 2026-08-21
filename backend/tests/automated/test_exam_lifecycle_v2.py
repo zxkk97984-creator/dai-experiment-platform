@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from app.models import Exam, ExamSubmission, User
+from app.models import Exam, ExamQuestion, ExamSubmission, User
 from app.services.time_utils import as_utc, utc_now
 from conftest import auth_header, create_course_db, create_user, login
 
@@ -219,6 +219,51 @@ def test_fill_blank_partial_scoring_visibility_and_manual_review(client, db_sess
     assert review["questions"][0]["correct_answer"]["blanks"][0]["accepted_answers"] == ["def"]
     assert review["saved_answers"][0]["text_answers"]["first"] == " DEF "
     assert review["saved_answers"][0]["score"] == 5.0
+
+
+def test_review_session_exposes_code_reference_solution_after_answers_are_released(client, db_session_factory):
+    code = {
+        "question_type": "code",
+        "prompt": "实现 add(a, b)",
+        "correct_answer": {"test_file": "secret evaluator code"},
+        "points": 10,
+        "starter_code": "def add(a, b):\n    pass",
+        "hidden_tests": "from user_code import add\n\ndef test_hidden():\n    assert add(2, 3) == 5",
+        "grading_mode": "legacy",
+    }
+    ctx = _seed(client, db_session_factory, question=code)
+    teacher_headers = auth_header(ctx["teacher"])
+    student_headers = auth_header(ctx["student"])
+    assert client.patch(
+        f"{API}/exams/{ctx['exam_id']}", headers=teacher_headers, json={"status": "published"},
+    ).status_code == 200
+
+    before_release = client.get(f"{API}/exams/{ctx['exam_id']}/session", headers=student_headers).json()
+    assert before_release["questions"] == []
+
+    with db_session_factory() as db:
+        exam = db.get(Exam, ctx["exam_id"])
+        question = db.get(ExamQuestion, ctx["question_id"])
+        question.reference_solution = "def add(a, b):\n    return a + b"
+        exam.review_released_at = utc_now()
+        exam.show_questions_after_review = True
+        exam.show_answers_after_review = True
+        db.commit()
+
+    review = client.get(f"{API}/exams/{ctx['exam_id']}/session", headers=student_headers).json()
+    assert review["questions"][0]["reference_solution"] == "def add(a, b):\n    return a + b"
+    assert "correct_answer" not in review["questions"][0]
+    assert "test_file" not in review["questions"][0]
+
+    with db_session_factory() as db:
+        question = db.get(ExamQuestion, ctx["question_id"])
+        question.reference_solution = None
+        db.commit()
+
+    without_reference_response = client.get(f"{API}/exams/{ctx['exam_id']}/session", headers=student_headers)
+    without_reference = without_reference_response.json()
+    assert without_reference["questions"][0]["reference_solution"] is None
+    assert "secret evaluator code" not in without_reference_response.text
 
 
 def test_teacher_force_submit_records_reason(client, db_session_factory):

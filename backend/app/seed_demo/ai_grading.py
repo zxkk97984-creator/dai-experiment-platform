@@ -78,6 +78,8 @@ def _ensure_rubric(
     db: Session, question: JudgeQuestion, task: dict, *, is_exam: bool, clock: DemoClock,
 ) -> QuestionRubric:
     """为 AI 题目确保锁定 Rubric（幂等）。"""
+    if not getattr(question, "reference_solution", None):
+        question.reference_solution = task["solution"]
     snapshot = {
         "title": getattr(question, "title", None) or getattr(question, "prompt", ""),
         "description": task["description"],

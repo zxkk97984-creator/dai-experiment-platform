@@ -17,8 +17,29 @@ const router = useRouter()
 const auth = useAuthStore()
 const app = useAppStore()
 
+const props = defineProps({
+  variant: {
+    type: String,
+    default: 'default',
+  },
+  studentContext: {
+    type: Object,
+    default: () => ({}),
+  },
+})
+
+const isStudentWorkspace = computed(() => props.variant === 'student-workspace')
+const isTeacherWorkspace = computed(() => props.variant === 'teacher-workspace')
+const isWorkspace = computed(() => isStudentWorkspace.value || isTeacherWorkspace.value)
+
 const menuItems = computed(() => {
-  const home = (root) => ({ path: root, label: '首页', sub: 'Home', icon: 'home', key: 'home' })
+  const home = (root) => ({
+    path: root,
+    label: isStudentWorkspace.value ? '工作台' : '首页',
+    sub: isStudentWorkspace.value ? 'Workspace' : 'Home',
+    icon: 'home',
+    key: 'home',
+  })
   const base = [
     { path: '/student/courses',     label: '课程',     sub: 'Courses',     icon: 'course',     key: 'courses' },
     { path: '/student/assignments', label: '作业',     sub: 'Assignments', icon: 'assignment', key: 'assignments' },
@@ -75,8 +96,22 @@ const avatarText = computed(() => displayName.value.trim().slice(0, 1))
 const roleText = computed(() => {
   const map = { student: '学生', teacher: '教师', admin: '管理员' }
   const role = map[auth.role] || auth.role || ''
+  if (isStudentWorkspace.value && auth.role === 'student' && props.studentContext.className) {
+    return `${role} · ${props.studentContext.className}`
+  }
   if (auth.role === 'teacher' && auth.user?.department) return `${role} · ${auth.user.department}`
   return role
+})
+
+const semesterNote = computed(() => {
+  const value = String(props.studentContext.currentTerm || '').trim()
+  if (!value) return { year: '当前学期', term: '暂无学期信息' }
+  const parts = value.match(/^(.*?学年)\s*(.*)$/u)
+  if (!parts) return { year: '当前学期', term: value }
+  return {
+    year: parts[1],
+    term: parts[2].replace(/[（(]([^）)]+)[）)]/u, ' · $1'),
+  }
 })
 
 const teacherCounts = ref({ pending_grading_count: 0, pending_review_count: 0 })
@@ -120,14 +155,30 @@ function navigate(path) {
 </script>
 
 <template>
-  <aside class="sidebar" :class="{ collapsed: app.sidebarCollapsed }">
+  <aside
+    class="sidebar"
+    :class="{
+      collapsed: !isWorkspace && app.sidebarCollapsed,
+      'student-workspace-sidebar': isStudentWorkspace,
+      'teacher-workspace-sidebar': isTeacherWorkspace,
+      'workspace-sidebar': isWorkspace,
+    }"
+    :aria-label="isStudentWorkspace ? '学生端主导航' : isTeacherWorkspace ? '教师端主导航' : undefined"
+  >
     <button
       type="button"
       class="logo sidebar-head"
       aria-label="返回首页"
       @click="navigate(homeForRole(auth.role))"
     >
-      <span class="wordmark"><span class="mark">DAI</span><small>实验平台</small></span>
+      <template v-if="isWorkspace">
+        <span class="workspace-brand-mark" aria-hidden="true">DAI</span>
+        <span class="workspace-brand-copy">
+          <strong class="workspace-brand-name">DAI 实验平台</strong>
+          <small class="workspace-brand-subtitle">{{ isStudentWorkspace ? '学生学习空间' : '教师教学空间' }}</small>
+        </span>
+      </template>
+      <span v-else class="wordmark"><span class="mark">DAI</span><small>实验平台</small></span>
     </button>
 
     <nav class="sidebar-nav">
@@ -141,7 +192,7 @@ function navigate(path) {
           :class="{ active: isActive(item.path) }"
           :aria-label="item.label"
           :aria-current="isActive(item.path) ? 'page' : undefined"
-          :title="app.sidebarCollapsed ? item.label : undefined"
+          :title="!isWorkspace && app.sidebarCollapsed ? item.label : undefined"
           @click="navigate(item.path)"
         >
           <AppIcon :name="item.icon" :size="17" aria-hidden="true" />
@@ -151,7 +202,12 @@ function navigate(path) {
       </div>
     </nav>
 
-    <div class="sidebar-foot">
+    <div v-if="isStudentWorkspace" class="semester-note">
+      <strong>{{ semesterNote.year }}</strong>
+      <span>{{ semesterNote.term }}</span>
+    </div>
+
+    <div class="sidebar-foot" :class="{ 'workspace-profile-block': isWorkspace }">
       <div class="user-card">
         <span class="avatar" aria-hidden="true">{{ avatarText }}</span>
         <div class="grow">
@@ -160,6 +216,7 @@ function navigate(path) {
         </div>
       </div>
       <button
+        v-if="!isWorkspace"
         class="collapse-btn"
         type="button"
         @click="app.toggleSidebar()"
@@ -196,4 +253,141 @@ function navigate(path) {
 }
 .collapse-btn:hover { color: var(--fg); background: var(--surface-sunken); border-color: transparent; }
 .collapse-text { font-size: var(--text-xs); letter-spacing: 0.02em; }
+
+.workspace-sidebar .sidebar-head {
+  min-height: 72px;
+  height: 72px;
+  gap: 11px;
+  padding: 0 22px;
+}
+
+.workspace-brand-mark {
+  width: 38px;
+  flex: 0 0 38px;
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.06em;
+  color: var(--fg);
+}
+
+.workspace-brand-copy {
+  min-width: 0;
+  display: block;
+}
+
+.workspace-brand-name {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 16px;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.workspace-brand-subtitle {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.3;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.workspace-sidebar .sidebar-nav {
+  padding: 0 10px;
+}
+
+.workspace-sidebar .nav-label {
+  padding: 25px 12px 9px;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.workspace-sidebar .nav-item {
+  width: 100%;
+  height: 46px;
+  justify-content: flex-start;
+  margin: 0 0 4px;
+  gap: 12px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.workspace-sidebar .nav-item:hover {
+  background: color-mix(in oklch, var(--fg) 5%, transparent);
+  color: var(--fg);
+}
+
+.workspace-sidebar .nav-item.active {
+  background: var(--surface);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.workspace-sidebar .nav-item.active::before {
+  left: -10px;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+}
+
+.workspace-sidebar .nav-item :deep(svg) {
+  width: 18px;
+  height: 18px;
+}
+
+.semester-note {
+  margin: 0 16px 18px;
+  padding: 16px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.semester-note strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.workspace-sidebar .workspace-profile-block {
+  min-height: 74px;
+  padding: 12px 18px;
+  gap: 0;
+}
+
+.workspace-sidebar .user-card {
+  width: 100%;
+  gap: 10px;
+  padding: 0;
+}
+
+.workspace-sidebar .avatar {
+  width: 34px;
+  height: 34px;
+  background: color-mix(in oklch, var(--fg) 7%, transparent);
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+.workspace-sidebar .user-card .u-name {
+  font-size: 13px;
+}
+
+.workspace-sidebar .user-card .u-role {
+  margin-top: 2px;
+  font-size: 11px;
+}
 </style>

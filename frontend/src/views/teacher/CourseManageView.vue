@@ -122,9 +122,9 @@ onMounted(async () => {
 
       <section class="table-wrap" aria-label="课程列表">
         <div class="toolbar">
-          <label class="searchbox" style="width: 260px;">
+          <label class="searchbox" :class="{ 'has-value': query }" style="width: 260px;">
             <AppIcon name="search" :size="15" />
-            <input v-model="query" type="search" placeholder="搜索课程名称或编号" />
+            <input v-model="query" type="search" class="input" placeholder="搜索课程名称或编号" aria-label="搜索课程名称或编号" />
             <button v-if="query" type="button" class="clear" aria-label="清空搜索" @click="query = ''">
               <AppIcon name="close" :size="13" />
             </button>

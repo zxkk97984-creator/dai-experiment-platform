@@ -51,6 +51,8 @@ from app.services.environment_builder_v2 import build_config_fingerprint
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _ACTIVE_JOB_STATUSES = ("queued", "building")
 _FAILED_JOB_STATUSES = ("failed", "timed_out")
+_DISPLAY_NAME_CONFLICT_CODE = "PROFILE_DISPLAY_NAME_CONFLICT"
+_DISPLAY_NAME_CONFLICT_MESSAGE = "环境名称已存在，请使用其他名称"
 
 
 def _empty_spec() -> dict:
@@ -92,6 +94,39 @@ def _new_slug(db: Session, requested: str | None) -> str:
         if db.scalar(select(EnvironmentProfile.id).where(EnvironmentProfile.slug == slug)) is None:
             return slug
     raise _error(503, "SLUG_GENERATION_FAILED", "暂时无法生成唯一环境标识，请稍后重试")
+
+
+def _normalize_display_name(display_name: str) -> str:
+    normalized = display_name.strip()
+    if not normalized:
+        raise _error(422, "DISPLAY_NAME_REQUIRED", "环境名称不能为空")
+    return normalized
+
+
+def _display_name_exists(
+    db: Session,
+    display_name: str,
+    *,
+    exclude_profile_id: int | None = None,
+) -> bool:
+    statement = select(EnvironmentProfile.id).where(
+        func.lower(func.trim(EnvironmentProfile.display_name)) == display_name.lower()
+    )
+    if exclude_profile_id is not None:
+        statement = statement.where(EnvironmentProfile.id != exclude_profile_id)
+    return db.scalar(statement) is not None
+
+
+def _ensure_unique_display_name(
+    db: Session,
+    display_name: str,
+    *,
+    exclude_profile_id: int | None = None,
+) -> str:
+    normalized = _normalize_display_name(display_name)
+    if _display_name_exists(db, normalized, exclude_profile_id=exclude_profile_id):
+        raise _error(409, _DISPLAY_NAME_CONFLICT_CODE, _DISPLAY_NAME_CONFLICT_MESSAGE)
+    return normalized
 
 
 def _validate_draft_inputs(
@@ -210,6 +245,7 @@ def create_profile_with_draft(
 
     if not settings.environment_editor_v2_enabled:
         raise _error(409, "LEGACY_ENVIRONMENT_API_DISABLED", "环境编辑器 V2 尚未启用")
+    display_name = _ensure_unique_display_name(db, display_name)
     slug = _new_slug(db, slug)
     profile = EnvironmentProfile(
         slug=slug,

@@ -89,6 +89,52 @@ describe('ExamView 安全状态与结果展示', () => {
     wrapper.unmount()
   })
 
+  it('讲评开放后按题型展示选择题选项和编程题参考代码，而不是原始答案 JSON', async () => {
+    const reviewQuestions = [
+      {
+        ...QUESTIONS[0],
+        correct_answer: { correct: ['B'] },
+      },
+      {
+        ...QUESTIONS[1],
+        correct_answer: {
+          blanks: [{ id: 'blank1', accepted_answers: ['函数名'], case_sensitive: false }],
+        },
+      },
+      {
+        ...QUESTIONS[2],
+        correct_answer: {},
+        reference_solution: 'def add(a, b):\n    return a + b',
+      },
+    ]
+    const wrapper = await mountExam('graded', {
+      visibility: { score: true, questions: true, answers: true, review_released: true },
+      submission: { score: 55, score_visible: true },
+      questions: reviewQuestions,
+    })
+
+    expect(wrapper.find('.review-options').text()).toContain('4')
+    expect(wrapper.find('.review-options').text()).toContain('5')
+    expect(wrapper.get('pre.review-code').text()).toContain('def add(a, b):')
+    expect(wrapper.get('pre.review-code').text()).toContain('return a + b')
+    expect(wrapper.text()).not.toContain('"correct"')
+    expect(wrapper.text()).not.toContain('"blanks"')
+    wrapper.unmount()
+  })
+
+  it('仅开放题目时仍展示选择题选项，但不标记正确答案', async () => {
+    const wrapper = await mountExam('graded', {
+      visibility: { score: true, questions: true, answers: false, review_released: true },
+      questions: [{ ...QUESTIONS[0], correct_answer: { correct: ['B'] } }],
+    })
+
+    expect(wrapper.find('.review-options').text()).toContain('4')
+    expect(wrapper.find('.review-options').text()).toContain('5')
+    expect(wrapper.find('.review-option.correct').exists()).toBe(false)
+    expect(wrapper.find('.standard-answer').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('成绩未公开时不把 null 渲染成 0 分', async () => {
     const wrapper = await mountExam('graded', { submission: { score: null, score_visible: false } })
     expect(wrapper.text()).toContain('成绩暂未开放')

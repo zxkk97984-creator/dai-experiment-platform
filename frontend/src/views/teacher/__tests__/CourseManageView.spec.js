@@ -117,6 +117,18 @@ describe('课程管理页 CourseManageView', () => {
     expect(wrapper.text()).toContain('暂无符合条件的课程')
   })
 
+  it('课程搜索框复用标准输入样式并显示清空态', async () => {
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    const searchbox = wrapper.get('label.searchbox')
+    expect(searchbox.get('input').classes()).toContain('input')
+
+    await searchbox.get('input').setValue('Python')
+    expect(searchbox.classes()).toContain('has-value')
+    expect(searchbox.get('button.clear').exists()).toBe(true)
+  })
+
   it('点击创建课程后打开创建弹窗', async () => {
     const wrapper = await mountPage()
     await flushPromises()

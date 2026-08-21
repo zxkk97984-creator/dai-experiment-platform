@@ -70,3 +70,39 @@ test('进行中考试倒计时、题号布局、编程题自测和未完成确�
   await expect(page.getByRole('button', { name: '确定' })).toBeVisible()
   await expect(page.getByRole('button', { name: '取消' })).toBeVisible()
 })
+
+test('考试讲评按题型展示选项和可运行的编程题参考代码', async ({ page }) => {
+  const consoleErrors = []
+  page.on('console', message => {
+    if (message.type() === 'error') consoleErrors.push(message.text())
+  })
+  await page.route('**/api/v1/auth/refresh', route => route.fulfill({
+    json: { access_token: 'browser-test-token', user: { id: 9, username: 'student', real_name: '验收学生', role: 'student' } },
+  }))
+  await page.route('**/api/v1/users/me/preferences', route => route.fulfill({ json: { preferences: {} } }))
+  await page.route('**/api/v1/exams/41/session', route => route.fulfill({
+    json: {
+      server_now: serverNow,
+      exam: { id: 41, title: '讲评验收考试', duration_minutes: 60, max_score: 60, student_status: 'graded' },
+      submission: { id: 20, status: 'graded', score: 57, score_visible: true, submitted_at: serverNow, submission_reason: 'manual' },
+      questions: [
+        { id: 1, question_type: 'single_choice', prompt: '2 + 2 = ?', options: { A: '4', B: '5' }, correct_answer: { correct: ['A'] }, points: 20 },
+        { id: 2, question_type: 'fill_blank', prompt: '函数关键字是 [[blank:name]]', correct_answer: { blanks: [{ id: 'name', accepted_answers: ['def'], case_sensitive: false }] }, points: 20 },
+        { id: 3, question_type: 'code', prompt: '实现 add 函数', correct_answer: {}, reference_solution: 'def add(a, b):\n    return a + b', points: 20 },
+      ],
+      saved_answers: [],
+      visibility: { score: true, questions: true, answers: true, review_released: true },
+    },
+  }))
+
+  await page.goto('/student/exams/41')
+  await expect(page.getByRole('heading', { name: '讲评验收考试' })).toBeVisible()
+  await expect(page.locator('.review-options')).toContainText('4')
+  await expect(page.locator('.review-options')).toContainText('5')
+  await expect(page.locator('pre.review-code')).toContainText('def add(a, b):')
+  await expect(page.locator('pre.review-code')).toContainText('return a + b')
+  const standardAnswers = (await page.locator('.standard-answer').allTextContents()).join('')
+  expect(standardAnswers).not.toContain('"correct"')
+  expect(standardAnswers).not.toContain('"blanks"')
+  expect(consoleErrors).toEqual([])
+})

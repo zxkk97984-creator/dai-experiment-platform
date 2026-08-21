@@ -102,6 +102,15 @@ def test_seed_demo_runs_and_is_idempotent(db_session_factory):
     assert c1["storage_objects"] == 0
     assert c1["storage_quarantines"] == 0
 
+    from app.models import Exam, ExamQuestion
+    with db_session_factory() as db:
+        midterm = db.scalar(select(Exam).where(Exam.title == "期中测验：Python 函数与数据结构"))
+        code_question = db.scalar(select(ExamQuestion).where(
+            ExamQuestion.exam_id == midterm.id,
+            ExamQuestion.question_type == "code",
+        ))
+        assert code_question.reference_solution.startswith("def sum_positive")
+
     from sqlalchemy import text
     from app.models import Assignment, CodeGrade, JudgeQuestion, Submission, User
     from app.models import EnvironmentBuildJob, EnvironmentVersion

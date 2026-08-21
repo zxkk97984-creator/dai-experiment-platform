@@ -1,4 +1,4 @@
-// 任务中心：作业+考试+实验聚合；状态标签页、筛选、排序、表格与分页
+// 作业列表：仅展示作业；状态标签页、搜索、筛选、排序、表格与分页
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -32,50 +32,46 @@ const DAY = 86400000
 const future = (offsetDays) => new Date(Date.now() + offsetDays * DAY).toISOString()
 const past = (offsetDays) => new Date(Date.now() - offsetDays * DAY).toISOString()
 
-function mockSources({ failAssignment = false, failExam = false, failExperiment = false } = {}) {
+function mockSources({ failAssignment = false, failCourses = false, assignmentItems } = {}) {
   assignmentsMock.list.mockImplementation(() =>
     failAssignment
       ? Promise.reject(new Error('boom'))
       : Promise.resolve({
           data: {
-            items: [
-              // 作业1 已全部提交（后端 list_assignments 返回 is_submitted），任务中心应显示「已提交」
+            items: assignmentItems || [
+              // 作业1 已全部提交（后端 list_assignments 返回 is_submitted）
               { id: 1, title: '线性回归作业', course_id: 5, status: 'published', due_at: future(3), is_submitted: true },
               { id: 2, title: '决策树作业', course_id: 6, status: 'published', due_at: past(1) },
             ],
           },
         }),
   )
-  examsMock.list.mockImplementation(() =>
-    failExam
-      ? Promise.reject(new Error('boom'))
-      : Promise.resolve({
-          data: {
-            items: [
-              { id: 3, title: '期中考试', course_id: 5, status: 'published', starts_at: future(2), ends_at: future(2) },
-            ],
-          },
-        }),
-  )
-  experimentsMock.listRecords.mockImplementation(() =>
-    failExperiment
-      ? Promise.reject(new Error('boom'))
-      : Promise.resolve({
-          data: {
-            items: [
-              { id: 9, lesson_id: 712, title: '决策树实验', status: 'started', updated_at: future(0) },
-            ],
-          },
-        }),
-  )
-  coursesMock.list.mockResolvedValue({
+  examsMock.list.mockResolvedValue({
     data: {
       items: [
-        { id: 5, title: '机器学习导论', status: 'published' },
-        { id: 6, title: '数据结构', status: 'published' },
+        { id: 3, title: '期中考试', course_id: 5, status: 'published', starts_at: future(2), ends_at: future(2) },
       ],
     },
   })
+  experimentsMock.listRecords.mockResolvedValue({
+    data: {
+      items: [
+        { id: 9, lesson_id: 712, title: '决策树实验', status: 'started', updated_at: future(0) },
+      ],
+    },
+  })
+  coursesMock.list.mockImplementation(() =>
+    failCourses
+      ? Promise.reject(new Error('boom'))
+      : Promise.resolve({
+          data: {
+            items: [
+              { id: 5, title: '机器学习导论', status: 'published' },
+              { id: 6, title: '数据结构', status: 'published' },
+            ],
+          },
+        }),
+  )
 }
 
 function mountView() {
@@ -95,14 +91,28 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe('任务中心 AssignmentListView（参考图 05）', () => {
-  it('页头展示真实开放任务数与最近截止', async () => {
+describe('作业列表 AssignmentListView', () => {
+  it('页头展示真实作业数与最近截止', async () => {
     mockSources()
     const wrapper = mountView()
     await flushPromises()
-    // 全部任务 = 作业1（已提交）+ 作业2（逾期）+ 考试 + 实验 = 4
-    expect(wrapper.get('.task-count').text()).toContain('4')
+    // 全部作业 = 作业1（已提交）+ 作业2（逾期）= 2
+    expect(wrapper.get('.assignment-count').text()).toContain('2')
     expect(wrapper.get('.nearest-deadline').text()).toBeTruthy()
+  })
+
+  it('只请求作业数据，不加载考试和实验，也不展示类型筛选', async () => {
+    mockSources()
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(assignmentsMock.list).toHaveBeenCalledTimes(1)
+    expect(examsMock.list).not.toHaveBeenCalled()
+    expect(experimentsMock.listRecords).not.toHaveBeenCalled()
+    expect(wrapper.find('.filter-kind').exists()).toBe(false)
+    expect(wrapper.findAll('thead th').map((node) => node.text())).not.toContain('类型')
+    expect(wrapper.text()).not.toContain('期中考试')
+    expect(wrapper.text()).not.toContain('决策树实验')
   })
 
   it('已全部提交的作业显示「已提交」而非「待办」', async () => {
@@ -132,26 +142,26 @@ describe('任务中心 AssignmentListView（参考图 05）', () => {
     expect(wrapper.text()).toContain('决策树作业')
   })
 
-  it('课程筛选仅显示所选课程任务', async () => {
+  it('课程筛选仅显示所选课程作业', async () => {
     mockSources()
     const wrapper = mountView()
     await flushPromises()
     await wrapper.get('.filter-course').setValue('5')
     const rows = wrapper.findAll('.task-table tbody tr')
-    expect(rows.length).toBe(2)
+    expect(rows.length).toBe(1)
     expect(wrapper.text()).toContain('线性回归作业')
-    expect(wrapper.text()).toContain('期中考试')
     expect(wrapper.text()).not.toContain('决策树作业')
   })
 
-  it('类型筛选仅显示所选类型任务', async () => {
+  it('按作业名称搜索仅显示匹配的作业', async () => {
     mockSources()
     const wrapper = mountView()
     await flushPromises()
-    await wrapper.get('.filter-kind').setValue('exam')
+    await wrapper.get('.assignment-search-input').setValue('决策树')
     const rows = wrapper.findAll('.task-table tbody tr')
     expect(rows.length).toBe(1)
-    expect(wrapper.text()).toContain('期中考试')
+    expect(wrapper.text()).toContain('决策树作业')
+    expect(wrapper.text()).not.toContain('线性回归作业')
   })
 
   it('排序按截止时间升序', async () => {
@@ -160,7 +170,7 @@ describe('任务中心 AssignmentListView（参考图 05）', () => {
     await flushPromises()
     await wrapper.get('.filter-sort').setValue('due')
     const titles = wrapper.findAll('.task-name').map((t) => t.text())
-    // 决策树作业逾期最早，其次考试（+2天），线性回归作业（+3天），实验无截止
+    // 决策树作业逾期最早，其次线性回归作业（+3天）
     expect(titles[0]).toContain('决策树作业')
   })
 
@@ -169,69 +179,66 @@ describe('任务中心 AssignmentListView（参考图 05）', () => {
     const wrapper = mountView()
     await flushPromises()
     await wrapper.get('.filter-course').setValue('5')
-    await wrapper.get('.filter-kind').setValue('exam')
+    await wrapper.get('.assignment-search-input').setValue('线性')
     expect(wrapper.findAll('.task-table tbody tr').length).toBe(1)
     await wrapper.get('.reset-btn').trigger('click')
-    expect(wrapper.findAll('.task-table tbody tr').length).toBe(4)
+    expect(wrapper.findAll('.task-table tbody tr').length).toBe(2)
   })
 
-  it('使用六列表格展示任务且不再按截止时间分组', async () => {
+  it('使用五列表格展示作业且不再按截止时间分组', async () => {
     mockSources()
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.findAll('thead th').map((node) => node.text())).toEqual([
-      '任务名称', '所属课程', '类型', '状态', '截止时间', '操作',
+      '作业名称', '所属课程', '状态', '截止时间', '操作',
     ])
-    expect(wrapper.findAll('.task-table tbody tr')).toHaveLength(4)
+    expect(wrapper.findAll('.task-table tbody tr')).toHaveLength(2)
     expect(wrapper.find('.task-group').exists()).toBe(false)
-    expect(wrapper.get('.task-catalog-heading').text()).toContain('全部任务')
-    expect(wrapper.get('.task-catalog-heading').text()).toContain('共 4 个')
+    expect(wrapper.get('.task-catalog-heading').text()).toContain('全部作业')
+    expect(wrapper.get('.task-catalog-heading').text()).toContain('共 2 个')
   })
 
-  it('每个任务 CTA 路由到既有学生路由', async () => {
+  it('每个作业 CTA 路由到既有学生路由', async () => {
     mockSources()
     const wrapper = mountView()
     await flushPromises()
     await wrapper.findAll('.task-action')[0].trigger('click')
-    // 第一个任务是逾期最早的决策树作业
+    // 第一个作业是逾期最早的决策树作业
     expect(routerState.push).toHaveBeenCalledWith('/student/assignments/2')
-    const examCta = wrapper.findAll('.task-table tbody tr').find((r) => r.text().includes('期中考试')).find('.task-action')
-    await examCta.trigger('click')
-    expect(routerState.push).toHaveBeenCalledWith('/student/exams/3')
-    const expCta = wrapper.findAll('.task-table tbody tr').find((r) => r.text().includes('决策树实验')).find('.task-action')
-    await expCta.trigger('click')
-    expect(routerState.push).toHaveBeenCalledWith('/student/experiments/712')
+    const assignmentCta = wrapper.findAll('.task-table tbody tr').find((r) => r.text().includes('线性回归作业')).find('.task-action')
+    await assignmentCta.trigger('click')
+    expect(routerState.push).toHaveBeenCalledWith('/student/assignments/1')
   })
 
-  it('单个来源失败不隐藏成功来源', async () => {
-    mockSources({ failExam: true })
+  it('课程数据失败时仍展示作业', async () => {
+    mockSources({ failCourses: true })
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.text()).toContain('线性回归作业')
-    expect(wrapper.text()).toContain('决策树实验')
+    expect(wrapper.text()).toContain('决策树作业')
     expect(wrapper.text()).not.toContain('加载失败')
   })
 
-  it('全部来源失败时展示错误并可重试', async () => {
-    mockSources({ failAssignment: true, failExam: true, failExperiment: true })
+  it('作业来源失败时展示错误并可重试', async () => {
+    mockSources({ failAssignment: true })
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.text()).toContain('加载失败')
     mockSources()
     await wrapper.get('.retry-btn').trigger('click')
     await flushPromises()
-    expect(wrapper.findAll('.task-table tbody tr').length).toBe(4)
+    expect(wrapper.findAll('.task-table tbody tr').length).toBe(2)
   })
 
-  it('所有任务操作使用与实验列表一致的轮廓按钮', async () => {
+  it('所有作业操作使用轮廓按钮', async () => {
     mockSources()
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.findAll('.task-action')).toHaveLength(4)
+    expect(wrapper.findAll('.task-action')).toHaveLength(2)
     expect(wrapper.findAll('.task-action.btn-primary')).toHaveLength(0)
   })
 
-  it('每页展示 10 条任务并可切换分页', async () => {
+  it('每页展示 10 条作业并可切换分页', async () => {
     mockSources()
     assignmentsMock.list.mockResolvedValue({
       data: {
@@ -284,17 +291,20 @@ describe('任务中心 AssignmentListView（参考图 05）', () => {
   })
 
   it('空结果显示空状态，缺失课程和截止时间使用占位符', async () => {
-    mockSources()
+    mockSources({
+      assignmentItems: [
+        { id: 10, title: '无课程作业', status: 'published', is_submitted: false },
+      ],
+    })
     const wrapper = mountView()
     await flushPromises()
 
-    const experimentRow = wrapper.findAll('.task-table tbody tr').find((row) => row.text().includes('决策树实验'))
-    expect(experimentRow.find('[data-label="所属课程"]').text()).toBe('—')
-    expect(experimentRow.find('[data-label="截止时间"]').text()).toBe('—')
+    const assignmentRow = wrapper.findAll('.task-table tbody tr').find((row) => row.text().includes('无课程作业'))
+    expect(assignmentRow.find('[data-label="所属课程"]').text()).toBe('—')
+    expect(assignmentRow.find('[data-label="截止时间"]').text()).toBe('—')
 
-    await wrapper.get('.filter-kind').setValue('experiment')
-    await wrapper.get('.filter-course').setValue('5')
-    expect(wrapper.text()).toContain('暂无任务')
+    await wrapper.get('.assignment-search-input').setValue('不存在')
+    expect(wrapper.text()).toContain('暂无作业')
     expect(wrapper.get('.task-catalog-heading').text()).toContain('共 0 个')
   })
 })

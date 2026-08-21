@@ -17,6 +17,7 @@ VALID_STATUSES = {"active", "disabled"}
 
 @router.get("", response_model=PaginatedResponse)
 def list_users(
+    q: str | None = None,
     role: str | None = None,
     status_filter: str | None = None,
     pagination: PaginationParams = Depends(pagination),
@@ -26,6 +27,15 @@ def list_users(
     page, page_size = pagination.page, pagination.page_size
     query = select(User)
     count_query = select(func.count()).select_from(User)
+    search_query = q.strip() if q else None
+    if search_query:
+        user_match = or_(
+            User.username == search_query,
+            User.student_no == search_query,
+            User.real_name == search_query,
+        )
+        query = query.where(user_match)
+        count_query = count_query.where(user_match)
     if role:
         query = query.where(User.role == role)
         count_query = count_query.where(User.role == role)

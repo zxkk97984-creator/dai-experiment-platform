@@ -589,7 +589,12 @@ def _student_question_payload(question: ExamQuestion, *, include_correct_answers
         "public_cases": question.public_cases,
     }
     if include_correct_answers:
-        payload["correct_answer"] = question.correct_answer or {}
+        if question.question_type == "code":
+            # 参考实现是讲评页唯一需要的编程题答案；旧版
+            # correct_answer 可能包含评测代码，不能原样暴露给学生端。
+            payload["reference_solution"] = question.reference_solution
+        else:
+            payload["correct_answer"] = question.correct_answer or {}
     return payload
 
 

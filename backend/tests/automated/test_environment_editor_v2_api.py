@@ -60,6 +60,50 @@ def test_create_profile_enters_editor_with_default_draft(client, db_session_fact
     assert body["capabilities"]["can_abandon_draft"] is True
 
 
+def test_create_profile_rejects_duplicate_display_name(client, db_session_factory, test_settings):
+    headers = _admin(client, db_session_factory, test_settings, "v2-api-admin-duplicate-name")
+    first = client.post(
+        f"{API}/profiles",
+        headers=headers,
+        json={"display_name": "重复环境", "description": "首次创建"},
+    )
+    assert first.status_code == 201, first.text
+    assert first.json()["display_name"] == "重复环境"
+
+    duplicate = client.post(
+        f"{API}/profiles",
+        headers=headers,
+        json={"display_name": " 重复环境 ", "description": "再次创建"},
+    )
+    assert duplicate.status_code == 409, duplicate.text
+    assert duplicate.json()["detail"]["code"] == "PROFILE_DISPLAY_NAME_CONFLICT"
+
+
+def test_update_profile_rejects_duplicate_display_name(client, db_session_factory, test_settings):
+    headers = _admin(client, db_session_factory, test_settings, "v2-api-admin-duplicate-update-name")
+    first = client.post(
+        f"{API}/profiles",
+        headers=headers,
+        json={"display_name": "已有环境", "description": "首次创建"},
+    ).json()
+    second = client.post(
+        f"{API}/profiles",
+        headers=headers,
+        json={"display_name": "待改名环境", "description": "第二个环境"},
+    ).json()
+
+    duplicate = client.patch(
+        f"{API}/profiles/{second['id']}",
+        headers=headers,
+        json={"display_name": "已有环境"},
+    )
+    assert duplicate.status_code == 409, duplicate.text
+    assert duplicate.json()["detail"]["code"] == "PROFILE_DISPLAY_NAME_CONFLICT"
+    unchanged = client.get(f"{API}/profiles/{second['id']}", headers=headers)
+    assert unchanged.status_code == 200, unchanged.text
+    assert unchanged.json()["display_name"] == "待改名环境"
+
+
 def test_draft_save_revision_conflict_and_editor_options(client, db_session_factory, test_settings):
     headers = _admin(client, db_session_factory, test_settings, "v2-api-admin-conflict")
     created = client.post(

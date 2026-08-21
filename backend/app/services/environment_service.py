@@ -413,12 +413,22 @@ def create_profile(
     actor_id: int | None,
 ) -> EnvironmentProfile:
     """创建环境档位——slug 唯一，冲突 → PROFILE_SLUG_CONFLICT。"""
+    normalized_name = display_name.strip()
+    if not normalized_name:
+        raise api_error(422, "DISPLAY_NAME_REQUIRED", "环境名称不能为空")
+    name_exists = db.scalar(
+        select(EnvironmentProfile.id).where(
+            func.lower(func.trim(EnvironmentProfile.display_name)) == normalized_name.lower()
+        )
+    )
+    if name_exists is not None:
+        raise api_error(409, "PROFILE_DISPLAY_NAME_CONFLICT", "环境名称已存在，请使用其他名称")
     existing = db.scalar(select(EnvironmentProfile).where(EnvironmentProfile.slug == slug))
     if existing is not None:
         raise api_error(409, "PROFILE_SLUG_CONFLICT", "档位 slug 已存在")
     profile = EnvironmentProfile(
         slug=slug,
-        display_name=display_name,
+        display_name=normalized_name,
         description=description,
         status="active",
         created_by_id=actor_id,
@@ -449,6 +459,22 @@ def update_profile(db: Session, profile_id: int, patch: dict) -> EnvironmentProf
         or (active_job is not None and active_job.status in {"queued", "building"})
     ):
         raise api_error(409, "DRAFT_BUILD_ACTIVE", "构建进行中，暂不能修改环境")
+    if "display_name" in patch:
+        raw_name = patch["display_name"]
+        if raw_name is None:
+            raise api_error(422, "DISPLAY_NAME_REQUIRED", "环境名称不能为空")
+        normalized_name = raw_name.strip()
+        if not normalized_name:
+            raise api_error(422, "DISPLAY_NAME_REQUIRED", "环境名称不能为空")
+        name_exists = db.scalar(
+            select(EnvironmentProfile.id).where(
+                func.lower(func.trim(EnvironmentProfile.display_name)) == normalized_name.lower(),
+                EnvironmentProfile.id != profile_id,
+            )
+        )
+        if name_exists is not None:
+            raise api_error(409, "PROFILE_DISPLAY_NAME_CONFLICT", "环境名称已存在，请使用其他名称")
+        patch = {**patch, "display_name": normalized_name}
     for field in ("display_name", "description", "status"):
         if field in patch:
             setattr(profile, field, patch[field])

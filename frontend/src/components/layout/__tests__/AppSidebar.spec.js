@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import AppSidebar from '../AppSidebar.vue'
 import { useAuthStore } from '../../../stores/auth.js'
+import { useAppStore } from '../../../stores/app.js'
 
 const routerState = vi.hoisted(() => ({
   push: vi.fn(),
@@ -19,13 +20,14 @@ vi.mock('vue-router', async (importOriginal) => {
 })
 
 describe('AppSidebar 角色首页导航', () => {
-  function mountAs(role, path) {
+  function mountAs(role, path, props = {}) {
     routerState.path = path
     const pinia = createPinia()
     setActivePinia(pinia)
     const auth = useAuthStore()
+    const app = useAppStore()
     auth.setUser({ id: 1, username: role, real_name: role, role })
-    return { wrapper: mount(AppSidebar, { global: { plugins: [pinia] } }), auth }
+    return { wrapper: mount(AppSidebar, { props, global: { plugins: [pinia] } }), auth, app }
   }
 
   beforeEach(() => {
@@ -41,6 +43,29 @@ describe('AppSidebar 角色首页导航', () => {
     expect(navItems[0].classes()).toContain('active')
     await navItems[0].trigger('click')
     expect(routerState.push).toHaveBeenCalledWith('/student')
+  })
+
+  it('学生工作台变体使用专属品牌、工作台导航与学期信息，且不可折叠', async () => {
+    const { wrapper, app } = mountAs('student', '/student', {
+      variant: 'student-workspace',
+      studentContext: {
+        className: '24621601班',
+        currentTerm: '2026-2027 学年第一学期（秋季）',
+      },
+    })
+    app.sidebarCollapsed = true
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('.sidebar').classes()).toContain('student-workspace-sidebar')
+    expect(wrapper.get('.sidebar').classes()).not.toContain('collapsed')
+    expect(wrapper.findAll('.nav-item')[0].text()).toContain('工作台')
+    expect(wrapper.get('.workspace-brand-mark').text()).toBe('DAI')
+    expect(wrapper.get('.workspace-brand-name').text()).toBe('DAI 实验平台')
+    expect(wrapper.get('.workspace-brand-subtitle').text()).toBe('学生学习空间')
+    expect(wrapper.get('.semester-note').text()).toMatch(/\d{4}[-—]\d{4} 学年/)
+    expect(wrapper.get('.semester-note').text()).toMatch(/第[一二]学期 · [春秋]季/)
+    expect(wrapper.get('.u-role').text()).toBe('学生 · 24621601班')
+    expect(wrapper.find('.collapse-btn').exists()).toBe(false)
   })
 
   it('活动路由项声明 aria-current="page"，其余项不声明（TASK-024）', () => {
@@ -78,6 +103,15 @@ describe('AppSidebar 角色首页导航', () => {
   it('教师首页项在子路由不高亮', () => {
     const { wrapper } = mountAs('teacher', '/teacher/courses')
     expect(wrapper.findAll('.nav-item')[0].classes()).not.toContain('active')
+  })
+
+  it('教师工作台变体显示教师教学空间且不提供折叠按钮', () => {
+    const { wrapper } = mountAs('teacher', '/teacher', { variant: 'teacher-workspace' })
+
+    expect(wrapper.get('.sidebar').classes()).toContain('teacher-workspace-sidebar')
+    expect(wrapper.text()).toContain('教师教学空间')
+    expect(wrapper.attributes('aria-label')).toBe('教师端主导航')
+    expect(wrapper.find('.collapse-btn').exists()).toBe(false)
   })
 
   it('点击 logo 返回角色首页', async () => {

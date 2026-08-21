@@ -1,6 +1,6 @@
 <script setup>
 // V2 环境编辑器：列表与单个草稿编辑器保持在同一页面，旧 PackageCatalog 写流程不参与。
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { environmentsAPI } from '../../../api/environments.js'
 import { useAppStore } from '../../../stores/app.js'
 import { statusBadge } from '../../../utils/status.js'
@@ -30,6 +30,9 @@ const showLog = ref(false)
 const logText = ref('')
 const logLoading = ref(false)
 const showCreate = ref(false)
+const createTrigger = ref(null)
+const createNameInput = ref(null)
+const createError = ref('')
 const createForm = reactive({ display_name: '', description: '' })
 const profileForm = reactive({ display_name: '', description: '' })
 const localSnapshot = ref(null)
@@ -157,6 +160,7 @@ async function loadDetail(id = selectedId.value) {
 
 async function createProfile() {
   if (!createForm.display_name.trim()) return
+  createError.value = ''
   clearError()
   try {
     const res = await environmentsAPI.createProfile({
@@ -166,13 +170,27 @@ async function createProfile() {
     })
     createForm.display_name = ''
     createForm.description = ''
-    showCreate.value = false
+    closeCreateModal()
     emit('refresh')
     await loadDetail(res.data?.id)
     app.showToast('环境草稿已创建', 'success')
   } catch (error) {
+    const detailError = error?.response?.data?.detail || {}
+    createError.value = detailError.message || '创建环境失败'
     showApiError(error, '创建环境失败')
   }
+}
+
+function openCreateModal() {
+  createError.value = ''
+  clearError()
+  showCreate.value = true
+  nextTick(() => createNameInput.value?.focus())
+}
+
+function closeCreateModal() {
+  showCreate.value = false
+  nextTick(() => createTrigger.value?.focus())
 }
 
 function addPythonPackage() {
@@ -512,8 +530,8 @@ function selectProfile(profile) {
         <h2>环境列表</h2>
         <p class="muted">声明依赖、构建不可变镜像，检查报告后再发布给教师。</p>
       </div>
-      <button class="btn-primary" type="button" @click="showCreate = !showCreate">
-        {{ showCreate ? '取消' : '新建环境' }}
+      <button ref="createTrigger" class="btn-primary" type="button" :aria-expanded="showCreate" @click="openCreateModal">
+        新建环境
       </button>
     </section>
 
@@ -524,20 +542,40 @@ function selectProfile(profile) {
       </span>
     </div>
 
-    <section v-if="showCreate" class="card create-card" aria-labelledby="create-env-title">
-      <h3 id="create-env-title">新建环境</h3>
-      <div class="form-grid">
-        <div class="form-group">
-          <label for="v2-display-name">环境名称</label>
-          <input id="v2-display-name" v-model="createForm.display_name" autocomplete="off" />
+    <div v-if="showCreate" class="modal-backdrop create-env-backdrop" @click.self="closeCreateModal">
+      <form
+        class="modal create-env-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-env-title"
+        @keydown.esc="closeCreateModal"
+        @submit.prevent="createProfile"
+      >
+        <header class="modal-head">
+          <h2 id="create-env-title">新建环境</h2>
+          <button class="btn btn-ghost btn-sm btn-icon" type="button" aria-label="关闭" @click="closeCreateModal">×</button>
+        </header>
+        <div class="modal-body">
+          <div v-if="createError" class="notice notice-danger create-error" role="alert">
+            {{ createError }}
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="v2-display-name">环境名称</label>
+              <input ref="createNameInput" id="v2-display-name" v-model="createForm.display_name" autocomplete="off" />
+            </div>
+            <div class="form-group">
+              <label for="v2-description">描述</label>
+              <input id="v2-description" v-model="createForm.description" autocomplete="off" />
+            </div>
+          </div>
         </div>
-        <div class="form-group">
-          <label for="v2-description">描述</label>
-          <input id="v2-description" v-model="createForm.description" autocomplete="off" />
-        </div>
-      </div>
-      <button class="btn-primary" type="button" :disabled="!createForm.display_name.trim()" @click="createProfile">创建并编辑</button>
-    </section>
+        <footer class="modal-foot">
+          <button class="btn btn-ghost" type="button" @click="closeCreateModal">取消</button>
+          <button class="btn btn-primary" type="submit" :disabled="!createForm.display_name.trim()">创建并编辑</button>
+        </footer>
+      </form>
+    </div>
 
     <div class="v2-layout">
       <section class="card profile-list" aria-labelledby="profile-list-title">
@@ -761,6 +799,10 @@ function selectProfile(profile) {
 .v2-toolbar, .section-head, .editor-title-row { justify-content: space-between; }
 .v2-toolbar h2, .section-head h3, .section-head h4, .editor-title-row h3 { margin: 0; }
 .v2-toolbar h2 { font-size: 20px; }
+.create-env-backdrop { z-index: 100; }
+.create-env-modal { max-width: 640px; }
+.create-error { margin-bottom: 12px; }
+.create-env-modal .form-grid { margin: 0; }
 .eyebrow { margin: 0 0 4px; color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .1em; }
 .muted { color: var(--muted); }
 .text-sm { font-size: var(--text-sm, 13px); }
