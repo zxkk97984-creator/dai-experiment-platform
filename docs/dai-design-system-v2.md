@@ -1,19 +1,16 @@
 # DAI 实验平台前端设计规范 V2 · 「墨松绿 × 岩灰」
 
-> 文档状态：**正式规范，后续所有 UI 开发必须严格遵守本文档。**
-> 本文档只依据以下 7 个参考文件编写，任何视觉、密度、组件与交互决策均以这 7 个文件为准：
+> 文档状态：**正式规范，后续所有 UI 开发必须严格遵守本文档。**（2026-08-21）
+> 当前仓库只保留一份可执行的设计系统 CSS 源文件；本规范描述其 token、组件语义和页面组合方式。
 >
 > | 文件 | 作用 |
 > | --- | --- |
-> | `new-frontend/dai-ds-v2.css` | V2 唯一设计系统源：token + 全部组件样式 |
-> | `new-frontend/design-system-showcase.html` | 22 个组件样板：结构与交互状态 |
-> | `new-frontend/teacher-home.html` | 教师工作台代表页 |
-> | `new-frontend/course-management.html` | 高密度列表 / 工具栏 / 弹窗代表页 |
-> | `new-frontend/student-submissions.html` | 提交列表 / 筛选 / 抽屉代表页 |
-> | `new-frontend/ai-scoring-detail.html` | AI 评分双栏工作台代表页 |
-> | `new-frontend/index.html` | V2 设计方向说明（选型理由、核心决策） |
+> | `frontend/src/styles/dai-ds-v2.css` | V2 唯一设计系统源：token + 全部全局组件样式 |
+> | `frontend/src/style.css` | 全局入口、迁移期 token 别名和兼容说明 |
+> | `frontend/src/styles/teacher-management.css` | 仍在使用的教师列表页迁移桥接层 |
+> | `frontend/src/components/` | 真实 Vue 组件中的页面组合与交互实现 |
 
-如后续需要判断“某个样式该怎么做”：先查本规范，再查 `dai-ds-v2.css`，最后查 4 个代表页。不得凭 V1 样式、旧组件 scoped 样式或个人偏好自行发挥。
+如后续需要判断“某个样式该怎么做”：先查本规范，再查 `frontend/src/styles/dai-ds-v2.css`，最后查对应的真实 Vue 页面和组件。不得凭已归档的静态设计稿、旧组件 scoped 样式或个人偏好自行发挥。
 
 ---
 
@@ -22,18 +19,18 @@
 1. **唯一色彩语法**：新增 UI 颜色一律使用 `oklch()` 或 `color-mix(in oklch, …)`，禁止在组件里新造 hex、rgb、hsl。已有 V2 源文件里出现的 oklch 值可直接沿用。
 2. **Token 优先**：组件优先引用 `var(--xxx)`；只有 V2 CSS 中已存在的固定 oklch 值（浮层遮罩、深色代码区等）允许直接写入组件。
 3. **类名语义**：全局样式沿用 `dai-ds-v2.css` 的类名。Vue scoped 样式只做布局细节，不复刻或覆盖全局组件语义；确需覆盖时必须显式加注释说明原因。
-4. **源文件优先**：本规范与参考文件冲突时，以 `new-frontend/dai-ds-v2.css` 和 4 个代表页为准；本规范与旧版 `frontend/src/style.css`、`frontend/src/styles/teacher-management.css` 冲突时，旧版一律作废。
+4. **源文件优先**：本规范与实现冲突时，以 `frontend/src/styles/dai-ds-v2.css` 及真实 Vue 组件为准；迁移桥接层只允许承载尚未迁移页面的兼容规则。
 5. **页面模板优先**：代表页已示范的信息层级、密度与组合方式视为强制模式。
 
 ---
 
 ## 1. 设计方向与总原则
 
-依据 `new-frontend/index.html`：
+设计方向以当前 V2 token、App Shell 和 AI 评分组件的实际实现为准：
 
 ### 1.1 三个配色方向的选型结论
 
-| 方向 | 结论 | 理由（来自 `index.html`） |
+| 方向 | 结论 | 理由 |
 | --- | --- | --- |
 | **墨松绿 × 岩灰** | **选定** | 绿色直接对应「判题通过 / 正确 / 已验证」；暖岩灰避免冷白，适合长时间工作；与 V1 蓝 / 橙彻底区分，克制耐看 |
 | 朱砂 × 纸墨 | 未采用 | 红 / 橙在评分语境易与「错误」混淆，长期使用存在语义风险 |
@@ -60,7 +57,7 @@
 
 ## 2. Design Tokens（唯一数值来源）
 
-以下数值全部来自 `new-frontend/dai-ds-v2.css` 第 7–107 行。**任何实现不得改值或另设同名变量。**
+以下数值全部来自 `frontend/src/styles/dai-ds-v2.css` 的 token 定义。**任何实现不得改值或另设同名变量。**
 
 ### 2.1 色彩
 
@@ -261,7 +258,7 @@
 
 ## 5. 全局组件规范（01–22 组件样板）
 
-以下组件结构、类名与状态全部来自 `design-system-showcase.html`，样式以 `dai-ds-v2.css` 为准。
+以下组件结构、类名与状态以 `frontend/src/styles/dai-ds-v2.css` 和现有 Vue 组件为准。
 
 ### 5.1 色彩系统
 
@@ -429,7 +426,7 @@
 
 - 宽度 max 560px；7px 圆角；`--shadow-lg`；最高 90vh。
 - head/body/foot 用发丝线分隔；footer 主操作在右。
-- 交互：`Escape` 关闭、遮罩点击关闭、打开后焦点移入（参考 `course-management.html` 脚本聚焦首个输入）。
+- 交互：`Escape` 关闭、遮罩点击关闭、打开后焦点移入首个输入或操作控件。
 - 用于确认、创建等聚焦任务；复杂多段编辑放全屏 / 抽屉，不放 modal。
 
 ### 5.13 抽屉（Drawer）
@@ -525,7 +522,7 @@
 
 ## 6. 代表页模式（必须照此组合）
 
-### 6.1 `teacher-home.html` — 教师工作台
+### 6.1 教师工作台（`/teacher`）
 
 自上而下：
 1. `.page-head` 问候区：eyebrow 日期 → h1「你好，张老师」→ lead 提示 → 右 actions（查看公告 secondary + 处理待评分 primary-lg，按钮内计数用 `.num`）。
@@ -537,7 +534,7 @@
 
 `.work-row` / `.urgency-dot` / `.rule` 在参考页内是页面级样式，Vue 实现可做成该视图 scoped 样式或提取为通用列表行组件，但视觉值必须一致。
 
-### 6.2 `course-management.html` — 课程管理
+### 6.2 课程管理（`/teacher/courses`、`/admin/courses`）
 
 1. `.page-head`：eyebrow「教学 / 课程」→ h1 → lead → 导入名单 secondary + 创建课程 primary-lg。
 2. `.table-wrap`：
@@ -547,7 +544,7 @@
    - `.pagination`。
 3. 创建课程 `.modal`：head eyebrow + h2；body 为 `.field` 单列 + `.grid-2` 两列字段 + textarea；foot 取消 ghost + 创建 primary。必填标记 `*` 用 `--danger` 文字。
 
-### 6.3 `student-submissions.html` — 提交与评分
+### 6.3 提交与评分（`/teacher/submissions`、`/teacher/submissions/unified`）
 
 1. `.page-head`：eyebrow「评分 / 实验提交」→ h1 → lead → 批量导出 secondary + 开始复核 primary-lg。
 2. `.metric-strip` 3 列：全部提交 / 待评分 `.em` / 已评分。
@@ -557,7 +554,7 @@
    - 表格：学生主副信息、实验名 `.cell-ellipsis`、课程、状态 badge、测试与 AI 得分 `.cell-num`（AI 得分 600 字重）、提交时间 `.meta`、行操作「复核」ghost-sm。
 4. 复核 `.drawer`：head eyebrow 提交号 + 姓名 + h2；body 为 `.evidence-block.ai`（AI 建议 score-orb 32px）+ `.field` 调整得分 + textarea 理由；foot 取消 + 确认并生效 primary。
 
-### 6.4 `ai-scoring-detail.html` — AI 评分详情
+### 6.4 AI 评分详情（`/teacher/ai-grading/:id`）
 
 1. 顶栏额外放「复制原始 JSON」ghost-sm；面包屑 current 为提交号。
 2. `.page-head`：eyebrow 提交号 + 时间 → h1 实验名 → `.row-wrap` 内 `.status-dot`（warning=待教师复核）+ 学生 / 学号 / 运行环境 `.meta`；右侧「查看题目」secondary。
@@ -576,7 +573,7 @@
 ### 7.1 样式挂载方式
 
 - `frontend/src/main.js` 当前导入 `./style.css` 与 `./styles/teacher-management.css`。
-- 迁移后：**删除 / 停用这两个旧文件**，改为在 `main.js` 中只导入 V2 设计系统 CSS（内容以 `new-frontend/dai-ds-v2.css` 为唯一来源，可原样复制为 `frontend/src/styles/dai-ds-v2.css`）。
+- 迁移目标：保留 `style.css` 作为全局入口，但在所有页面完成迁移后删除其中的旧 token 别名；同时删除不再被页面引用的 `teacher-management.css` 桥接规则。`dai-ds-v2.css` 已经是仓库内的唯一 V2 CSS 源，不再从其他目录复制。
 - 页面级视觉差异（如 `.batch-bar`、`.workbench`、`.confirm-bar`）优先提取到对应 Vue 组件 scoped style；数值必须使用 token。
 - Vue scoped 样式允许存在，但只用于该组件专属布局；全局已定义的 `.btn` / `.input` / `.ds-table` 等类不得在 scoped 中重写为 V1 形态。
 
@@ -628,7 +625,7 @@
 
 ### 7.4 未包含在 22 个样板内的组件扩展规则
 
-V2 参考文件未覆盖 toast、上传、多选下拉、富文本编辑器等业务组件。实现时允许新建样式，但必须：
+规范未覆盖 toast、上传、多选下拉、富文本编辑器等业务组件。实现时允许新建样式，但必须：
 
 1. 颜色只使用第 2 节 token 或 V2 源内已存在的 oklch 固定值；
 2. 圆角从 `--radius-sm/md/lg` 选择，控件高 28 / 32 / 36px；
@@ -646,7 +643,7 @@ V2 参考文件未覆盖 toast、上传、多选下拉、富文本编辑器等�
 
 ## 8. 响应式契约
 
-以 `dai-ds-v2.css` 第 590–614 行为准：
+以 `frontend/src/styles/dai-ds-v2.css` 的响应式规则为准：
 
 | 断点 | 行为 |
 | --- | --- |
@@ -667,13 +664,13 @@ V2 参考文件未覆盖 toast、上传、多选下拉、富文本编辑器等�
 - 状态不得只靠颜色：badge 有文字，status-dot 有文字，图表有图例。
 - 空状态 / 加载 / 错误分别使用第 5.19–5.21 组件；错误要提供重试。
 - 保留旧版 `prefers-reduced-motion` 降级思路：动画时长统一压缩，V2 骨架 shimmer / hover 过渡不得例外。
-- 图标一律真实图标库（现有 `AppIcon`），禁止 emoji、自制 SVG、CSS 图案；空状态描线图标例外，允许复用 V2 样板内联 SVG 结构。
+- 图标一律使用现有 `AppIcon` 图标库，禁止 emoji、自制 SVG、CSS 图案。
 
 ---
 
 ## 10. 验收检查清单（每个页面 / PR 必查）
 
-1. 7 个参考文件齐全且 `dai-ds-v2.css` 已接入，旧 `style.css` / `teacher-management.css` 不再生效。
+1. `frontend/src/styles/dai-ds-v2.css` 已由 `frontend/src/style.css` 接入；旧桥接规则只存在于仍未迁移的页面。
 2. 新增样式中 grep 不到 hex / rgb / hsl；只有 V2 token 与 `oklch()` / `color-mix(in oklch, …)`。
 3. 页面只有 **一个** `btn-primary`；主操作层级与参考页一致。
 4. h1 / h2 为衬线；正文 14px；表格 13px / 42px 行高；控件 32px。
@@ -690,30 +687,25 @@ V2 参考文件未覆盖 toast、上传、多选下拉、富文本编辑器等�
 
 ---
 
-## 附录 A：参考文件阅读顺序与关键区段
+## 附录 A：当前实现映射
 
-| 文件 | 关键内容 |
+| 实现位置 | 责任 |
 | --- | --- |
-| `new-frontend/dai-ds-v2.css` | 1–107 token；108–134 reset/base；135–162 布局 / 排版；163–257 App Shell / 页头；259–286 按钮；287–371 表单 / 搜索 / 开关；372–387 筛选；388–404 Tabs；405–419 徽标；420–450 面板 / 指标条；451–475 表格；476–483 分页；484–488 工具栏；489–499 Modal；500–510 Drawer；511–540 代码区 / 终端；541–562 AI 评分；563–578 空态 / 加载 / 错误；579–588 数据可视化；589–614 响应式；616–641 展示页辅助 |
-| `design-system-showcase.html` | 导航列出 22 个区块；每区块含结构、状态与说明文字；末尾含弹窗 / 抽屉 / tabs / 搜索 / 筛选的参考交互脚本 |
-| `teacher-home.html` | 问候页头 + metric-strip + grid-2-1 + 最近提交表；页面级 `.work-row/.urgency-dot/.rule` |
-| `course-management.html` | toolbar + batch-bar + 高密度课程表 + 创建课程 modal；页面级 `.batch-bar` |
-| `student-submissions.html` | 3 列 metric-strip + 多维筛选 + 提交表 + 复核 drawer；页面级 `.batch-bar` |
-| `ai-scoring-detail.html` | 证据图例 + 3 列评分总览 + `.workbench` 双栏 + 底部 `.confirm-bar`；页面级 `.workbench/.evidence-list/.ev-chip/.confirm-bar` |
-| `index.html` | 三选一理由、六项核心决策、交付物说明 |
+| `frontend/src/styles/dai-ds-v2.css` | token、reset、App Shell、表单、表格、面板、状态、AI 证据、响应式规则 |
+| `frontend/src/style.css` | 全局 CSS 入口；迁移期旧 token 别名和少量兼容规则 |
+| `frontend/src/styles/teacher-management.css` | 尚未迁移的教师管理列表页桥接；完成迁移后删除 |
+| `frontend/src/components/layout/` | Shell、Header、Sidebar 的真实实现 |
+| `frontend/src/components/ui/` | AppIcon、面板、进度、状态、确认等通用 UI |
+| `frontend/src/components/ai/` | AI 配置、评分证据、代码和教师复核组件 |
+| `frontend/src/views/teacher/` | 教师工作台、课程/作业/考试/实验/提交/评分等页面组合 |
 
-## 附录 B：V2 源文件已知问题（仅实施时处理，不改视觉规范）
-
-`new-frontend/dai-ds-v2.css` 在 `.select select:disabled { … }` 之后多出一个孤立 `}`（位于 `/* 搜索框 */` 注释之前）。浏览器可容错解析。前端复制到 Vite 工程时，应**删除该冗余右括号**，其余内容原样保留；不要顺手修改任何 token 或组件数值。
-
-## 附录 C：代表页页面级样式清单（Vue 迁移时归位）
+## 附录 B：页面级样式清单
 
 | 页面级类 | 来源页面 | 迁移建议 |
 | --- | --- | --- |
-| `.work-row` / `.urgency-dot` | teacher-home | 提取为教师工作台组件 scoped 样式 |
-| `.rule` | teacher-home | 全局工具类（发丝线 hr） |
-| `.batch-bar` | course-management、student-submissions | 提取为 `DataTable` / 列表页通用组件 |
-| `.workbench` / `.wb-col` | ai-scoring-detail | 评分详情视图 scoped 样式 |
-| `.evidence-list` / `.ev-chip` | ai-scoring-detail | 评分详情 scoped 样式 |
-| `.confirm-bar` | ai-scoring-detail | 需要 sticky 底栏的工作台页通用组件 |
-
+| `.work-row` / `.urgency-dot` | `frontend/src/views/teacher/DashboardView.vue` | 保持为教师工作台页面级样式 |
+| `.rule` | 教师工作台公告区域 | 需要复用时提取为通用列表分隔原语 |
+| `.batch-bar` | 教师列表页 | 迁移到通用数据表组件或页面级样式 |
+| `.workbench` / `.wb-col` | `AIGradingReviewDetailView.vue` | 保持评分详情双栏布局 |
+| `.evidence-list` / `.ev-chip` | AI 评分组件 | 保持事实 / AI 建议 / 教师终审的视觉区分 |
+| `.confirm-bar` | AI 评分详情 | 需要 sticky 底栏的工作台页通用组件 |

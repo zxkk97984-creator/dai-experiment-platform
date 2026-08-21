@@ -164,7 +164,7 @@ struggling 不在白名单（课程列表不可见），用于验证课程可见
   白名单课程权限：elite/average/new 可见，struggling 不可见；elite 已选课可访问内容。
 - **前端**：学生首页 / 学生作业列表 / 教师首页 / AI 评分复核 / 管理端用户 均渲染真实数据，
   零 console 错误。
-- **测试**：`pytest tests/automated/test_seed_demo.py` 4 通过；全量后端测试 `pytest -q` 为 **1193 passed, 3 skipped**（本轮 Phase 7 验收）。
+- **测试**：`pytest tests/automated/test_seed_demo.py` 应通过；全量后端测试使用 `pytest -q`，结果以当前 CI 或本地执行输出为准。
 
 ---
 
