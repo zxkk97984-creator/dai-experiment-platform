@@ -103,8 +103,17 @@ AI 生产开关默认关闭。开启前必须完成 [`docs/ai-data-governance.md
 - Docker Engine/Desktop，且当前用户有权访问 Docker daemon；
 - Python 3.12（版本基线见 `backend/.python-version`）；
 - Node.js 20（CI、Vitest 和 Playwright 基线）；
-- Docker Compose v2；
-- Linux/macOS 使用 Bash 脚本时还需要 `curl`、`setsid`、`ps`；Windows 可手动启动服务。
+- Docker Compose v2。
+
+各平台启动方式：
+
+| 平台 | 支持情况 |
+| --- | --- |
+| Linux | 完整支持：一键脚本和手动命令都可用（一键脚本额外需要 `curl`、`setsid`、`ps`） |
+| macOS | 手动命令全部可用（`.venv/bin/python` 等 Unix 路径写法一致）；一键脚本不兼容，原因见下文 |
+| Windows | 原生 PowerShell 仅支持手动模式；需要一键脚本时请使用 WSL2 并按 Linux 流程操作 |
+
+下文 Bash 示例统一使用 `.venv/bin/python` 写法；Windows PowerShell 中对应 `.venv\Scripts\python.exe`。
 
 ## 本地开发
 
@@ -155,7 +164,21 @@ cd backend
   --real-name Administrator
 ```
 
-首次需要判题和 Notebook 镜像时构建：
+Windows PowerShell 对应命令：
+
+```powershell
+cd ..
+docker compose up -d mysql redis
+
+cd backend
+.venv\Scripts\python.exe -m alembic upgrade head
+.venv\Scripts\python.exe -m app.cli create-admin `
+  --username admin `
+  --password 'Test1234!' `
+  --real-name Administrator
+```
+
+首次需要判题和 Notebook 镜像时构建（三个平台的 `docker build` 命令完全一致）：
 
 ```bash
 cd ..
@@ -164,6 +187,8 @@ docker build -t dai-kernel-python:latest backend/docker/kernel
 ```
 
 ### 3. 推荐：一键启动完整开发栈
+
+> **平台兼容性说明**：该脚本仅支持 Linux。它依赖 Linux 特有的 `setsid` 命令创建独立进程组，并用 `/proc/<pid>/cwd` 校验进程归属；macOS 没有内置 `setsid`，也没有 `/proc` 文件系统，Windows 原生 shell 两者皆无，因此这两个平台无法直接运行此脚本。macOS 用户请使用第 4 节的手动模式（命令完全一致）；Windows 用户建议在 WSL2 内按本节执行（Docker Desktop 启用 WSL2 后端后，WSL2 内可直接使用 `docker compose` 和 `npm`）。
 
 ```bash
 DAI_DEV_NO_BROWSER=1 ./scripts/dev-up.sh
@@ -188,6 +213,8 @@ DAI_DEV_NO_BROWSER=1 ./scripts/dev-up.sh
 
 ### 4. 手动分别启动
 
+以下命令适用于 Linux 和 macOS（每个服务一个终端）：
+
 ```bash
 # 终端 1：API（在 backend 目录）
 cd backend
@@ -207,12 +234,40 @@ npm install
 npm run dev
 ```
 
+Windows PowerShell 原生环境对应命令（Docker Desktop 需正在运行）：
+
+```powershell
+# 终端 1：API（在 backend 目录）
+cd backend
+.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# 终端 2：作业/考试/AI 判题 Worker
+cd backend
+.venv\Scripts\python.exe -m app.worker.judge_worker
+
+# 终端 3：环境构建 Worker
+cd backend
+.venv\Scripts\python.exe -m app.worker.environment_builder_worker
+
+# 终端 4：前端
+cd frontend
+npm install
+npm run dev
+```
+
 API 端口变化时同步设置前端代理：
 
 ```bash
 DAI_DEV_API_PORT=8001 ./scripts/dev-up.sh
 # 或手动：
 VITE_API_PROXY_TARGET=http://localhost:8001 npm run dev
+```
+
+PowerShell 中环境变量需要用 `$env:` 前缀设置：
+
+```powershell
+$env:VITE_API_PROXY_TARGET = "http://localhost:8001"
+npm run dev
 ```
 
 访问地址：
@@ -232,13 +287,15 @@ cd backend
 .venv/bin/python -m app.cli seed-environments --enqueue
 ```
 
-Demo 数据是幂等的；`seed-demo` 默认要求 `basic` 环境已有可用版本：
+Demo 数据是幂等的；`seed-demo` 默认要求 `basic` 环境已有可用版本（即先执行过 `seed-environments --enqueue` 且 Environment Builder 构建成功）：
 
 ```bash
 cd backend
 .venv/bin/python -m app.cli seed-demo
 .venv/bin/python -m app.cli seed-demo --reset-demo
 ```
+
+Windows PowerShell 用户将上述命令中的 `.venv/bin/python` 替换为 `.venv\Scripts\python.exe` 即可。
 
 详细账号、前置条件、故事线和重置边界见 [`docs/demo-data.md`](docs/demo-data.md)。
 
@@ -370,6 +427,9 @@ npm ci
 npm run lint
 npm test
 npm run build
+
+# 首次运行 E2E 前安装 Playwright 浏览器（一次即可）
+npx playwright install
 
 # 等 API、前端和数据库由外部提供后运行
 npm run e2e
