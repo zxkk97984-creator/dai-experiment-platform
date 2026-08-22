@@ -86,7 +86,7 @@ const navGroups = computed(() => {
     return [
       { label: '教务', items: pick(['users', 'academics', 'courses', 'experiments']) },
       { label: '评分', items: pick(['ai-grading']) },
-      { label: '系统', items: pick(['environments']) },
+      { label: '系统', items: pick(['environments', 'logs']) },
     ]
   }
   return [{ label: '学习', items }]
