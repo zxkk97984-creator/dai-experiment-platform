@@ -25,6 +25,7 @@
 - 限时考试、选择题/代码题、自动交卷、重判、成绩汇总和教师逐题改分；
 - 实验模块、不可变 Notebook 模板版本、内置 Notebook Player、Studio 编辑器、导入/导出和资源清单；
 - AI 代码评分的测试组、Rubric、`legacy`/`shadow`/`active` 模式、输出校验和教师终审；
+- 结构化日志与可观测性：JSON 行文件日志（按大小轮转）、request_id 贯穿、敏感字段脱敏和管理员系统日志页（见 [系统日志与可观测性](#系统日志与可观测性)）；
 - 环境 Profile/Draft/immutable Version、Python/pip/apt 包校验、异步构建、Registry digest 校验、发布和回滚；
 - 教师 Dashboard、统一提交中心、全局搜索、通知、成绩统计、班级/学员、设置和环境选择；
 - JWT Access Token + HttpOnly Refresh Token、Redis 限流/黑名单、角色和资源级权限。
@@ -81,6 +82,7 @@ AI 生产开关默认关闭。开启前必须完成 [`docs/ai-data-governance.md
 │   ├── docker/kernel/        # Notebook Kernel 镜像
 │   ├── lesson_content/       # 课程教学内容
 │   ├── storage/              # 本地运行/业务文件存储
+│   ├── logs/                 # 运行时文件日志（gitignore，管理员日志页读取）
 │   └── tests/automated/      # 后端自动化测试
 ├── frontend/
 │   ├── src/                  # Vue 页面、组件、API、Store 和工具
@@ -314,6 +316,7 @@ Windows PowerShell 用户将上述命令中的 `.venv/bin/python` 替换为 `.ve
 | 组 | 变量 |
 | --- | --- |
 | 基础连接 | `DAI_ENVIRONMENT`、`DAI_DATABASE_URL`、`DAI_REDIS_URL`、`DAI_SECRET_KEY`、`DAI_CORS_ORIGINS` |
+| 日志 | `DAI_LOG_DIR`、`DAI_LOG_MAX_BYTES`、`DAI_LOG_BACKUP_COUNT` |
 | Compose 数据库 | `DAI_DB_USER`、`DAI_DB_PASSWORD`、`DAI_DB_ROOT_PASSWORD` |
 | 判题 | `DAI_JUDGE_IMAGE`、`DAI_KERNEL_IMAGE`、`DAI_JUDGE_TIMEOUT_SECONDS`、`DAI_JUDGE_MEMORY_LIMIT_MB`、`DAI_JUDGE_CPU_LIMIT`、`DAI_JUDGE_HOST_WORK_DIR` |
 | Storage | `DAI_STORAGE_BACKEND`、`DAI_STORAGE_S3_*`、`DAI_VIDEO_*`、`DAI_COVER_*` |
@@ -381,6 +384,46 @@ docker compose -f docker-compose.prod.yml logs --tail=200 environment-builder
 ```
 
 环境 V2 的真实构建必须完成 Docker build、smoke、Registry push、按 digest pull-back、数据库 `available` 和教师旧绑定回归；仅完成 API 测试不等于生产验收。
+
+## 系统日志与可观测性
+
+平台内置两层可观测性设施，用于快速定位 AI 评分、判题与基础设施异常。
+
+### 文件日志（API 与 Worker）
+
+- API 与判题 Worker 分别写 `backend/logs/dai-api.log`、`backend/logs/dai-worker.log`（生产 Compose 中为共享卷 `/app/logs`）；
+- 统一 JSON 行格式：时间、级别、logger、`request_id`（rid）与结构化附加字段（如 `operation`、`completion_tokens`、`finish_reason`、`attempts`）；
+- 按大小轮转（默认 20MB × 10 份），目录不可写时自动降级为仅控制台，不阻断启动；
+- 敏感字段（API Key、Authorization 等）在 JSON 输出时自动剔除，学生代码原文按约定从不入日志；
+- 配置：`DAI_LOG_DIR`（置空禁用）、`DAI_LOG_MAX_BYTES`、`DAI_LOG_BACKUP_COUNT`。
+
+### 管理员系统日志页
+
+管理员登录后，侧栏「系统 → 系统日志」进入（`/admin/logs`），能力包括：
+
+- API 服务 / 判题 Worker 双来源切换，含轮转副本；
+- 级别过滤（ERROR / WARNING 及以上）、按消息内容、logger 或 request_id 的关键词搜索；
+- 「AI 事件」一键过滤 `ai_` 前缀事件（`ai_chat_completed` / `ai_retries_exhausted` 等），快速定位 AI 调用失败；
+- 结构化附加字段与异常堆栈展开、可选 10 秒自动刷新；
+- 仅 admin 角色可访问（后端同样校验），读取路径限定在日志目录内，防路径穿越。
+
+对应后端 API：`GET /api/v1/admin/logs` 与 `GET /api/v1/admin/logs/files`。
+
+### 常见故障的日志特征速查
+
+| 日志特征 | 含义 | 处置 |
+| --- | --- | --- |
+| `finish_reason=length` / `completion_tokens == max_tokens` | completion 预算耗尽（推理模型推理挤占正文） | 调高 `OPERATION_MAX_TOKENS` 对应预算 |
+| `ai_retries_exhausted` | AI 调用重试耗尽，任务转人工 | AI 评分复核工作台重试或覆盖 |
+| `ExamSubmission ... 转 review_required` | 考试提交转人工复核 | 成绩详情逐题处理（补救通道可自动收口） |
+| `http_401/403`（AI） | AI API Key 失效 | 更换 `DAI_AI_API_KEY` 后重启 |
+| `timeout` / `http_5xx`（AI） | 上游 AI 服务抖动 | 稍后重试或联系服务商 |
+
+### 生产日志边界（已知限制）
+
+- stdout 日志由 Compose `json-file` 驱动限制（50MB × 5 份），文件日志存于 `app_logs` 卷，随卷生命周期保留；
+- 当前为单机日志视图；将来 API 多副本部署时需引入集中式日志（Loki/ELK）后再扩展；
+- 尚无主动告警：错误率突增或 `review_required` 积压超阈值时的通知（邮件/webhook）属于后续增强。
 
 ## 数据库迁移、初始化与回滚
 
