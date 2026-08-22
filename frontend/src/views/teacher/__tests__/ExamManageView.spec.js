@@ -101,6 +101,51 @@ describe('考试管理页 ExamManageView', () => {
     expect(wrapper.text()).toContain('期中考试')
   })
 
+  it('把筛选和排序交给服务端，并按 total 分页', async () => {
+    coursesAPI.list.mockResolvedValue({ data: { items: courses } })
+    examsAPI.list.mockResolvedValue({
+      data: {
+        items: [{ id: 1, title: '目标考试', status: 'draft', course_id: 10001, duration_minutes: 60 }],
+        page: 1,
+        page_size: 10,
+        total: 25,
+      },
+    })
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    expect(examsAPI.list).toHaveBeenCalledWith({
+      page: 1,
+      page_size: 10,
+      sort: 'updated_desc',
+    })
+    const next = wrapper.find('[aria-label="考试列表分页"] button[aria-label="下一页"]')
+    expect(next.exists()).toBe(true)
+    await next.trigger('click')
+    await flushPromises()
+    expect(examsAPI.list).toHaveBeenLastCalledWith({
+      page: 2,
+      page_size: 10,
+      sort: 'updated_desc',
+    })
+
+    await wrapper.find('input[aria-label="搜索考试名称或课程"]').setValue('目标')
+    await wrapper.find('input[aria-label="搜索考试名称或课程"]').trigger('input')
+    await wrapper.find('select[aria-label="状态筛选"]').setValue('draft')
+    await wrapper.find('select[aria-label="课程筛选"]').setValue('10001')
+    await wrapper.find('select[aria-label="排序"]').setValue('title_asc')
+    await flushPromises()
+
+    expect(examsAPI.list).toHaveBeenLastCalledWith({
+      page: 1,
+      page_size: 10,
+      q: '目标',
+      status: 'draft',
+      course_id: 10001,
+      sort: 'title_asc',
+    })
+  })
+
   it('点击「创建考试」打开信息弹窗，确认后跳转题目编辑页', async () => {
     examsAPI.create.mockResolvedValue({ data: { id: 23 } })
     const wrapper = await mountPage()

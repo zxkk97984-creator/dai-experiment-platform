@@ -80,6 +80,35 @@ def test_admin_user_list_exactly_matches_username_student_no_or_real_name(client
     assert partial_response.json()["items"] == []
 
 
+def test_teacher_student_candidate_search_matches_partial_student_no(client, db_session_factory):
+    create_user(db_session_factory, "student-search-teacher", "teacher")
+    create_user(
+        db_session_factory,
+        "student-search-target",
+        "student",
+        real_name="目标学生",
+    )
+    with db_session_factory() as db:
+        from sqlalchemy import select
+        from app.models import User
+
+        student = db.scalar(select(User).where(User.username == "student-search-target"))
+        student.student_no = "2026001234"
+        db.commit()
+
+    access_token, _ = login(client, "student-search-teacher")
+    response = client.get(
+        "/api/v1/users/students",
+        headers=auth_header(access_token),
+        params={"q": "001234", "page": 1, "page_size": 20},
+    )
+
+    assert response.status_code == 200, response.text
+    assert [item["username"] for item in response.json()["items"]] == [
+        "student-search-target"
+    ]
+
+
 def test_student_cannot_create_users(client, db_session_factory):
     create_user(db_session_factory, "student", "student")
     access_token, _ = login(client, "student")

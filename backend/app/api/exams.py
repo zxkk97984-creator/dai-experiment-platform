@@ -6,15 +6,19 @@ import math
 from pathlib import Path
 import tempfile
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from sqlalchemy import and_, func, or_, select
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy import and_, case, exists, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.courses import can_access_course_content, ensure_course_manager, require_course
 from app.config import Settings, get_settings
 from app.dependencies import get_current_user, get_db, require_roles, PaginationParams, pagination
 from app.errors import api_error
-from app.models import CodeGrade, Course, CourseEnrollment, Exam, ExamAnswer, ExamGrade, ExamQuestion, ExamSubmission, QuestionRubric, User
+from app.models import (
+    CodeGrade, Course, CourseEnrollment, Exam, ExamAnswer, ExamAudienceClass,
+    ExamAudienceStudent, ExamGrade, ExamQuestion, ExamSubmission,
+    QuestionRubric, TeachingClassStudent, User,
+)
 from app.schemas import CourseStudentImportResult, CourseStudentImportRow, ExamAnswerBatchRequest, ExamAnswerScoreUpdate, ExamCreate, ExamGradeRead, ExamQuestionCreate, ExamQuestionRead, ExamQuestionTeacherRead, ExamQuestionUpdate, ExamRead, ExamRetryRequest, ExamSampleRunRequest, ExamSessionRead, ExamSubmitRequest, ExamSubmissionRead, ExamTimeExtensionRequest, ExamUpdate, PaginatedResponse, SampleRunResponse
 from app.services.exam_service import build_student_exam_session, build_student_exam_summary, create_question, delete_question, exam_max_score, extend_exam_submission, force_submit_exam_submission, get_my_grade, get_question, list_questions, release_exam_review, require_exam_editable, retry_exam_submission as retry_exam_submission_service, save_answer, start_exam as svc_start_exam, student_exam_status, submit_exam as svc_submit_exam, update_question, validate_publish
 from app.services.time_utils import as_utc, utc_now
@@ -76,30 +80,67 @@ def _submitted_ids(db: Session, exams: list[Exam], student_id: int) -> set[int]:
 
 @router.get("", response_model=PaginatedResponse)
 def list_exams(
+    q: str | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),
+    course_id: int | None = None,
+    sort: str = "updated_desc",
     pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     page, page_size = pagination.page, pagination.page_size
-    query = select(Exam)
+    server_now = utc_now()
+    query = select(Exam).join(Course, Exam.course_id == Course.id)
     if current_user.role == "student":
         query = (
-            query.join(Course, Exam.course_id == Course.id)
-            .where(Exam.status == "published")
+            query.where(Exam.status == "published")
             .where(Course.status == "published")
             .where(exam_visible_condition(current_user.id))
         )
     elif current_user.role == "teacher":
-        query = query.join(Course, Exam.course_id == Course.id).where(Course.teacher_id == current_user.id)
+        query = query.where(Course.teacher_id == current_user.id)
     elif current_user.role != "admin":
         # Any unsupported role: empty
         query = query.where(Exam.id == -1)
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        query = query.where(or_(Exam.title.ilike(like), Course.title.ilike(like)))
+    if course_id is not None:
+        query = query.where(Exam.course_id == course_id)
+    if status_filter:
+        normalized_status = status_filter.strip().lower()
+        if normalized_status == "draft":
+            query = query.where(Exam.status == "draft")
+        elif normalized_status == "ended":
+            query = query.where(
+                Exam.status == "published",
+                Exam.end_at.is_not(None),
+                Exam.end_at < server_now,
+            )
+        elif normalized_status == "published":
+            query = query.where(
+                Exam.status == "published",
+                or_(Exam.end_at.is_(None), Exam.end_at >= server_now),
+            )
+        else:
+            raise api_error(422, "INVALID_EXAM_STATUS_FILTER", "考试状态筛选值无效")
+    sort_expressions = {
+        "updated": (Exam.updated_at.desc(), Exam.id.desc()),
+        "updated_desc": (Exam.updated_at.desc(), Exam.id.desc()),
+        "updated_asc": (Exam.updated_at.asc(), Exam.id.asc()),
+        "title": (Exam.title.asc(), Exam.id.asc()),
+        "title_asc": (Exam.title.asc(), Exam.id.asc()),
+        "title_desc": (Exam.title.desc(), Exam.id.desc()),
+        "id": (Exam.id.asc(),),
+    }
+    if sort not in sort_expressions:
+        raise api_error(422, "INVALID_EXAM_SORT", "考试排序值无效")
     # TASK-022：窗口函数一次取回总数，避免额外的 count 查询；
     # joinedload 预取 course，避免逐项惰性加载
     rows = db.execute(
         query.options(joinedload(Exam.course))
         .add_columns(func.count().over().label("_total"))
-        .order_by(Exam.id)
+        .order_by(*sort_expressions[sort])
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()
@@ -107,8 +148,6 @@ def list_exams(
     exams = [row.Exam for row in rows]
     populate_audience_cache(db, task_type="exam", tasks=exams)
     student_submissions = {}
-    from app.services.time_utils import utc_now
-    server_now = utc_now()
     if current_user.role == "student" and exams:
         rows = db.scalars(select(ExamSubmission).where(
             ExamSubmission.student_id == current_user.id,
@@ -583,35 +622,158 @@ def force_submit_submission(
 @router.get("/{exam_id}/grades")
 def exam_grades(
     exam_id: int,
+    q: str | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),
+    score_filter: str = Query(default="all", alias="score"),
+    sort: str = "score_desc",
+    pagination: PaginationParams = Depends(pagination),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("teacher", "admin")),
 ):
-    from app.services.time_utils import utc_now
     server_now = utc_now()
     exam = require_exam(exam_id, db)
     if current_user.role == "teacher":
         ensure_course_manager(exam.course, current_user)
-    submissions = db.scalars(
-        select(ExamSubmission).where(ExamSubmission.exam_id == exam_id).order_by(ExamSubmission.id)
-    ).all()
-    submission_by_student = {submission.student_id: submission for submission in submissions}
-
-    audience_ids = effective_student_ids(
-        db, task_type="exam", task_id=exam.id, course=exam.course,
+    submission_join = and_(
+        ExamSubmission.exam_id == exam_id,
+        ExamSubmission.student_id == User.id,
     )
-    enrolled_students = db.scalars(
-        select(User).where(User.id.in_(audience_ids)).order_by(User.id)
-    ).all() if audience_ids else []
-    students_by_id = {student.id: student for student in enrolled_students}
-    for submission in submissions:
-        students_by_id.setdefault(submission.student_id, submission.student)
 
-    items = []
-    for student in students_by_id.values():
-        submission = submission_by_student.get(student.id)
+    enrolled = exists(
+        select(CourseEnrollment.id).where(
+            CourseEnrollment.course_id == Exam.course_id,
+            CourseEnrollment.student_id == User.id,
+            CourseEnrollment.status == "enrolled",
+        )
+    )
+    selected_class_member = exists(
+        select(ExamAudienceClass.id)
+        .join(
+            TeachingClassStudent,
+            TeachingClassStudent.teaching_class_id == ExamAudienceClass.teaching_class_id,
+        )
+        .where(
+            ExamAudienceClass.exam_id == Exam.id,
+            TeachingClassStudent.student_id == User.id,
+            TeachingClassStudent.status == "active",
+        )
+    )
+    include_student = exists(
+        select(ExamAudienceStudent.id).where(
+            ExamAudienceStudent.exam_id == Exam.id,
+            ExamAudienceStudent.student_id == User.id,
+            ExamAudienceStudent.kind == "include",
+        )
+    )
+    exclude_student = exists(
+        select(ExamAudienceStudent.id).where(
+            ExamAudienceStudent.exam_id == Exam.id,
+            ExamAudienceStudent.student_id == User.id,
+            ExamAudienceStudent.kind == "exclude",
+        )
+    )
+    audience_condition = and_(
+        or_(
+            and_(Exam.audience_mode == "all_enrolled", enrolled),
+            and_(Exam.audience_mode == "selected_classes", selected_class_member),
+            include_student,
+        ),
+        or_(~exclude_student, include_student),
+    )
+    has_submission = exists(
+        select(ExamSubmission.id).where(
+            ExamSubmission.exam_id == exam_id,
+            ExamSubmission.student_id == User.id,
+        ).correlate(User, Exam)
+    )
+    student_scope = or_(audience_condition, has_submission)
+
+    filters = []
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        filters.append(or_(
+            User.real_name.ilike(like),
+            User.student_no.ilike(like),
+            User.username.ilike(like),
+        ))
+    if score_filter not in {"all", "excellent", "good", "pass", "fail"}:
+        raise api_error(422, "INVALID_GRADE_SCORE_FILTER", "成绩分数段筛选值无效")
+    if score_filter != "all":
+        score_ranges = {
+            "excellent": (90, None),
+            "good": (80, 90),
+            "pass": (60, 80),
+            "fail": (0, 60),
+        }
+        low, high = score_ranges[score_filter]
+        score_filter_clause = [ExamSubmission.score.is_not(None), ExamSubmission.score >= low]
+        if high is not None:
+            score_filter_clause.append(ExamSubmission.score < high)
+        filters.extend(score_filter_clause)
+    if status_filter:
+        normalized_status = status_filter.strip().lower()
+        if normalized_status == "in_progress":
+            filters.append(ExamSubmission.status == "started")
+        elif normalized_status in {"submitted", "grading", "graded", "review_required"}:
+            filters.append(ExamSubmission.status == normalized_status)
+        elif normalized_status == "scheduled":
+            filters.append(and_(
+                ExamSubmission.id.is_(None),
+                Exam.start_at.is_not(None),
+                Exam.start_at > server_now,
+            ))
+        elif normalized_status == "ready":
+            filters.append(and_(
+                ExamSubmission.id.is_(None),
+                or_(Exam.start_at.is_(None), Exam.start_at <= server_now),
+                or_(Exam.end_at.is_(None), Exam.end_at > server_now),
+            ))
+        elif normalized_status == "missed":
+            filters.append(and_(
+                ExamSubmission.id.is_(None),
+                Exam.end_at.is_not(None),
+                Exam.end_at <= server_now,
+            ))
+        else:
+            raise api_error(422, "INVALID_GRADE_STATUS_FILTER", "成绩状态筛选值无效")
+
+    sort_expressions = {
+        "score_desc": (ExamSubmission.score.desc().nullslast(), User.id.asc()),
+        "score-desc": (ExamSubmission.score.desc().nullslast(), User.id.asc()),
+        "score_asc": (ExamSubmission.score.asc().nullslast(), User.id.asc()),
+        "score-asc": (ExamSubmission.score.asc().nullslast(), User.id.asc()),
+        "time": (ExamSubmission.submitted_at.desc().nullslast(), User.id.asc()),
+        "name": (User.real_name.asc(), User.id.asc()),
+    }
+    if sort not in sort_expressions:
+        raise api_error(422, "INVALID_GRADE_SORT", "成绩排序值无效")
+
+    # Join the one requested exam explicitly.  Besides making the status
+    # predicates correct, this prevents another exam row from multiplying the
+    # grade rows when the database contains multiple exams.
+    base_query = (
+        select(User, ExamSubmission)
+        .select_from(User)
+        .join(Exam, Exam.id == exam_id)
+        .outerjoin(ExamSubmission, submission_join)
+        .where(student_scope)
+    )
+    filtered_query = base_query.where(*filters)
+    total = db.scalar(
+        select(func.count()).select_from(filtered_query.order_by(None).subquery())
+    ) or 0
+    page, page_size = pagination.page, pagination.page_size
+    rows = db.execute(
+        filtered_query
+        .order_by(*sort_expressions[sort])
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+
+    def _grade_item(student: User, submission: ExamSubmission | None) -> dict:
         score = submission.score if submission else None
-        derived_status = submission.status if submission else student_exam_status(exam, None, server_now)[0]
-        items.append({
+        derived_status = student_exam_status(exam, submission, server_now)[0]
+        return {
             "id": submission.id if submission else f"absent-{student.id}",
             "exam_id": exam.id,
             "student_id": student.id,
@@ -627,17 +789,127 @@ def exam_grades(
             "submitted_at": submission.submitted_at if submission else None,
             "graded_at": submission.graded_at if submission else None,
             "review_reason": submission.review_reason if submission else None,
-        })
+        }
 
-    scored = [float(item["score"]) for item in items if item["score"] is not None]
-    submitted_count = sum(1 for item in items if item["status"] in ("submitted", "grading", "graded", "review_required"))
-    status_counts = {key: sum(1 for item in items if item["status"] == key) for key in (
+    status_keys = (
         "scheduled", "ready", "in_progress", "submitted", "grading", "graded", "review_required", "missed"
-    )}
-    pass_count = sum(1 for score in scored if score >= 60)
-    distribution = []
-    for label, low, high in (("90–100", 90, 101), ("80–89", 80, 90), ("70–79", 70, 80), ("60–69", 60, 70), ("0–59", 0, 60)):
-        distribution.append({"label": label, "count": sum(1 for score in scored if low <= score < high)})
+    )
+    submission_status = case(
+        (
+            and_(
+                ExamSubmission.status == "started",
+                ExamSubmission.started_at.is_not(None),
+                ExamSubmission.started_at > server_now,
+            ),
+            "scheduled",
+        ),
+        (ExamSubmission.status == "started", "in_progress"),
+        (
+            ExamSubmission.status.in_(
+                ("submitted", "grading", "graded", "review_required")
+            ),
+            ExamSubmission.status,
+        ),
+        else_=ExamSubmission.status,
+    )
+    derived_status = case(
+        (ExamSubmission.id.is_not(None), submission_status),
+        (
+            and_(Exam.start_at.is_not(None), Exam.start_at > server_now),
+            "scheduled",
+        ),
+        (
+            and_(Exam.end_at.is_not(None), Exam.end_at <= server_now),
+            "missed",
+        ),
+        else_="ready",
+    )
+    submitted_statuses = ("submitted", "grading", "graded", "review_required")
+    distribution_ranges = (
+        ("90–100", 90, 101, "90_100"),
+        ("80–89", 80, 90, "80_89"),
+        ("70–79", 70, 80, "70_79"),
+        ("60–69", 60, 70, "60_69"),
+        ("0–59", 0, 60, "0_59"),
+    )
+    summary_columns = [
+        func.count(User.id).label("expected_count"),
+        func.sum(
+            case((derived_status.in_(submitted_statuses), 1), else_=0)
+        ).label("submitted_count"),
+        func.count(ExamSubmission.score).label("graded_count"),
+        func.avg(ExamSubmission.score).label("average_score"),
+        func.max(ExamSubmission.score).label("highest_score"),
+        func.sum(
+            case(
+                (
+                    and_(
+                        ExamSubmission.score.is_not(None),
+                        ExamSubmission.score >= 60,
+                    ),
+                    1,
+                ),
+                else_=0,
+            )
+        ).label("pass_count"),
+        func.sum(
+            case(
+                (
+                    and_(
+                        ExamSubmission.score.is_not(None),
+                        ExamSubmission.score >= 90,
+                    ),
+                    1,
+                ),
+                else_=0,
+            )
+        ).label("excellent_count"),
+    ]
+    for _label, low, high, key in distribution_ranges:
+        summary_columns.append(
+            func.sum(
+                case(
+                    (
+                        and_(
+                            ExamSubmission.score.is_not(None),
+                            ExamSubmission.score >= low,
+                            ExamSubmission.score < high,
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label(f"distribution_{key}")
+        )
+    for key in status_keys:
+        summary_columns.append(
+            func.sum(case((derived_status == key, 1), else_=0)).label(
+                f"status_{key}"
+            )
+        )
+    summary_row = db.execute(
+        select(*summary_columns)
+        .select_from(User)
+        .join(Exam, Exam.id == exam_id)
+        .outerjoin(ExamSubmission, submission_join)
+        .where(student_scope)
+    ).one()._mapping
+
+    def _summary_int(key: str) -> int:
+        return int(summary_row[key] or 0)
+
+    scored_count = _summary_int("graded_count")
+    average_score = summary_row["average_score"]
+    highest_score = summary_row["highest_score"]
+    distribution = [
+        {"label": label, "count": _summary_int(f"distribution_{key}")}
+        for label, _low, _high, key in distribution_ranges
+    ]
+    status_counts = {
+        key: _summary_int(f"status_{key}") for key in status_keys
+    }
+
+    items = [_grade_item(student, submission) for student, submission in rows]
 
     question_count = db.scalar(
         select(func.count()).select_from(ExamQuestion).where(ExamQuestion.exam_id == exam_id)
@@ -647,9 +919,9 @@ def exam_grades(
     ) or 0
     return {
         "items": items,
-        "page": 1,
-        "page_size": len(items) or 20,
-        "total": len(items),
+        "page": page,
+        "page_size": page_size,
+        "total": total,
         "exam": {
             "id": exam.id,
             "title": exam.title,
@@ -668,13 +940,13 @@ def exam_grades(
             "server_now": server_now,
         },
         "summary": {
-            "expected_count": len(items),
-            "submitted_count": submitted_count,
-            "graded_count": len(scored),
-            "average_score": round(sum(scored) / len(scored), 1) if scored else None,
-            "highest_score": max(scored) if scored else None,
-            "pass_rate": round(pass_count * 100 / len(scored), 1) if scored else 0,
-            "excellent_rate": round(sum(1 for score in scored if score >= 90) * 100 / len(scored), 1) if scored else 0,
+            "expected_count": _summary_int("expected_count"),
+            "submitted_count": _summary_int("submitted_count"),
+            "graded_count": scored_count,
+            "average_score": round(float(average_score), 1) if average_score is not None else None,
+            "highest_score": float(highest_score) if highest_score is not None else None,
+            "pass_rate": round(_summary_int("pass_count") * 100 / scored_count, 1) if scored_count else 0,
+            "excellent_rate": round(_summary_int("excellent_count") * 100 / scored_count, 1) if scored_count else 0,
             "status_counts": status_counts,
         },
         "distribution": distribution,

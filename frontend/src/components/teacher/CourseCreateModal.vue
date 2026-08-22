@@ -42,6 +42,7 @@ const createdCourse = ref(null)
 const coverUploadController = ref(null)
 const syncedWhitelistStudentIds = new Set()
 let classesRequestId = 0
+const classPageSize = 50
 
 const MAX_COVER_BYTES = 5 * 1024 * 1024
 const ALLOWED_COVER_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
@@ -150,8 +151,22 @@ async function loadClasses(termId) {
 
   classesLoading.value = true
   try {
-    const res = await academicsAPI.listClasses({ academic_term_id: Number(termId), page_size: 100 })
-    if (requestId === classesRequestId) availableClasses.value = res.data.items || []
+    const rows = []
+    let page = 1
+    while (true) {
+      if (requestId !== classesRequestId) return
+      const res = await academicsAPI.listClasses({
+        academic_term_id: Number(termId),
+        page,
+        page_size: classPageSize,
+      })
+      const items = res.data.items || []
+      rows.push(...items)
+      const total = res.data.total
+      if (total == null || page >= Math.max(1, Math.ceil(Number(total) / classPageSize))) break
+      page += 1
+    }
+    if (requestId === classesRequestId) availableClasses.value = rows
   } catch {
     if (requestId === classesRequestId) classesError.value = '教学班加载失败，可稍后到课程设置中选择'
   } finally {

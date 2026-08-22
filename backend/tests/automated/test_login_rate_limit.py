@@ -4,15 +4,17 @@
 - IP 维度：单 IP 15 分钟窗口内最多 30 次尝试（换用户名不可绕过）。
 - 超限返回 429 + Retry-After；成功登录清除该账户失败计数。
 - Redis 故障返回 503，不造成永久锁定。
-- 仅当 trusted_proxy=True 时才信任 X-Forwarded-For 最右一跳。
+- 只有 immediate peer 命中可信代理 CIDR/主机配置时才解析 X-Forwarded-For。
 """
 
 import time
 
 import pytest
 import redis as redis_lib
+from starlette.requests import Request
 
 from conftest import create_user
+from app.api.auth import _client_ip
 
 WRONG = "wrong-password-1"
 RIGHT = "Passw0rd!"
@@ -105,8 +107,8 @@ def test_forged_xff_ignored_without_trusted_proxy(client, test_settings):
     assert blocked.status_code == 429
 
 
-def test_xff_honored_only_with_trusted_proxy(client, test_settings, monkeypatch):
-    monkeypatch.setattr(test_settings, "trusted_proxy", True)
+def test_xff_honored_only_with_configured_trusted_proxy(client, test_settings, monkeypatch):
+    monkeypatch.setattr(test_settings, "trusted_proxy_cidrs", "testclient")
     for i in range(30):
         response = login_attempt(
             client, f"ghost{i}", WRONG, headers={"X-Forwarded-For": "203.0.113.9"}
@@ -119,6 +121,31 @@ def test_xff_honored_only_with_trusted_proxy(client, test_settings, monkeypatch)
     assert blocked.status_code == 429
     # 不带转发头的真实客户端 IP 不受该转发 IP 封禁影响
     assert login_attempt(client, "ghost31", WRONG).status_code == 401
+
+
+def _request_with_xff(value: str | None) -> Request:
+    headers = [] if value is None else [(b"x-forwarded-for", value.encode())]
+    return Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "headers": headers,
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+        "scheme": "http",
+    })
+
+
+def test_proxy_chain_requires_trusted_peer_and_trusted_intermediate_hops():
+    class SettingsStub:
+        trusted_proxy_cidrs = "testclient,10.0.0.0/8"
+
+    settings = SettingsStub()
+    assert _client_ip(_request_with_xff("203.0.113.9"), settings) == "203.0.113.9"
+    assert _client_ip(_request_with_xff("203.0.113.9, 10.1.2.3"), settings) == "203.0.113.9"
+    assert _client_ip(_request_with_xff("203.0.113.9, 198.51.100.2"), settings) == "testclient"
+    no_trust = type("NoTrust", (), {"trusted_proxy_cidrs": ""})()
+    assert _client_ip(_request_with_xff("203.0.113.9"), no_trust) == "testclient"
 
 
 def test_username_normalization_for_rate_limit_key(client, db_session_factory):

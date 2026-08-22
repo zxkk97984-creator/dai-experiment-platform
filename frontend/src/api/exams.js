@@ -5,7 +5,6 @@ export const examsAPI = {
   create(data) { return client.post('/exams', data) },
   get(id) { return client.get(`/exams/${id}`) },
   update(id, data) { return client.patch(`/exams/${id}`, data) },
-  delete(id) { return client.delete(`/exams/${id}`) },
   getSession(id) { return client.get(`/exams/${id}/session`) },
   importAudienceStudents(examId, kind, file) {
     const formData = new FormData()
@@ -14,7 +13,7 @@ export const examsAPI = {
   },
   start(id) { return client.post(`/exams/${id}/start`) },
   submit(id, data = {}) { return client.post(`/exams/${id}/submit`, data) },
-  getGrades(id) { return client.get(`/exams/${id}/grades`) },
+  getGrades(id, params) { return client.get(`/exams/${id}/grades`, { params }) },
   getGradeDetail(examId, submissionId) { return client.get(`/exams/${examId}/grades/${submissionId}`) },
   updateGradeAnswerScore(examId, submissionId, answerId, score, reason) {
     return client.patch(`/exams/${examId}/grades/${submissionId}/answers/${answerId}/score`, { score, reason })

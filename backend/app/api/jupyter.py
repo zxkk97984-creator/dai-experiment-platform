@@ -4,7 +4,7 @@ from app.config import Settings, get_settings
 from app.dependencies import get_current_user
 from app.errors import api_error
 from app.models import User
-from app.schemas import JupyterEntryResponse, JupyterTemplateRead, NotebookCopyResponse, PaginatedResponse
+from app.schemas import JupyterEntryResponse
 
 router = APIRouter(prefix="/jupyter", tags=["jupyter"])
 
@@ -19,23 +19,19 @@ def jupyter_entry(
     return JupyterEntryResponse(iframe_url=settings.jupyter_base_url)
 
 
-@router.get("/templates", response_model=PaginatedResponse)
+@router.get("/templates")
 def jupyter_templates(_: User = Depends(get_current_user)):
-    templates = [
-        JupyterTemplateRead(
-            id="intro-ml",
-            name="intro-ml.ipynb",
-            path="templates/intro-ml.ipynb",
-        ),
-        JupyterTemplateRead(
-            id="deep-learning-basics",
-            name="deep-learning-basics.ipynb",
-            path="templates/deep-learning-basics.ipynb",
-        ),
-    ]
-    return PaginatedResponse(items=templates, page=1, page_size=len(templates), total=len(templates))
+    raise api_error(
+        410,
+        "JUPYTER_TEMPLATES_RETIRED",
+        "Jupyter 模板复制接口已下线，请使用 /api/v1/experiments 的 Notebook 模板流程",
+    )
 
 
-@router.post("/templates/{template_id}/copy", response_model=NotebookCopyResponse)
+@router.post("/templates/{template_id}/copy")
 def copy_template(template_id: str, _: User = Depends(get_current_user)):
-    return NotebookCopyResponse(template_id=template_id, target_path=f"workspaces/current/{template_id}.ipynb")
+    raise api_error(
+        410,
+        "JUPYTER_TEMPLATES_RETIRED",
+        "Jupyter 模板复制接口已下线，请使用 /api/v1/experiments 的 Notebook 模板流程",
+    )

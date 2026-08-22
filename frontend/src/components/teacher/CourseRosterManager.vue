@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { coursesAPI } from '../../api/courses.js'
 import { usersAPI } from '../../api/users.js'
 import { useAppStore } from '../../stores/app.js'
+import TeacherPagination from './TeacherPagination.vue'
 
 const props = defineProps({ courseId: { type: [Number, String], required: true } })
 const emit = defineEmits(['changed'])
@@ -13,14 +14,23 @@ const query = ref('')
 const loading = ref(false)
 const importing = ref(false)
 const fileInput = ref(null)
+const page = ref(1)
+const total = ref(0)
+const pageSize = 20
 
 async function load() {
   if (typeof coursesAPI.listStudents !== 'function') return
   loading.value = true
   try {
-    const res = await coursesAPI.listStudents(props.courseId, { page_size: 100 })
+    const res = await coursesAPI.listStudents(props.courseId, { page: page.value, page_size: pageSize })
     students.value = res.data.items || []
+    total.value = Number(res.data.total ?? students.value.length)
   } finally { loading.value = false }
+}
+
+async function changePage(nextPage) {
+  page.value = nextPage
+  await load()
 }
 
 async function search() {
@@ -67,7 +77,7 @@ onMounted(load)
 
 <template>
   <section class="roster-panel">
-    <div class="roster-head"><div><strong>课程学生名单</strong><p>班级成员自动同步，也可手工添加例外学生或 CSV 导入名单。</p></div><div class="roster-head-actions"><span>{{ students.length }} 人</span><button type="button" class="button button-secondary" :disabled="importing" @click="fileInput.click()">{{ importing ? '导入中…' : '导入 CSV' }}</button><input ref="fileInput" type="file" accept=".csv,text/csv" hidden @change="handleImport" /></div></div>
+    <div class="roster-head"><div><strong>课程学生名单</strong><p>班级成员自动同步，也可手工添加例外学生或 CSV 导入名单。</p></div><div class="roster-head-actions"><span>{{ total }} 人</span><button type="button" class="button button-secondary" :disabled="importing" @click="fileInput.click()">{{ importing ? '导入中…' : '导入 CSV' }}</button><input ref="fileInput" type="file" accept=".csv,text/csv" hidden @change="handleImport" /></div></div>
     <div class="roster-search"><input v-model="query" placeholder="按姓名、学号或账号搜索" @keyup.enter="search" /><button type="button" class="button button-secondary" @click="search">搜索学生</button></div>
     <div v-if="candidates.length" class="candidate-list">
       <button v-for="student in candidates" :key="student.id" type="button" @click="add(student)">
@@ -79,6 +89,7 @@ onMounted(load)
     <table v-else><thead><tr><th>姓名</th><th>学号</th><th>所属班级</th><th>来源</th><th></th></tr></thead><tbody>
       <tr v-for="student in students" :key="student.id"><td>{{ student.real_name }}</td><td>{{ student.student_no || student.username }}</td><td>{{ student.teaching_classes?.map((item) => item.name).join('、') || '—' }}</td><td>{{ originLabel(student.enrollment_origin) }}</td><td><button type="button" class="remove" @click="remove(student)">移出</button></td></tr>
     </tbody></table>
+    <TeacherPagination v-if="total > 0" :current-page="page" :page-count="Math.max(1, Math.ceil(total / pageSize))" :total="total" :page-size="pageSize" aria-label="课程名单分页" @change="changePage" />
   </section>
 </template>
 

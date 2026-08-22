@@ -1,3 +1,5 @@
+from ipaddress import ip_address, ip_network
+
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
@@ -75,14 +77,50 @@ def _logout_access_payload(request: Request, settings: Settings) -> dict | None:
 
 
 def _client_ip(request: Request, settings: Settings) -> str:
-    """客户端 IP：仅当配置为可信代理时才信任 X-Forwarded-For 最右一跳。"""
-    if settings.trusted_proxy:
-        forwarded = request.headers.get("X-Forwarded-For", "")
-        if forwarded:
-            last_hop = forwarded.split(",")[-1].strip()
-            if last_hop:
-                return last_hop
-    return request.client.host if request.client else "unknown"
+    """Resolve the client IP only across an explicitly trusted proxy chain.
+
+    The immediate ASGI peer must be allow-listed. Every XFF hop after the
+    left-most client address must also be allow-listed; malformed or unknown
+    chains fail closed to the direct peer rather than trusting user input.
+    """
+    peer = request.client.host if request.client else "unknown"
+    trusted_tokens = {
+        item.strip()
+        for item in settings.trusted_proxy_cidrs.split(",")
+        if item.strip()
+    }
+
+    def is_trusted(host: str) -> bool:
+        if host in trusted_tokens:
+            return True
+        try:
+            address = ip_address(host)
+        except ValueError:
+            return False
+        for token in trusted_tokens:
+            try:
+                if address in ip_network(token, strict=False):
+                    return True
+            except ValueError:
+                continue
+        return False
+
+    if not is_trusted(peer):
+        return peer
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if not forwarded:
+        return peer
+    hops = [item.strip() for item in forwarded.split(",")]
+    if not hops or any(not item for item in hops):
+        return peer
+    try:
+        for item in hops:
+            ip_address(item)
+    except ValueError:
+        return peer
+    if all(is_trusted(item) for item in hops[1:]):
+        return hops[0]
+    return peer
 
 
 @router.post("/login")

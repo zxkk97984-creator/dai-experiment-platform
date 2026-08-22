@@ -2,7 +2,7 @@
 
 人工智能基础实验平台面向人工智能、机器学习和深度学习课程，提供课程学习、在线 Python 实验、作业与考试、Docker 隔离判题、AI 辅助评分、Notebook/Studio、环境档位和教师工作台。
 
-当前仓库已标记为 `V0.1`。核心代码、数据库迁移、自动化测试和生产 Compose 已具备；真实部署机上的 Docker daemon、Registry、镜像推送/回拉和生产数据恢复演练仍需按部署环境完成，不能用受限开发沙箱替代。
+当前仓库已标记为 `V0.1`。核心代码、数据库迁移、自动化测试和生产 Compose 已具备；真实部署机上的 Docker daemon、Registry、镜像推送/回拉和生产数据恢复演练仍需按部署环境完成，不能用受限开发沙箱替代。发布证据边界见 [`docs/production-evidence-checklist.md`](docs/production-evidence-checklist.md)。
 
 ## 项目定位
 
@@ -47,7 +47,7 @@ AI 生产开关默认关闭。开启前必须完成 [`docs/ai-data-governance.md
 
 ## 系统架构
 
-本地开发时，MySQL 和 Redis 运行在 Docker，FastAPI、Judge Worker、Environment Builder Worker 和 Vite 在宿主机运行。生产时使用 `docker-compose.prod.yml` 将迁移、API、两个 Worker 和 Nginx 前端容器化。
+本地开发时，MySQL 和 Redis 运行在 Docker，FastAPI、确定性 Judge Worker、Environment Builder Worker 和 Vite 在宿主机运行。生产时使用 `docker-compose.prod.yml` 将迁移、API、确定性 Worker 和 Nginx 前端容器化；AI Worker 仅在审批后显式启用 `ai` profile。
 
 ```text
 浏览器
@@ -125,7 +125,7 @@ AI 生产开关默认关闭。开启前必须完成 [`docs/ai-data-governance.md
 cd backend
 python3.12 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install -r requirements-dev.txt
 cp .env.example .env
 ```
 
@@ -135,7 +135,7 @@ Windows PowerShell 对应命令：
 cd backend
 py -3.12 -m venv .venv
 .venv\Scripts\python.exe -m pip install --upgrade pip
-.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 Copy-Item .env.example .env
 ```
 
@@ -159,7 +159,7 @@ cd ..
 docker compose up -d mysql redis
 
 cd backend
-.venv/bin/python -m alembic upgrade head
+.venv/bin/python ../scripts/bootstrap_database.py
 .venv/bin/python -m app.cli create-admin \
   --username admin \
   --password 'Test1234!' \
@@ -173,7 +173,7 @@ cd ..
 docker compose up -d mysql redis
 
 cd backend
-.venv\Scripts\python.exe -m alembic upgrade head
+.venv\Scripts\python.exe ..\scripts\bootstrap_database.py
 .venv\Scripts\python.exe -m app.cli create-admin `
   --username admin `
   --password 'Test1234!' `
@@ -196,7 +196,7 @@ docker build -t dai-kernel-python:latest backend/docker/kernel
 DAI_DEV_NO_BROWSER=1 ./scripts/dev-up.sh
 ```
 
-脚本会按顺序执行 MySQL/Redis 健康检查、`alembic upgrade head`、判题镜像构建、API、Judge Worker、Environment Builder Worker 和 Vite 启动，并检查 API ready 与前端 HTTP 状态。
+脚本会按顺序执行 MySQL/Redis 健康检查、统一 disposable 两阶段数据库 bootstrap、判题镜像构建、API、确定性 Judge Worker、Environment Builder Worker 和 Vite 启动，并检查 API ready 与前端 HTTP 状态。脚本会对子进程固定 `DAI_ENVIRONMENT=development` 与 `DAI_MIGRATION_MODE=disposable`，因此即使 `backend/.env` 是生产模板也不会把本地入口切换成生产迁移；生产真实 digest 只在生产 Compose/手动入口提供。AI Worker 不会随默认开发栈启动。
 
 常用变量：
 
@@ -222,9 +222,12 @@ DAI_DEV_NO_BROWSER=1 ./scripts/dev-up.sh
 cd backend
 .venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-# 终端 2：作业/考试/AI 判题 Worker
+# 终端 2：作业/考试确定性判题 Worker（默认不消费 AI 队列）
 cd backend
 .venv/bin/python -m app.worker.judge_worker
+
+# 只有完成 AI 审批并显式启用时，另开终端启动 AI Worker
+DAI_WORKER_ROLE=ai DAI_AI_ENABLED=true .venv/bin/python -m app.worker.judge_worker
 
 # 终端 3：环境构建 Worker（需要 Docker daemon）
 cd backend
@@ -243,7 +246,7 @@ Windows PowerShell 原生环境对应命令（Docker Desktop 需正在运行）�
 cd backend
 .venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-# 终端 2：作业/考试/AI 判题 Worker
+# 终端 2：作业/考试确定性判题 Worker（默认不消费 AI 队列）
 cd backend
 .venv\Scripts\python.exe -m app.worker.judge_worker
 
@@ -320,8 +323,9 @@ Windows PowerShell 用户将上述命令中的 `.venv/bin/python` 替换为 `.ve
 | Compose 数据库 | `DAI_DB_USER`、`DAI_DB_PASSWORD`、`DAI_DB_ROOT_PASSWORD` |
 | 判题 | `DAI_JUDGE_IMAGE`、`DAI_KERNEL_IMAGE`、`DAI_JUDGE_TIMEOUT_SECONDS`、`DAI_JUDGE_MEMORY_LIMIT_MB`、`DAI_JUDGE_CPU_LIMIT`、`DAI_JUDGE_HOST_WORK_DIR` |
 | Storage | `DAI_STORAGE_BACKEND`、`DAI_STORAGE_S3_*`、`DAI_VIDEO_*`、`DAI_COVER_*` |
+| 数据库 bootstrap | `DAI_MIGRATION_MODE`、生产真实 `DAI_BASIC_ENVIRONMENT_IMAGE_DIGEST`、`DAI_BASIC_ENVIRONMENT_BASE_IMAGE` |
 | 环境 V2 | `DAI_ENVIRONMENT_EDITOR_V2_ENABLED`、`DAI_ENV_BASE_IMAGE`、`DAI_ENV_PYTHON_BASE_IMAGES`、`DAI_ENV_REGISTRY_REPOSITORY`、`DAI_ENV_REGISTRY_DOCKER_CONFIG_FILE` 及构建资源限制变量 |
-| AI | `DAI_AI_ENABLED`、`DAI_AI_BASE_URL`、`DAI_AI_API_KEY`、`DAI_AI_MODEL`、超时/重试/队列变量 |
+| Worker/AI | `DAI_WORKER_ROLE`、`DAI_AI_ENABLED`、`DAI_AI_BASE_URL`、`DAI_AI_API_KEY`、`DAI_AI_MODEL`、超时/重试/队列变量 |
 
 ### 端口与服务
 
@@ -336,6 +340,11 @@ Windows PowerShell 用户将上述命令中的 `.venv/bin/python` 替换为 `.ve
 | E2E 覆盖 | MySQL / Redis | `3309:3306` / `6380:6379` |
 
 生产 Compose 不发布 MySQL、Redis 或 API 的宿主机端口，应用通过内部网络访问它们。
+
+登录限流默认 fail-closed：API 只有在 `DAI_TRUSTED_PROXY_CIDRS` 显式包含直接反向代理
+peer（以及 X-Forwarded-For 中除最左客户端地址外的可信中间跳）时才解析 XFF；未配置时使用
+直连 peer。边界代理必须先清洗客户端提交的 XFF，再按真实代理链追加地址，不能把任意客户端
+可控的 header 直接转发给 API。
 
 ## Docker Compose 生产部署
 
@@ -355,24 +364,21 @@ docker compose -f docker-compose.prod.yml config -q
 - `DAI_DB_USER`、`DAI_DB_PASSWORD`、`DAI_DB_ROOT_PASSWORD` 已替换；
 - `DAI_JUDGE_HOST_WORK_DIR` 是部署机绝对路径；
 - `DAI_ENV_BASE_IMAGE` 带真实 `@sha256:` digest；
+- 全新库 bootstrap 提供真实的 `DAI_BASIC_ENVIRONMENT_IMAGE_DIGEST`，不能用 `000...`、`111...` 或 disposable digest；
 - `DAI_ENV_REGISTRY_DOCKER_CONFIG_FILE` 指向部署机 root-owned、只读的真实 Docker config；
 - 生产 AI 默认保持 `DAI_AI_ENABLED=false`，启用前完成数据治理审批。
 
-全新库或缺少 basic 可用环境版本时，必须按 [`docs/environment-profiles.md`](docs/environment-profiles.md) 的分阶段迁移顺序执行：
+全新库或缺少 basic 可用环境版本时，必须使用 Compose 的统一 bootstrap 入口：
 
 ```bash
 docker compose -f docker-compose.prod.yml up -d --wait mysql redis
-docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade b4c5d6e7f890
-
-# 生产必须提供真实 basic digest；不要使用占位值
-docker compose -f docker-compose.prod.yml run --rm \
-  -e DAI_BASIC_ENVIRONMENT_IMAGE_DIGEST=sha256:<64位hex> \
-  -e DAI_BASIC_ENVIRONMENT_BASE_IMAGE=python:3.12-slim@sha256:<64位hex> \
-  migrate python /scripts/seed-basic-environment-mysql.py
-
-docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade head
+# .env 必须提供真实 basic digest 和基础镜像 digest；不得使用 000/111 或 disposable 值
+docker compose -f docker-compose.prod.yml run --rm migrate
 docker compose -f docker-compose.prod.yml up -d --wait
 docker compose -f docker-compose.prod.yml ps
+# 审批完成后才可额外启用 AI Worker；默认不启动 ai profile。
+# ai-worker 只消费 AI 队列，不持有 Docker Socket、judge-work 或 Registry Secret。
+docker compose --profile ai -f docker-compose.prod.yml up -d ai-worker
 ```
 
 检查健康状态和环境构建日志：
@@ -431,7 +437,7 @@ docker compose -f docker-compose.prod.yml logs --tail=200 environment-builder
 
 ```bash
 cd backend
-.venv/bin/python -m alembic upgrade head
+.venv/bin/python ../scripts/bootstrap_database.py
 .venv/bin/python -m alembic current
 .venv/bin/python -m alembic heads
 ```
@@ -501,8 +507,9 @@ BASE_URL=http://localhost:8080 ./scripts/check_security_headers.sh
 ## API 与兼容路径注意事项
 
 - API 前缀统一为 `/api/v1`；Swagger 在 `/docs`，live/ready 在 `/api/v1/health/live` 和 `/api/v1/health/ready`。
-- `/api/v1/notebooks` 已废弃，仅为旧客户端进程内转发，响应带 `Deprecation: true` 和 `Sunset: 2026-09-01`；新代码使用 `/api/v1/experiments` 和 `/api/v1/studio`。
-- `/api/v1/jupyter` 与 Compose 的 `legacy-jupyter` profile 保留兼容能力，但默认关闭；新流程使用内置 Notebook Player。
+- `/api/v1/notebooks` 已终止兼容转发，旧路径统一返回 `410 DEPRECATED` 并提示迁移；新代码使用 `/api/v1/experiments` 和 `/api/v1/studio`。
+- `/api/v1/jupyter/entry` 仅在显式启用 legacy Jupyter 时可用；模板列表/复制接口返回 `410 JUPYTER_TEMPLATES_RETIRED`，新流程使用内置 Notebook Player。
+- 生产 `worker` 只消费普通判题/考试队列；`ai-worker` 位于默认关闭的 `ai` profile，只消费 AI 队列。
 - 环境已绑定版本运行时使用不可变 digest；`latest` 只允许出现在未绑定存量兼容路径或本地开发配置。
 - `backend/storage/`、命名 Docker volume 和 `judge-work/` 含运行/业务数据，清理缓存时不要递归删除。
 - 生产 Docker socket 具有主机级风险，不要用 `chmod 666 /var/run/docker.sock`，也不要开放 2375/2376。
@@ -514,7 +521,7 @@ BASE_URL=http://localhost:8080 ./scripts/check_security_headers.sh
 1. 在真实部署机验证 Docker daemon、socket 权限、Registry Secret 和环境 V2 真实构建/推送/回拉；
 2. 完成生产数据库、Redis、Storage 的备份恢复演练，并补齐责任人和外部签字记录；
 3. 逐页移除前端 `teacher-management.css` 迁移桥接层，计划见 [`docs/ui-v2-migration-plan.md`](docs/ui-v2-migration-plan.md)；
-4. 在 Sunset 日期前移除新增代码对 `/api/v1/notebooks` 的依赖，之后再评估删除兼容 Router 和 legacy Jupyter 配置。
+4. 部署方按 [`docs/production-evidence-checklist.md`](docs/production-evidence-checklist.md) 补齐真实外部门禁；在证据完成前保持 AI 关闭。
 
 ## 当前文档地图
 
@@ -522,6 +529,7 @@ BASE_URL=http://localhost:8080 ./scripts/check_security_headers.sh
 - [`docs/environment-profiles.md`](docs/environment-profiles.md)：环境 V2、迁移、Registry 和运维；
 - [`docs/demo-data.md`](docs/demo-data.md)：Demo 数据播种与验证；
 - [`docs/backup-restore.md`](docs/backup-restore.md)：备份恢复上线边界；
+- [`docs/production-evidence-checklist.md`](docs/production-evidence-checklist.md)：生产证据责任方、路径和阻断条件；
 - [`docs/ai-data-governance.md`](docs/ai-data-governance.md)：AI 数据治理上线门；
 - [`docs/dai-design-system-v2.md`](docs/dai-design-system-v2.md)：前端设计系统；
 - [`docs/security/`](docs/security/)：Docker socket、TLS、安全依赖和安全头；

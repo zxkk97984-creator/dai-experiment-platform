@@ -1169,55 +1169,6 @@ class JupyterEntryResponse(BaseModel):
     deprecated: bool = True
 
 
-class NotebookCopyResponse(BaseModel):
-    template_id: str
-    target_path: str
-    deprecated: bool = True
-
-
-class JupyterTemplateRead(BaseModel):
-    """旧 Jupyter 模板（仅兼容旧 API）"""
-    id: str
-    name: str
-    path: str
-
-
-# ── 废弃的旧 Schema（保留兼容，标记 deprecated）───────────────
-
-
-class NotebookCellOut(BaseModel):
-    """[已废弃] 旧 notebook cell schema"""
-    id: str
-    cell_type: str
-    source: str
-    rendered_html: str | None = None
-    outputs: dict | None = None
-    execution_count: int | None = None
-    status: str | None = None
-
-
-class NotebookResponse(BaseModel):
-    """[已废弃] GET /notebooks/{lesson_id}"""
-    record_id: int
-    lesson_id: int
-    status: str
-    cells: list[NotebookCellOut]
-    cell_order: list[str]
-    template_outdated: bool = False
-    deprecated: bool = True
-
-
-class NotebookCellsSaveRequest(BaseModel):
-    """[已废弃]"""
-    cells: dict[str, str]
-
-
-class NotebookSaveResponse(BaseModel):
-    """[已废弃]"""
-    record_id: int
-    deprecated: bool = True
-
-
 class ExperimentRecordCreate(BaseModel):
     """[已废弃] 旧实验记录创建"""
     module_id: int

@@ -24,41 +24,20 @@ const scoreFilter = ref('all')
 const sortOrder = ref('score-desc')
 const page = ref(1)
 const pageSize = ref(10)
+const total = ref(0)
 const actionDialog = ref(null)
 const actionBusy = ref(false)
 const extensionMinutes = ref(10)
 
 const { nowMs, calibrate } = useServerClock(async () => {
-  const res = await examsAPI.getGrades(route.params.id)
+  const res = await examsAPI.getGrades(route.params.id, gradeQuery())
   applyGradeData(res.data)
   return res.data.exam?.server_now
 })
 
-function scoreMatches(score, range) {
-  if (range === 'all') return true
-  if (score == null) return false
-  if (range === 'excellent') return score >= 90
-  if (range === 'good') return score >= 80 && score < 90
-  if (range === 'pass') return score >= 60 && score < 80
-  return score < 60
-}
-const filteredGrades = computed(() => {
-  const keyword = query.value.trim().toLowerCase()
-  const items = grades.value.filter((item) => {
-    const matchesQuery = !keyword || item.student_name?.toLowerCase().includes(keyword) || item.student_number?.toLowerCase().includes(keyword)
-    const matchesStatus = statusFilter.value === 'all' || item.status === statusFilter.value
-    return matchesQuery && matchesStatus && scoreMatches(item.score, scoreFilter.value)
-  })
-  return [...items].sort((a, b) => {
-    if (sortOrder.value === 'name') return (a.student_name || '').localeCompare(b.student_name || '', 'zh-CN')
-    if (sortOrder.value === 'time') return new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0)
-    const left = a.score == null ? -1 : a.score
-    const right = b.score == null ? -1 : b.score
-    return sortOrder.value === 'score-asc' ? left - right : right - left
-  })
-})
-const pageCount = computed(() => Math.max(1, Math.ceil(filteredGrades.value.length / pageSize.value)))
-const pagedGrades = computed(() => filteredGrades.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
+const filteredGrades = computed(() => grades.value)
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+const pagedGrades = computed(() => grades.value)
 const paginationItems = computed(() => {
   const total = pageCount.value
   if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1)
@@ -93,21 +72,35 @@ const canReleaseReview = computed(() => Boolean(
 
 function applyGradeData(data) {
   grades.value = data.items || []
+  total.value = Number(data.total ?? grades.value.length)
   exam.value = data.exam || {}
   summary.value = { ...summary.value, ...(data.summary || {}) }
   distribution.value = data.distribution || []
 }
 
+function gradeQuery() {
+  const params = {
+    page: page.value,
+    page_size: pageSize.value,
+    sort: sortOrder.value.replace('-', '_'),
+  }
+  if (query.value.trim()) params.q = query.value.trim()
+  if (statusFilter.value !== 'all') params.status = statusFilter.value
+  if (scoreFilter.value !== 'all') params.score = scoreFilter.value
+  return params
+}
+
 async function load() {
   loading.value = true
   try {
-    const res = await examsAPI.getGrades(route.params.id)
+    const res = await examsAPI.getGrades(route.params.id, gradeQuery())
     applyGradeData(res.data)
     calibrate(res.data.exam?.server_now)
   } catch { app.showToast('加载成绩失败', 'error') }
   finally { loading.value = false }
 }
-function resetPage() { page.value = 1 }
+function resetPage() { page.value = 1; load() }
+function changePage(nextPage) { page.value = nextPage; load() }
 function viewDetail(item) { if (item.submission_id) router.push(`/teacher/exams/${route.params.id}/grades/${item.submission_id}`) }
 function remainingTime(item) {
   if (item.status !== 'in_progress' || !item.expires_at || !nowMs.value) return '—'
@@ -175,11 +168,11 @@ onMounted(load)
       </section>
 
       <section class="results-panel">
-        <div class="filter-bar"><label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索学生姓名或学号" @input="resetPage" /></label><select v-model="statusFilter" @change="resetPage"><option value="all">状态：全部</option><option value="scheduled">未开始</option><option value="ready">可开始</option><option value="in_progress">进行中</option><option value="submitted">已交卷</option><option value="graded">已评分</option><option value="review_required">待复核</option><option value="grading">评分中</option><option value="missed">缺考</option></select><select v-model="scoreFilter" @change="resetPage"><option value="all">分数段：全部</option><option value="excellent">90–100</option><option value="good">80–89</option><option value="pass">60–79</option><option value="fail">0–59</option></select><select v-model="sortOrder"><option value="score-desc">排序：分数从高到低</option><option value="score-asc">排序：分数从低到高</option><option value="time">排序：最近提交</option><option value="name">排序：学生姓名</option></select></div>
+        <div class="filter-bar"><label class="search-control"><AppIcon name="search" :size="18" /><input v-model="query" placeholder="搜索学生姓名或学号" @input="resetPage" /></label><select v-model="statusFilter" @change="resetPage"><option value="all">状态：全部</option><option value="scheduled">未开始</option><option value="ready">可开始</option><option value="in_progress">进行中</option><option value="submitted">已交卷</option><option value="graded">已评分</option><option value="review_required">待复核</option><option value="grading">评分中</option><option value="missed">缺考</option></select><select v-model="scoreFilter" @change="resetPage"><option value="all">分数段：全部</option><option value="excellent">90–100</option><option value="good">80–89</option><option value="pass">60–79</option><option value="fail">0–59</option></select><select v-model="sortOrder" @change="resetPage"><option value="score-desc">排序：分数从高到低</option><option value="score-asc">排序：分数从低到高</option><option value="time">排序：最近提交</option><option value="name">排序：学生姓名</option></select></div>
         <div v-if="loading" class="loading-list"><span v-for="i in 5" :key="i" class="skeleton"></span></div>
         <div v-else-if="!filteredGrades.length" class="empty-state"><AppIcon name="chart" :size="34" /><strong>暂无符合条件的成绩</strong></div>
         <div v-else class="table-scroll"><table class="grade-table"><thead><tr><th>学生</th><th>学号</th><th>状态</th><th>剩余时间 / 最后保存</th><th>得分</th><th>提交时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in pagedGrades" :key="item.id"><td data-label="学生"><span class="student-cell"><i>{{ item.student_name?.slice(0, 1) || '学' }}</i><strong>{{ item.student_name }}</strong></span></td><td data-label="学号">{{ item.student_number }}</td><td data-label="状态"><span class="status-pill" :class="item.status">{{ statusBadge(EXAM_GRADE_STATUS_MAP, item.status).label }}</span></td><td data-label="剩余时间 / 最后保存" class="muted-cell"><strong v-if="item.status === 'in_progress'">剩余 {{ remainingTime(item) }}</strong><span v-else>{{ item.last_saved_at ? formatDateTime(item.last_saved_at, { seconds: true }) : '—' }}</span></td><td data-label="得分"><strong v-if="item.score != null" class="score">{{ item.score }}</strong><span v-else>—</span></td><td data-label="提交时间" class="muted-cell">{{ formatDateTime(item.submitted_at, { seconds: true }) }}</td><td data-label="操作"><div class="row-actions"><button class="detail-action" :disabled="!item.submission_id" @click="viewDetail(item)">查看详情</button><template v-if="item.status === 'in_progress'"><button class="extend-action" @click="extensionMinutes = 10; actionDialog = { kind: 'extend', item }">延时</button><button class="force-action" @click="actionDialog = { kind: 'force', item }">强制交卷</button></template></div></td></tr></tbody></table></div>
-        <footer v-if="!loading && filteredGrades.length" class="pagination-bar"><span>共 {{ filteredGrades.length }} 条</span><div class="pagination"><button aria-label="上一页" :disabled="page === 1" @click="page--">‹</button><template v-for="item in paginationItems" :key="item"><span v-if="typeof item === 'string'" class="pagination-ellipsis">…</span><button v-else :aria-label="`第 ${item} 页`" :class="{ active: page === item }" @click="page = item">{{ item }}</button></template><button aria-label="下一页" :disabled="page === pageCount" @click="page++">›</button></div><span>{{ pageSize }} 条/页</span></footer>
+        <footer v-if="!loading && total" class="pagination-bar"><span>共 {{ total }} 条</span><div class="pagination"><button aria-label="上一页" :disabled="page === 1" @click="changePage(page - 1)">‹</button><template v-for="item in paginationItems" :key="item"><span v-if="typeof item === 'string'" class="pagination-ellipsis">…</span><button v-else :aria-label="`第 ${item} 页`" :class="{ active: page === item }" @click="changePage(item)">{{ item }}</button></template><button aria-label="下一页" :disabled="page === pageCount" @click="changePage(page + 1)">›</button></div><span>{{ pageSize }} 条/页</span></footer>
       </section>
     </main>
 

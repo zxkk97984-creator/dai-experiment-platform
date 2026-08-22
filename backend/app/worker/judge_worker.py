@@ -972,27 +972,45 @@ def _recover_stale(db, redis_client, owner_id: str) -> bool:
     return True
 
 
+def _worker_queue_names(settings: Settings) -> tuple[str, ...]:
+    """Return only the queues owned by this worker role.
+
+    The deterministic worker is deliberately the default.  An AI worker is
+    opt-in and has no consumption queues at all while AI is disabled.
+    """
+    if settings.worker_role == "judge":
+        return settings.judge_queue_name, EXAM_JUDGE_QUEUE
+    if settings.worker_role == "ai":
+        return (settings.ai_queue_name,) if settings.ai_enabled else ()
+    raise ValueError(f"unsupported worker role: {settings.worker_role}")
+
+
 def run_worker_loop():
     import redis as _redis
 
     settings = get_settings()
+    worker_role = settings.worker_role
+    queues = _worker_queue_names(settings)
+    if not queues:
+        logger.info("AI worker 未启用，退出消费循环")
+        return
+
     redis_client = _redis.Redis.from_url(settings.redis_url, decode_responses=True)
-    ai_queue = settings.ai_queue_name
     import socket
     owner_id = f"worker:{socket.gethostname()}:{os.getpid()}"
 
-    queues = [settings.judge_queue_name, EXAM_JUDGE_QUEUE, ai_queue]
-    logger.info("Worker 启动，监听队列: %s", queues)
+    logger.info("%s worker 启动，监听队列: %s", worker_role, queues)
 
     last_recovery = time.monotonic()
-    with SessionLocal() as db:
-        _recover_stale(db, redis_client, owner_id)
+    if worker_role == "judge":
+        with SessionLocal() as db:
+            _recover_stale(db, redis_client, owner_id)
 
     while True:
         try:
             result = redis_client.brpop(queues, timeout=5)
             if result is None:
-                if time.monotonic() - last_recovery > 120:
+                if worker_role == "judge" and time.monotonic() - last_recovery > 120:
                     with SessionLocal() as db:
                         _recover_stale(db, redis_client, owner_id)
                     last_recovery = time.monotonic()
@@ -1013,12 +1031,18 @@ def run_worker_loop():
         msg_type = payload.get("type", "")
         job_id = payload.get("id")
 
-        if msg_type == "ai_grade":
+        if worker_role == "ai":
+            if msg_type != "ai_grade":
+                logger.warning("AI worker 忽略非 AI 消息: queue=%s", queue_name)
+                continue
             with SessionLocal() as db:
                 try:
                     process_ai_grade(db, redis_client, settings, job_id)
                 except Exception:
                     logger.exception("AI 评分异常: id=%s", job_id)
+        elif msg_type == "ai_grade":
+            logger.warning("Judge worker 忽略 AI 消息: queue=%s", queue_name)
+            continue
         elif queue_name == EXAM_JUDGE_QUEUE or msg_type == "exam":
             with SessionLocal() as db:
                 try:

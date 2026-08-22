@@ -41,7 +41,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # 一次性迁移执行者：同一镜像运行 alembic upgrade head，成功后 API/Worker 才启动。
+  # 一次性迁移执行者：统一 bootstrap 成功后 API/Worker 才启动。
   # 失败时 API、Judge Worker、environment-builder 都不会启动
   #（depends_on service_completed_successfully）。
   # 注意：迁移链在 b4c5d6e7f890 后要求 basic 环境已有 available 版本
@@ -49,13 +49,15 @@ services:
   migrate:
     build: ./backend
     restart: "no"
-    command: ["alembic", "upgrade", "head"]
+    command: ["python", "/scripts/bootstrap_database.py"]
     environment:
       DAI_ENVIRONMENT: ${DAI_ENVIRONMENT:-production}
+      DAI_MIGRATION_MODE: ${DAI_MIGRATION_MODE:-production}
       DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
       DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
       DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
       DAI_ENV_BASE_IMAGE: "${DAI_ENV_BASE_IMAGE:?DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的 python:3.12-slim 引用}"
+      DAI_BASIC_ENVIRONMENT_IMAGE_DIGEST: ${DAI_BASIC_ENVIRONMENT_IMAGE_DIGEST:-}
       DAI_ENVIRONMENT_EDITOR_V2_ENABLED: ${DAI_ENVIRONMENT_EDITOR_V2_ENABLED:-false}
       DAI_ENV_REGISTRY_REPOSITORY: ${DAI_ENV_REGISTRY_REPOSITORY:-}
       DAI_ENV_REGISTRY_DOCKER_CONFIG: /run/secrets/config.json
@@ -82,6 +84,7 @@ services:
         target: config.json
     volumes:
       - ./backend/alembic/versions:/app/alembic/versions:ro
+      - ./scripts/bootstrap_database.py:/scripts/bootstrap_database.py:ro
       - ./scripts/seed-basic-environment-mysql.py:/scripts/seed-basic-environment-mysql.py:ro
 
   api:
@@ -121,9 +124,9 @@ services:
       DAI_STORAGE_S3_ADDRESSING_STYLE: ${DAI_STORAGE_S3_ADDRESSING_STYLE:-auto}
       DAI_STORAGE_S3_KEY_PREFIX: ${DAI_STORAGE_S3_KEY_PREFIX:-}
       DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
-      # 登录限流：生产 API 位于前端 Nginx 反向代理之后，必须信任 X-Forwarded-For
-      # 最右一跳作为客户端 IP；否则所有用户共享 Nginx 容器 IP 的限流桶
-      DAI_TRUSTED_PROXY: ${DAI_TRUSTED_PROXY:-true}
+      # 登录限流：仅信任显式配置的直接代理 peer 与已清洗的代理链。
+      # 留空时 fail-closed 使用直连 peer；生产需按真实网络填写 CIDR。
+      DAI_TRUSTED_PROXY_CIDRS: ${DAI_TRUSTED_PROXY_CIDRS:-}
       # 环境档位基础镜像——生产校验强制带 @sha256: digest（config.py 拒绝可变标签）
       DAI_ENV_BASE_IMAGE: "${DAI_ENV_BASE_IMAGE:?DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的 python:3.12-slim 引用}"
       DAI_ENVIRONMENT_EDITOR_V2_ENABLED: ${DAI_ENVIRONMENT_EDITOR_V2_ENABLED:-false}
@@ -224,6 +227,7 @@ services:
       DAI_JUDGE_WORK_DIR: /judge-work
       DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须是宿主机判题目录的绝对路径}
       DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
+      DAI_WORKER_ROLE: judge
       # ── AI 智能代码评分（TASK-020：默认关闭） ──
       DAI_AI_ENABLED: ${DAI_AI_ENABLED:-false}
       DAI_AI_BASE_URL: ${DAI_AI_BASE_URL:-https://aihub.codingpython.cn}
@@ -251,6 +255,47 @@ services:
       - "${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须设置}:/judge-work"
       - ./backend/alembic/versions:/app/alembic/versions:ro
       - studio_data:/app/storage/studio
+      - app_logs:/app/logs
+
+  # AI 慢调用单独隔离；默认 profile 不启动，且 DAI_AI_ENABLED=false 时不消费。
+  # 该进程只处理 AI 队列，不执行 Docker 判题，因此不得继承 worker 的
+  # Docker socket、judge-work 宿主目录或 Registry Secret。
+  ai-worker:
+    build: ./backend
+    restart: unless-stopped
+    profiles:
+      - ai
+    command: python -m app.worker.judge_worker
+    logging: *api_logging
+    environment:
+      DAI_ENVIRONMENT: ${DAI_ENVIRONMENT:-production}
+      DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
+      DAI_LOG_DIR: /app/logs
+      DAI_REDIS_URL: redis://redis:6379/0
+      DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
+      DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
+      # Settings 的生产启动校验仍要求固定基础镜像；AI worker 本身不会使用 Docker。
+      DAI_ENV_BASE_IMAGE: "${DAI_ENV_BASE_IMAGE:?DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的 python:3.12-slim 引用}"
+      DAI_WORKER_ROLE: ai
+      DAI_AI_ENABLED: ${DAI_AI_ENABLED:-false}
+      DAI_AI_BASE_URL: ${DAI_AI_BASE_URL:-https://aihub.codingpython.cn}
+      DAI_AI_API_KEY: ${DAI_AI_API_KEY:-}
+      DAI_AI_MODEL: ${DAI_AI_MODEL:-deepseek-v4-flash}
+      DAI_AI_TIMEOUT_SECONDS: ${DAI_AI_TIMEOUT_SECONDS:-60}
+      DAI_AI_MAX_RETRIES: ${DAI_AI_MAX_RETRIES:-3}
+      DAI_AI_TEST_GROUP_TIMEOUT_SECONDS: ${DAI_AI_TEST_GROUP_TIMEOUT_SECONDS:-120}
+      DAI_AI_TEST_GROUP_MAX_RETRIES: ${DAI_AI_TEST_GROUP_MAX_RETRIES:-0}
+      DAI_AI_QUEUE_NAME: ${DAI_AI_QUEUE_NAME:-judge:ai:queue}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - internal
+    volumes:
       - app_logs:/app/logs
 
   # 环境档位构建 Worker（Phase 6）——单副本、单并发、低频管理任务

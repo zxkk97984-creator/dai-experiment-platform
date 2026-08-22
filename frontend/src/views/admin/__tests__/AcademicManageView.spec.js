@@ -29,9 +29,9 @@ async function mountPage() {
 describe('管理员教务管理页', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    academicsAPI.listTerms.mockResolvedValue({ data: { items: [term] } })
-    academicsAPI.listClasses.mockResolvedValue({ data: { items: [teachingClass] } })
-    academicsAPI.listClassStudents.mockResolvedValue({ data: { items: [{ id: 3, username: 'student_a', student_no: '20260001', real_name: '陈同学' }] } })
+    academicsAPI.listTerms.mockResolvedValue({ data: { items: [term], total: 1 } })
+    academicsAPI.listClasses.mockResolvedValue({ data: { items: [teachingClass], total: 101 } })
+    academicsAPI.listClassStudents.mockResolvedValue({ data: { items: [{ id: 3, username: 'student_a', student_no: '20260001', real_name: '陈同学' }], total: 1 } })
     usersAPI.listStudents.mockResolvedValue({ data: { items: [] } })
   })
 
@@ -40,9 +40,21 @@ describe('管理员教务管理页', () => {
     expect(wrapper.text()).toContain('2026 秋季学期')
     await wrapper.findAll('.rows')[1].find('div').trigger('click')
     await flushPromises()
-    expect(academicsAPI.listClassStudents).toHaveBeenCalledWith(2, { page_size: 100 })
+    expect(academicsAPI.listClasses).toHaveBeenCalledWith({ page: 1, page_size: 20 })
+    expect(academicsAPI.listClassStudents).toHaveBeenCalledWith(2, { page: 1, page_size: 20 })
     expect(wrapper.text()).toContain('20260001')
     expect(wrapper.text()).toContain('陈同学')
+  })
+
+  it('使用后端 total 分页加载超过一页的教学班', async () => {
+    const wrapper = await mountPage()
+    const next = wrapper.find('[aria-label="教学班列表分页"] button[aria-label="下一页"]')
+
+    expect(next.exists()).toBe(true)
+    await next.trigger('click')
+    await flushPromises()
+
+    expect(academicsAPI.listClasses).toHaveBeenLastCalledWith({ page: 2, page_size: 20 })
   })
 
   it('创建学期后刷新教务数据', async () => {

@@ -87,7 +87,7 @@ describe('CourseCreateModal', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    expect(academicsAPI.listClasses).toHaveBeenCalledWith({ academic_term_id: 1, page_size: 100 })
+    expect(academicsAPI.listClasses).toHaveBeenCalledWith({ academic_term_id: 1, page: 1, page_size: 50 })
     expect(coursesAPI.create).toHaveBeenCalledWith({
       title: '数据结构',
       code: 'CS101',
@@ -99,6 +99,19 @@ describe('CourseCreateModal', () => {
       default_score: 90,
     })
     expect(wrapper.emitted('created')).toHaveLength(1)
+  })
+
+  it('教学班超过一页时继续加载全部分页供选择', async () => {
+    academicsAPI.listClasses
+      .mockResolvedValueOnce({ data: { items: [{ id: 10, name: '第一页班级' }], page: 1, page_size: 50, total: 51 } })
+      .mockResolvedValueOnce({ data: { items: [{ id: 60, name: '第二页班级' }], page: 2, page_size: 50, total: 51 } })
+    const wrapper = mountModal()
+
+    await wrapper.get('select').setValue('1')
+    await flushPromises()
+
+    expect(academicsAPI.listClasses).toHaveBeenNthCalledWith(1, { academic_term_id: 1, page: 1, page_size: 50 })
+    expect(academicsAPI.listClasses).toHaveBeenNthCalledWith(2, { academic_term_id: 1, page: 2, page_size: 50 })
   })
 
   it('封面上传失败后可重试且不会重复创建课程', async () => {

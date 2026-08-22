@@ -79,6 +79,45 @@ def test_class_roster_syncs_course_counts_and_student_metadata(client, db_sessio
     assert denied.status_code == 409
 
 
+def test_class_roster_search_filters_student_no_before_pagination(client, db_session_factory):
+    admin, _teacher, first_student, admin_token, _teacher_token, _student_token = _setup(
+        client, db_session_factory
+    )
+    second_student = create_user(
+        db_session_factory,
+        "academic_second_student",
+        "student",
+        real_name="另一位学生",
+    )
+    with db_session_factory() as db:
+        db.get(User, second_student.id).student_no = "20269999"
+        db.commit()
+
+    term = client.post(f"{API}/academic-terms", headers=auth_header(admin_token), json={
+        "code": "2031-FALL", "name": "2031 秋季学期",
+        "start_date": "2031-09-01", "end_date": "2032-01-20", "status": "active",
+    }).json()
+    class_id = client.post(f"{API}/teaching-classes", headers=auth_header(admin_token), json={
+        "academic_term_id": term["id"], "code": "SEARCH-01", "name": "搜索班",
+    }).json()["id"]
+    added = client.post(
+        f"{API}/teaching-classes/{class_id}/students",
+        headers=auth_header(admin_token),
+        json={"student_ids": [first_student.id, second_student.id]},
+    )
+    assert added.status_code == 200, added.text
+
+    response = client.get(
+        f"{API}/teaching-classes/{class_id}/students",
+        headers=auth_header(admin_token),
+        params={"q": "9999", "page": 1, "page_size": 20},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 1
+    assert [item["student_no"] for item in response.json()["items"]] == ["20269999"]
+
+
 def test_manual_drop_is_not_reactivated_by_class_sync(client, db_session_factory):
     _admin, _teacher, student, admin_token, teacher_token, student_token = _setup(client, db_session_factory)
     term = client.post(f"{API}/academic-terms", headers=auth_header(admin_token), json={

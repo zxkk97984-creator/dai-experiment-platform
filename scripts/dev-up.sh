@@ -12,6 +12,11 @@
 set -Eeuo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# This is a disposable development entrypoint.  Pin the mode for every child
+# process so a production-oriented backend/.env cannot turn the local bootstrap
+# into a production migration or require production-only digest evidence.
+export DAI_ENVIRONMENT=development
+export DAI_MIGRATION_MODE=disposable
 RUN_DIR="${DAI_DEV_RUN_DIR:-/tmp/dai-dev}"
 PY="${DAI_PYTHON:-$PROJECT_DIR/backend/.venv/bin/python}"
 API_PORT="${DAI_DEV_API_PORT:-8000}"
@@ -133,7 +138,7 @@ require_cmd setsid
 require_cmd ps
 
 "$PY" -c 'import fastapi, sqlalchemy' >/dev/null 2>&1 \
-    || fail "后端虚拟环境缺少依赖，请在 backend 中安装 requirements.txt"
+    || fail "后端虚拟环境缺少依赖，请在 backend 中安装 requirements-dev.txt"
 
 # Worker 需要直接访问 Docker socket。原脚本在 docker 无权限时用 sudo -u $USER
 # 启动 Python，但这不会给当前用户增加 docker 组权限，容易出现“API 能开、判题 Worker 不能用”。
@@ -152,11 +157,11 @@ cd "$PROJECT_DIR"
 "${DOCKER[@]}" compose up -d --wait --no-recreate mysql redis
 log "MySQL/Redis 健康检查通过"
 
-# ── 3. 数据库迁移 ─────────────────────────────────────────────
-log "执行数据库迁移（alembic upgrade head）..."
+# ── 3. 数据库 bootstrap ───────────────────────────────────────
+log "执行统一数据库 bootstrap（disposable 两阶段迁移）..."
 cd "$PROJECT_DIR/backend"
-if ! "$PY" -m alembic upgrade head; then
-    fail "数据库迁移失败"
+if ! "$PY" "$PROJECT_DIR/scripts/bootstrap_database.py"; then
+    fail "数据库 bootstrap 失败"
 fi
 
 # ── 4. 判题镜像 ───────────────────────────────────────────────

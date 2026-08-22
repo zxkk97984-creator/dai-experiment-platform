@@ -169,13 +169,27 @@ def archive_class(class_id: int, db: Session = Depends(get_db), _: User = Depend
     return _class_summary(db, row)
 
 
-def _query_class_students(class_id: int, db: Session, page: int, page_size: int) -> PaginatedResponse:
+def _query_class_students(
+    class_id: int,
+    db: Session,
+    page: int,
+    page_size: int,
+    q: str | None = None,
+) -> PaginatedResponse:
     """教学班学生名单分页查询（纯函数——供路由与内部调用复用，不依赖 FastAPI DI）。"""
     row = db.get(TeachingClass, class_id)
     if not row:
         raise api_error(404, "TEACHING_CLASS_NOT_FOUND", "教学班不存在")
-    filters = (TeachingClassStudent.teaching_class_id == class_id, TeachingClassStudent.status == "active")
-    total = db.scalar(select(func.count()).select_from(TeachingClassStudent).where(*filters)) or 0
+    filters = [TeachingClassStudent.teaching_class_id == class_id, TeachingClassStudent.status == "active"]
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        filters.append(or_(User.student_no.ilike(like), User.username.ilike(like), User.real_name.ilike(like)))
+    total = db.scalar(
+        select(func.count())
+        .select_from(TeachingClassStudent)
+        .join(User, TeachingClassStudent.student_id == User.id)
+        .where(*filters)
+    ) or 0
     students = db.scalars(select(User).join(TeachingClassStudent, TeachingClassStudent.student_id == User.id)
         .where(*filters).order_by(User.student_no, User.id).offset((page - 1) * page_size).limit(page_size)).all()
     return PaginatedResponse(items=[UserRead.model_validate(x) for x in students], page=page, page_size=page_size, total=total)
@@ -200,10 +214,16 @@ def _ensure_class_visible_to_teacher(db: Session, class_id: int, current_user: U
 
 
 @router.get("/teaching-classes/{class_id}/students", response_model=PaginatedResponse)
-def list_class_students(class_id: int, pagination: PaginationParams = Depends(pagination), db: Session = Depends(get_db), current_user: User = Depends(require_roles("admin", "teacher"))):
+def list_class_students(
+    class_id: int,
+    q: str | None = None,
+    pagination: PaginationParams = Depends(pagination),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("admin", "teacher")),
+):
     page, page_size = pagination.page, pagination.page_size
     _ensure_class_visible_to_teacher(db, class_id, current_user)
-    return _query_class_students(class_id, db, page, page_size)
+    return _query_class_students(class_id, db, page, page_size, q=q)
 
 
 @router.post("/teaching-classes/{class_id}/students", response_model=PaginatedResponse)
@@ -225,7 +245,7 @@ def add_class_students(class_id: int, payload: TeachingClassStudentBatch, db: Se
         else:
             db.add(TeachingClassStudent(teaching_class_id=class_id, student_id=student_id, status="active"))
     db.flush(); sync_courses_for_class(db, class_id); db.commit()
-    return _query_class_students(class_id, db, page=1, page_size=100)
+    return _query_class_students(class_id, db, page=1, page_size=20)
 
 
 @router.delete("/teaching-classes/{class_id}/students/{student_id}", status_code=status.HTTP_204_NO_CONTENT)

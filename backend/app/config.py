@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     # 存量兼容路径与开发环境。安全参数不在此处放松。
     kernel_image: str = "dai-kernel-python:latest"
     jupyter_enabled: bool = False
+    worker_role: Literal["judge", "ai"] = "judge"
     studio_storage_dir: str = str(
         Path(__file__).resolve().parents[1] / "storage" / "studio"
     )
@@ -195,9 +196,12 @@ class Settings(BaseSettings):
     login_rate_limit_window_seconds: int = Field(default=900, ge=60)
     login_rate_limit_user_max_failures: int = Field(default=10, ge=1)
     login_rate_limit_ip_max_attempts: int = Field(default=30, ge=1)
-    # 仅当部署在可信反向代理之后（生产 Nginx）才置 True；
-    # 此时客户端 IP 取 X-Forwarded-For 最右一跳，否则使用直连地址。
+    # Legacy switch retained for configuration compatibility. XFF is ignored
+    # unless the immediate peer also matches trusted_proxy_cidrs.
     trusted_proxy: bool = False
+    # Comma-separated IP/CIDR allow-list for the immediate proxy peer and
+    # every intermediate proxy hop represented in X-Forwarded-For.
+    trusted_proxy_cidrs: str = ""
 
     # ── 环境档位控制面（Phase 1 / V2） ────────────────────────
     # V2 默认关闭：先部署 additive schema、API 和 Worker，再通过配置切换。

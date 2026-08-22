@@ -79,33 +79,22 @@ V2 管理端点均位于现有 `/environments` Router：`GET /editor-options`、
 
 当前 V2 迁移链从 `20260820_0001` 到 `20260820_0003`，基于 `20260819_0003`。迁移会新增 Draft/Publication 表、回填 requested/resolved spec、固定历史 Python 3.12、设置 current pointer 和 migration baseline 审计记录，并为 Profile/Version 建立同 Profile 复合外键；不删除旧包目录、镜像、构建日志或业务外键。
 
-**全新库不能直接执行 `upgrade head`。** 旧的业务绑定迁移 `c5d6e7f8a901` 会在升级必填环境外键前检查 `basic` 是否已有真实 `available + image_digest`。请在已备份、可回滚的维护窗口严格按以下顺序执行：
+**全新库不能直接执行 `upgrade head`。** 旧的业务绑定迁移 `c5d6e7f8a901` 会在升级必填环境外键前检查 `basic` 是否已有真实 `available + image_digest`。生产/CI/开发入口都应调用统一 bootstrap；部署方仍须在已备份、可回滚的维护窗口执行并留存真实证据：
 
 ```bash
 # 0. 只启动数据库和 Redis，不启动 API/Worker
 docker compose -f docker-compose.prod.yml up -d mysql redis
 
-# 1. 迁移到控制面（迁移 A）
-docker compose -f docker-compose.prod.yml run --rm migrate \
-  alembic upgrade b4c5d6e7f890
+# 1. 使用批准的真实环境文件（不得使用占位 digest）执行统一两阶段入口
+docker compose --env-file <approved-production-env-file> \
+  -f docker-compose.prod.yml run --rm migrate
 
-# 2. 写入已经通过 smoke、并已保存到 Registry/备份的 basic 镜像 digest
-#    生产禁止省略该变量，也不要使用 000.../111... 占位值。
-DAI_ENVIRONMENT=production \
-DAI_BASIC_ENVIRONMENT_IMAGE_DIGEST=sha256:<64位hex> \
-DAI_DATABASE_URL=mysql+pymysql://... \
-  python scripts/seed-basic-environment-mysql.py
-
-# 3. 完成旧业务绑定迁移及 V2 additive migration
-docker compose -f docker-compose.prod.yml run --rm migrate \
-  alembic upgrade head
-
-# 4. 迁移后检查，确认旧 digest/外键不变，再启动完整栈
+# 2. 迁移后检查，确认旧 digest/外键不变，再启动完整栈
 docker compose -f docker-compose.prod.yml config --quiet
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-`seed-basic-environment-mysql.py` 在非生产环境可用于一次性空库烟测；生产必须提供 `DAI_BASIC_ENVIRONMENT_IMAGE_DIGEST`，脚本会拒绝占位值。若没有可信的 basic 预构建产物，应停止在步骤 1，先用发布版本对应的旧构建流程生成并验证产物，不能为了通过迁移检查伪造 digest。
+`bootstrap_database.py` 会先执行迁移 A，再调用 fail-closed 的 basic seed，最后执行 head；当前 revision 已在 head 时幂等跳过。`seed-basic-environment-mysql.py` 在非生产环境可用于一次性空库烟测；生产必须提供 `DAI_BASIC_ENVIRONMENT_IMAGE_DIGEST`，脚本会拒绝占位值。若没有可信的 basic 预构建产物，应停止 bootstrap，不能为了通过迁移检查伪造 digest。
 
 降级默认被拒绝，因为会删除 V2 业务列和审计数据；只有一次性、已备份的测试库显式设置开关后才允许升级/降级循环：
 
@@ -124,7 +113,7 @@ export DAI_ALLOW_ENVIRONMENT_V2_DOWNGRADE=true
 这三个概念必须分开：
 
 - **Docker daemon** 是实际创建容器和构建镜像的后台引擎（通常由 `dockerd` 提供）；Docker CLI 只是客户端。
-- **Docker socket**（通常是 `/var/run/docker.sock`）是 CLI/Worker 与 daemon 通信的 Unix socket。生产 Compose 只给确需容器生命周期权限的 `api`、`worker`、`environment-builder` 挂载它；它的权限等价于较高的主机控制权。
+- **Docker socket**（通常是 `/var/run/docker.sock`）是 CLI/Worker 与 daemon 通信的 Unix socket。生产 Compose 只给确需容器生命周期权限的 `api`、确定性 `worker`、可选 `ai-worker`、`environment-builder` 挂载它；它的权限等价于较高的主机控制权。
 - **部署机** 是真正运行 Docker daemon、MySQL/Redis 和 Compose 的服务器或虚拟机，不是 API 容器，也不是 Codex/CI 的受限执行沙箱。
 - **Registry** 是保存环境镜像的仓库（Harbor、云 Registry 或 Docker Hub 等）。构建成功后必须推送到仓库并按 digest 回拉，教师和学生运行时不依赖可变 `latest` 标签。
 
@@ -153,11 +142,10 @@ rootful Docker 通常通过受控的 `docker` 用户组访问 socket；rootless 
 #### 真实构建与推送验收
 
 ```bash
-# 启动数据库和 Redis；迁移命令按本手册 0.3 的分阶段顺序执行
+# 启动数据库和 Redis；迁移命令统一调用本手册 0.3 的 bootstrap 入口
 docker compose -f docker-compose.prod.yml up -d mysql redis
-docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade b4c5d6e7f890
-# 准备并验证 basic 真实 digest 后，再执行 upgrade head
-docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade head
+docker compose --env-file <approved-production-env-file> \
+  -f docker-compose.prod.yml run --rm migrate
 
 # 启动完整栈并观察构建 Worker
 docker compose -f docker-compose.prod.yml up -d

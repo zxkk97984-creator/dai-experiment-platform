@@ -1,7 +1,7 @@
 """教师上传视频：上传 / 权限 / 校验 / 生命周期 / 签名播放 端到端测试
 
 - 存储目录由 conftest 指向 tmp_path，绝不写入真实 backend/storage/videos/
-- 媒体端点直接使用 TestClient（签名 URL 的 base 为 http://testserver）
+- 媒体端点直接使用 TestClient（签名 URL 为同源相对路径）
 """
 from __future__ import annotations
 
@@ -120,7 +120,7 @@ def test_owner_teacher_uploads_mp4_webm_mov(client, db_session_factory, test_set
         assert lesson["video_content_type"] == mime
         assert lesson["video_size"] == len(content)
         assert "video_storage_key" not in lesson, "不得向客户端暴露 storage key"
-        assert data["playback_url"].startswith("http://testserver/api/v1/media/lesson-videos/")
+        assert data["playback_url"].startswith("/api/v1/media/lesson-videos/")
         assert data["expires_at"]
     assert len(_video_keys(test_settings)) == 3
 
@@ -421,8 +421,21 @@ def test_playback_url_grants_for_enrolled_owner_admin(client, db_session_factory
     for role in ("s_yes", "t_own", "admin"):
         r = client.get(f"{API}/lessons/{d['lid']}/video-playback-url", headers=auth_header(d["tok"][role]))
         assert r.status_code == 200, f"{role}: {r.status_code}"
-        assert r.json()["url"].startswith("http://testserver/api/v1/media/lesson-videos/")
+        assert r.json()["url"].startswith("/api/v1/media/lesson-videos/")
         assert "sig=" in r.json()["url"]
+
+
+def test_playback_url_is_same_origin_relative_path(client, db_session_factory):
+    d = _uploaded_setup(client, db_session_factory)
+    response = client.get(
+        f"{API}/lessons/{d['lid']}/video-playback-url",
+        headers=auth_header(d["tok"]["t_own"]),
+    )
+
+    assert response.status_code == 200, response.text
+    url = response.json()["url"]
+    assert url.startswith("/api/v1/media/lesson-videos/")
+    assert not url.startswith(("http://", "https://"))
 
 
 def test_playback_url_denied_for_unenrolled_nonowner(client, db_session_factory):

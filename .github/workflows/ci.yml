@@ -24,8 +24,7 @@ jobs:
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest fakeredis
+          pip install -r requirements-dev.txt
       - name: Secret 扫描（高信号模式：密钥/私钥形态，误报需显式说明）
         run: |
           if grep -rnE "(sk-[A-Za-z0-9]{20,}|-----BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY-----)" \
@@ -74,6 +73,8 @@ jobs:
       run:
         working-directory: backend
     env:
+      DAI_ENVIRONMENT: development
+      DAI_MIGRATION_MODE: disposable
       DAI_DATABASE_URL: mysql+pymysql://dai:dai_test@127.0.0.1:3306/dai_platform
       DAI_REDIS_URL: redis://127.0.0.1:6379/0
       DAI_SECRET_KEY: ci-test-key
@@ -86,8 +87,7 @@ jobs:
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
+          pip install -r requirements-dev.txt
       - name: 等 MySQL 就绪
         run: |
           for i in $(seq 1 30); do
@@ -98,16 +98,8 @@ jobs:
       # 说明：不单独 ping Redis——ubuntu-24.04 runner 没有 redis-cli（2026-08 两次
       # 因此 exit 127 挂掉）。redis 服务容器已配置 --health-cmd "redis-cli ping"，
       # GitHub Actions 会等服务 healthy 后才开始执行步骤，无需重复探测。
-      - name: 迁移第一步（环境控制面迁移 A）
-        run: alembic upgrade b4c5d6e7f890
-      - name: 种入 basic 可用版本（迁移 B 前置，等价生产 seed-environments 后构建完成）
-        run: |
-          mysql -h 127.0.0.1 -u root -ptest_root dai_platform -e "
-          INSERT INTO environment_profiles (slug, display_name, status, created_at, updated_at) VALUES ('basic', '基础档位', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
-          INSERT INTO environment_versions (profile_id, version_number, base_image_ref, minimum_memory_mb, manifest_sha256, status, image_digest, created_at, updated_at)
-          SELECT id, 1, 'python:3.12-slim', 128, REPEAT('a',64), 'available', CONCAT('sha256:',REPEAT('b',64)), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM environment_profiles WHERE slug='basic';"
-      - name: 迁移到 head
-        run: alembic upgrade head
+      - name: 统一数据库 bootstrap（disposable）
+        run: python ../scripts/bootstrap_database.py
       - name: 模型/迁移收敛检查（TASK-010：ORM 与实库零漂移）
         run: alembic check
       - name: 运行测试（跳过 kernel + docker）
@@ -160,6 +152,7 @@ jobs:
     needs: [backend-test-sqlite, frontend-test]
     env:
       DAI_ENVIRONMENT: development
+      DAI_MIGRATION_MODE: disposable
       DAI_SECRET_KEY: ci-e2e-secret-key
       DAI_CORS_ORIGINS: http://localhost:8080
       DAI_JUDGE_HOST_WORK_DIR: ${{ github.workspace }}/judge-work
@@ -189,12 +182,10 @@ jobs:
         run: |
           cd ..
           docker compose -f docker-compose.prod.yml up -d --wait mysql redis
-      - name: 空库两步迁移（TASK-016）
+      - name: 统一数据库 bootstrap（disposable）
         run: |
           cd ..
-          docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade b4c5d6e7f890
-          docker compose -f docker-compose.prod.yml run --rm migrate python /scripts/seed-basic-environment-mysql.py
-          docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade head
+          docker compose -f docker-compose.prod.yml run --rm migrate python /scripts/bootstrap_database.py
       - name: 构建 basic 环境镜像并回写 digest（判题/Kernel 依赖）
         run: |
           cd ..
@@ -213,12 +204,15 @@ jobs:
           docker compose -f docker-compose.prod.yml down -v
 
   docker-smoke:
-    name: Docker Compose 冒烟测试
+    name: Docker Compose disposable 冒烟测试（非生产）
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [backend-test-sqlite, frontend-test]
     env:
-      DAI_ENVIRONMENT: production
+      # This job verifies a disposable Compose bootstrap only. It is not
+      # production evidence and must never provide a fake production digest.
+      DAI_ENVIRONMENT: development
+      DAI_MIGRATION_MODE: disposable
       DAI_SECRET_KEY: ci-smoke-secret-key
       DAI_CORS_ORIGINS: https://example.com
       DAI_JUDGE_HOST_WORK_DIR: ${{ github.workspace }}/judge-work
@@ -230,11 +224,9 @@ jobs:
         run: docker compose -f docker-compose.prod.yml config -q
       - name: 启动数据库与缓存
         run: docker compose -f docker-compose.prod.yml up -d --wait mysql redis
-      - name: 空库两步迁移（TASK-016）
+      - name: 统一数据库 bootstrap（disposable；不代表生产验收）
         run: |
-          docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade b4c5d6e7f890
-          docker compose -f docker-compose.prod.yml run --rm migrate python /scripts/seed-basic-environment-mysql.py
-          docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade head
+          docker compose -f docker-compose.prod.yml run --rm migrate python /scripts/bootstrap_database.py
       - name: 启动服务
         run: |
           mkdir -p judge-work

@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = REPO_ROOT / "docker-compose.prod.yml"
 
 SOCKET_HOLDERS = {"api", "worker", "environment-builder"}
-NON_HOLDERS = {"frontend", "mysql", "redis", "migrate"}
+NON_HOLDERS = {"frontend", "mysql", "redis", "migrate", "ai-worker"}
 
 
 def _service_blocks() -> dict[str, str]:
@@ -49,6 +49,22 @@ def test_non_holders_have_no_socket():
     for name in NON_HOLDERS:
         assert name in blocks, f"{name} 服务缺失"
         assert "/var/run/docker.sock" not in blocks[name], f"{name} 不应持有 Socket"
+
+
+def test_ai_worker_has_no_judge_runtime_resources():
+    """AI worker 只消费 AI 队列，不继承 Docker 判题运行时或 Registry Secret。"""
+    blocks = _service_blocks()
+    ai_worker = blocks["ai-worker"]
+    assert "extends:" not in ai_worker
+    for forbidden in (
+        "/var/run/docker.sock",
+        "/judge-work",
+        "DAI_JUDGE_HOST_WORK_DIR",
+        "DAI_JUDGE_WORK_DIR",
+        "DOCKER_CONFIG",
+        "config.json",
+    ):
+        assert forbidden not in ai_worker, f"ai-worker 不应包含 {forbidden}"
 
 
 def _read_app_files() -> list[str]:

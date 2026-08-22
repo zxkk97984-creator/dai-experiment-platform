@@ -40,4 +40,42 @@ describe('考试成绩总览', () => {
     await detailButton.trigger('click')
     expect(pushMock).toHaveBeenCalledWith('/teacher/exams/5/grades/7')
   })
+
+  it('使用服务端分页和成绩筛选，不在当前页数组上伪造总数', async () => {
+    getGradesMock.mockResolvedValue({ data: {
+      exam: { title: '大班考试', course_title: '课程' },
+      summary: { expected_count: 25, submitted_count: 25, graded_count: 25, average_score: 80, pass_rate: 80 },
+      distribution: [],
+      page: 1,
+      page_size: 10,
+      total: 25,
+      items: [{ id: 1, submission_id: 1, student_name: '目标学生', student_number: '20260001', status: 'graded', score: 80 }],
+    } })
+    const wrapper = mount(GradesView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' } } } })
+    await flushPromises()
+
+    expect(getGradesMock).toHaveBeenCalledWith('5', { page: 1, page_size: 10, sort: 'score_desc' })
+    const next = wrapper.find('button[aria-label="下一页"]')
+    expect(next.exists()).toBe(true)
+    await next.trigger('click')
+    await flushPromises()
+    expect(getGradesMock).toHaveBeenLastCalledWith('5', { page: 2, page_size: 10, sort: 'score_desc' })
+
+    const search = wrapper.find('input[placeholder="搜索学生姓名或学号"]')
+    await search.setValue('目标')
+    await search.trigger('input')
+    await wrapper.findAll('select')[0].setValue('graded')
+    await wrapper.findAll('select')[1].setValue('excellent')
+    await wrapper.findAll('select')[2].setValue('name')
+    await flushPromises()
+    expect(getGradesMock).toHaveBeenLastCalledWith('5', {
+      page: 1,
+      page_size: 10,
+      q: '目标',
+      status: 'graded',
+      score: 'excellent',
+      sort: 'name',
+    })
+    expect(wrapper.text()).toContain('共 25 条')
+  })
 })

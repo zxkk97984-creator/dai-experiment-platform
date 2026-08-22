@@ -22,9 +22,10 @@ const createOpen = ref(false)
 const query = ref('')
 const statusFilter = ref('all')
 const courseFilter = ref('all')
-const sortOrder = ref('updated')
+const sortOrder = ref('updated_desc')
 const page = ref(1)
 const pageSize = ref(10)
+const total = ref(0)
 
 function displayStatus(exam) {
   if (exam.status === 'draft') return 'draft'
@@ -32,32 +33,27 @@ function displayStatus(exam) {
   return 'published'
 }
 const summary = computed(() => ({
-  total: exams.value.length,
-  published: exams.value.filter((item) => displayStatus(item) === 'published').length,
-  draft: exams.value.filter((item) => displayStatus(item) === 'draft').length,
-  ended: exams.value.filter((item) => displayStatus(item) === 'ended').length,
+  total: total.value,
 }))
 const courseName = (exam) => exam.course_title || courses.value.find((course) => String(course.id) === String(exam.course_id))?.title || `课程 ${exam.course_id}`
-const filteredExams = computed(() => {
-  const keyword = query.value.trim().toLowerCase()
-  const result = exams.value.filter((exam) => {
-    const matchesQuery = !keyword || exam.title.toLowerCase().includes(keyword) || courseName(exam).toLowerCase().includes(keyword)
-    const matchesStatus = statusFilter.value === 'all' || displayStatus(exam) === statusFilter.value
-    const matchesCourse = courseFilter.value === 'all' || String(exam.course_id) === courseFilter.value
-    return matchesQuery && matchesStatus && matchesCourse
-  })
-  return [...result].sort((a, b) => sortOrder.value === 'title'
-    ? a.title.localeCompare(b.title, 'zh-CN')
-    : new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))
-})
-const pageCount = computed(() => Math.max(1, Math.ceil(filteredExams.value.length / pageSize.value)))
-const pagedExams = computed(() => filteredExams.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
+const filteredExams = computed(() => exams.value)
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+const pagedExams = computed(() => exams.value)
 
 async function fetchExams() {
   loading.value = true
   try {
-    const res = await examsAPI.list({ page_size: 100 })
+    const params = {
+      page: page.value,
+      page_size: pageSize.value,
+      sort: sortOrder.value,
+    }
+    if (query.value.trim()) params.q = query.value.trim()
+    if (statusFilter.value !== 'all') params.status = statusFilter.value
+    if (courseFilter.value !== 'all') params.course_id = Number(courseFilter.value)
+    const res = await examsAPI.list(params)
     exams.value = res.data.items || res.data || []
+    total.value = Number(res.data.total ?? exams.value.length)
   } catch { app.showToast('加载失败', 'error') }
   finally { loading.value = false }
 }
@@ -67,7 +63,8 @@ async function fetchCourses() {
     courses.value = res.data.items || res.data || []
   } catch { courses.value = [] }
 }
-function resetPage() { page.value = 1 }
+function resetPage() { page.value = 1; fetchExams() }
+function changePage(nextPage) { page.value = nextPage; fetchExams() }
 function openCreateModal() { createOpen.value = true }
 function closeCreateModal() { createOpen.value = false }
 async function handleSave(payload) {
@@ -93,10 +90,7 @@ onMounted(() => { fetchExams(); fetchCourses() })
       <TeacherPageHeader title="考试管理" subtitle="创建考试、配置题目、查看成绩与统计" action-label="创建考试" @action="openCreateModal" />
 
       <TeacherMetricGrid aria-label="考试统计" :items="[
-        { key: 'total', label: '全部考试', icon: 'exam', tone: 'blue', value: summary.total },
-        { key: 'published', label: '已发布', icon: 'send', tone: 'green', value: summary.published },
-        { key: 'draft', label: '草稿', icon: 'draft', tone: 'orange', value: summary.draft },
-        { key: 'ended', label: '已结束', icon: 'clock', tone: 'purple', value: summary.ended },
+        { key: 'total', label: '符合筛选', icon: 'exam', tone: 'blue', value: summary.total },
       ]" />
 
       <section class="table-wrap data-panel">
@@ -104,7 +98,7 @@ onMounted(() => { fetchExams(); fetchCourses() })
           <label class="searchbox" :class="{ 'has-value': query }" style="width: 260px;"><AppIcon name="search" :size="15" /><input v-model="query" type="search" class="input" placeholder="搜索考试名称或课程" aria-label="搜索考试名称或课程" @input="resetPage" /><button v-if="query" type="button" class="clear" aria-label="清空搜索" @click="query = ''; resetPage()"><AppIcon name="close" :size="13" /></button></label>
           <select v-model="statusFilter" aria-label="状态筛选" @change="resetPage"><option value="all">状态：全部</option><option value="published">已发布</option><option value="draft">草稿</option><option value="ended">已结束</option></select>
           <select v-model="courseFilter" aria-label="课程筛选" @change="resetPage"><option value="all">课程：全部课程</option><option v-for="course in courses" :key="course.id" :value="String(course.id)">{{ course.title }}</option></select>
-          <select v-model="sortOrder" aria-label="排序"><option value="updated">排序：最近更新</option><option value="title">排序：考试名称</option></select>
+          <select v-model="sortOrder" aria-label="排序" @change="resetPage"><option value="updated_desc">排序：最近更新</option><option value="title_asc">排序：考试名称</option></select>
         </div>
 
         <div v-if="loading" class="loading-list"><span v-for="i in 6" :key="i" class="skeleton"></span></div>
@@ -129,7 +123,7 @@ onMounted(() => { fetchExams(); fetchCourses() })
           </table>
         </div>
 
-        <TeacherPagination v-if="!loading" :current-page="page" :page-count="pageCount" :total="filteredExams.length" :page-size="pageSize" aria-label="考试列表分页" @change="page = $event" />
+        <TeacherPagination v-if="!loading" :current-page="page" :page-count="pageCount" :total="total" :page-size="pageSize" aria-label="考试列表分页" @change="changePage" />
       </section>
     </main>
 

@@ -84,8 +84,8 @@ def test_jupyter_entry_and_experiment_records(client, db_session_factory):
         "/api/v1/jupyter/templates",
         headers=auth_header(student_token),
     )
-    assert templates_response.status_code == 200
-    assert templates_response.json()["items"][0]["name"].endswith(".ipynb")
+    assert templates_response.status_code == 410
+    assert templates_response.json()["detail"]["code"] == "JUPYTER_TEMPLATES_RETIRED"
 
     module_response = client.post(
         "/api/v1/experiments/modules",

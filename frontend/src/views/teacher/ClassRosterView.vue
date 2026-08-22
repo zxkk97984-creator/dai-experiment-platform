@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import AppLayout from '../../components/layout/AppLayout.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
+import TeacherPagination from '../../components/teacher/TeacherPagination.vue'
 import { academicsAPI } from '../../api/academics.js'
 import { useAppStore } from '../../stores/app.js'
 
@@ -10,14 +11,17 @@ const classes = ref([])
 const selectedClassId = ref(null)
 const selectedClass = ref(null)
 const students = ref([])
+const classPage = ref(1)
+const classTotal = ref(0)
+const studentPage = ref(1)
+const studentTotal = ref(0)
 const loading = ref(true)
 const query = ref('')
+const pageSize = 20
 
-const filteredStudents = computed(() => {
-  const q = query.value.trim().toLowerCase()
-  if (!q) return students.value
-  return students.value.filter((student) => `${student.real_name || ''} ${student.student_no || ''} ${student.username || ''}`.toLowerCase().includes(q))
-})
+const filteredStudents = computed(() => students.value)
+const classPageCount = computed(() => Math.max(1, Math.ceil(classTotal.value / pageSize)))
+const studentPageCount = computed(() => Math.max(1, Math.ceil(studentTotal.value / pageSize)))
 
 function classTitle(item) {
   const name = item.name || ''
@@ -38,12 +42,17 @@ function classSubtitle(item) {
 async function load() {
   loading.value = true
   try {
-    const res = await academicsAPI.listClasses({ page_size: 100, scope: 'linked' })
+    const res = await academicsAPI.listClasses({ page: classPage.value, page_size: pageSize, scope: 'linked' })
     classes.value = res.data.items || []
+    classTotal.value = Number(res.data.total ?? classes.value.length)
     if (classes.value.length && !selectedClassId.value) {
       selectedClassId.value = String(classes.value[0].id)
+      selectedClass.value = classes.value[0]
     }
-    if (selectedClassId.value) await loadRoster(selectedClassId.value)
+    if (selectedClassId.value) {
+      selectedClass.value = classes.value.find((item) => String(item.id) === String(selectedClassId.value)) || selectedClass.value
+      await loadRoster(selectedClassId.value)
+    }
   } catch {
     app.showToast('加载教学班失败', 'error')
   } finally {
@@ -54,17 +63,34 @@ async function load() {
 async function selectClass(item) {
   selectedClassId.value = String(item.id)
   selectedClass.value = item
+  studentPage.value = 1
   await loadRoster(item.id)
 }
 
 async function loadRoster(classId) {
   try {
-    const res = await academicsAPI.listClassStudents(classId, { page_size: 100 })
+    const params = { page: studentPage.value, page_size: pageSize }
+    if (query.value.trim()) params.q = query.value.trim()
+    const res = await academicsAPI.listClassStudents(Number(classId), params)
     students.value = res.data.items || []
+    studentTotal.value = Number(res.data.total ?? students.value.length)
   } catch {
     students.value = []
+    studentTotal.value = 0
     app.showToast('加载学员名单失败', 'error')
   }
+}
+async function changeClassPage(nextPage) {
+  classPage.value = nextPage
+  await load()
+}
+async function changeStudentPage(nextPage) {
+  studentPage.value = nextPage
+  await loadRoster(selectedClassId.value)
+}
+async function searchStudents() {
+  studentPage.value = 1
+  await loadRoster(selectedClassId.value)
 }
 
 onMounted(load)
@@ -82,9 +108,9 @@ onMounted(load)
       </section>
 
       <section class="metric-strip">
-        <div class="metric"><span class="m-value">{{ classes.length }}</span><span class="m-label">关联教学班</span></div>
+        <div class="metric"><span class="m-value">{{ classTotal }}</span><span class="m-label">关联教学班</span></div>
         <div class="metric"><span class="m-value">{{ selectedClass?.student_count ?? students.length }}</span><span class="m-label">当前班级人数</span></div>
-        <div class="metric"><span class="m-value">{{ filteredStudents.length }}</span><span class="m-label">筛选结果</span></div>
+        <div class="metric"><span class="m-value">{{ studentTotal }}</span><span class="m-label">筛选结果</span></div>
       </section>
 
       <div class="grid-2-1 roster-grid">
@@ -110,6 +136,7 @@ onMounted(load)
                 <span class="class-meta">{{ classSubtitle(item) }}</span>
               </button>
             </div>
+            <TeacherPagination v-if="classTotal > 0" :current-page="classPage" :page-count="classPageCount" :total="classTotal" :page-size="pageSize" aria-label="教学班列表分页" @change="changeClassPage" />
           </div>
         </section>
 
@@ -120,11 +147,12 @@ onMounted(load)
           <div class="panel-body">
             <label class="searchbox" style="width: 100%; margin-bottom: 12px;">
               <AppIcon name="search" :size="15" />
-              <input v-model="query" type="search" class="input" placeholder="搜索姓名、学号或账号" />
+              <input v-model="query" type="search" class="input" placeholder="搜索姓名、学号或账号" @keyup.enter="searchStudents" />
               <button v-if="query" type="button" class="clear" aria-label="清空搜索" @click="query = ''">
                 <AppIcon name="close" :size="13" />
               </button>
             </label>
+            <button type="button" class="button button-secondary roster-search-button" @click="searchStudents">搜索</button>
             <div v-if="filteredStudents.length === 0" class="empty">
               <div class="empty-mark"><AppIcon name="user" :size="20" /></div>
               <h3>暂无学员</h3>
@@ -142,6 +170,7 @@ onMounted(load)
                 </tbody>
               </table>
             </div>
+            <TeacherPagination v-if="studentTotal > 0" :current-page="studentPage" :page-count="studentPageCount" :total="studentTotal" :page-size="pageSize" aria-label="班级名单分页" @change="changeStudentPage" />
           </div>
         </section>
       </div>

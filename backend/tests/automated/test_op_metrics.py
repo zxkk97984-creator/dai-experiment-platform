@@ -111,6 +111,26 @@ def test_metrics_admin_payload(client, db_session_factory, redis_client):
     assert "code" not in serialized
 
 
+def test_metrics_reports_assignment_exam_and_ai_queue_depths_separately(
+    client, db_session_factory, redis_client, test_settings
+):
+    from app.worker.judge_worker import EXAM_JUDGE_QUEUE
+
+    create_user(db_session_factory, "ops-queue-admin", "admin")
+    token, _ = login(client, "ops-queue-admin")
+    redis_client.rpush(test_settings.judge_queue_name, "assignment")
+    redis_client.rpush(EXAM_JUDGE_QUEUE, "exam-1", "exam-2")
+    redis_client.rpush(test_settings.ai_queue_name, "ai-1", "ai-2", "ai-3")
+
+    response = client.get(f"{API}/metrics", headers=auth_header(token))
+
+    assert response.status_code == 200, response.text
+    metrics = response.json()["metrics"]
+    assert metrics["judge_queue_depth"] == 1
+    assert metrics["exam_queue_depth"] == 2
+    assert metrics["ai_queue_depth"] == 3
+
+
 # ── 中间件：状态类别计数 + 低基数路径 ──
 
 

@@ -401,8 +401,8 @@ def test_execution_count_increments_per_visible_cell(client, db_session_factory,
 # 问题 7: notebooks 转发 + catchall
 # ═══════════════════════════════════════════════════════════════
 
-def test_notebooks_get_returns_template_not_found_with_deprecation(client, db_session_factory):
-    """已发布已选课但无模板的 lesson → TEMPLATE_NOT_FOUND + Deprecation"""
+def test_notebooks_get_returns_retired_with_deprecation(client, db_session_factory):
+    """旧 notebooks 入口统一终止，并提示迁移到 experiments。"""
     create_user(db_session_factory, "tnb", "teacher")
     create_user(db_session_factory, "snb", "student")
     t_tok, _ = login(client, "tnb")
@@ -421,8 +421,8 @@ def test_notebooks_get_returns_template_not_found_with_deprecation(client, db_se
 
     r = client.get(f"/api/v1/notebooks/{lid}", headers=auth_header(s_tok))
     assert r.headers.get("Deprecation") == "true"
-    assert r.status_code == 404
-    assert r.json()["detail"]["code"] == "TEMPLATE_NOT_FOUND"
+    assert r.status_code == 410
+    assert r.json()["detail"]["code"] == "DEPRECATED"
 
 
 def test_notebooks_catchall_returns_410_and_deprecation(client, db_session_factory):

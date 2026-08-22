@@ -1,7 +1,7 @@
 from collections.abc import Callable
 
 import redis
-from fastapi import Depends, Query
+from fastapi import Depends, Query, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
@@ -37,8 +37,16 @@ def get_db():
     yield from get_db_session()
 
 
-def get_redis_client(settings: Settings = Depends(get_settings)):
-    return redis.Redis.from_url(settings.redis_url, decode_responses=True)
+def get_redis_client(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+):
+    """Return the app-scoped Redis client, lazily initialized for non-lifespan callers."""
+    client = getattr(request.app.state, "redis_client", None)
+    if client is None:
+        client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+        request.app.state.redis_client = client
+    return client
 
 
 def get_current_payload(

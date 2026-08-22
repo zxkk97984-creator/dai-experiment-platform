@@ -27,6 +27,27 @@ logger = logging.getLogger("dai.main")
 _http_metrics = http_metrics_recorder()
 
 
+async def _run_sync_in_thread(func, *args, **kwargs):
+    """Run blocking maintenance work without occupying the event loop."""
+    return await asyncio.to_thread(func, *args, **kwargs)
+
+
+def _scan_expired_exams_once(owner_id: str):
+    from app.services.scheduler_lease import try_acquire_lease
+    from app.services.time_utils import utc_now
+
+    with SessionLocal() as db:
+        if not try_acquire_lease(db, "exam-expiry", owner_id, ttl_seconds=20):
+            return None
+        return scan_expired_exams(db, utc_now())
+
+
+def _cleanup_kernel_once():
+    from app.services.kernel_manager import get_kernel_manager
+
+    get_kernel_manager().cleanup_idle(max_idle_seconds=900)
+
+
 def _normalize_detail(detail):
     if isinstance(detail, dict) and set(detail.keys()) == {"code", "message", "fields"}:
         return detail
@@ -63,14 +84,9 @@ async def _expiry_scanner():
     while True:
         try:
             await asyncio.sleep(5)
-            with SessionLocal() as db:
-                from app.services.scheduler_lease import try_acquire_lease
-                if not try_acquire_lease(db, "exam-expiry", owner_id, ttl_seconds=20):
-                    continue  # 其他实例持有租约
-                from app.services.time_utils import utc_now
-                metrics = scan_expired_exams(db, utc_now())
-                if any(v > 0 for v in metrics.values()):
-                    logger.info("考试扫描: %s", metrics)
+            metrics = await _run_sync_in_thread(_scan_expired_exams_once, owner_id)
+            if metrics and any(v > 0 for v in metrics.values()):
+                logger.info("考试扫描: %s", metrics)
         except Exception:
             logger.exception("过期考试扫描异常")
 
@@ -80,25 +96,39 @@ async def _kernel_cleanup():
     while True:
         try:
             await asyncio.sleep(300)  # 每 5 分钟清理一次
-            from app.services.kernel_manager import get_kernel_manager
-            km = get_kernel_manager()
-            km.cleanup_idle(max_idle_seconds=900)  # 15 分钟无活动则销毁
+            await _run_sync_in_thread(_cleanup_kernel_once)  # 15 分钟无活动则销毁
         except Exception:
             logger.exception("Kernel 清理异常")
 
 
 @asynccontextmanager
 async def lifespan(app):
+    import redis as _redis
+
+    settings = app.state.settings
+    app.state.redis_client = _redis.Redis.from_url(
+        settings.redis_url,
+        decode_responses=True,
+    )
     expiry_task = asyncio.create_task(_expiry_scanner())
     cleanup_task = asyncio.create_task(_kernel_cleanup())
-    yield
-    expiry_task.cancel()
-    cleanup_task.cancel()
+    try:
+        yield
+    finally:
+        expiry_task.cancel()
+        cleanup_task.cancel()
+        await asyncio.gather(expiry_task, cleanup_task, return_exceptions=True)
+        close = getattr(app.state.redis_client, "close", None)
+        if close is not None:
+            close()
+        app.state.redis_client = None
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
+    app.state.settings = settings
+    app.state.redis_client = None
 
     # Request ID 中间件 + 访问指标（TASK-029：状态类别/延迟，低基数路径模板）
     from app.logging_config import set_request_id, setup_logging
@@ -216,7 +246,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok", "app": settings.app_name}
 
     @app.get("/api/v1/health/ready", tags=["health"])
-    def health_ready():
+    def health_ready(request: Request):
         """就绪检查——验证 MySQL + Redis 可达。
 
         Redis 承载 Refresh Token、黑名单与队列唤醒，是认证关键依赖；
@@ -227,24 +257,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         details = {}
 
         # MySQL
+        db = None
         try:
             from app.database import SessionLocal
             db = SessionLocal()
-            db.execute(select(1)) if True else None  # simplified check
-            db.close()
+            db.execute(select(1))
             details["mysql"] = "ok"
         except Exception:
             ready = False
             details["mysql"] = "unavailable"
+        finally:
+            if db is not None:
+                db.close()
 
         # Redis
+        redis_client = getattr(request.app.state, "redis_client", None)
+        owns_redis_client = redis_client is None
         try:
-            r = _redis.Redis.from_url(settings.redis_url, socket_connect_timeout=2)
+            r = redis_client or _redis.Redis.from_url(settings.redis_url, socket_connect_timeout=2)
             r.ping()
             details["redis"] = "ok"
         except Exception:
             ready = False
             details["redis"] = "unavailable"
+        finally:
+            if owns_redis_client and "r" in locals():
+                close = getattr(r, "close", None)
+                if close is not None:
+                    close()
 
         status_code = 200 if ready else 503
         from fastapi.responses import JSONResponse
@@ -303,7 +343,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         # Redis 侧：队列深度 + 健康 + 当前小时指标快照
         try:
-            stats["judge_queue_depth"] = queue_depth(redis_client, settings.ai_queue_name)
+            from app.worker.judge_worker import EXAM_JUDGE_QUEUE
+
+            stats["judge_queue_depth"] = queue_depth(redis_client, settings.judge_queue_name)
+            stats["exam_queue_depth"] = queue_depth(redis_client, EXAM_JUDGE_QUEUE)
+            stats["ai_queue_depth"] = queue_depth(redis_client, settings.ai_queue_name)
             redis_client.ping()
             stats["redis_ok"] = True
         except Exception:

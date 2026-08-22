@@ -52,10 +52,9 @@ def _require_video_lesson(lesson_id: int, db: Session) -> Lesson:
 
 
 def _playback_url(request: Request, lesson_id: int, uid: int, expires: int, sig: str) -> str:
-    """拼接媒体端点签名 URL（query string 为短期 bearer capability）。"""
-    base = str(request.base_url).rstrip("/")
+    """返回同源相对签名 URL，避免反向代理的内部 scheme/host 泄漏到浏览器。"""
     return (
-        f"{base}/api/v1/media/lesson-videos/{lesson_id}"
+        f"/api/v1/media/lesson-videos/{lesson_id}"
         f"?uid={uid}&expires={expires}&sig={sig}"
     )
 

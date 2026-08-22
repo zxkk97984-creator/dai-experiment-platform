@@ -97,7 +97,11 @@ def list_students(
     count_query = select(func.count()).select_from(User).where(*filters)
     if q:
         like = f"%{q}%"
-        name_match = or_(User.username.ilike(like), User.real_name.ilike(like))
+        name_match = or_(
+            User.username.ilike(like),
+            User.real_name.ilike(like),
+            User.student_no.ilike(like),
+        )
         query = query.where(name_match)
         count_query = count_query.where(name_match)
     total = db.scalar(count_query) or 0

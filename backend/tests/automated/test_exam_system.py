@@ -141,6 +141,179 @@ def test_teacher_grades(client, db_session_factory):
     assert listed_exam["participant_count"] == 1
 
 
+def test_teacher_grades_use_server_pagination_and_search(client, db_session_factory):
+    from app.models import CourseEnrollment
+
+    ctx = _setup(client, db_session_factory)
+    extra = create_user(db_session_factory, "e_extra", "student", real_name="额外学生")
+    with db_session_factory() as db:
+        db.add(CourseEnrollment(course_id=ctx["cid"], student_id=extra.id, status="enrolled"))
+        db.commit()
+
+    response = client.get(
+        f"{API}/exams/{ctx['eid']}/grades",
+        headers=_h(ctx["t_tok"]),
+        params={"page": 2, "page_size": 1, "sort": "name"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["page"] == 2
+    assert body["page_size"] == 1
+    assert body["total"] == 2
+    assert len(body["items"]) == 1
+
+    searched = client.get(
+        f"{API}/exams/{ctx['eid']}/grades",
+        headers=_h(ctx["t_tok"]),
+        params={"q": "额外", "page": 1, "page_size": 20},
+    )
+    assert searched.status_code == 200, searched.text
+    assert searched.json()["total"] == 1
+    assert [item["student_name"] for item in searched.json()["items"]] == ["额外学生"]
+
+
+@pytest.mark.parametrize(
+    ("status_filter", "start_delta", "end_delta"),
+    [
+        ("scheduled", timedelta(hours=1), timedelta(hours=2)),
+        ("ready", timedelta(hours=-1), timedelta(hours=1)),
+        ("missed", timedelta(hours=-2), timedelta(hours=-1)),
+    ],
+)
+def test_teacher_grades_status_filters_join_the_requested_exam(
+    client, db_session_factory, status_filter, start_delta, end_delta
+):
+    """缺考/待考筛选只能基于当前 exam，不能被其他考试的时间行放大。"""
+    from app.models import Exam
+
+    ctx = _setup(client, db_session_factory)
+    now = datetime.datetime.now(timezone.utc)
+    start_at = now + start_delta
+    end_at = now + end_delta
+    with db_session_factory() as db:
+        exam = db.get(Exam, ctx["eid"])
+        exam.start_at = start_at
+        exam.end_at = end_at
+        # 旧实现未连接 Exam，会把这个同类时间行也笛卡尔拼进结果。
+        db.add(Exam(
+            course_id=ctx["cid"],
+            title=f"noise-{status_filter}",
+            status="draft",
+            duration_minutes=60,
+            start_at=start_at,
+            end_at=end_at,
+        ))
+        db.commit()
+
+    response = client.get(
+        f"{API}/exams/{ctx['eid']}/grades",
+        headers=_h(ctx["t_tok"]),
+        params={"status": status_filter, "page": 1, "page_size": 20},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 1
+    assert len(body["items"]) == 1
+    assert body["items"][0]["status"] == status_filter
+
+
+def test_teacher_grades_summary_aggregates_without_materializing_all_students(
+    client, db_session_factory
+):
+    """摘要应由聚合 SQL 计算，成绩页只物化请求页的学生行。"""
+    from sqlalchemy import event
+
+    from app.models import CourseEnrollment, ExamSubmission
+
+    ctx = _setup(client, db_session_factory)
+    extra_student_ids = []
+    for index in range(8):
+        extra = create_user(
+            db_session_factory,
+            f"e_bulk_{index}",
+            "student",
+            real_name=f"批量学生{index}",
+        )
+        extra_student_ids.append(extra.id)
+        with db_session_factory() as db:
+            db.add(CourseEnrollment(
+                course_id=ctx["cid"], student_id=extra.id, status="enrolled"
+            ))
+            db.commit()
+
+    with db_session_factory() as db:
+        db.add_all([
+            ExamSubmission(
+                exam_id=ctx["eid"], student_id=extra_student_ids[0],
+                status="graded", score=95,
+            ),
+            ExamSubmission(
+                exam_id=ctx["eid"], student_id=extra_student_ids[1],
+                status="graded", score=85,
+            ),
+            ExamSubmission(
+                exam_id=ctx["eid"], student_id=extra_student_ids[2],
+                status="submitted", score=55,
+            ),
+        ])
+        db.commit()
+
+    engine = db_session_factory.kw["bind"]
+    statements = []
+
+    def capture_sql(_conn, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(statement.lower())
+
+    event.listen(engine, "before_cursor_execute", capture_sql)
+    try:
+        response = client.get(
+            f"{API}/exams/{ctx['eid']}/grades",
+            headers=_h(ctx["t_tok"]),
+            params={"page": 1, "page_size": 1},
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_sql)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    summary = body["summary"]
+    assert summary["expected_count"] == 9
+    assert summary["submitted_count"] == 3
+    assert summary["graded_count"] == 3
+    assert summary["average_score"] == 78.3
+    assert summary["highest_score"] == 95.0
+    assert summary["pass_rate"] == 66.7
+    assert summary["excellent_rate"] == 33.3
+    assert summary["status_counts"] == {
+        "scheduled": 0,
+        "ready": 6,
+        "in_progress": 0,
+        "submitted": 1,
+        "grading": 0,
+        "graded": 2,
+        "review_required": 0,
+        "missed": 0,
+    }
+    assert [bucket["count"] for bucket in body["distribution"]] == [1, 1, 0, 0, 1]
+    assert len(body["items"]) == 1
+    assert any(
+        statement.lstrip().startswith("select count(")
+        and "avg(" in statement
+        for statement in statements
+    ), "成绩摘要必须由 SQL 聚合查询返回"
+    unbounded_student_selects = [
+        statement
+        for statement in statements
+        if statement.lstrip().startswith("select users.")
+        and "from users" in statement
+        and "exam_submissions" in statement
+    ]
+    assert unbounded_student_selects, "应至少执行一次成绩页学生查询"
+    assert all(" limit " in statement for statement in unbounded_student_selects), (
+        "成绩页不应执行无 limit 的全班 ORM 行查询"
+    )
+
+
 def test_teacher_grade_detail_manual_score_override(client, db_session_factory):
     """教师成绩详情可逐题改分：0~本题满分，超限拒绝，并同步重算总分。"""
     from app.models import ExamAnswer, ExamSubmission

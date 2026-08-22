@@ -26,12 +26,15 @@
 | 服务 | 是否挂载 Socket | 用途 |
 | --- | --- | --- |
 | api | 是 | 同步判题路径（legacy 判题/实验执行）需要启动判题容器 |
-| worker | 是 | AI/判题队列消费者，启动判题容器 |
+| worker | 是 | 确定性作业/考试队列消费者，启动判题容器 |
+| ai-worker | 否 | 可选 AI 队列消费者；只调用 AI 服务，不执行 Docker 判题，默认 profile 不启动 |
 | environment-builder | 是 | 环境档位镜像构建（低频管理任务） |
 | frontend / mysql / redis / migrate | 否 | 无容器生命周期职责 |
 
 守护：`backend/tests/automated/test_docker_socket_isolation.py` 断言清单
-与 `docker-compose.prod.yml` 一致（多挂少挂都失败）。
+与 `docker-compose.prod.yml` 一致（多挂少挂都失败），并明确断言 `ai-worker`
+不继承 Docker Socket、`judge-work` 或 Registry Secret。AI worker 的队列/角色隔离
+由 `test_phase4_worker_isolation.py` 一并守护。
 
 ## 3. 学生容器隔离基线
 

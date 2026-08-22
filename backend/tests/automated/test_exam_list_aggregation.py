@@ -166,3 +166,64 @@ def test_empty_list_ok(client, db_session_factory):
     assert resp.status_code == 200, resp.text
     assert resp.json()["total"] == 0
     assert resp.json()["items"] == []
+
+
+def test_teacher_exam_list_filters_and_sorts_before_pagination(
+    client, db_session_factory, exam_seed
+):
+    course_id, _ = exam_seed
+    now = utc_now()
+    with db_session_factory() as db:
+        exams = db.scalars(select(Exam).order_by(Exam.id)).all()
+        exams[0].title = "目标草稿考试"
+        exams[0].status = "draft"
+        exams[1].title = "排序-A"
+        exams[2].title = "排序-Z"
+        exams[2].end_at = now - timedelta(minutes=1)
+        db.commit()
+
+    token, _ = login(client, "agg-teacher")
+    headers = auth_header(token)
+
+    filtered = client.get(
+        f"{API}/exams",
+        headers=headers,
+        params={
+            "q": "目标草稿",
+            "status": "draft",
+            "course_id": course_id,
+            "sort": "title_desc",
+            "page": 1,
+            "page_size": 10,
+        },
+    )
+    assert filtered.status_code == 200, filtered.text
+    filtered_body = filtered.json()
+    assert filtered_body["total"] == 1
+    assert [item["title"] for item in filtered_body["items"]] == ["目标草稿考试"]
+
+    ended = client.get(
+        f"{API}/exams",
+        headers=headers,
+        params={"status": "ended", "page": 1, "page_size": 10},
+    )
+    assert ended.status_code == 200, ended.text
+    assert ended.json()["total"] == 1
+    assert ended.json()["items"][0]["title"] == "排序-Z"
+
+    sorted_response = client.get(
+        f"{API}/exams",
+        headers=headers,
+        params={
+            "q": "排序-",
+            "course_id": course_id,
+            "sort": "title_desc",
+            "page": 1,
+            "page_size": 10,
+        },
+    )
+    assert sorted_response.status_code == 200, sorted_response.text
+    assert [item["title"] for item in sorted_response.json()["items"]] == [
+        "排序-Z",
+        "排序-A",
+    ]

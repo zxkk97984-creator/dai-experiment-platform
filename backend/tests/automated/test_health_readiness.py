@@ -7,6 +7,8 @@ Redis 故障时 ready 必须返回 503，且响应不得回显底层异常详情
 import pytest
 
 import redis as redis_lib
+from types import SimpleNamespace
+from starlette.requests import Request
 
 
 class _HealthyRedis:
@@ -36,11 +38,14 @@ class _HealthyDB:
 
 
 class _DownDB:
+    def __init__(self):
+        self.closed = False
+
     def execute(self, stmt):
         raise RuntimeError("mysql connection refused")
 
     def close(self):
-        pass
+        self.closed = True
 
 
 @pytest.fixture
@@ -112,3 +117,50 @@ def test_ready_does_not_leak_exception_details(client, all_down):
     assert "unavailable" in raw
     for leaked in ("ConnectionError", "RuntimeError", "unreachable", "refused", "Traceback"):
         assert leaked not in raw
+
+
+def test_ready_closes_database_session_when_query_fails(client, monkeypatch):
+    down_db = _DownDB()
+    monkeypatch.setattr(redis_lib.Redis, "from_url", _HealthyRedis.from_url)
+    monkeypatch.setattr("app.database.SessionLocal", lambda: down_db)
+
+    response = client.get("/api/v1/health/ready")
+
+    assert response.status_code == 503
+    assert down_db.closed is True
+
+
+def test_redis_dependency_reuses_app_scoped_client(monkeypatch):
+    from app.config import Settings
+    from app.dependencies import get_redis_client
+
+    created = []
+
+    class RedisStub:
+        def close(self):
+            pass
+
+    def from_url(*args, **kwargs):
+        client = RedisStub()
+        created.append(client)
+        return client
+
+    monkeypatch.setattr(redis_lib.Redis, "from_url", from_url)
+    state = SimpleNamespace()
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [],
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+        "scheme": "http",
+        "app": SimpleNamespace(state=state),
+    })
+    settings = Settings(_env_file=None, database_url="sqlite://", secret_key="test-secret")
+
+    first = get_redis_client(request, settings)
+    second = get_redis_client(request, settings)
+
+    assert first is second
+    assert created == [first]
