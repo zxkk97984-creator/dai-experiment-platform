@@ -246,8 +246,17 @@ p { text-wrap: pretty; }
 .shell.is-collapsed .user-card .u-name,
 .shell.is-collapsed .user-card .u-role,
 .shell.is-collapsed .user-card .grow { display: none; }
-.shell.is-collapsed .nav-item { justify-content: center; padding: 0; }
-.shell.is-collapsed .nav-item.active::before { left: 0; }
+.shell.is-collapsed .wordmark { font-size: 14px; line-height: 1.45; letter-spacing: 0; }
+.shell.is-collapsed .wordmark .mark {
+  display: block;
+  width: 2em;
+  margin-inline: auto;
+  text-align: center;
+  word-break: break-all;
+}
+.shell.is-collapsed .sidebar-nav { padding-inline: 7px; }
+.shell.is-collapsed .nav-item { width: 100%; justify-content: center; gap: 0; padding: 0; }
+.shell.is-collapsed .nav-item.active::before { left: -7px; }
 .shell.is-collapsed .user-card { justify-content: center; padding-inline: 0; }
 
 /* 页面头部 */

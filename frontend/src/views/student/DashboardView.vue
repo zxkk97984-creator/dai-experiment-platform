@@ -331,7 +331,7 @@ onMounted(loadDashboard)
 </script>
 
 <template>
-  <AppLayout variant="student-workspace" :student-context="studentContext">
+  <AppLayout :student-context="studentContext">
     <main class="student-dashboard">
       <section class="dashboard-section welcome-section">
         <div>

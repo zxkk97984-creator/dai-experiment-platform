@@ -213,12 +213,12 @@ beforeEach(() => {
 })
 
 describe('学生工作台（student workspace redesign）', () => {
-  it('挂载时仅请求一次聚合数据并启用学生工作台专属外壳', async () => {
+  it('挂载时仅请求一次聚合数据并使用统一默认外壳', async () => {
     const wrapper = mountView()
     await flushPromises()
     expect(studentMock.student).toHaveBeenCalledTimes(1)
     expect(academicsMock.listTerms).toHaveBeenCalledWith({ page: 1, page_size: 100 })
-    expect(wrapper.get('main').attributes('data-variant')).toBe('student-workspace')
+    expect(wrapper.get('main').attributes('data-variant')).toBeUndefined()
     expect(wrapper.get('main').attributes('data-student-class')).toBe('智科一班')
     expect(wrapper.get('main').attributes('data-student-term')).toBe('2026—2027 学年第一学期（秋季）')
   })

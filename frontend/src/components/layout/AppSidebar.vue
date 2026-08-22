@@ -96,22 +96,11 @@ const avatarText = computed(() => displayName.value.trim().slice(0, 1))
 const roleText = computed(() => {
   const map = { student: '学生', teacher: '教师', admin: '管理员' }
   const role = map[auth.role] || auth.role || ''
-  if (isStudentWorkspace.value && auth.role === 'student' && props.studentContext.className) {
+  if (auth.role === 'student' && props.studentContext.className) {
     return `${role} · ${props.studentContext.className}`
   }
   if (auth.role === 'teacher' && auth.user?.department) return `${role} · ${auth.user.department}`
   return role
-})
-
-const semesterNote = computed(() => {
-  const value = String(props.studentContext.currentTerm || '').trim()
-  if (!value) return { year: '当前学期', term: '暂无学期信息' }
-  const parts = value.match(/^(.*?学年)\s*(.*)$/u)
-  if (!parts) return { year: '当前学期', term: value }
-  return {
-    year: parts[1],
-    term: parts[2].replace(/[（(]([^）)]+)[）)]/u, ' · $1'),
-  }
 })
 
 const teacherCounts = ref({ pending_grading_count: 0, pending_review_count: 0 })
@@ -201,11 +190,6 @@ function navigate(path) {
         </button>
       </div>
     </nav>
-
-    <div v-if="isStudentWorkspace" class="semester-note">
-      <strong>{{ semesterNote.year }}</strong>
-      <span>{{ semesterNote.term }}</span>
-    </div>
 
     <div class="sidebar-foot" :class="{ 'workspace-profile-block': isWorkspace }">
       <div class="user-card">
@@ -343,22 +327,6 @@ function navigate(path) {
 .workspace-sidebar .nav-item :deep(svg) {
   width: 18px;
   height: 18px;
-}
-
-.semester-note {
-  margin: 0 16px 18px;
-  padding: 16px;
-  border-top: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.semester-note strong {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--fg);
-  font-weight: 600;
 }
 
 .workspace-sidebar .workspace-profile-block {

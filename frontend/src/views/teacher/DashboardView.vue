@@ -196,7 +196,7 @@ onMounted(loadDashboard)
 </script>
 
 <template>
-  <AppLayout variant="teacher-workspace">
+  <AppLayout>
     <div class="teacher-dashboard">
       <section class="intro-section">
         <div>

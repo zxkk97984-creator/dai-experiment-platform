@@ -147,12 +147,12 @@ describe('教师首页 DashboardView', () => {
     expect(academicsMock.listTerms).toHaveBeenCalledWith({ page: 1, page_size: 100 })
   })
 
-  it('使用教师工作台外壳，并只读展示教务系统当前学期', async () => {
+  it('使用统一默认外壳，并只读展示教务系统当前学期', async () => {
     teacherMock.teacher.mockResolvedValue({ data: dashboardData() })
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.get('.layout-stub').attributes('data-variant')).toBe('teacher-workspace')
+    expect(wrapper.get('.layout-stub').attributes('data-variant')).toBeUndefined()
     expect(wrapper.get('.current-term').text()).toContain('2026-2027 学年第一学期（秋季）')
     expect(wrapper.find('.current-term select').exists()).toBe(false)
   })
