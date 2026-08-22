@@ -174,11 +174,11 @@ function navigate(path) {
       <template v-if="isWorkspace">
         <span class="workspace-brand-mark" aria-hidden="true">DAI</span>
         <span class="workspace-brand-copy">
-          <strong class="workspace-brand-name">DAI 实验平台</strong>
+          <strong class="workspace-brand-name">人工智能基础实验平台</strong>
           <small class="workspace-brand-subtitle">{{ isStudentWorkspace ? '学生学习空间' : '教师教学空间' }}</small>
         </span>
       </template>
-      <span v-else class="wordmark"><span class="mark">DAI</span><small>实验平台</small></span>
+      <span v-else class="wordmark"><span class="mark">人工智能</span><small>基础实验平台</small></span>
     </button>
 
     <nav class="sidebar-nav">

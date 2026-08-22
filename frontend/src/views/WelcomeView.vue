@@ -89,7 +89,7 @@ onUnmounted(() => {
               <path d="M6.3 7.5L10.1 10.5M6.3 16.5L10.1 13.5M17.7 7.5L13.9 10.5M17.7 16.5L13.9 13.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
             </svg>
           </span>
-          <span class="w-nav-name">人工智能实验平台</span>
+          <span class="w-nav-name">人工智能基础实验平台</span>
         </div>
 
         <nav class="w-nav-links" aria-label="页面导航">
@@ -130,7 +130,7 @@ onUnmounted(() => {
 
     <footer class="w-footer" role="contentinfo">
       <div class="w-footer-inner">
-        <span>© 2026 人工智能实验平台</span>
+        <span>© 2026 人工智能基础实验平台</span>
         <span class="w-footer-sep">·</span>
         <span>Python Learning Studio</span>
       </div>

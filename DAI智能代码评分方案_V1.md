@@ -1,4 +1,4 @@
-# DAI 实验平台智能代码评分方案 V1
+# 人工智能基础实验平台智能代码评分方案 V1
 
 > 文档状态：讨论稿 / V1 候选方案  
 > 适用项目：`zxkk97984-creator/dai-experiment-platform`  

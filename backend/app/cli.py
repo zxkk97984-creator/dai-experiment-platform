@@ -72,7 +72,7 @@ def seed_demo(reset: bool, reference_date: str | None, skip_env_check: bool, for
             force_fixture=force_fixture,
         )
         print("=" * 64)
-        print("DAI 实验平台 —— Demo 演示数据播种完成")
+        print("人工智能基础实验平台 —— Demo 演示数据播种完成")
         print("=" * 64)
         for key, value in summary.items():
             print(f"{key:24s}: {value}")

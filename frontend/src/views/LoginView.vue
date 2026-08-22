@@ -63,7 +63,7 @@ function goWelcome() { router.push('/welcome') }
             <path d="M6.3 7.5L10.1 10.5M6.3 16.5L10.1 13.5M17.7 7.5L13.9 10.5M17.7 16.5L13.9 13.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
           </svg>
         </div>
-        <span class="brand-name">人工智能 实验平台</span>
+        <span class="brand-name">人工智能基础实验平台</span>
       </div>
 
       <!-- Header -->
@@ -152,7 +152,7 @@ function goWelcome() { router.push('/welcome') }
     </div>
 
     <footer class="page-foot">
-      <span>© 2026 人工智能 实验平台 · Python Learning Studio</span>
+      <span>© 2026 人工智能基础实验平台 · Python Learning Studio</span>
     </footer>
   </div>
 </template>

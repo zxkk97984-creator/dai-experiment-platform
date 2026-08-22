@@ -1,4 +1,4 @@
-# DAI 实验平台前端设计规范 V2 · 「墨松绿 × 岩灰」
+# 人工智能基础实验平台前端设计规范 V2 · 「墨松绿 × 岩灰」
 
 > 文档状态：**正式规范，后续所有 UI 开发必须严格遵守本文档。**（2026-08-21）
 > 当前仓库只保留一份可执行的设计系统 CSS 源文件；本规范描述其 token、组件语义和页面组合方式。
@@ -228,8 +228,8 @@
 
 - 背景 `--bg`（不是纯白），右侧 `1px solid var(--border)`；sticky 顶栏高度 100vh。
 - `.sidebar-head`：56px 高，左右 padding 16px，下边框；内容为 `.wordmark`：
-  - `DAI` 的 `.mark` 用 `--accent`，其余文字 `--fg`；衬线 18px / 700。
-  - `small`：10px、`--muted`，副标题（如“实验平台”）。
+  - `人工智能` 的 `.mark` 用 `--accent`，其余文字 `--fg`；衬线 18px / 700。
+  - `small`：10px、`--muted`，副标题（如“基础实验平台”）。
 - `.sidebar-nav`：`padding: 12px 8px`，纵向滚动。
 - `.nav-group`：分组间距 16px；`.nav-label`：mono 10px、0.09em、uppercase、`--faint`、padding `8px 12px`。
 - `.nav-item`：36px 高、`--radius-md`、margin-top 2px、gap 12px、文字 14px / 500 / `--muted`。

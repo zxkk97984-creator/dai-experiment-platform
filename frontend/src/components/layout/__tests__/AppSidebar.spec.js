@@ -60,7 +60,7 @@ describe('AppSidebar 角色首页导航', () => {
     expect(wrapper.get('.sidebar').classes()).not.toContain('collapsed')
     expect(wrapper.findAll('.nav-item')[0].text()).toContain('工作台')
     expect(wrapper.get('.workspace-brand-mark').text()).toBe('DAI')
-    expect(wrapper.get('.workspace-brand-name').text()).toBe('DAI 实验平台')
+    expect(wrapper.get('.workspace-brand-name').text()).toBe('人工智能基础实验平台')
     expect(wrapper.get('.workspace-brand-subtitle').text()).toBe('学生学习空间')
     expect(wrapper.get('.semester-note').text()).toMatch(/\d{4}[-—]\d{4} 学年/)
     expect(wrapper.get('.semester-note').text()).toMatch(/第[一二]学期 · [春秋]季/)
