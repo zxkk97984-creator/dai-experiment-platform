@@ -83,7 +83,7 @@ def run_demo_seed(
 
     # 2. 课程 / 章节 / 课时 / 进度
     from . import courses as courses_mod
-    courses = courses_mod.create_courses(db, clock, user_map, academics["term"])
+    courses = courses_mod.create_courses(db, clock, user_map, academics["term"], env_by_slug)
     users_mod.link_courses_to_classes(db, courses, academics["classes"])
     courses_mod.create_course_whitelists(db, user_map, courses)
     courses_mod.create_lesson_progress(db, clock, user_map, courses)

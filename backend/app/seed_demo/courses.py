@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from pathlib import Path
 
@@ -17,8 +19,11 @@ from app.models import (
     Course,
     CourseEnrollment,
     CourseWhitelistStudent,
+    EnvironmentVersion,
     Lesson,
     LessonProgress,
+    NotebookTemplate,
+    NotebookTemplateVersion,
     User,
 )
 
@@ -68,10 +73,103 @@ def _lesson_markdown(course_title: str, chapter_title: str, suffix: str) -> str:
     )
 
 
+_LESSON_TEMPLATE_ALLOWED_IMPORTS = ["numpy", "matplotlib"]
+
+
+def _lesson_template_cells(lesson: Lesson) -> list[dict]:
+    """课时实验模板的初始 cells：任务说明（markdown）+ 自由练习区（code）。"""
+    task_source = (lesson.content or "").strip() or f"# {lesson.title}\n\n按课时要求完成动手实验。"
+    return [
+        {
+            "id": "task",
+            "type": "markdown",
+            "source": task_source,
+            "order": 0,
+            "student_editable": False,
+            "source_hidden": False,
+        },
+        {
+            "id": "scratch",
+            "type": "code",
+            "source": "# 动手实验：在下方编写并运行你的代码\nprint(\"Hello, DAI!\")\n",
+            "order": 1,
+            "student_editable": True,
+            "source_hidden": False,
+        },
+    ]
+
+
+def _bind_lesson_notebook_template(
+    db: Session, course: Course, lesson: Lesson, env_version: EnvironmentVersion | None
+) -> None:
+    """为 notebook 课时创建并绑定已发布模板；幂等，可修复存量未绑定课时。"""
+    if lesson.content_type != "notebook":
+        return
+    if lesson.template_id is not None:
+        return
+    if env_version is None:
+        logger.warning("[跳过] 课时 %s 缺 basic 环境，无法创建 Notebook 模板", lesson.id)
+        return
+
+    template_name = f"课时实验：{course.title} · {lesson.title}"
+    template = db.scalar(select(NotebookTemplate).where(NotebookTemplate.name == template_name))
+    if template is None:
+        cells = _lesson_template_cells(lesson)
+        digest = hashlib.sha256(
+            json.dumps(cells, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        template = NotebookTemplate(
+            name=template_name,
+            description=f"《{course.title}》课时「{lesson.title}」的动手实验模板",
+            status="published",
+            owner_id=course.teacher_id,
+            draft_cells=cells,
+            draft_revision=1,
+            draft_metadata={"seed": True},
+            draft_assets_dir=None,
+            draft_environment_version_id=env_version.id,
+            draft_import_policy_mode="restricted",
+            draft_allowed_imports=_LESSON_TEMPLATE_ALLOWED_IMPORTS,
+        )
+        db.add(template)
+        db.flush()
+        version = NotebookTemplateVersion(
+            template_id=template.id,
+            version_number=1,
+            sha256=digest,
+            cells=cells,
+            cell_order=[cell["id"] for cell in cells],
+            notebook_metadata={"seed": True},
+            assets_dir=None,
+            published_by_id=course.teacher_id,
+            environment_version_id=env_version.id,
+            import_policy_mode="restricted",
+            allowed_imports=_LESSON_TEMPLATE_ALLOWED_IMPORTS,
+        )
+        db.add(version)
+        db.flush()
+        template.current_version_id = version.id
+        db.flush()
+        mark(db, "notebook_templates", template.id)
+        mark(db, "notebook_template_versions", version.id)
+        logger.info("[创建] 课时 Notebook 模板 %s", template_name)
+    elif template.current_version_id is None:
+        logger.warning("[跳过] 模板 %s 无可用版本，课时 %s 保持未绑定", template_name, lesson.id)
+        return
+
+    lesson.template_id = template.id
+    db.flush()
+    logger.info("[绑定] 课时 %s → Notebook 模板 %s", lesson.id, template_name)
+
+
 def create_courses(
     db: Session, clock: DemoClock, users: dict, term: AcademicTerm,
+    env_by_slug: dict | None = None,
 ) -> dict:
-    """创建课程/章节/课时；返回 {title: Course}。"""
+    """创建课程/章节/课时；返回 {title: Course}。
+
+    env_by_slug：可选；提供时为 notebook 课时创建并绑定 Notebook 模板（含存量课时修复）。
+    """
     lesson_md = _load_lesson_md()
     courses: dict[str, Course] = {}
     md_index = 0
@@ -178,6 +276,10 @@ def create_courses(
                 else:
                     lesson.status = "published"
                     db.flush()
+                if env_by_slug:
+                    _bind_lesson_notebook_template(
+                        db, course, lesson, env_by_slug.get("basic")
+                    )
                 mark(db, "lessons", lesson.id)
         db.flush()
     return courses

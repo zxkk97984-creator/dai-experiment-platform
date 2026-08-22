@@ -130,6 +130,17 @@ def test_seed_demo_runs_and_is_idempotent(db_session_factory):
         assert db.scalar(text("SELECT COUNT(*) FROM lessons WHERE video_object_id IS NOT NULL")) == 0
         assert db.scalar(text("SELECT COUNT(*) FROM notebook_templates WHERE draft_assets_dir IS NOT NULL")) == 0
         assert db.scalar(text("SELECT COUNT(*) FROM notebook_template_versions WHERE assets_dir IS NOT NULL")) == 0
+        # notebook 课时必须绑定已发布版本的模板，否则学生端打开即 404
+        assert db.scalar(
+            text(
+                "SELECT COUNT(*) FROM lessons l "
+                "JOIN notebook_templates t ON t.id = l.template_id "
+                "WHERE l.content_type = 'notebook' AND (t.current_version_id IS NULL)"
+            )
+        ) == 0
+        assert db.scalar(
+            text("SELECT COUNT(*) FROM lessons WHERE content_type = 'notebook' AND template_id IS NULL")
+        ) == 0
 
         from app.seed_demo.marks import all_marks, validate_mark_tables
         from app.seed_demo.verify import MARKED_MODELS
