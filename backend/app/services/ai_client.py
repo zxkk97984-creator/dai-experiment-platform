@@ -26,7 +26,7 @@ OPERATION_MAX_TOKENS: dict[str, int] = {
     # 相加超限 → 输出被截断（Expecting ',' delimiter）甚至 content 为空
     # （finish_reason=length）。max_tokens 是上限不是花费，放宽不影响成功短响应的成本。
     "ai_grading": 8000,             # 单份作业/考试提交评分
-    "rubric_generation": 2000,      # Rubric 生成（教师触发/发布门禁）
+    "rubric_generation": 8000,      # Rubric 生成（教师触发/发布门禁；2000 同样被推理耗尽）
     "test_group_generation": 12000, # 测试组生成（推理 + F/R 用例代码，成本最高）
 }
 

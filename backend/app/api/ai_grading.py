@@ -293,6 +293,14 @@ def generate_rubric_endpoint(
     except RubricGenerationError as exc:
         # AI 输出结构不合规：可读错误 + 可重试，而非 500
         raise api_error(502, "AI_GENERATION_INVALID", str(exc), fields={"retryable": True})
+    except AIServiceError as exc:
+        if exc.code == "timeout":
+            raise api_error(504, "AI_GENERATION_TIMEOUT", "AI 生成超时，请稍后重试")
+        if exc.code == "http_429":
+            raise api_error(429, "AI_RATE_LIMITED", "AI 服务限流，请稍后重试")
+        if exc.retryable:
+            raise api_error(502, "AI_GENERATION_INVALID", f"AI 服务暂时不可用: {exc}", fields={"retryable": True})
+        raise api_error(502, "AI_GENERATION_INVALID", f"AI 生成失败: {exc}", fields={"retryable": False})
     db.commit()
     return {"id": rubric.id, "version": rubric.version, "status": rubric.status, "rubric_json": rubric.rubric_json}
 

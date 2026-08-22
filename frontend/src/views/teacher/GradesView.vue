@@ -154,7 +154,7 @@ onMounted(load)
 
       <section class="review-control">
         <div><p class="control-kicker">讲评与公开</p><h2>{{ exam.review_released_at ? '讲评已发布' : '讲评尚未发布' }}</h2><p>成绩：{{ exam.show_score_after_grading ? '评分后公开' : '隐藏' }} · 题目：{{ exam.show_questions_after_review ? '讲评后公开' : '隐藏' }} · 答案：{{ exam.show_answers_after_review ? '讲评后公开' : '隐藏' }}</p></div>
-        <div class="review-actions"><button class="btn-ghost" @click="router.push(`/teacher/exams/${route.params.id}/questions`)">调整公开策略</button><button v-if="!exam.review_released_at" class="btn-primary" :disabled="!canReleaseReview" :title="canReleaseReview ? '' : '最晚进入时间结束且无人正在考试后才可发布'" @click="actionDialog = { kind: 'review' }">发布讲评</button><span v-else>{{ formatDateTime(exam.review_released_at) }}</span></div>
+        <div class="review-actions"><button class="btn-ghost" @click="router.push(`/teacher/exams/${route.params.id}/edit`)">调整公开策略</button><button v-if="!exam.review_released_at" class="btn-primary" :disabled="!canReleaseReview" :title="canReleaseReview ? '' : '最晚进入时间结束且无人正在考试后才可发布'" @click="actionDialog = { kind: 'review' }">发布讲评</button><span v-else>{{ formatDateTime(exam.review_released_at) }}</span></div>
       </section>
 
       <section class="status-overview" aria-label="考试进度统计"><article v-for="status in statusCards" :key="status[0]" :class="status[2]"><strong>{{ status[1] }}</strong><span>{{ status[0] }}</span></article></section>

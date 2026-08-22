@@ -66,6 +66,7 @@ const menuItems = computed(() => {
     { path: '/admin/experiments',   label: '实验管理', sub: 'Experiments', icon: 'experiment', key: 'experiments' },
     { path: '/admin/environments',  label: '环境档位', sub: 'Environments', icon: 'experiment', key: 'environments' },
     { path: '/admin/ai-grading',    label: 'AI 评分复核', sub: 'AI Grading', icon: 'brain',      key: 'ai-grading' },
+    { path: '/admin/logs',          label: '系统日志',     sub: 'System Logs', icon: 'clipboard',  key: 'logs' },
   ]
   return [home('/student'), ...base]
 })

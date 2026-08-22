@@ -1034,4 +1034,6 @@ def run_worker_loop():
 
 
 if __name__ == "__main__":
+    from app.logging_config import setup_logging
+    setup_logging(get_settings().environment, process_name="worker", settings=get_settings())
     run_worker_loop()

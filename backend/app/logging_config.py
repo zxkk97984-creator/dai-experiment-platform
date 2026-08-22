@@ -1,9 +1,15 @@
-"""结构化日志配置——统一 request_id / job_id 透传；生产输出 JSON（含 extra 字段，脱敏）。"""
+"""结构化日志配置——统一 request_id / job_id 透传；生产输出 JSON（含 extra 字段，脱敏）。
+
+文件日志：无论环境如何都写 JSON 行（按大小轮转），供管理员日志页直读；
+控制台保持开发人类可读 / 生产 JSON。API 与 worker 写不同文件，避免多进程轮转冲突。
+"""
 import contextvars
 import json
 import logging
 import sys
 from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 # ContextVar 替代全局类变量，避免并发请求相互覆盖
 _request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
@@ -67,8 +73,27 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
-def setup_logging(environment: str = "development"):
-    """配置根日志——人类可读格式（开发）/ JSON（生产，含 extra 字段与脱敏）"""
+def _build_file_handler(log_path: Path, max_bytes: int, backup_count: int) -> RotatingFileHandler:
+    """JSON 行格式文件 handler（轮转）；目录自动创建，权限收紧到 0o640。"""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handler = RotatingFileHandler(
+        log_path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8",
+    )
+    handler.setFormatter(JsonFormatter())
+    try:
+        log_path.chmod(0o640)
+    except OSError:
+        pass  # 容器/受限环境下静默降级
+    return handler
+
+
+def setup_logging(environment: str = "development", *, process_name: str = "api", settings=None):
+    """配置根日志。
+
+    - 控制台：开发人类可读 / 生产 JSON
+    - 文件：始终 JSON 行 + 按大小轮转（settings.log_dir 为空时禁用），
+      文件名 dai-{process_name}.log——管理员日志页依赖此格式直读。
+    """
     root = logging.getLogger()
     root.setLevel(logging.INFO)
 
@@ -80,10 +105,29 @@ def setup_logging(environment: str = "development"):
         handler.setFormatter(logging.Formatter(fmt, datefmt="%Y-%m-%dT%H:%M:%S"))
     # Filter 加到 handler 而非 root logger，确保子 logger 记录也能获得 request_id
     handler.addFilter(RequestIDFilter())
-
-    # 清除已有 handler 避免重复
     root.handlers = []
     root.addHandler(handler)
+
+    # 文件日志（可选）：日志页读取的就是这些文件
+    if settings is None:
+        from app.config import get_settings
+        try:
+            settings = get_settings()
+        except Exception:
+            settings = None
+    log_dir = getattr(settings, "log_dir", "") or ""
+    if log_dir and process_name:
+        try:
+            file_handler = _build_file_handler(
+                Path(log_dir) / f"dai-{process_name}.log",
+                max_bytes=int(getattr(settings, "log_max_bytes", 20 * 1024 * 1024)),
+                backup_count=int(getattr(settings, "log_backup_count", 10)),
+            )
+            file_handler.addFilter(RequestIDFilter())
+            root.addHandler(file_handler)
+        except OSError:
+            # 文件系统不可写等场景不阻断服务启动
+            root.warning("文件日志初始化失败（跳过）", exc_info=True)
 
     # 抑制 noisy 库
     logging.getLogger("httpx").setLevel(logging.WARNING)

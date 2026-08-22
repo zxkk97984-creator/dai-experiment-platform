@@ -102,7 +102,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Request ID 中间件 + 访问指标（TASK-029：状态类别/延迟，低基数路径模板）
     from app.logging_config import set_request_id, setup_logging
-    setup_logging(settings.environment)
+    setup_logging(settings.environment, process_name="api", settings=settings)
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):

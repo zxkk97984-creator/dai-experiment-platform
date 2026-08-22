@@ -66,6 +66,7 @@ const routes = [
   { path: '/admin/judge-submissions/:id', name: 'AdminJudgeSubmissionDetail', component: () => import('../views/teacher/JudgeSubmissionDetailView.vue'), meta: { role: 'admin' } },
   { path: '/admin/ai-grading', name: 'AdminAIGrading', component: () => import('../views/teacher/AIGradingReviewView.vue'), meta: { role: 'admin' } },
   { path: '/admin/ai-grading/:id', name: 'AdminAIGradingDetail', component: () => import('../views/teacher/AIGradingReviewDetailView.vue'), meta: { role: 'admin' } },
+  { path: '/admin/logs', name: 'AdminLogs', component: () => import('../views/admin/AdminLogsView.vue'), meta: { role: 'admin' } },
 
   { path: '/', redirect: '/welcome' },
   { path: '/:pathMatch(.*)*', redirect: '/welcome' },

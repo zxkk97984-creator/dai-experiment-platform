@@ -23,6 +23,11 @@ class Settings(BaseSettings):
 
     app_name: str = "DAI Experiment Platform API"
     environment: str = "development"
+    # ── 文件日志（结构化 JSON，按大小轮转；管理员日志页直读此文件）──────
+    # 置空字符串可禁用。API 与 worker 默认同目录不同文件，避免多进程写同一文件。
+    log_dir: str = "logs"
+    log_max_bytes: int = 20 * 1024 * 1024
+    log_backup_count: int = 10
     database_url: str = "mysql+pymysql://dai:dai_password@localhost:3306/dai_platform"
     redis_url: str = "redis://localhost:6379/0"
     secret_key: str = Field(default="change-me-in-production", min_length=1)

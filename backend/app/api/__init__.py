@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from .admin_logs import router as admin_logs_router
 from .ai_grading import router as ai_grading_router
 from .academics import router as academics_router
 from .announcements import router as announcements_router
@@ -46,3 +47,4 @@ api_router.include_router(statistics_router)
 api_router.include_router(search_router)
 api_router.include_router(submissions_router)
 api_router.include_router(notifications_router)
+api_router.include_router(admin_logs_router)
