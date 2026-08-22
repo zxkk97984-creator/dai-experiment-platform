@@ -130,7 +130,7 @@ function toggle(id) {
   overflow: auto;
   padding: 12px;
   border-radius: var(--radius-md);
-  color: var(--info-bg);
+  color: var(--border);
   background: var(--fg);
   font-family: var(--font-mono);
   font-size: 12px;

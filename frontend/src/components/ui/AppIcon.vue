@@ -37,3 +37,11 @@ if (import.meta.env.DEV && !icon.value) {
     :aria-label="label || undefined"
   />
 </template>
+
+<style>
+/* 全局 img,svg{max-width:100%} 在 grid/flex 容器里会把按属性定宽的图标压缩成几像素，
+   图标始终由 size 属性显式定宽，这里解除该钳制。 */
+.app-icon {
+  max-width: none;
+}
+</style>

@@ -316,19 +316,19 @@ def update_exam(
                 ExamQuestion.exam_id == exam_id,
                 ExamQuestion.question_type == "code",
                 ExamQuestion.grading_mode != "legacy",
-            )
+            ).order_by(ExamQuestion.order_index)
         ).all()
         if code_questions and previous_status != "published":
             if not settings.ai_ready:
                 raise api_error(503, "AI_NOT_READY", "发布含 AI 评分的考试需要配置 DAI_AI_API_KEY")
             missing = []
-            for question in code_questions:
+            for position, question in enumerate(code_questions, start=1):
                 locked = db.scalar(select(QuestionRubric.id).where(
                     QuestionRubric.exam_question_id == question.id,
                     QuestionRubric.status == "locked",
                 ).limit(1))
                 if locked is None:
-                    missing.append(str(question.order_index + 1))
+                    missing.append(str(position))
             if missing:
                 raise api_error(422, "AI_RUBRIC_REQUIRED", "以下编程题尚未锁定 Rubric：第 " + "、".join(missing) + " 题")
     db.commit()
@@ -732,6 +732,14 @@ def _exam_grade_detail_payload(exam: Exam, submission: ExamSubmission, db: Sessi
     question_map = {q.id: q for q in questions}
     answer_by_question = {a.question_id: a for a in answers}
 
+    # 编程题关联的 AI 评分记录（exam_answer_id 唯一）——供详情页展示确定性/AI 评分状态
+    code_grade_by_answer: dict[int, CodeGrade] = {}
+    if answers:
+        code_grades = db.scalars(
+            select(CodeGrade).where(CodeGrade.exam_answer_id.in_([a.id for a in answers]))
+        ).all()
+        code_grade_by_answer = {cg.exam_answer_id: cg for cg in code_grades}
+
     objective_score = 0.0
     objective_total = 0.0
     code_score = 0.0
@@ -791,11 +799,51 @@ def _exam_grade_detail_payload(exam: Exam, submission: ExamSubmission, db: Sessi
             "correct_count": correct_count,
         },
         "questions": [_question_teacher_payload(q, q.id in locked_ids) for q in questions],
-        "answers": [_answer_payload(answer, question_map) for answer in answers],
+        "answers": [
+            _answer_payload(answer, question_map, code_grade_by_answer.get(answer.id))
+            for answer in answers
+        ],
     }
 
 
-def _answer_payload(answer: ExamAnswer, question_map: dict[int, ExamQuestion]) -> dict:
+def _tests_counts_from_details(details: dict | None) -> tuple[int | None, int | None]:
+    """从确定性判题明细归一化样例通过数（与作业工作台口径一致）。"""
+    groups = (details or {}).get("groups") or []
+    if not groups:
+        return None, None
+    passed = total = 0
+    for group in groups:
+        counts = group.get("counts") or {}
+        passed += int(counts.get("passed", 0) or 0)
+        total += sum(int(counts.get(key, 0) or 0) for key in ("passed", "failed", "errors", "skipped"))
+    return passed, total
+
+
+def _ai_grading_payload(code_grade: CodeGrade | None) -> dict | None:
+    """答案关联的 AI 评分上下文：确定性得分、AI 状态、失败原因。"""
+    if code_grade is None:
+        return None
+    tests_passed, tests_total = _tests_counts_from_details(code_grade.deterministic_details)
+    return {
+        "id": code_grade.id,
+        "mode": code_grade.mode,
+        "status": code_grade.status,
+        "functional_score": code_grade.functional_score,
+        "robustness_score": code_grade.robustness_score,
+        "algorithm_score": code_grade.algorithm_score,
+        "quality_score": code_grade.quality_score,
+        "final_score_100": code_grade.final_score_100,
+        "scaled_score": code_grade.scaled_score,
+        "tests_passed": tests_passed,
+        "tests_total": tests_total,
+        "needs_teacher_review": bool(code_grade.needs_teacher_review),
+        "review_reason": code_grade.review_reason,
+        "last_error": code_grade.last_error,
+        "attempt_count": code_grade.attempt_count,
+    }
+
+
+def _answer_payload(answer: ExamAnswer, question_map: dict[int, ExamQuestion], code_grade: CodeGrade | None = None) -> dict:
     question = question_map.get(answer.question_id) or answer.question
     return {
         "id": answer.id,
@@ -814,6 +862,7 @@ def _answer_payload(answer: ExamAnswer, question_map: dict[int, ExamQuestion]) -
         "manual_score_reason": answer.manual_score_reason,
         "manual_score_at": answer.manual_score_at,
         "system_error": answer.system_error,
+        "ai_grading": _ai_grading_payload(code_grade),
     }
 
 

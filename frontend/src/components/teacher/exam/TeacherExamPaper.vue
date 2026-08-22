@@ -5,6 +5,9 @@
  * 标准答案/参考答案，并允许在 0 ~ 本题满分 之间逐题修改得分。
  */
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
 
 const props = defineProps({
   questions: { type: Array, default: () => [] },
@@ -179,6 +182,60 @@ function gradingModeLabel(mode) {
   return { legacy: '传统判题', shadow: 'AI 影子评分', active: 'AI 正式评分' }[mode] || mode || '未配置'
 }
 
+function judgeCounts(row) {
+  const passed = row.answer?.ai_grading?.tests_passed ?? row.answer?.tests_passed
+  const total = row.answer?.ai_grading?.tests_total ?? row.answer?.tests_total
+  if (passed == null && total == null) return null
+  return { passed: Number(passed ?? 0), total: Number(total ?? 0) }
+}
+
+function deterministicSummary(row) {
+  const ai = row.answer?.ai_grading
+  if (!ai) return ''
+  const parts = []
+  if (ai.functional_score != null) parts.push(`功能 ${fmtScore(ai.functional_score)}`)
+  if (ai.robustness_score != null) parts.push(`健壮性 ${fmtScore(ai.robustness_score)}`)
+  return parts.join(' · ')
+}
+
+const AI_STATUS_LABELS = { pending: '排队中', queued: '排队中', running: '评分中', completed: '已完成', review_required: '需人工复核' }
+
+function aiState(row) {
+  const ai = row.answer?.ai_grading
+  if (!ai) return null
+  if (ai.status === 'review_required' || (ai.needs_teacher_review && !['pending', 'queued', 'running'].includes(ai.status))) {
+    return {
+      tone: 'review',
+      label: AI_STATUS_LABELS[ai.status] || ai.status,
+      detail: ai.scaled_score != null
+        ? `AI 折算分 ${fmtScore(ai.scaled_score)} / 100（待教师确认）`
+        : 'AI 自动评分终止，本题暂无得分',
+      reason: ai.review_reason || ai.last_error || '',
+      gradeId: ai.id,
+    }
+  }
+  if (['pending', 'queued', 'running'].includes(ai.status)) {
+    return {
+      tone: 'running',
+      label: AI_STATUS_LABELS[ai.status] || ai.status,
+      detail: `已尝试 ${ai.attempt_count ?? 0} 次`,
+      reason: '',
+      gradeId: ai.id,
+    }
+  }
+  return {
+    tone: 'done',
+    label: AI_STATUS_LABELS.completed,
+    detail: ai.scaled_score != null ? `折算分 ${fmtScore(ai.scaled_score)} / ${fmtScore(row.question.points)}` : '',
+    reason: '',
+    gradeId: ai.id,
+  }
+}
+
+function goAiReview(gradeId) {
+  router.push(`/teacher/ai-grading/${gradeId}`)
+}
+
 function scoreKey(row) {
   return row.answer ? row.answer.id : `question-${row.question.id}`
 }
@@ -278,10 +335,22 @@ function commitScore(row, event) {
           </div>
           <div class="code-meta">
             <span>评分方式：{{ gradingModeLabel(row.question.grading_mode) }}</span>
-            <span v-if="row.answer?.tests_total != null">判题样例 {{ row.answer.tests_passed ?? 0 }} / {{ row.answer.tests_total }}</span>
+            <span v-if="judgeCounts(row)">判题样例 {{ judgeCounts(row).passed }} / {{ judgeCounts(row).total }}</span>
+            <span v-if="deterministicSummary(row)">确定性得分：{{ deterministicSummary(row) }}</span>
             <span v-if="(row.question.public_cases || []).length">公开样例 {{ row.question.public_cases.length }} 个</span>
             <span v-if="(row.question.test_groups || []).length">测试组 {{ row.question.test_groups.length }} 个</span>
             <span v-if="row.question.has_locked_rubric">Rubric 已锁定</span>
+          </div>
+          <div v-if="aiState(row)" class="ai-state" :class="aiState(row).tone" role="status">
+            <b>AI 评分 · {{ aiState(row).label }}</b>
+            <strong>{{ aiState(row).detail }}</strong>
+            <p v-if="aiState(row).reason">{{ aiState(row).reason }}</p>
+            <button
+              v-if="aiState(row).tone === 'review'"
+              type="button"
+              class="ai-review-link"
+              @click="goAiReview(aiState(row).gradeId)"
+            >前往 AI 评分复核处理 →</button>
           </div>
         </template>
 
@@ -434,7 +503,7 @@ function commitScore(row, event) {
   overflow: auto;
   padding: 13px;
   border-radius: var(--radius-md);
-  color: var(--info-bg);
+  color: var(--border);
   background: var(--fg);
   font: 12px/1.65 var(--font-mono);
   white-space: pre-wrap;
@@ -442,6 +511,37 @@ function commitScore(row, event) {
 }
 
 .code-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; color: var(--muted); font-size: 11px; }
+
+.ai-state {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+  font-size: 12px;
+}
+.ai-state b { color: var(--muted); font-size: 11px; }
+.ai-state strong { color: var(--fg); }
+.ai-state p { margin: 0; color: var(--muted); line-height: 1.6; word-break: break-word; }
+.ai-state.review { border-color: var(--warning-bg); background: var(--warning-bg); }
+.ai-state.review b, .ai-state.review strong { color: var(--warning); }
+.ai-state.running { border-color: var(--info-bg); }
+.ai-state.done { border-color: var(--success-bg); background: var(--success-bg); }
+.ai-state.done b, .ai-state.done strong { color: var(--success); }
+.ai-review-link {
+  justify-self: start;
+  margin-top: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+.ai-review-link:hover { text-decoration: underline; }
 
 .standard-answer {
   margin-top: 12px;

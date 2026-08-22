@@ -274,6 +274,32 @@ def _bind(
     target = _authorize_context(
         db, user, lesson_id, module_id, creating=creating
     )
+    # 换绑会把旧宿主的 template_id 置空；不允许让「已发布」的实验入口变成学生不可用的孤儿
+    bound_lessons = db.scalars(
+        select(Lesson).where(Lesson.template_id == template.id)
+    ).all()
+    for old in bound_lessons:
+        if isinstance(target, Lesson) and old.id == target.id:
+            continue
+        if old.content_type == "notebook" and old.status == "published":
+            raise api_error(
+                409,
+                "REBIND_CONFLICT",
+                f"该模板已绑定到已发布的 Notebook 课时「{old.title}」。"
+                "请先在 Studio 为其更换其他模板，或将该课时下线后再重新绑定",
+            )
+    bound_modules = db.scalars(
+        select(ExperimentModule).where(ExperimentModule.template_id == template.id)
+    ).all()
+    for old in bound_modules:
+        if isinstance(target, ExperimentModule) and old.id == target.id:
+            continue
+        if old.status == "published":
+            raise api_error(
+                409,
+                "REBIND_CONFLICT",
+                f"该模板已绑定到已发布的实验模块「{old.name}」。请先将其下线后再重新绑定",
+            )
     db.execute(
         update(Lesson)
         .where(Lesson.template_id == template.id)

@@ -731,3 +731,45 @@ def test_legacy_published_version_missing_flags_still_readable(
         headers=_headers(ctx, "studio_teacher"),
     )
     assert exported.status_code == 200, exported.text
+
+
+def test_rebind_blocked_when_template_bound_to_published_notebook_lesson(
+    client, db_session_factory, studio_context
+):
+    """换绑不允许把「已发布 Notebook 课时」变成无模板孤儿。"""
+    ctx = studio_context
+    template = _create_teacher_template(client, ctx)
+
+    with db_session_factory() as db:
+        lesson = db.get(Lesson, ctx["lesson_id"])
+        lesson.content_type = "notebook"
+        lesson.status = "published"
+        db.commit()
+
+    response = client.post(
+        f"/api/v1/studio/templates/{template['id']}/bind",
+        headers=_headers(ctx, "studio_teacher"),
+        json={"module_id": ctx["teacher_module_id"]},
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "REBIND_CONFLICT"
+    assert "已发布的 Notebook 课时" in response.json()["detail"]["message"]
+
+    with db_session_factory() as db:
+        assert db.get(Lesson, ctx["lesson_id"]).template_id == template["id"]
+
+
+def test_rebind_allowed_while_host_lesson_is_draft(client, db_session_factory, studio_context):
+    """草稿课时可以被换绑（不产生学生可见的破坏）。"""
+    ctx = studio_context
+    template = _create_teacher_template(client, ctx)
+
+    response = client.post(
+        f"/api/v1/studio/templates/{template['id']}/bind",
+        headers=_headers(ctx, "studio_teacher"),
+        json={"module_id": ctx["teacher_module_id"]},
+    )
+    assert response.status_code == 200, response.text
+
+    with db_session_factory() as db:
+        assert db.get(Lesson, ctx["lesson_id"]).template_id is None

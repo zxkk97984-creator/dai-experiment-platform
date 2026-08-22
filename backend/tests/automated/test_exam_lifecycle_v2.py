@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from app.models import Exam, ExamQuestion, ExamSubmission, User
+from app.models import Exam, ExamAnswer, ExamQuestion, ExamSubmission, User
 from app.services.time_utils import as_utc, utc_now
 from conftest import auth_header, create_course_db, create_user, login
 
@@ -264,6 +264,40 @@ def test_review_session_exposes_code_reference_solution_after_answers_are_releas
     without_reference = without_reference_response.json()
     assert without_reference["questions"][0]["reference_solution"] is None
     assert "secret evaluator code" not in without_reference_response.text
+
+
+def test_review_session_hides_question_scores_until_score_is_released(client, db_session_factory):
+    ctx = _seed(client, db_session_factory)
+    teacher_headers = auth_header(ctx["teacher"])
+    student_headers = auth_header(ctx["student"])
+    assert client.patch(
+        f"{API}/exams/{ctx['exam_id']}", headers=teacher_headers, json={"status": "published"},
+    ).status_code == 200
+    assert client.post(f"{API}/exams/{ctx['exam_id']}/start", headers=student_headers).status_code == 201
+    assert client.put(
+        f"{API}/exams/{ctx['exam_id']}/answers/{ctx['question_id']}",
+        headers=student_headers,
+        json={"selected_options": ["A"]},
+    ).status_code == 201
+    assert client.post(f"{API}/exams/{ctx['exam_id']}/submit", headers=student_headers).status_code == 201
+
+    with db_session_factory() as db:
+        exam = db.get(Exam, ctx["exam_id"])
+        answer = db.scalar(select(ExamAnswer).where(ExamAnswer.question_id == ctx["question_id"]))
+        answer.score = 7.0
+        answer.manual_score_reason = "教师内部改分说明"
+        exam.end_at = utc_now() - timedelta(seconds=1)
+        exam.show_questions_after_review = True
+        exam.show_answers_after_review = True
+        exam.show_score_after_grading = False
+        db.commit()
+
+    assert client.post(f"{API}/exams/{ctx['exam_id']}/review-release", headers=teacher_headers).status_code == 200
+    review = client.get(f"{API}/exams/{ctx['exam_id']}/session", headers=student_headers).json()
+    assert review["visibility"] == {"score": False, "questions": True, "answers": True, "review_released": True}
+    saved = review["saved_answers"][0]
+    assert "score" not in saved
+    assert "manual_score_reason" not in saved
 
 
 def test_teacher_force_submit_records_reason(client, db_session_factory):

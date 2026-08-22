@@ -1,6 +1,6 @@
 """TASK-028（F-22/F-23）：AI 输出与成本护栏。
 
-- 各操作 completion 预算（评分 1500 / Rubric 2000 / 测试组 12000），未知操作 fail-closed
+- 各操作 completion 预算（评分 8000 / Rubric 2000 / 测试组 12000），未知操作 fail-closed
 - usage/延迟/重试指标入结构化日志；usage 缺失不阻断；日志绝不出现学生原文
 - 高成本生成限流在 Redis 故障时 fail-closed 返回 503（F-23）
 - httpx 客户端不读环境代理变量（socks 代理注入不破坏出站调用）
@@ -42,7 +42,7 @@ def _ok_response(**usage):
 @pytest.mark.parametrize(
     ("operation", "expected"),
     [
-        ("ai_grading", 1500),
+        ("ai_grading", 8000),
         ("rubric_generation", 2000),
         ("test_group_generation", 12000),
     ],
@@ -124,7 +124,7 @@ def test_usage_metrics_logged(caplog):
     assert rec.prompt_tokens == 42
     assert rec.completion_tokens == 7
     assert rec.total_tokens == 49
-    assert rec.max_tokens == 1500
+    assert rec.max_tokens == 8000
     assert rec.attempts == 1
     assert rec.elapsed_ms >= 0
 

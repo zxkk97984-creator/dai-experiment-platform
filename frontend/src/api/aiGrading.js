@@ -6,7 +6,8 @@ export const aiGradingAPI = {
   getConfig(kind, id) { return client.get(`/ai-grading/questions/${kind}/${id}/config`) },
   updateConfig(kind, id, data) { return client.put(`/ai-grading/questions/${kind}/${id}/config`, data) },
   listRubrics(kind, id) { return client.get(`/ai-grading/questions/${kind}/${id}/rubrics`) },
-  generateRubric(kind, id) { return client.post(`/ai-grading/questions/${kind}/${id}/rubrics/generate`) },
+  // 单次 DeepSeek 调用（后端 ai_timeout_seconds 默认 60s、上限 180s）；预留 200s，避免后端完成前 axios 先中断
+  generateRubric(kind, id) { return client.post(`/ai-grading/questions/${kind}/${id}/rubrics/generate`, null, { timeout: 200000 }) },
   // 生成最多两次 DeepSeek 调用（单次最长 120s）+ Docker 预检；预留 300s，避免后端完成前 axios 先中断
   generateTestGroups(kind, id, data) { return client.post(`/ai-grading/questions/${kind}/${id}/test-groups/generate`, data, { timeout: 300000 }) },
   updateRubric(id, data) { return client.patch(`/ai-grading/rubrics/${id}`, data) },

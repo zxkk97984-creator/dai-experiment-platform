@@ -64,67 +64,72 @@ def score_fill_blank_answer(question, text_answers) -> float:
     return round_score(earned)
 
 
-def validate_question(question, *, publish: bool = False) -> list[str]:
-    """逐题校验，返回错误列表（空=通过）"""
+def validate_question(question, *, publish: bool = False, number: int | None = None) -> list[str]:
+    """逐题校验，返回错误列表（空=通过）
+
+    number：展示给教师的题号（1 起始，与题目列表序号一致）。
+    缺省时退回 order_index + 1（order_index 为 0 起始存储值）。
+    """
+    label = number if number is not None else (question.order_index or 0) + 1
     errors = []
 
     # 所有题型通用校验
     if not question.points or question.points <= 0:
-        errors.append(f"题目 {question.order_index}: 分值必须大于 0，当前为 {question.points}")
+        errors.append(f"题目 {label}: 分值必须大于 0，当前为 {question.points}")
 
     if question.question_type in ("single_choice", "multi_choice"):
         options = question.options or {}
         if len(options) < 2:
-            errors.append(f"题目 {question.order_index}: 选项至少需要 2 个，当前 {len(options)} 个")
+            errors.append(f"题目 {label}: 选项至少需要 2 个，当前 {len(options)} 个")
         correct = (question.correct_answer or {}).get("correct", [])
         if question.question_type == "single_choice":
             if len(correct) != 1:
-                errors.append(f"题目 {question.order_index}: 单选题必须有恰好 1 个正确答案，当前 {len(correct)} 个")
+                errors.append(f"题目 {label}: 单选题必须有恰好 1 个正确答案，当前 {len(correct)} 个")
         if question.question_type == "multi_choice":
             if len(correct) < 1:
-                errors.append(f"题目 {question.order_index}: 多选题至少需要 1 个正确答案")
+                errors.append(f"题目 {label}: 多选题至少需要 1 个正确答案")
         for key in correct:
             if key not in options:
-                errors.append(f"题目 {question.order_index}: 正确答案 '{key}' 不在选项中")
+                errors.append(f"题目 {label}: 正确答案 '{key}' 不在选项中")
         if any(not str(key).strip() or not str(value).strip() for key, value in options.items()):
-            errors.append(f"题目 {question.order_index}: 选项标识和内容不能为空")
+            errors.append(f"题目 {label}: 选项标识和内容不能为空")
         scoring_mode = (question.correct_answer or {}).get("scoring_mode", "all_or_nothing")
         if scoring_mode not in ("all_or_nothing", "partial_no_wrong"):
-            errors.append(f"题目 {question.order_index}: 不支持的多选计分方式 '{scoring_mode}'")
+            errors.append(f"题目 {label}: 不支持的多选计分方式 '{scoring_mode}'")
         if question.question_type == "single_choice" and scoring_mode != "all_or_nothing":
-            errors.append(f"题目 {question.order_index}: 单选题只支持完全匹配计分")
+            errors.append(f"题目 {label}: 单选题只支持完全匹配计分")
 
     elif question.question_type == "fill_blank":
         markers = _BLANK_PATTERN.findall(question.prompt or "")
         configured = (question.correct_answer or {}).get("blanks", [])
         configured_ids = [str(blank.get("id", "")) for blank in configured]
         if not markers:
-            errors.append(f"题目 {question.order_index}: 填空题至少需要插入一个空格")
+            errors.append(f"题目 {label}: 填空题至少需要插入一个空格")
         if len(markers) != len(set(markers)):
-            errors.append(f"题目 {question.order_index}: 填空题空格标识不能重复")
+            errors.append(f"题目 {label}: 填空题空格标识不能重复")
         if markers != configured_ids:
-            errors.append(f"题目 {question.order_index}: 填空题占位符与答案配置不一致")
+            errors.append(f"题目 {label}: 填空题占位符与答案配置不一致")
         for blank in configured:
             accepted = [str(value).strip() for value in blank.get("accepted_answers", [])]
             if not accepted or any(not value for value in accepted):
-                errors.append(f"题目 {question.order_index}: 每个空格至少需要一个非空可接受答案")
+                errors.append(f"题目 {label}: 每个空格至少需要一个非空可接受答案")
 
     elif question.question_type == "code":
         mode = question.grading_mode or "active"
         if publish and mode in ("legacy", "shadow") and not (question.hidden_tests or "").strip():
-            errors.append(f"题目 {question.order_index}: {mode} 模式必须配置隐藏测试")
+            errors.append(f"题目 {label}: {mode} 模式必须配置隐藏测试")
         if publish and mode in ("shadow", "active") and not (question.test_groups or []):
-            errors.append(f"题目 {question.order_index}: {mode} 模式必须配置 AI 测试组")
+            errors.append(f"题目 {label}: {mode} 模式必须配置 AI 测试组")
         if question.time_limit_ms is not None and question.time_limit_ms <= 0:
-            errors.append(f"题目 {question.order_index}: 时间限制必须为正数")
+            errors.append(f"题目 {label}: 时间限制必须为正数")
         if question.time_limit_ms is None:
             # 默认 10000ms
             pass
         if question.memory_limit_mb is not None and question.memory_limit_mb <= 0:
-            errors.append(f"题目 {question.order_index}: 内存限制必须为正数")
+            errors.append(f"题目 {label}: 内存限制必须为正数")
 
     else:
-        errors.append(f"题目 {question.order_index}: 不支持的题型 '{question.question_type}'")
+        errors.append(f"题目 {label}: 不支持的题型 '{question.question_type}'")
 
     return errors
 
@@ -138,16 +143,19 @@ def validate_publish(exam, db):
         raise api_error(422, "PUBLISH_INVALID", "公开标准答案时必须同时公开题目")
     if not exam.duration_minutes or exam.duration_minutes <= 0:
         raise api_error(422, "PUBLISH_INVALID", "考试时长必须大于0")
-    questions = db.scalars(select(ExamQuestion).where(ExamQuestion.exam_id == exam.id)).all()
+    questions = db.scalars(
+        select(ExamQuestion).where(ExamQuestion.exam_id == exam.id)
+        .order_by(ExamQuestion.order_index, ExamQuestion.id)
+    ).all()
     if not questions:
         raise api_error(422, "PUBLISH_INVALID", "至少需要一道题目")
     total = sum(q.points for q in questions)
     if total <= 0:
         raise api_error(422, "PUBLISH_INVALID", "总分必须大于0")
-    # 逐题校验
+    # 逐题校验（题号按排序后的展示位置 1 起始，与题目列表一致）
     all_errors = []
-    for q in questions:
-        all_errors.extend(validate_question(q, publish=True))
+    for position, q in enumerate(questions, start=1):
+        all_errors.extend(validate_question(q, publish=True, number=position))
     if all_errors:
         raise api_error(422, "QUESTION_INVALID", "题目校验失败：" + "; ".join(all_errors))
 def start_exam(exam, student, db):
@@ -639,7 +647,7 @@ def build_student_exam_session(exam: Exam, student: User, db: Session) -> dict:
     saved_answers = []
     if submission and include_questions:
         answers = db.scalars(select(ExamAnswer).where(ExamAnswer.submission_id == submission.id)).all()
-        saved_answers = [_saved_answer_payload(answer, include_score=answers_visible) for answer in answers]
+        saved_answers = [_saved_answer_payload(answer, include_score=score_visible) for answer in answers]
 
     submission_payload = None
     if submission:
@@ -814,8 +822,9 @@ def create_question(db, exam_id, payload, user):
             raise api_error(422, "CHOICE_LEGACY_ONLY", "选择题只支持 legacy 模式")
         q.grading_mode = "legacy"
 
-    # 创建时立即校验
-    errors = validate_question(q)
+    # 创建时立即校验（新题追加到末尾，展示题号 = 现有题数 + 1）
+    position = db.scalar(select(func.count()).where(ExamQuestion.exam_id == exam_id)) or 0
+    errors = validate_question(q, number=position + 1)
     if errors:
         raise api_error(422, "QUESTION_INVALID", "题目校验失败：" + "; ".join(errors))
 
@@ -843,8 +852,15 @@ def update_question(db, exam_id, question_id, payload, user):
     if q.question_type != "code":
         q.grading_mode = "legacy"
 
-    # 更新后校验
-    errors = validate_question(q)
+    # 更新后校验（按排序位置计算展示题号，删除造成的 order_index 空洞不影响编号）
+    position = db.scalar(
+        select(func.count()).where(
+            ExamQuestion.exam_id == exam_id,
+            ExamQuestion.id != question_id,
+            ExamQuestion.order_index < q.order_index,
+        )
+    ) or 0
+    errors = validate_question(q, number=position + 1)
     if errors:
         raise api_error(422, "QUESTION_INVALID", "题目校验失败：" + "; ".join(errors))
 
@@ -857,4 +873,13 @@ def delete_question(db, exam_id, question_id, user):
     require_exam_editable(exam, user)
     q = get_question(db, exam_id, question_id)
     db.delete(q)
+    db.flush()
+    # 重新收拢 order_index（0 起始连续），避免删除后题号与展示序号错位
+    remaining = db.scalars(
+        select(ExamQuestion).where(ExamQuestion.exam_id == exam_id)
+        .order_by(ExamQuestion.order_index, ExamQuestion.id)
+    ).all()
+    for index, row in enumerate(remaining):
+        if row.order_index != index:
+            row.order_index = index
     db.commit()

@@ -90,18 +90,27 @@ test('考试讲评按题型展示选项和可运行的编程题参考代码', as
         { id: 2, question_type: 'fill_blank', prompt: '函数关键字是 [[blank:name]]', correct_answer: { blanks: [{ id: 'name', accepted_answers: ['def'], case_sensitive: false }] }, points: 20 },
         { id: 3, question_type: 'code', prompt: '实现 add 函数', correct_answer: {}, reference_solution: 'def add(a, b):\n    return a + b', points: 20 },
       ],
-      saved_answers: [],
+      saved_answers: [
+        { question_id: 1, score: 18, manual_score_reason: '按答题过程调整得分' },
+        { question_id: 2, score: 20 },
+        { question_id: 3, score: 19 },
+      ],
       visibility: { score: true, questions: true, answers: true, review_released: true },
     },
   }))
 
   await page.goto('/student/exams/41')
   await expect(page.getByRole('heading', { name: '讲评验收考试' })).toBeVisible()
+  await expect(page.locator('.question-score').nth(0)).toContainText('18 / 20 分')
+  await expect(page.locator('.question-score').nth(1)).toContainText('20 / 20 分')
+  await expect(page.locator('.teacher-score-note')).toContainText('按答题过程调整得分')
   await expect(page.locator('.review-options')).toContainText('4')
   await expect(page.locator('.review-options')).toContainText('5')
   await expect(page.locator('pre.review-code')).toContainText('def add(a, b):')
   await expect(page.locator('pre.review-code')).toContainText('return a + b')
   const standardAnswers = (await page.locator('.standard-answer').allTextContents()).join('')
+  expect(standardAnswers).toContain('def')
+  expect(standardAnswers).not.toContain('name')
   expect(standardAnswers).not.toContain('"correct"')
   expect(standardAnswers).not.toContain('"blanks"')
   expect(consoleErrors).toEqual([])

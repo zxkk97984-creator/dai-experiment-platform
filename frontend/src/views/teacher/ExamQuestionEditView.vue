@@ -436,7 +436,7 @@ onMounted(load)
 
           <div class="form-group">
             <label>题目类型</label>
-            <select v-model="form.question_type" @change="form.grading_mode = form.question_type === 'code' ? 'active' : 'legacy'">
+            <select v-model="form.question_type" class="modal-field" @change="form.grading_mode = form.question_type === 'code' ? 'active' : 'legacy'">
               <option value="single_choice">单选题</option>
               <option value="multi_choice">多选题</option>
               <option value="fill_blank">填空题</option>
@@ -445,11 +445,11 @@ onMounted(load)
           </div>
           <div v-if="form.question_type !== 'fill_blank'" class="form-group">
             <label>题目内容</label>
-            <textarea v-model="form.prompt" rows="3" placeholder="输入题目内容"></textarea>
+            <textarea v-model="form.prompt" rows="3" class="modal-field" placeholder="输入题目内容"></textarea>
           </div>
           <div class="form-group">
             <label>分值</label>
-            <input v-model.number="form.points" type="number" min="0.1" step="0.1" />
+            <input v-model.number="form.points" type="number" class="modal-field" min="0.1" step="0.1" />
           </div>
           </section>
 
@@ -468,16 +468,20 @@ onMounted(load)
               <div class="section-heading"><span>2</span><div><h4>代码模板</h4><p>为学生提供起始代码并设置运行限制</p></div></div>
             <div class="form-group">
               <label>初始代码</label>
-              <textarea v-model="form.starter_code" rows="7" class="code-input" placeholder="def solution():&#10;    pass"></textarea>
+              <textarea v-model="form.starter_code" rows="7" class="modal-field code-input" placeholder="def solution():&#10;    pass"></textarea>
             </div>
             <div class="limit-grid">
-              <div class="form-group"><label>时间限制（毫秒）</label><input v-model.number="form.time_limit_ms" type="number" min="1" /></div>
-              <div class="form-group"><label>内存限制（MB）</label><input v-model.number="form.memory_limit_mb" type="number" min="1" /></div>
+              <div class="form-group"><label>时间限制（毫秒）</label><input v-model.number="form.time_limit_ms" type="number" class="modal-field" min="1" /></div>
+              <div class="form-group"><label>内存限制（MB）</label><input v-model.number="form.memory_limit_mb" type="number" class="modal-field" min="1" /></div>
             </div>
             </section>
 
             <section class="editor-section">
               <div class="section-heading"><span>3</span><div><h4>样例与测试</h4><p>公开样例展示给学生，私有测试用于传统或影子判题</p></div></div>
+              <div v-if="form.grading_mode === 'active'" class="active-optional-note">
+                <AppIcon name="info" :size="14" />
+                <span>当前为 <strong>AI 正式评分（active）</strong>：私有测试不参与判题，本区块均可选填——公开样例仅用于向学生展示输入输出示例，实际判题使用下方「AI 评分」中的功能/鲁棒性测试组。</span>
+              </div>
               <QeTestCases
                 :key="testCasesKey"
                 :public-cases="form.public_cases"
@@ -662,6 +666,7 @@ onMounted(load)
 .modal-header p { margin:5px 0 0; color:var(--muted); font-size:13px; }
 .modal-close { border:0; background:none; color:var(--muted); font-size:26px; line-height:1; cursor:pointer; }
 .modal-body { padding:24px 28px; overflow-y:auto; }
+.modal-field { width:100%; box-sizing:border-box; }
 .editor-section { padding:0 0 22px; margin-bottom:22px; border-bottom:1px solid var(--border); }
 .editor-section:last-child { border-bottom:0; margin-bottom:0; }
 .section-heading { display:flex; align-items:center; gap:10px; margin-bottom:16px; }
@@ -670,6 +675,9 @@ onMounted(load)
 .section-heading p { margin:3px 0 0; color:var(--muted); font-size:12px; }
 .limit-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 .save-first-note { padding:14px 16px; border:1px solid var(--warning-bg); border-radius: var(--radius-md); background:var(--warning-bg); color:var(--danger); font-size:13px; }
+.active-optional-note { display:flex; align-items:flex-start; gap:7px; margin-bottom:14px; padding:9px 12px; border-radius: var(--radius-md); background:var(--info-bg); color:var(--accent-hover); font-size:12px; line-height:1.6; }
+.active-optional-note .app-icon { flex:none; margin-top:2px; }
+.active-optional-note strong { font-weight:650; }
 .ai-section :deep(.ai-config) { margin-top:0; }
 .ai-section :deep(.ai-config-header h4) { display:none; }
 .ai-section :deep(.ai-config-header) { justify-content:flex-end; }

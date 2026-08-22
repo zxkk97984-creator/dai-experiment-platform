@@ -81,11 +81,18 @@ describe('ExamView 安全状态与结果展示', () => {
     const wrapper = await mountExam('graded', {
       visibility: { score: true, questions: true, answers: true, review_released: true },
       submission: { score: 55, score_visible: true },
-      saved_answers: [{ question_id: 1, score: 8, manual_score_reason: '学生部分正确', selected_options: ['A'] }],
+      saved_answers: [
+        { question_id: 1, score: 8, manual_score_reason: '学生部分正确', selected_options: ['A'] },
+        { question_id: 2, score: 18, text_answers: { blank1: '函数名' } },
+      ],
     })
     expect(wrapper.text()).toContain('教师改分说明')
     expect(wrapper.text()).toContain('学生部分正确')
     expect(wrapper.text()).toContain('教师改分后得分：8 / 10 分')
+    expect(wrapper.findAll('.question-score').map(node => node.text())).toEqual([
+      '本题得分 8 / 10 分',
+      '本题得分 18 / 20 分',
+    ])
     wrapper.unmount()
   })
 
@@ -117,6 +124,8 @@ describe('ExamView 安全状态与结果展示', () => {
     expect(wrapper.find('.review-options').text()).toContain('5')
     expect(wrapper.get('pre.review-code').text()).toContain('def add(a, b):')
     expect(wrapper.get('pre.review-code').text()).toContain('return a + b')
+    expect(wrapper.findAll('.standard-answer')[1].text()).toContain('函数名')
+    expect(wrapper.findAll('.standard-answer')[1].text()).not.toContain('blank1')
     expect(wrapper.text()).not.toContain('"correct"')
     expect(wrapper.text()).not.toContain('"blanks"')
     wrapper.unmount()
@@ -139,6 +148,18 @@ describe('ExamView 安全状态与结果展示', () => {
     const wrapper = await mountExam('graded', { submission: { score: null, score_visible: false } })
     expect(wrapper.text()).toContain('成绩暂未开放')
     expect(wrapper.text()).not.toContain('0 / 30')
+    wrapper.unmount()
+  })
+
+  it('总成绩未公开时不渲染逐题分数或教师改分理由', async () => {
+    const wrapper = await mountExam('graded', {
+      visibility: { score: false, questions: true, answers: true, review_released: true },
+      submission: { score: null, score_visible: false },
+      saved_answers: [{ question_id: 1, score: 8, manual_score_reason: '不应提前显示' }],
+    })
+
+    expect(wrapper.find('.question-score').exists()).toBe(false)
+    expect(wrapper.find('.teacher-score-note').exists()).toBe(false)
     wrapper.unmount()
   })
 

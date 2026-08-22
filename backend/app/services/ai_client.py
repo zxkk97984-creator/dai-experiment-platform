@@ -22,7 +22,10 @@ _NON_RETRYABLE_HTTP_STATUS = {401, 403}
 # 共用 max_tokens；预算必须给两者同时留空间，否则会出现“推理耗尽 token、content 为空”。
 # 新操作必须在此登记预算后才能调用 chat_json（未知操作 fail-closed）。
 OPERATION_MAX_TOKENS: dict[str, int] = {
-    "ai_grading": 1500,             # 单份作业/考试提交评分
+    # 1500 实测不足：reasoning 模型在复杂 Rubric 下推理 token 与 JSON 正文
+    # 相加超限 → 输出被截断（Expecting ',' delimiter）甚至 content 为空
+    # （finish_reason=length）。max_tokens 是上限不是花费，放宽不影响成功短响应的成本。
+    "ai_grading": 8000,             # 单份作业/考试提交评分
     "rubric_generation": 2000,      # Rubric 生成（教师触发/发布门禁）
     "test_group_generation": 12000, # 测试组生成（推理 + F/R 用例代码，成本最高）
 }

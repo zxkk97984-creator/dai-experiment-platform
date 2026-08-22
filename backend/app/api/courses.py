@@ -12,7 +12,8 @@ from app.errors import api_error
 from app.services.course_access_service import student_visible_course_predicate
 from app.models import (
     AcademicTerm, Chapter, Course, CourseEnrollment, CourseTeachingClass,
-    CourseWhitelistStudent, Lesson, TeachingClass, TeachingClassStudent, User,
+    CourseWhitelistStudent, Lesson, NotebookTemplate, TeachingClass,
+    TeachingClassStudent, User,
 )
 from app.schemas import (
     ChapterCreate,
@@ -330,8 +331,8 @@ def _ensure_course_term_writable(course: Course) -> None:
         raise api_error(409, "ACADEMIC_TERM_CLOSED", "已关闭学期的课程只读")
 
 
-def _ensure_course_publishable(course: Course) -> None:
-    """课程从草稿发布前，必须具备完整的课程基本信息。"""
+def _ensure_course_publishable(db: Session, course: Course) -> None:
+    """课程从草稿发布前，必须具备完整的课程基本信息与可用的 Notebook 实验内容。"""
     missing = []
     if not (course.title or "").strip():
         missing.append("课程名称")
@@ -351,6 +352,26 @@ def _ensure_course_publishable(course: Course) -> None:
         missing.append("默认评分")
     if missing:
         raise api_error(422, "COURSE_INCOMPLETE", f"发布前请完善：{'、'.join(missing)}")
+
+    # Notebook 课时必须有绑定且已发布版本的模板，否则学生打开即 404
+    unconfigured = [
+        lesson.title
+        for chapter in course.chapters
+        for lesson in chapter.lessons
+        if lesson.content_type == "notebook"
+        and (
+            lesson.template_id is None
+            or (template := db.get(NotebookTemplate, lesson.template_id)) is None
+            or not template.current_version_id
+        )
+    ]
+    if unconfigured:
+        preview = "、".join(unconfigured[:5]) + ("等" if len(unconfigured) > 5 else "")
+        raise api_error(
+            422,
+            "NOTEBOOK_TEMPLATE_REQUIRED",
+            f"以下课时尚未完成 Notebook 配置：{preview}。请进入课时编辑页完成模板配置并发布版本",
+        )
 
 
 @router.post("/courses", response_model=CourseRead, status_code=status.HTTP_201_CREATED)
@@ -444,7 +465,7 @@ def update_course(
         if any(link.teaching_class.academic_term_id != course.academic_term_id for link in course.teaching_class_links):
             raise api_error(422, "TEACHING_CLASS_TERM_MISMATCH", "更换学期时必须同时重新选择教学班")
     if publishing:
-        _ensure_course_publishable(course)
+        _ensure_course_publishable(db, course)
     db.commit()
     db.refresh(course)
     if cover_binding_changed and old_cover_object_id is not None:
@@ -742,6 +763,13 @@ def create_lesson(
     chapter = require_chapter(chapter_id, db)
     ensure_course_manager(chapter.course, current_user)
     _ensure_course_term_writable(chapter.course)
+    if payload.content_type == "notebook" and payload.status == "published":
+        # 模板绑定依赖已存在的课时，直接以发布态创建必然产生学生不可用的实验入口
+        raise api_error(
+            422,
+            "NOTEBOOK_TEMPLATE_REQUIRED",
+            "Notebook 课时请先以草稿创建，完成模板配置后再发布",
+        )
     lesson = Lesson(chapter_id=chapter_id, **payload.model_dump())
     db.add(lesson)
     db.commit()
@@ -802,6 +830,33 @@ def update_lesson(
         lesson.video_object_id = None
         lesson.video_url = None
         clear_files = True
+
+    # Notebook 课时进入学生可见态前，必须已绑定且模板已有发布版本
+    effective_content_type = data.get("content_type", lesson.content_type)
+    effective_status = data.get("status", lesson.status)
+    becomes_visible_notebook = (
+        lesson.status != "published"
+        and effective_status == "published"
+        or (
+            lesson.content_type != "notebook"
+            and data.get("content_type") == "notebook"
+            and effective_status == "published"
+        )
+    )
+    if effective_content_type == "notebook" and becomes_visible_notebook:
+        template = db.get(NotebookTemplate, lesson.template_id) if lesson.template_id else None
+        if template is None:
+            raise api_error(
+                422,
+                "NOTEBOOK_TEMPLATE_REQUIRED",
+                "该课时为 Notebook 实验课，发布前请先进入课时编辑页完成模板配置",
+            )
+        if not template.current_version_id:
+            raise api_error(
+                422,
+                "NOTEBOOK_TEMPLATE_REQUIRED",
+                "该课时的 Notebook 模板尚未发布任何版本，请先在 Studio 中发布",
+            )
 
     for key, value in data.items():
         setattr(lesson, key, value)

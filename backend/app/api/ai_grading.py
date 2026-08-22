@@ -864,9 +864,11 @@ def override_grade(
             if ans and cg.scaled_score is not None:
                 ans.score = cg.scaled_score
                 ans.grading_status = "completed"
-                from app.services.exam_grading import finalize_if_ready
+                from app.services.exam_grading import finalize_if_ready, promote_review_required_if_complete
                 db.flush()  # 确保 ans 更新对 finalize 可见
                 finalize_if_ready(ans.submission_id, db)
+                # 教师覆盖确认是显式受控动作：失败原因已消除则收口
+                promote_review_required_if_complete(ans.submission_id, db)
 
     db.commit()
     return {"ok": True, "grade_id": grade_id, "original": original, "replacement": replacement}

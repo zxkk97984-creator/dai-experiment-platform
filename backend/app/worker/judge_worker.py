@@ -928,8 +928,10 @@ def process_ai_grade(db: Session, redis_client, settings: Settings, code_grade_i
             if cg.exam_answer_id and cg.mode == "active":
                 ans = db.get(ExamAnswer, cg.exam_answer_id)
                 if ans:
-                    from app.services.exam_grading import finalize_if_ready
+                    from app.services.exam_grading import finalize_if_ready, promote_review_required_if_complete
                     finalize_if_ready(ans.submission_id, db)
+                    # 教师在工作台显式重试成功后的补救：失败原因已消除则收口
+                    promote_review_required_if_complete(ans.submission_id, db)
         else:
             # review_required（AI 自动终态）：考试 active 父级当场转 review_required
             # finalize 自身幂等/CAS，重复触发无害
