@@ -121,6 +121,13 @@ def test_settings(tmp_path):
         db_path = tmp_path / "test.db"
         db_url = f"sqlite:///{db_path}"
     return Settings(
+        # Do not let a developer's backend/.env (for example V2=true) change
+        # the default SQLite test contract.  V2-specific tests opt in below.
+        environment="development",
+        environment_editor_v2_enabled=False,
+        env_base_image="python:3.12-slim",
+        env_registry_repository=None,
+        env_registry_docker_config="/run/secrets/config.json",
         database_url=db_url,
         redis_url=os.environ.get("DAI_REDIS_URL", "redis://localhost:6379/15"),
         secret_key="test-secret-key",

@@ -493,6 +493,8 @@ def test_p1_6_production_cors_accepts_real_domains():
         cors_origins="https://myapp.example.com",
         # Phase 6：生产校验要求环境基础镜像带 digest
         env_base_image="python:3.12-slim@sha256:" + "0" * 64,
+        judge_image="dai-judge-python@sha256:" + "a" * 64,
+        kernel_image="dai-kernel-python@sha256:" + "b" * 64,
     )
     assert s.cors_origin_list == ["https://myapp.example.com"]
 

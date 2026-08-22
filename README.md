@@ -36,8 +36,8 @@ AI 生产开关默认关闭。开启前必须完成 [`docs/ai-data-governance.md
 
 | 层 | 当前实现 |
 | --- | --- |
-| 前端 | Vue 3.5.13、Vite 6.0.5、Pinia 2.2.6、Vue Router 4.5.0、CodeMirror 6、Marked |
-| 前端测试 | Vitest 4.1.10、Vue Test Utils、Playwright 1.55.0、ESLint 10 |
+| 前端 | Vue 3.5.39、Vite 6.4.3、Pinia 2.3.1、Vue Router 4.6.4、CodeMirror 6、Marked |
+| 前端测试 | Vitest 4.1.10、Vue Test Utils、Playwright 1.62.0、ESLint 10.8.1 |
 | 后端 | Python 3.12、FastAPI 0.115.6、Uvicorn 0.32.1、SQLAlchemy 2.0.36、Pydantic Settings 2.7.0 |
 | 数据库迁移 | Alembic 1.14.0；生产/CI 使用 MySQL 8.0，本地 Compose 使用 MySQL 8.4 |
 | 缓存/队列 | Redis 7（本地镜像 7.4-alpine，生产/CI 镜像 7-alpine） |
@@ -116,6 +116,49 @@ AI 生产开关默认关闭。开启前必须完成 [`docs/ai-data-governance.md
 | Windows | 原生 PowerShell 仅支持手动模式；需要一键脚本时请使用 WSL2 并按 Linux 流程操作 |
 
 下文 Bash 示例统一使用 `.venv/bin/python` 写法；Windows PowerShell 中对应 `.venv\Scripts\python.exe`。
+
+## 跨机器复现边界
+
+另一台机器从 Git 克隆**已推送的提交**后，可以重建源码、依赖、空数据库结构和确定性
+Demo 业务数据；Git 仓库不会携带当前电脑上的 MySQL 数据卷、Redis AOF、上传文件、
+Docker 镜像、Registry 凭据、生产 `.env` 或运行日志。
+
+| 内容 | 能否仅靠 Git/README 复现 | 正确方式 |
+| --- | --- | --- |
+| 前后端源码与依赖 | 可以 | Python 3.12 安装 `requirements-dev.txt`；Node 20 使用 `npm ci` |
+| 空库结构与 Demo 业务数据 | 可以 | 统一 bootstrap 后执行 `seed-demo --force-fixture`；结果不依赖本机 Docker 判题镜像 |
+| 真实判题/Notebook 镜像 | 不可以自动复制 | 在目标机重建，或从批准的 Registry/镜像归档拉取并验证 |
+| 当前 MySQL/上传文件 | 不可以 | 按备份恢复方案单独迁移 MySQL 与 Storage；不要把 Demo seed 当作生产数据备份 |
+| 生产 TLS、域名、代理 CIDR、容量 | 不可以 | 由学校部署方在目标拓扑中配置和验收 |
+
+最小跨机功能复现建议先保持 AI 关闭并使用确定性 Fixture：
+
+```bash
+git clone https://github.com/zxkk97984-creator/dai-experiment-platform.git
+cd dai-experiment-platform
+git checkout Xiaoxiao/pre-release-remediation
+
+cd backend
+python3.12 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements-dev.txt
+cp .env.example .env
+# 编辑 backend/.env：保持 DAI_ENVIRONMENT=development，并设置 DAI_AI_ENABLED=false
+
+cd ..
+docker compose up -d --wait mysql redis
+cd backend
+.venv/bin/python ../scripts/bootstrap_database.py
+.venv/bin/python -m app.cli seed-demo --force-fixture
+
+cd ../frontend
+npm ci
+npm test
+npm run build
+```
+
+上述流程用于验证代码、数据库结构和 Demo 主链路，不是生产发布证据。需要真实 Docker
+判题时，再按下文构建 Judge/Kernel 和 basic 环境镜像。
 
 ## 本地开发
 
@@ -235,7 +278,7 @@ cd backend
 
 # 终端 4：前端
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
@@ -256,7 +299,7 @@ cd backend
 
 # 终端 4：前端
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
@@ -292,11 +335,15 @@ cd backend
 .venv/bin/python -m app.cli seed-environments --enqueue
 ```
 
-Demo 数据是幂等的；`seed-demo` 默认要求 `basic` 环境已有可用版本（即先执行过 `seed-environments --enqueue` 且 Environment Builder 构建成功）：
+Demo 数据是幂等的；统一 disposable bootstrap 会创建可用于 Fixture 演示的 basic 记录。
+跨机器验证推荐显式使用 `--force-fixture`，避免把目标机尚未准备好的 Docker 镜像误当成
+Demo 数据前置。需要验证真实判题时，才执行 `seed-environments --enqueue` 并启动
+Environment Builder：
 
 ```bash
 cd backend
 .venv/bin/python -m app.cli seed-demo
+.venv/bin/python -m app.cli seed-demo --force-fixture
 .venv/bin/python -m app.cli seed-demo --reset-demo
 ```
 
@@ -318,12 +365,13 @@ Windows PowerShell 用户将上述命令中的 `.venv/bin/python` 替换为 `.ve
 
 | 组 | 变量 |
 | --- | --- |
-| 基础连接 | `DAI_ENVIRONMENT`、`DAI_DATABASE_URL`、`DAI_REDIS_URL`、`DAI_SECRET_KEY`、`DAI_CORS_ORIGINS` |
+| 基础连接 | `DAI_ENVIRONMENT`、`DAI_DATABASE_URL`、`DAI_REDIS_URL`、`DAI_SECRET_KEY`、`DAI_CORS_ORIGINS`、`DAI_TRUSTED_PROXY_CIDRS` |
 | 日志 | `DAI_LOG_DIR`、`DAI_LOG_MAX_BYTES`、`DAI_LOG_BACKUP_COUNT` |
 | Compose 数据库 | `DAI_DB_USER`、`DAI_DB_PASSWORD`、`DAI_DB_ROOT_PASSWORD` |
 | 判题 | `DAI_JUDGE_IMAGE`、`DAI_KERNEL_IMAGE`、`DAI_JUDGE_TIMEOUT_SECONDS`、`DAI_JUDGE_MEMORY_LIMIT_MB`、`DAI_JUDGE_CPU_LIMIT`、`DAI_JUDGE_HOST_WORK_DIR` |
 | Storage | `DAI_STORAGE_BACKEND`、`DAI_STORAGE_S3_*`、`DAI_VIDEO_*`、`DAI_COVER_*` |
 | 数据库 bootstrap | `DAI_MIGRATION_MODE`、生产真实 `DAI_BASIC_ENVIRONMENT_IMAGE_DIGEST`、`DAI_BASIC_ENVIRONMENT_BASE_IMAGE` |
+| 可复现镜像 | `DAI_MYSQL_IMAGE`、`DAI_REDIS_IMAGE`、`DAI_BACKEND_BASE_IMAGE`、`DAI_FRONTEND_NODE_BASE_IMAGE`、`DAI_FRONTEND_NGINX_BASE_IMAGE`；Judge/Kernel 构建参数 `DAI_JUDGE_BASE_IMAGE`、`DAI_KERNEL_BASE_IMAGE` |
 | 环境 V2 | `DAI_ENVIRONMENT_EDITOR_V2_ENABLED`、`DAI_ENV_BASE_IMAGE`、`DAI_ENV_PYTHON_BASE_IMAGES`、`DAI_ENV_REGISTRY_REPOSITORY`、`DAI_ENV_REGISTRY_DOCKER_CONFIG_FILE` 及构建资源限制变量 |
 | Worker/AI | `DAI_WORKER_ROLE`、`DAI_AI_ENABLED`、`DAI_AI_BASE_URL`、`DAI_AI_API_KEY`、`DAI_AI_MODEL`、超时/重试/队列变量 |
 
@@ -343,8 +391,10 @@ Windows PowerShell 用户将上述命令中的 `.venv/bin/python` 替换为 `.ve
 
 登录限流默认 fail-closed：API 只有在 `DAI_TRUSTED_PROXY_CIDRS` 显式包含直接反向代理
 peer（以及 X-Forwarded-For 中除最左客户端地址外的可信中间跳）时才解析 XFF；未配置时使用
-直连 peer。边界代理必须先清洗客户端提交的 XFF，再按真实代理链追加地址，不能把任意客户端
-可控的 header 直接转发给 API。
+直连 peer。生产 Compose 中直连 peer 是 Nginx 容器，留空会让全部浏览器共享该容器的
+IP 限流桶（默认 15 分钟 30 次尝试），因此留空只适合首次配置检查，**正式多人使用前必须填写**。
+边界代理必须先清洗客户端提交的 XFF，再按真实代理链追加地址，不能把任意客户端可控的
+header 直接转发给 API。
 
 ## Docker Compose 生产部署
 
@@ -362,13 +412,33 @@ docker compose -f docker-compose.prod.yml config -q
 - `DAI_SECRET_KEY` 是唯一的生产密钥；
 - `DAI_CORS_ORIGINS` 是实际前端来源，不能是 `*` 或 localhost；
 - `DAI_DB_USER`、`DAI_DB_PASSWORD`、`DAI_DB_ROOT_PASSWORD` 已替换；
+- `DAI_TRUSTED_PROXY_CIDRS` 只填写直接 Nginx 所在 Compose 子网，以及 XFF 中真实可信的外层
+  LB/代理 CIDR；不确定时先停止多人发布，不要长期留空，也禁止使用 `0.0.0.0/0`；
 - `DAI_JUDGE_HOST_WORK_DIR` 是部署机绝对路径；
 - `DAI_ENV_BASE_IMAGE` 带真实 `@sha256:` digest；
+- `DAI_BACKEND_BASE_IMAGE`、前端 Node/Nginx 及 Judge/Kernel 的基础镜像在构建时使用已审核的真实 digest；
+- `DAI_JUDGE_IMAGE`、`DAI_KERNEL_IMAGE` 已替换为本次 smoke 产物的完整不可变
+  `repository@sha256:...` Registry 引用；生产校验不接受 `latest` 或裸本机 image ID；
 - 全新库 bootstrap 提供真实的 `DAI_BASIC_ENVIRONMENT_IMAGE_DIGEST`，不能用 `000...`、`111...` 或 disposable digest；
 - `DAI_ENV_REGISTRY_DOCKER_CONFIG_FILE` 指向部署机 root-owned、只读的真实 Docker config；
 - 生产 AI 默认保持 `DAI_AI_ENABLED=false`，启用前完成数据治理审批。
 
+启动 MySQL/Redis 后可先确定当前 Compose 项目和内部网络，再把实际子网写回 `.env`：
+
+```bash
+docker network ls --filter label=com.docker.compose.project=dai-experiment-platform
+# 默认项目名对应以下网络；如果使用了 -p，请替换项目名前缀。只复制 Subnet，不复制 Gateway
+docker network inspect dai-experiment-platform_internal \
+  --format '{{(index .IPAM.Config 0).Subnet}}'
+```
+
+如果学校网关/LB 位于 Nginx 之前，还必须把 XFF 中会出现的可信中间代理 CIDR 一并加入，
+然后用两个不同客户端地址验证不会共享同一个 Redis `rl:ip:*` 键。
+
 全新库或缺少 basic 可用环境版本时，必须使用 Compose 的统一 bootstrap 入口：
+
+> 先完成下文“Judge / Kernel 生产镜像”和“首个 basic 环境镜像”，并把验证后的引用写入
+> `.env`；没有这些产物时不要执行生产 bootstrap。
 
 ```bash
 docker compose -f docker-compose.prod.yml up -d --wait mysql redis
@@ -483,6 +553,86 @@ npx playwright install
 # 等 API、前端和数据库由外部提供后运行
 npm run e2e
 ```
+
+#### Judge / Kernel 生产镜像
+
+生产 `Settings` 只接受 `repository@sha256:...`，不会接受 `latest` 或裸本机 image ID。
+因此必须先登录学校批准的 Registry，使用固定基础镜像构建、smoke、推送并回拉：
+
+```bash
+# 把仓库地址替换为学校实际 Registry；基础镜像值复制自已审核的生产 .env
+RELEASE_TAG="$(git rev-parse --short=12 HEAD)"
+JUDGE_TAG="registry.school.example/dai/judge:${RELEASE_TAG}"
+KERNEL_TAG="registry.school.example/dai/kernel:${RELEASE_TAG}"
+JUDGE_BASE_REF='python:3.12-slim@sha256:<真实多架构digest>'
+KERNEL_BASE_REF='python:3.12-slim@sha256:<真实多架构digest>'
+
+docker build --build-arg DAI_JUDGE_BASE_IMAGE="$JUDGE_BASE_REF" \
+  -t "$JUDGE_TAG" backend/docker/judge
+docker run --rm --network none "$JUDGE_TAG" \
+  python -c "import pytest, numpy, pandas, sklearn"
+docker push "$JUDGE_TAG"
+docker image inspect "$JUDGE_TAG" \
+  --format '{{index .RepoDigests 0}}'
+
+docker build --build-arg DAI_KERNEL_BASE_IMAGE="$KERNEL_BASE_REF" \
+  -t "$KERNEL_TAG" backend/docker/kernel
+docker run --rm --network none "$KERNEL_TAG" \
+  python -c "import ipykernel, numpy, pandas, sklearn, matplotlib"
+docker push "$KERNEL_TAG"
+docker image inspect "$KERNEL_TAG" \
+  --format '{{index .RepoDigests 0}}'
+```
+
+将两条 `RepoDigests` 的完整输出分别写入 `DAI_JUDGE_IMAGE` 和 `DAI_KERNEL_IMAGE`，再执行
+`docker pull repository@sha256:...` 与 `docker image inspect repository@sha256:...` 回拉验证。
+
+#### 首个 basic 环境镜像
+
+全新生产库不能用占位 digest 通过 bootstrap。当前 Legacy basic seed 字段保存的是目标
+Docker daemon 可直接解析的本机 image ID（裸 `sha256:...`），而环境 V2 才使用完整的
+`repository@sha256:...`。两者不能混填。
+
+首发支持的跨机路径是：在**全新、隔离、无业务数据**的 disposable Compose 项目中构建，
+执行 smoke 后 `docker save`；在学校目标机 `docker load` 并重新读取 image ID。不要把脚本
+指向已有开发库或生产库，因为构建器读取该隔离库中的首个 basic 版本：
+
+```bash
+# 在隔离项目完成 disposable bootstrap；.env.basic-build 不得复用生产数据库或数据卷
+cp .env.example .env.basic-build
+# 编辑 .env.basic-build：使用独立密码，并设置：
+# DAI_ENVIRONMENT=development
+# DAI_MIGRATION_MODE=disposable
+# DAI_DB_ROOT_PASSWORD=staging-root-password（必须与下方脚本参数相同）
+# DAI_ENV_BASE_IMAGE=python:3.12-slim@sha256:<真实多架构digest>
+docker compose -p dai-basic-build --env-file .env.basic-build \
+  -f docker-compose.prod.yml up -d --wait mysql redis
+docker compose -p dai-basic-build --env-file .env.basic-build \
+  -f docker-compose.prod.yml run --rm migrate python /scripts/bootstrap_database.py
+
+# DAI_ENV_BASE_IMAGE 必须与隔离库 basic v1 的 base_image_ref 相同且为真实 digest
+DAI_BASIC_BUILD_RELEASE=true \
+DAI_BASIC_IMAGE_ARCHIVE="$PWD/artifacts/dai-env-basic.tar" \
+DAI_DB_ROOT_PASSWORD='staging-root-password' \
+DAI_ENV_BASE_IMAGE='python:3.12-slim@sha256:<真实多架构digest>' \
+COMPOSE_FILES='-p dai-basic-build --env-file .env.basic-build -f docker-compose.prod.yml' \
+bash scripts/build-basic-environment-ci.sh
+```
+
+把归档安全传到目标机后执行：
+
+```bash
+docker load -i /path/to/dai-env-basic.tar
+docker image inspect dai-env-basic:ci --format '{{.Id}}'
+docker run --rm --network none dai-env-basic:ci \
+  python -c "import ipykernel, pytest; print('basic image smoke: ok')"
+```
+
+把目标机 `docker image inspect` 返回的裸 `sha256:...` 写入
+`DAI_BASIC_ENVIRONMENT_IMAGE_DIGEST`。当前不要把
+`DAI_BASIC_IMAGE_REGISTRY_REPOSITORY` 返回的完整 Registry 引用写入该 Legacy 字段；
+它与 seed 校验及本机运行语义不同。禁止使用临时 tag、全 0/全 1 digest 或示例值。
+basic 构建不会自动复制 MySQL、上传文件、Registry 凭据或生产 `.env`。
 
 也可以使用：
 

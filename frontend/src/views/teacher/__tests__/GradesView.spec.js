@@ -78,4 +78,36 @@ describe('考试成绩总览', () => {
     })
     expect(wrapper.text()).toContain('共 25 条')
   })
+
+  it('导出当前筛选条件下的全部服务端分页结果', async () => {
+    globalThis.URL.createObjectURL = vi.fn(() => 'blob:test')
+    globalThis.URL.revokeObjectURL = vi.fn()
+    getGradesMock.mockImplementation((_examId, params) => Promise.resolve({ data: {
+      exam: { title: '大班考试' },
+      total: 201,
+      items: [{ id: params.page, student_name: `学生${params.page}`, student_number: `${params.page}`, status: 'graded', score: 80 }],
+    } }))
+    const wrapper = mount(GradesView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' } } } })
+    await flushPromises()
+    await wrapper.findAll('select')[0].setValue('graded')
+    await wrapper.findAll('select')[1].setValue('good')
+    await wrapper.findAll('select')[2].setValue('name')
+    await wrapper.find('input[placeholder="搜索学生姓名或学号"]').setValue('目标')
+    await wrapper.find('input[placeholder="搜索学生姓名或学号"]').trigger('input')
+    await flushPromises()
+
+    getGradesMock.mockClear()
+    await wrapper.find('button.export-button').trigger('click')
+    await flushPromises()
+
+    expect(getGradesMock).toHaveBeenNthCalledWith(1, '5', {
+      page: 1, page_size: 100, q: '目标', status: 'graded', score: 'good', sort: 'name',
+    })
+    expect(getGradesMock).toHaveBeenNthCalledWith(2, '5', {
+      page: 2, page_size: 100, q: '目标', status: 'graded', score: 'good', sort: 'name',
+    })
+    expect(getGradesMock).toHaveBeenNthCalledWith(3, '5', {
+      page: 3, page_size: 100, q: '目标', status: 'graded', score: 'good', sort: 'name',
+    })
+  })
 })

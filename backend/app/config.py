@@ -118,6 +118,17 @@ class Settings(BaseSettings):
         if "dai_password" in self.database_url or "change_me" in self.database_url:
             errors.append("DAI_DATABASE_URL 使用了默认密码，生产环境必须使用唯一密码")
 
+        # Legacy judge/kernel fallbacks are still supported in development, but
+        # production must never resolve a mutable tag such as ``latest``.
+        for label, image_ref in (
+            ("DAI_JUDGE_IMAGE", self.judge_image),
+            ("DAI_KERNEL_IMAGE", self.kernel_image),
+        ):
+            if not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", image_ref):
+                errors.append(
+                    f"{label} 必须是带 @sha256: digest 的不可变镜像引用，拒绝可变标签"
+                )
+
         # CORS 校验
         origins = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
         if not origins:

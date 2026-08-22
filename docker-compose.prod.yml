@@ -5,15 +5,29 @@ secrets:
   dai_env_registry_docker_config:
     file: ${DAI_ENV_REGISTRY_DOCKER_CONFIG_FILE:-./deploy/registry-docker-config.example.json}
 
+# Production builds accept digest-pinned base image references through the
+# approved .env.  The tag defaults keep disposable CI/dev config usable; the
+# deployment checklist requires real digests before a production build.
+x-backend-build: &backend-build
+  context: ./backend
+  args:
+    DAI_BACKEND_BASE_IMAGE: ${DAI_BACKEND_BASE_IMAGE:?DAI_BACKEND_BASE_IMAGE 必须是已审核的 digest 镜像引用}
+
+x-frontend-build: &frontend-build
+  context: ./frontend
+  args:
+    DAI_FRONTEND_NODE_BASE_IMAGE: ${DAI_FRONTEND_NODE_BASE_IMAGE:?DAI_FRONTEND_NODE_BASE_IMAGE 必须是已审核的 digest 镜像引用}
+    DAI_FRONTEND_NGINX_BASE_IMAGE: ${DAI_FRONTEND_NGINX_BASE_IMAGE:?DAI_FRONTEND_NGINX_BASE_IMAGE 必须是已审核的 digest 镜像引用}
+
 services:
   mysql:
-    image: mysql:8.0
+    image: ${DAI_MYSQL_IMAGE:?DAI_MYSQL_IMAGE 必须是已审核的 digest 镜像引用}
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${DAI_DB_ROOT_PASSWORD:-root_secret}
+      MYSQL_ROOT_PASSWORD: ${DAI_DB_ROOT_PASSWORD:?DAI_DB_ROOT_PASSWORD 未设置，生产环境必须提供}
       MYSQL_DATABASE: dai_platform
-      MYSQL_USER: ${DAI_DB_USER:-dai}
-      MYSQL_PASSWORD: ${DAI_DB_PASSWORD:-dai_password}
+      MYSQL_USER: ${DAI_DB_USER:?DAI_DB_USER 未设置，生产环境必须提供}
+      MYSQL_PASSWORD: ${DAI_DB_PASSWORD:?DAI_DB_PASSWORD 未设置，生产环境必须提供}
     volumes:
       - mysql_data:/var/lib/mysql
     networks:
@@ -25,7 +39,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: ${DAI_REDIS_IMAGE:?DAI_REDIS_IMAGE 必须是已审核的 digest 镜像引用}
     restart: unless-stopped
     # AOF everysec + 命名卷：容器重建后 Refresh Token、黑名单与短期唤醒状态不丢失。
     # 故障语义：Redis 丢失时全部 Refresh 失效（需重新登录）、黑名单最多影响
@@ -47,15 +61,17 @@ services:
   # 注意：迁移链在 b4c5d6e7f890 后要求 basic 环境已有 available 版本
   # （seed-environments + 构建完成），全新部署需按部署文档执行中间步骤后重跑本服务。
   migrate:
-    build: ./backend
+    build: *backend-build
     restart: "no"
     command: ["python", "/scripts/bootstrap_database.py"]
     environment:
       DAI_ENVIRONMENT: ${DAI_ENVIRONMENT:-production}
       DAI_MIGRATION_MODE: ${DAI_MIGRATION_MODE:-production}
-      DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
+      DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:?DAI_DB_USER 未设置}:${DAI_DB_PASSWORD:?DAI_DB_PASSWORD 未设置}@mysql:3306/dai_platform
       DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
       DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
+      DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:?DAI_JUDGE_IMAGE 必须是已 smoke 的 digest 镜像引用}
+      DAI_KERNEL_IMAGE: ${DAI_KERNEL_IMAGE:?DAI_KERNEL_IMAGE 必须是已 smoke 的 digest 镜像引用}
       DAI_ENV_BASE_IMAGE: "${DAI_ENV_BASE_IMAGE:?DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的 python:3.12-slim 引用}"
       DAI_BASIC_ENVIRONMENT_IMAGE_DIGEST: ${DAI_BASIC_ENVIRONMENT_IMAGE_DIGEST:-}
       DAI_ENVIRONMENT_EDITOR_V2_ENABLED: ${DAI_ENVIRONMENT_EDITOR_V2_ENABLED:-false}
@@ -88,7 +104,7 @@ services:
       - ./scripts/seed-basic-environment-mysql.py:/scripts/seed-basic-environment-mysql.py:ro
 
   api:
-    build: ./backend
+    build: *backend-build
     restart: unless-stopped
     # 迁移由一次性 migrate 服务执行；API 启动只跑 Uvicorn
     command: ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
@@ -106,7 +122,7 @@ services:
       start_period: 30s
     environment:
       DAI_ENVIRONMENT: ${DAI_ENVIRONMENT:-production}
-      DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
+      DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:?DAI_DB_USER 未设置}:${DAI_DB_PASSWORD:?DAI_DB_PASSWORD 未设置}@mysql:3306/dai_platform
       DAI_REDIS_URL: redis://redis:6379/0
       # 文件日志（管理员系统日志页直读；20MB×10 轮转）
       DAI_LOG_DIR: /app/logs
@@ -123,7 +139,8 @@ services:
       DAI_STORAGE_S3_SESSION_TOKEN: ${DAI_STORAGE_S3_SESSION_TOKEN:-}
       DAI_STORAGE_S3_ADDRESSING_STYLE: ${DAI_STORAGE_S3_ADDRESSING_STYLE:-auto}
       DAI_STORAGE_S3_KEY_PREFIX: ${DAI_STORAGE_S3_KEY_PREFIX:-}
-      DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
+      DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:?DAI_JUDGE_IMAGE 必须是已 smoke 的 digest 镜像引用}
+      DAI_KERNEL_IMAGE: ${DAI_KERNEL_IMAGE:?DAI_KERNEL_IMAGE 必须是已 smoke 的 digest 镜像引用}
       # 登录限流：仅信任显式配置的直接代理 peer 与已清洗的代理链。
       # 留空时 fail-closed 使用直连 peer；生产需按真实网络填写 CIDR。
       DAI_TRUSTED_PROXY_CIDRS: ${DAI_TRUSTED_PROXY_CIDRS:-}
@@ -192,17 +209,19 @@ services:
       - app_logs:/app/logs
 
   worker:
-    build: ./backend
+    build: *backend-build
     restart: unless-stopped
     command: python -m app.worker.judge_worker
     logging: *api_logging
     environment:
       DAI_ENVIRONMENT: ${DAI_ENVIRONMENT:-production}
-      DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
+      DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:?DAI_DB_USER 未设置}:${DAI_DB_PASSWORD:?DAI_DB_PASSWORD 未设置}@mysql:3306/dai_platform
       DAI_LOG_DIR: /app/logs
       DAI_REDIS_URL: redis://redis:6379/0
       DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
-      DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:-dai-judge-python:latest}
+      DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
+      DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:?DAI_JUDGE_IMAGE 必须是已 smoke 的 digest 镜像引用}
+      DAI_KERNEL_IMAGE: ${DAI_KERNEL_IMAGE:?DAI_KERNEL_IMAGE 必须是已 smoke 的 digest 镜像引用}
       DAI_ENV_BASE_IMAGE: "${DAI_ENV_BASE_IMAGE:?DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的 python:3.12-slim 引用}"
       DAI_ENVIRONMENT_EDITOR_V2_ENABLED: ${DAI_ENVIRONMENT_EDITOR_V2_ENABLED:-false}
       DAI_ENV_REGISTRY_REPOSITORY: ${DAI_ENV_REGISTRY_REPOSITORY:-}
@@ -226,7 +245,6 @@ services:
       DAI_STUDIO_STORAGE_DIR: /app/storage/studio
       DAI_JUDGE_WORK_DIR: /judge-work
       DAI_JUDGE_HOST_WORK_DIR: ${DAI_JUDGE_HOST_WORK_DIR:?DAI_JUDGE_HOST_WORK_DIR 必须是宿主机判题目录的绝对路径}
-      DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
       DAI_WORKER_ROLE: judge
       # ── AI 智能代码评分（TASK-020：默认关闭） ──
       DAI_AI_ENABLED: ${DAI_AI_ENABLED:-false}
@@ -261,7 +279,7 @@ services:
   # 该进程只处理 AI 队列，不执行 Docker 判题，因此不得继承 worker 的
   # Docker socket、judge-work 宿主目录或 Registry Secret。
   ai-worker:
-    build: ./backend
+    build: *backend-build
     restart: unless-stopped
     profiles:
       - ai
@@ -269,11 +287,13 @@ services:
     logging: *api_logging
     environment:
       DAI_ENVIRONMENT: ${DAI_ENVIRONMENT:-production}
-      DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
+      DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:?DAI_DB_USER 未设置}:${DAI_DB_PASSWORD:?DAI_DB_PASSWORD 未设置}@mysql:3306/dai_platform
       DAI_LOG_DIR: /app/logs
       DAI_REDIS_URL: redis://redis:6379/0
       DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
       DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
+      DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:?DAI_JUDGE_IMAGE 必须是已 smoke 的 digest 镜像引用}
+      DAI_KERNEL_IMAGE: ${DAI_KERNEL_IMAGE:?DAI_KERNEL_IMAGE 必须是已 smoke 的 digest 镜像引用}
       # Settings 的生产启动校验仍要求固定基础镜像；AI worker 本身不会使用 Docker。
       DAI_ENV_BASE_IMAGE: "${DAI_ENV_BASE_IMAGE:?DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的 python:3.12-slim 引用}"
       DAI_WORKER_ROLE: ai
@@ -301,7 +321,7 @@ services:
   # 环境档位构建 Worker（Phase 6）——单副本、单并发、低频管理任务
   # DB 是构建任务事实源，Redis list 只负责唤醒；构建由宿主机 Docker daemon 执行
   environment-builder:
-    build: ./backend
+    build: *backend-build
     restart: unless-stopped
     command: python -m app.worker.environment_builder_worker
     # 构建 Worker 必须连接 Docker socket，但自身不需要额外 Linux capability。
@@ -317,10 +337,12 @@ services:
       - /tmp:rw,nosuid,nodev,size=512m
     environment:
       DAI_ENVIRONMENT: ${DAI_ENVIRONMENT:-production}
-      DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:-dai}:${DAI_DB_PASSWORD:-dai_password}@mysql:3306/dai_platform
+      DAI_DATABASE_URL: mysql+pymysql://${DAI_DB_USER:?DAI_DB_USER 未设置}:${DAI_DB_PASSWORD:?DAI_DB_PASSWORD 未设置}@mysql:3306/dai_platform
       DAI_REDIS_URL: redis://redis:6379/0
       DAI_SECRET_KEY: ${DAI_SECRET_KEY:?DAI_SECRET_KEY 未设置，生产环境必须提供}
       DAI_CORS_ORIGINS: ${DAI_CORS_ORIGINS:?DAI_CORS_ORIGINS 未设置，生产环境必须指定前端域名}
+      DAI_JUDGE_IMAGE: ${DAI_JUDGE_IMAGE:?DAI_JUDGE_IMAGE 必须是已 smoke 的 digest 镜像引用}
+      DAI_KERNEL_IMAGE: ${DAI_KERNEL_IMAGE:?DAI_KERNEL_IMAGE 必须是已 smoke 的 digest 镜像引用}
       # 环境构建控制面——生产必须使用带 sha256 digest 的基础镜像引用（config.py 校验强制）
       DAI_ENV_BASE_IMAGE: "${DAI_ENV_BASE_IMAGE:?DAI_ENV_BASE_IMAGE 必须是带 @sha256: digest 的 python:3.12-slim 引用}"
       DAI_ENV_BUILD_QUEUE_NAME: ${DAI_ENV_BUILD_QUEUE_NAME:-environment:build:queue}
@@ -362,7 +384,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
   frontend:
-    build: ./frontend
+    build: *frontend-build
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-8080}:80"

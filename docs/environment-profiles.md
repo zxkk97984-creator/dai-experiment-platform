@@ -113,7 +113,7 @@ export DAI_ALLOW_ENVIRONMENT_V2_DOWNGRADE=true
 这三个概念必须分开：
 
 - **Docker daemon** 是实际创建容器和构建镜像的后台引擎（通常由 `dockerd` 提供）；Docker CLI 只是客户端。
-- **Docker socket**（通常是 `/var/run/docker.sock`）是 CLI/Worker 与 daemon 通信的 Unix socket。生产 Compose 只给确需容器生命周期权限的 `api`、确定性 `worker`、可选 `ai-worker`、`environment-builder` 挂载它；它的权限等价于较高的主机控制权。
+- **Docker socket**（通常是 `/var/run/docker.sock`）是 CLI/Worker 与 daemon 通信的 Unix socket。生产 Compose 只给确需容器生命周期权限的 `api`、确定性 `worker`、`environment-builder` 挂载它；可选的 `ai-worker` 不挂载 socket、`judge-work` 或 Registry Secret。socket 权限等价于较高的主机控制权。
 - **部署机** 是真正运行 Docker daemon、MySQL/Redis 和 Compose 的服务器或虚拟机，不是 API 容器，也不是 Codex/CI 的受限执行沙箱。
 - **Registry** 是保存环境镜像的仓库（Harbor、云 Registry 或 Docker Hub 等）。构建成功后必须推送到仓库并按 digest 回拉，教师和学生运行时不依赖可变 `latest` 标签。
 
@@ -179,7 +179,7 @@ docker compose -f docker-compose.prod.yml logs -f environment-builder
 | `environment-builder` | 单副本、单并发的环境构建 Worker | `command: python -m app.worker.environment_builder_worker`；只挂载 `/var/run/docker.sock`，**不挂载学生工作目录**；DB 是任务事实源，Redis list 只负责唤醒 |
 | `api` / `worker` | 不执行环境构建 | V2 开启时读取三版本 digest 映射；V2 关闭时使用 `DAI_ENV_BASE_IMAGE` 兼容配置 |
 
-现有 `dai-judge-python:latest` / `dai-kernel-python:latest` 仅保留为未绑定环境版本的存量兼容路径与回滚窗口；新提交与新实验一律使用环境版本 digest。
+现有 `dai-judge-python:latest` / `dai-kernel-python:latest` 仅保留为开发环境未绑定环境版本的存量兼容路径；生产配置会拒绝可变标签，新提交与新实验一律使用环境版本 digest。
 
 ### 1.2 环境变量（.env.example 已收录）
 
@@ -282,7 +282,7 @@ docker run --rm --network none --user 1000:1000 dai-env:basic-v1 python -c "impo
 
 1. 停止 `environment-builder`（`docker compose stop environment-builder`），避免产生新版本。
 2. 回滚教师/学生前端——不影响控制面数据与已绑定记录。
-3. 回滚运行链路代码到 Phase 1，恢复旧 `DAI_JUDGE_IMAGE` / `DAI_KERNEL_IMAGE`（`latest`）配置。
+3. 回滚运行链路代码到 Phase 1，恢复此前已 smoke 的不可变 `DAI_JUDGE_IMAGE` / `DAI_KERNEL_IMAGE` 引用；`latest` 只允许用于本地开发，不可写入生产配置。
 4. 生产不执行 `alembic downgrade`；关闭 V2 开关并回滚应用/Compose 配置即可，数据库和镜像保持可审计状态。
 5. 只有一次性、已备份的测试库才允许设置 `DAI_ALLOW_ENVIRONMENT_V2_DOWNGRADE=true`，并按 `20260820_0003 → 20260819_0003` 做验证循环；不要在现有生产库试验。
 6. **不删除已生成镜像**；待系统恢复并核对引用后人工处理。

@@ -32,6 +32,38 @@ from app.worker.judge_worker import _run_docker_pytest, _status_from_pytest
 router = APIRouter(prefix="/exams", tags=["exams"])
 
 
+def _nulls_last_order(column, *, descending: bool = False):
+    """Return a portable NULLS LAST ordering for MySQL and SQLite.
+
+    SQLAlchemy's ``nullslast()`` emits ``NULLS LAST``.  PostgreSQL accepts
+    that syntax, but MySQL does not, so use a boolean CASE key first and then
+    the requested direction for the actual value.
+    """
+
+    value_order = column.desc() if descending else column.asc()
+    return (
+        case((column.is_(None), 1), else_=0).asc(),
+        value_order,
+    )
+
+
+def _grade_sort_expressions() -> dict[str, tuple]:
+    """Build the grade list ordering map without dialect-specific SQL."""
+
+    score_desc = (*_nulls_last_order(ExamSubmission.score, descending=True), User.id.asc())
+    score_asc = (*_nulls_last_order(ExamSubmission.score), User.id.asc())
+    submitted_time = (*_nulls_last_order(ExamSubmission.submitted_at, descending=True), User.id.asc())
+    name = (*_nulls_last_order(User.real_name), User.id.asc())
+    return {
+        "score_desc": score_desc,
+        "score-desc": score_desc,
+        "score_asc": score_asc,
+        "score-asc": score_asc,
+        "time": submitted_time,
+        "name": name,
+    }
+
+
 def require_exam(exam_id: int, db: Session) -> Exam:
     exam = db.get(Exam, exam_id)
     if not exam:
@@ -737,14 +769,7 @@ def exam_grades(
         else:
             raise api_error(422, "INVALID_GRADE_STATUS_FILTER", "成绩状态筛选值无效")
 
-    sort_expressions = {
-        "score_desc": (ExamSubmission.score.desc().nullslast(), User.id.asc()),
-        "score-desc": (ExamSubmission.score.desc().nullslast(), User.id.asc()),
-        "score_asc": (ExamSubmission.score.asc().nullslast(), User.id.asc()),
-        "score-asc": (ExamSubmission.score.asc().nullslast(), User.id.asc()),
-        "time": (ExamSubmission.submitted_at.desc().nullslast(), User.id.asc()),
-        "name": (User.real_name.asc(), User.id.asc()),
-    }
+    sort_expressions = _grade_sort_expressions()
     if sort not in sort_expressions:
         raise api_error(422, "INVALID_GRADE_SORT", "成绩排序值无效")
 

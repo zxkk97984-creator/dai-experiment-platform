@@ -11,15 +11,16 @@
 
 ## 一、前置条件
 
-1. 数据库迁移（本地 dev 库为空时必须先执行）：
+1. 数据库迁移（本地 dev 库为空时必须先执行统一 bootstrap）：
 
    ```bash
    cd backend
-   .venv/bin/python -m alembic upgrade head
+   .venv/bin/python ../scripts/bootstrap_database.py
    ```
 
-   > 注意：迁移 B（bind_environment_versions）要求 basic 环境版本已 available。
-   > 若 upgrade 被该前置拦截，按下面第 2 步先初始化 basic 环境，再重新执行 upgrade。
+   > 注意：bootstrap 会按 `base → 迁移 A → basic → head` 顺序执行；生产环境还要求
+   > 真实 basic 镜像 digest，不能用占位值。若仅做 SQLite fixture 演示，可使用项目
+   > 的开发 `.env` 和 disposable 模式。
 
 2. 环境档位（basic 必须 available 且带**真实镜像 ID**；data/torch-cpu 可选）：
 
@@ -27,21 +28,24 @@
    .venv/bin/python -m app.cli seed-environments --enqueue   # 创建档位 + 入队构建
    # 方式 A（推荐，真实镜像）：启动环境构建 Worker 完成 basic v1 构建
    #   .venv/bin/python -m app.worker.environment_builder_worker
-   # 方式 B（烟测，占位 digest）：空库一次性初始化
+   # 方式 B（仅 disposable 烟测，占位 digest）：空库一次性初始化
    #   DAI_DATABASE_URL='mysql+pymysql://dai:dai_password@localhost:3306/dai_platform' \
    #     ../scripts/seed-basic-environment-mysql.py
    ```
 
+   > 方式 B 只用于本地/CI disposable 烟测，不能作为生产 basic 产物或上线证据。
    > **真实判题前置**：`seed-demo` 的真实 Docker 判题要求 basic 的 `image_digest`
    > 是本机真实存在的镜像 ID（`docker image inspect sha256:...` 能查到）。
    > 占位 digest（如 `sha256:aaa...`）会被 `real_judge_available` 判定为不可用，
    > 种子自动降级为 seed_fixture，**不会**再把整批提交写成 system_error。
-   > 本机已有构建好的真实镜像：`dai-env:basic-v1`（ID `sha256:f943a16f...`，
-   > python 3.12 + numpy/pandas/sklearn/pytest/ipykernel），可直接回写：
+   > 如果当前机器已经构建并 smoke `dai-env:basic-v1`，必须读取**当前 Docker daemon**
+   > 返回的 image ID；不要复制其他机器文档或数据库中的 `sha256`：
 
    ```bash
+   docker image inspect dai-env:basic-v1 --format '{{.Id}}'
+   # 将上一条命令的完整输出替换到 <TARGET_MACHINE_IMAGE_ID>
    docker exec dai-mysql mysql -uroot -proot_password dai_platform \
-     -e "UPDATE environment_versions SET image_digest='sha256:f943a16f5d1a2f2d0793fc483d6ccbb44d46b7c2ece5aeba2997f258146fb12f' \
+     -e "UPDATE environment_versions SET image_digest='<TARGET_MACHINE_IMAGE_ID>' \
           WHERE profile_id=(SELECT id FROM environment_profiles WHERE slug='basic') AND version_number=1;"
    ```
 
@@ -131,7 +135,7 @@ struggling 不在白名单（课程列表不可见），用于验证课程可见
 | teaching_class_students | 60 | submissions | ~636 |
 | courses | 8 | exams / exam_questions | 3 / 15 |
 | chapters | 21 | exam_submissions / exam_answers / exam_grades | 72 / 360 / 55 |
-| lessons | 69 | notebook_templates / versions | 4 / 4 |
+| lessons | 69 | notebook_templates / versions | 25 / 25 |
 | course_enrollments | 211 | experiment_modules / records / submissions | 4 / ~157 / ~156 |
 | question_rubrics | 5 | code_grades | 180（completed 147 / review_required 33） |
 | course_whitelist_students | 3 | announcements | 5 |
@@ -158,9 +162,11 @@ struggling 不在白名单（课程列表不可见），用于验证课程可见
   校验器会拒绝 `available` 无 digest、`queued` 无活动任务以及 `succeeded` 残留错误。
 - **Storage 边界**：本轮 seed 只写数据库中的 Notebook/实验 JSON 和 data URI，不调用本地文件写入，
   也不登记 `StorageObject`；真实上传链路仍由 Course/Lesson/Studio 的 StorageObject 业务服务负责。
-- **API**：8 个固定账号全部可登录；/dashboard/teacher、/dashboard/student、
-  /courses、/assignments、/judge/submissions、/ai-grading/grades、/exams/{id}/questions、
-  /exams/{id}/grades、/experiments/records 均返回 200 与真实数据。
+- **API**：8 个固定账号全部可登录；SQLite disposable 数据库中的
+  `/dashboard/teacher`、`/dashboard/student`、`/courses`、`/assignments`、
+  `/judge/submissions`、`/ai-grading/grades`、`/exams/{id}/questions`、
+  `/exams/{id}/grades`、`/experiments/records` 均返回 200 与真实数据。MySQL 的成绩排序
+  与导出回归需要按仓库测试命令在 MySQL 服务上单独执行，不把 SQLite 结果冒充 MySQL 证据。
   白名单课程权限：elite/average/new 可见，struggling 不可见；elite 已选课可访问内容。
 - **前端**：学生首页 / 学生作业列表 / 教师首页 / AI 评分复核 / 管理端用户 均渲染真实数据，
   零 console 错误。

@@ -157,6 +157,18 @@ jobs:
       DAI_CORS_ORIGINS: http://localhost:8080
       DAI_JUDGE_HOST_WORK_DIR: ${{ github.workspace }}/judge-work
       DAI_ENV_BASE_IMAGE: python:3.12-slim@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      DAI_DB_ROOT_PASSWORD: ci-e2e-root-password
+      DAI_DB_USER: dai
+      DAI_DB_PASSWORD: ci-e2e-db-password
+      DAI_MYSQL_IMAGE: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+      DAI_REDIS_IMAGE: redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
+      DAI_BACKEND_BASE_IMAGE: python:3.12-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
+      DAI_FRONTEND_NODE_BASE_IMAGE: node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
+      DAI_FRONTEND_NGINX_BASE_IMAGE: nginx:alpine@sha256:4a73073bd557c65b759505da037898b61f1be6cbcc3c2c3aeac22d2a470c1752
+      DAI_JUDGE_BASE_IMAGE: python:3.12-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
+      DAI_KERNEL_BASE_IMAGE: python:3.12-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
+      DAI_JUDGE_IMAGE: dai-judge-python:latest
+      DAI_KERNEL_IMAGE: dai-kernel-python:latest
     defaults:
       run:
         working-directory: frontend
@@ -176,8 +188,8 @@ jobs:
         run: |
           cd ..
           mkdir -p judge-work
-          docker build -t dai-judge-python:latest backend/docker/judge
-          docker build -t dai-kernel-python:latest backend/docker/kernel
+          docker build --build-arg DAI_JUDGE_BASE_IMAGE="$DAI_JUDGE_BASE_IMAGE" -t dai-judge-python:latest backend/docker/judge
+          docker build --build-arg DAI_KERNEL_BASE_IMAGE="$DAI_KERNEL_BASE_IMAGE" -t dai-kernel-python:latest backend/docker/kernel
       - name: 启动数据库与缓存
         run: |
           cd ..
@@ -217,7 +229,16 @@ jobs:
       DAI_CORS_ORIGINS: https://example.com
       DAI_JUDGE_HOST_WORK_DIR: ${{ github.workspace }}/judge-work
       DAI_ENV_BASE_IMAGE: python:3.12-slim@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      DAI_DB_ROOT_PASSWORD: ci-smoke-root-password
+      DAI_DB_USER: dai
       DAI_DB_PASSWORD: ci-smoke-db-password
+      DAI_MYSQL_IMAGE: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+      DAI_REDIS_IMAGE: redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
+      DAI_BACKEND_BASE_IMAGE: python:3.12-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
+      DAI_FRONTEND_NODE_BASE_IMAGE: node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
+      DAI_FRONTEND_NGINX_BASE_IMAGE: nginx:alpine@sha256:4a73073bd557c65b759505da037898b61f1be6cbcc3c2c3aeac22d2a470c1752
+      DAI_JUDGE_IMAGE: dai-judge-python:latest
+      DAI_KERNEL_IMAGE: dai-kernel-python:latest
     steps:
       - uses: actions/checkout@v4
       - name: 验证 Compose 配置

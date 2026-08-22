@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from app.config import Settings
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BACKEND_ROOT = REPO_ROOT / "backend"
@@ -84,6 +85,47 @@ def test_compose_forwards_production_basic_digest_to_bootstrap_container():
     migrate = compose.split("  migrate:", 1)[1].split("  api:", 1)[0]
 
     assert "DAI_BASIC_ENVIRONMENT_IMAGE_DIGEST:" in migrate
+
+
+def test_production_compose_requires_all_database_credentials_without_fallbacks():
+    compose = COMPOSE_PATH.read_text(encoding="utf-8")
+
+    assert "DAI_DB_ROOT_PASSWORD:?" in compose
+    assert "DAI_DB_USER:?" in compose
+    assert "DAI_DB_PASSWORD:?" in compose
+    assert "DAI_DB_ROOT_PASSWORD:-" not in compose
+    assert "DAI_DB_USER:-" not in compose
+    assert "DAI_DB_PASSWORD:-" not in compose
+
+
+def test_production_compose_requires_immutable_service_and_legacy_runner_images():
+    compose = COMPOSE_PATH.read_text(encoding="utf-8")
+
+    for variable in (
+        "DAI_MYSQL_IMAGE:?",
+        "DAI_REDIS_IMAGE:?",
+        "DAI_BACKEND_BASE_IMAGE:?",
+        "DAI_FRONTEND_NODE_BASE_IMAGE:?",
+        "DAI_FRONTEND_NGINX_BASE_IMAGE:?",
+        "DAI_JUDGE_IMAGE:?",
+        "DAI_KERNEL_IMAGE:?",
+    ):
+        assert variable in compose
+
+
+def test_production_rejects_mutable_legacy_judge_and_kernel_image_tags():
+    with pytest.raises(ValueError, match="DAI_JUDGE_IMAGE"):
+        Settings(
+            environment="production",
+            database_url="mysql+pymysql://dai:unique-password@mysql/dai_platform",
+            secret_key="production-test-secret-key-1234",
+            cors_origins="https://school.example",
+            judge_work_dir="/app/judge-work",
+            judge_host_work_dir="/srv/dai/judge-work",
+            env_base_image="python:3.12-slim@sha256:" + "a" * 64,
+            judge_image="dai-judge-python:latest",
+            kernel_image="dai-kernel-python:latest",
+        )
 
 
 def _bootstrap_env(db_path: Path, *, environment: str = "development") -> dict[str, str]:

@@ -6,9 +6,11 @@
 ## 发布硬顺序
 
 1. 部署责任人确认本次备份已完成且校验可读；
-2. 执行迁移 A（`b4c5d6e7f890`）；
-3. 生成并确认 `basic` 环境的 available 版本；
-4. 执行 `alembic upgrade head`；
+2. 在目标 Docker daemon 准备并 smoke `basic` 镜像，把该目标机可解析的真实 image ID
+   写入批准的生产 `.env`；
+3. 执行统一 `bootstrap_database.py`（或生产 Compose 的 `migrate` 服务），由入口完成
+   迁移 A → basic seed → head；
+4. 校验 Alembic 已到 head，且 `basic v1` 为 `available`、image ID 可由目标机解析；
 5. 最后启动新 API、Worker 与前端。
 
 任一步没有证据或失败，都必须停止发布。不得先迁移再补备份。

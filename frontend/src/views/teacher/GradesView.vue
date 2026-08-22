@@ -27,6 +27,7 @@ const pageSize = ref(10)
 const total = ref(0)
 const actionDialog = ref(null)
 const actionBusy = ref(false)
+const exportBusy = ref(false)
 const extensionMinutes = ref(10)
 
 const { nowMs, calibrate } = useServerClock(async () => {
@@ -78,10 +79,10 @@ function applyGradeData(data) {
   distribution.value = data.distribution || []
 }
 
-function gradeQuery() {
+function gradeQuery(overrides = {}) {
   const params = {
-    page: page.value,
-    page_size: pageSize.value,
+    page: overrides.page ?? page.value,
+    page_size: overrides.page_size ?? pageSize.value,
     sort: sortOrder.value.replace('-', '_'),
   }
   if (query.value.trim()) params.q = query.value.trim()
@@ -129,11 +130,35 @@ async function confirmAction() {
     app.showToast(error.response?.data?.detail?.message || '操作失败', 'error')
   } finally { actionBusy.value = false }
 }
-function exportGrades() {
-  const rows = [['学生姓名', '学号', '状态', '得分', '提交时间'], ...filteredGrades.value.map((item) => [item.student_name, item.student_number, statusBadge(EXAM_GRADE_STATUS_MAP, item.status).label, item.score ?? '', formatDateTime(item.submitted_at, { seconds: true })])]
-  const csv = `\ufeff${rows.map((row) => row.map((cell) => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(',')).join('\n')}`
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
-  const link = document.createElement('a'); link.href = url; link.download = `${exam.value.title || '考试'}-成绩.csv`; link.click(); URL.revokeObjectURL(url)
+async function exportGrades() {
+  exportBusy.value = true
+  try {
+    // The table is server-paginated.  Fetch every matching page so export is
+    // complete while retaining the active search, filters and sort order.
+    const exportPageSize = 100
+    const first = await examsAPI.getGrades(route.params.id, gradeQuery({ page: 1, page_size: exportPageSize }))
+    const data = first.data || {}
+    const allItems = [...(data.items || [])]
+    const exportTotal = Number(data.total ?? allItems.length)
+    const pageCount = Math.ceil(exportTotal / exportPageSize)
+    for (let exportPage = 2; exportPage <= pageCount; exportPage += 1) {
+      const response = await examsAPI.getGrades(route.params.id, gradeQuery({ page: exportPage, page_size: exportPageSize }))
+      allItems.push(...(response.data?.items || []))
+    }
+
+    const rows = [['学生姓名', '学号', '状态', '得分', '提交时间'], ...allItems.map((item) => [item.student_name, item.student_number, statusBadge(EXAM_GRADE_STATUS_MAP, item.status).label, item.score ?? '', formatDateTime(item.submitted_at, { seconds: true })])]
+    const csv = `\ufeff${rows.map((row) => row.map((cell) => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(',')).join('\n')}`
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${exam.value.title || '考试'}-成绩.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    app.showToast('导出成绩失败', 'error')
+  } finally {
+    exportBusy.value = false
+  }
 }
 
 onMounted(load)
@@ -143,7 +168,7 @@ onMounted(load)
   <AppLayout>
     <main class="grades-page">
       <button class="back-link" @click="router.push('/teacher/exams')"><AppIcon name="back" :size="17" />返回考试管理</button>
-      <header class="page-head"><div><h1>{{ exam.title || '考试成绩' }} · 成绩总览</h1><p>查看本场考试成绩、统计与学生表现</p></div><button class="btn-primary export-button" :disabled="!grades.length" @click="exportGrades"><AppIcon name="download" :size="18" />导出成绩</button></header>
+      <header class="page-head"><div><h1>{{ exam.title || '考试成绩' }} · 成绩总览</h1><p>查看本场考试成绩、统计与学生表现</p></div><button class="btn-primary export-button" :disabled="!grades.length || exportBusy" @click="exportGrades"><AppIcon name="download" :size="18" />{{ exportBusy ? '导出中…' : '导出成绩' }}</button></header>
 
       <section class="review-control">
         <div><p class="control-kicker">讲评与公开</p><h2>{{ exam.review_released_at ? '讲评已发布' : '讲评尚未发布' }}</h2><p>成绩：{{ exam.show_score_after_grading ? '评分后公开' : '隐藏' }} · 题目：{{ exam.show_questions_after_review ? '讲评后公开' : '隐藏' }} · 答案：{{ exam.show_answers_after_review ? '讲评后公开' : '隐藏' }}</p></div>

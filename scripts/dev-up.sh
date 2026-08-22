@@ -202,7 +202,7 @@ check_alive envbuilder
 cd "$PROJECT_DIR/frontend"
 if [ ! -d node_modules ]; then
     log "安装前端依赖..."
-    npm install
+    npm ci
 fi
 
 if pid_alive frontend; then
